@@ -1,0 +1,252 @@
+'use client'
+
+import { Search, Filter, Grid, List, MapPin, Camera, Wifi, WifiOff, Settings } from 'lucide-react'
+import { useState } from 'react'
+
+export default function CameraInventory() {
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const cameras = [
+    {
+      id: 'CAM-001',
+      name: 'Main Entrance',
+      location: 'Building A - Floor 1',
+      type: 'Dome Camera',
+      model: 'Axis P3245-LVE',
+      ip: '192.168.1.101',
+      status: 'online',
+      resolution: '1080p',
+      fps: 30,
+      lastSeen: '2 minutes ago',
+      recordingStatus: 'active'
+    },
+    {
+      id: 'CAM-002',
+      name: 'Parking Lot North',
+      location: 'Outdoor - North Side',
+      type: 'PTZ Camera',
+      model: 'Hikvision DS-2DE5425IW-AE',
+      ip: '192.168.1.102',
+      status: 'online',
+      resolution: '4K',
+      fps: 25,
+      lastSeen: '1 minute ago',
+      recordingStatus: 'active'
+    },
+    {
+      id: 'CAM-003',
+      name: 'Reception Area',
+      location: 'Building A - Floor 1',
+      type: 'Fixed Camera',
+      model: 'Dahua IPC-HFW5831E-ZE',
+      ip: '192.168.1.103',
+      status: 'offline',
+      resolution: '4K',
+      fps: 0,
+      lastSeen: '15 minutes ago',
+      recordingStatus: 'stopped'
+    },
+    {
+      id: 'CAM-004',
+      name: 'Server Room',
+      location: 'Building B - Basement',
+      type: 'Thermal Camera',
+      model: 'FLIR A310f',
+      ip: '192.168.1.104',
+      status: 'online',
+      resolution: '320x240',
+      fps: 30,
+      lastSeen: '30 seconds ago',
+      recordingStatus: 'active'
+    }
+  ]
+
+  const getStatusIcon = (status: string) => {
+    return status === 'online' ? (
+      <Wifi className="w-4 h-4 text-green-600" />
+    ) : (
+      <WifiOff className="w-4 h-4 text-red-600" />
+    )
+  }
+
+  const getStatusColor = (status: string) => {
+    return status === 'online'
+      ? 'bg-green-100 text-green-800 border-green-200'
+      : 'bg-red-100 text-red-800 border-red-200'
+  }
+
+  const filteredCameras = cameras.filter(camera =>
+    camera.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    camera.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    camera.id.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold text-gray-900">Camera Inventory</h1>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 bg-white rounded-lg border p-1">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-2 rounded ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-600'}`}
+            >
+              <Grid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-2 rounded ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-600'}`}
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Search and Filters */}
+      <div className="flex items-center space-x-4">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <input
+            type="text"
+            placeholder="Search cameras by name, location, or ID..."
+            className="pl-10 pr-4 py-2 w-full border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <button className="flex items-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
+          <Filter className="w-4 h-4" />
+          <span>Filters</span>
+        </button>
+      </div>
+
+      {/* Stats Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-lg border">
+          <div className="text-2xl font-bold text-gray-900">248</div>
+          <div className="text-sm text-gray-600">Total Cameras</div>
+        </div>
+        <div className="bg-white p-4 rounded-lg border">
+          <div className="text-2xl font-bold text-green-600">236</div>
+          <div className="text-sm text-gray-600">Online</div>
+        </div>
+        <div className="bg-white p-4 rounded-lg border">
+          <div className="text-2xl font-bold text-red-600">12</div>
+          <div className="text-sm text-gray-600">Offline</div>
+        </div>
+        <div className="bg-white p-4 rounded-lg border">
+          <div className="text-2xl font-bold text-blue-600">234</div>
+          <div className="text-sm text-gray-600">Recording</div>
+        </div>
+      </div>
+
+      {/* Camera Grid/List */}
+      <div className="bg-white rounded-lg shadow-sm border">
+        {viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+            {filteredCameras.map((camera) => (
+              <div key={camera.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <Camera className="w-5 h-5 text-gray-600" />
+                    <span className="font-medium text-gray-900">{camera.name}</span>
+                  </div>
+                  {getStatusIcon(camera.status)}
+                </div>
+
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex items-center space-x-1">
+                    <MapPin className="w-3 h-3" />
+                    <span>{camera.location}</span>
+                  </div>
+                  <div>Type: {camera.type}</div>
+                  <div>Model: {camera.model}</div>
+                  <div>IP: {camera.ip}</div>
+                  <div>Resolution: {camera.resolution} @ {camera.fps}fps</div>
+                </div>
+
+                <div className="flex items-center justify-between mt-4 pt-3 border-t">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(camera.status)}`}>
+                    {camera.status}
+                  </span>
+                  <button className="text-blue-600 hover:text-blue-800">
+                    <Settings className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Camera
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Location
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Type/Model
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Resolution
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {filteredCameras.map((camera) => (
+                  <tr key={camera.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <Camera className="w-5 h-5 text-gray-600 mr-3" />
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{camera.name}</div>
+                          <div className="text-sm text-gray-500">{camera.id}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {camera.location}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{camera.type}</div>
+                      <div className="text-sm text-gray-500">{camera.model}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center space-x-2">
+                        {getStatusIcon(camera.status)}
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(camera.status)}`}>
+                          {camera.status}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {camera.resolution} @ {camera.fps}fps
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <button className="text-blue-600 hover:text-blue-800 mr-3">View</button>
+                      <button className="text-gray-600 hover:text-gray-800">
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
