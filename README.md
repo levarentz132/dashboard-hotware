@@ -41,9 +41,10 @@ A comprehensive React-based camera surveillance dashboard management system with
 
 ## ⚡ Quick Start
 
-1. **Clone or navigate to the project directory**
+1. **Clone the repository**
    ```bash
-   cd "dashboard hotware"
+   git clone https://github.com/YOUR_USERNAME/hotware-dashboard.git
+   cd hotware-dashboard
    ```
 
 2. **Install dependencies**
@@ -51,13 +52,41 @@ A comprehensive React-based camera surveillance dashboard management system with
    npm install
    ```
 
-3. **Start the development server**
+3. **Configure environment**
+   ```bash
+   cp .env.example .env.local
+   # Edit .env.local with your configuration
+   ```
+
+4. **Start the development server**
    ```bash
    npm run dev
    ```
 
-4. **Open your browser**
+5. **Open your browser**
    Navigate to [http://localhost:3000](http://localhost:3000)
+
+## 🚀 Deployment
+
+For detailed deployment instructions, see [DEPLOYMENT.md](./DEPLOYMENT.md)
+
+### Quick Deploy Options:
+
+**Deploy to Vercel (Recommended):**
+```bash
+npx vercel --prod
+```
+
+**Deploy to Netlify:**
+```bash
+npx netlify deploy --prod --dir=.next
+```
+
+**Deploy to GitHub Pages:**
+```bash
+npm run build
+npm run export
+```
 
 ## 🏗️ Project Structure
 
@@ -157,6 +186,23 @@ The dashboard is fully responsive and optimized for:
 - Laptop (1366x768+)
 - Tablet (768x1024)
 - Mobile (375x667+)
+
+## 🎨 Hotware Branding
+
+This dashboard is branded as **Hotware** - Professional Camera Surveillance Solutions.
+
+### Brand Elements:
+- **Brand Name**: Hotware
+- **Product**: Camera Dashboard
+- **Color Scheme**: Blue primary with gray accents
+- **Typography**: Inter font family
+- **Logo**: Customizable via environment variables
+
+### Customization:
+```env
+NEXT_PUBLIC_BRAND_NAME=Hotware
+NEXT_PUBLIC_BRAND_LOGO=/images/hotware-logo.png
+```
 
 ## 🔐 Security Considerations
 
