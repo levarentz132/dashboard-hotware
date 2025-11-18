@@ -23,48 +23,35 @@ export default function DashboardOverview() {
   const offlineCameras = totalCameras - onlineCameras
   const activeAlarms = alarms.filter(a => a.type !== 'resolved').length
   
+  // Only show stats for data we actually have from the API
   const stats = [
     {
       title: 'Total Cameras',
       value: camerasLoading ? '...' : totalCameras.toString(),
-      change: totalCameras > 0 ? `+${Math.floor(totalCameras * 0.05)}` : '0',
-      changeType: 'positive' as const,
+      change: totalCameras > 0 ? `${totalCameras} devices` : 'No devices',
+      changeType: totalCameras > 0 ? 'positive' as const : 'neutral' as const,
       icon: Camera,
     },
     {
-      title: 'Online Cameras',
+      title: 'Online Cameras', 
       value: camerasLoading ? '...' : onlineCameras.toString(),
-      change: onlineCameras > 0 ? `+${Math.floor(onlineCameras * 0.02)}` : '0',
-      changeType: 'positive' as const,
+      change: `${offlineCameras} offline`,
+      changeType: offlineCameras === 0 ? 'positive' as const : 'warning' as const,
       icon: Activity,
     },
     {
       title: 'Active Alarms',
       value: alarmsLoading ? '...' : activeAlarms.toString(),
-      change: activeAlarms > 0 ? `-${Math.floor(activeAlarms * 0.5)}` : '0',
-      changeType: activeAlarms > 0 ? 'negative' as const : 'positive' as const,
+      change: activeAlarms === 0 ? 'All clear' : 'Needs attention',
+      changeType: activeAlarms === 0 ? 'positive' as const : 'negative' as const,
       icon: AlertTriangle,
     },
     {
-      title: 'Storage Usage',
-      value: '78.5%',
-      change: '+2.3%',
-      changeType: 'neutral' as const,
+      title: 'System Status',
+      value: connected ? 'Online' : 'Offline',
+      change: connected ? 'Connected' : 'Check connection',
+      changeType: connected ? 'positive' as const : 'negative' as const,
       icon: Database,
-    },
-    {
-      title: 'Daily Events',
-      value: '1,247',
-      change: '+156',
-      changeType: 'positive' as const,
-      icon: TrendingUp,
-    },
-    {
-      title: 'Active Users',
-      value: '23',
-      change: '+3',
-      changeType: 'positive' as const,
-      icon: Users,
     },
   ]
 
@@ -101,7 +88,7 @@ export default function DashboardOverview() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat, index) => (
           <StatsCard key={index} {...stat} />
         ))}

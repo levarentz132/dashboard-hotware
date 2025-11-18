@@ -2,31 +2,42 @@
 
 import { BarChart3, TrendingUp, PieChart, Activity, Calendar, Download } from 'lucide-react'
 
+import { useCameras, useEvents } from '@/hooks/useNxAPI'
+
 export default function Analytics() {
+  const { cameras, loading: camerasLoading } = useCameras()
+  const { events, loading: eventsLoading } = useEvents()
+
+  // Calculate real analytics from API data
+  const totalEvents = events?.length || 0
+  const onlineCameras = cameras?.filter(c => c.status?.toLowerCase() === 'online').length || 0
+  const totalCameras = cameras?.length || 0
+  const uptime = totalCameras > 0 ? ((onlineCameras / totalCameras) * 100).toFixed(1) : '0'
+
   const analyticsCards = [
     {
       title: 'Event Analytics',
-      description: 'Motion detection trends and patterns',
+      description: 'Recent events and activity',
       icon: Activity,
       metrics: [
-        { label: 'Events Today', value: '1,247' },
-        { label: 'Peak Hour', value: '2-3 PM' },
-        { label: 'Avg per Hour', value: '52' }
+        { label: 'Events', value: eventsLoading ? '...' : totalEvents.toString() },
+        { label: 'Active Cameras', value: camerasLoading ? '...' : onlineCameras.toString() },
+        { label: 'Total Devices', value: camerasLoading ? '...' : totalCameras.toString() }
       ]
     },
     {
       title: 'Camera Performance',
-      description: 'Uptime and reliability metrics',
+      description: 'System uptime and availability',
       icon: BarChart3,
       metrics: [
-        { label: 'Avg Uptime', value: '99.2%' },
-        { label: 'Response Time', value: '145ms' },
-        { label: 'Error Rate', value: '0.3%' }
+        { label: 'System Uptime', value: camerasLoading ? '...' : `${uptime}%` },
+        { label: 'Online Cameras', value: camerasLoading ? '...' : onlineCameras.toString() },
+        { label: 'Connection Status', value: totalCameras > 0 ? 'Active' : 'No Data' }
       ]
     },
     {
-      title: 'Storage Analytics',
-      description: 'Usage patterns and forecasting',
+      title: 'System Overview',
+      description: 'Real-time system information',
       icon: PieChart,
       metrics: [
         { label: 'Daily Growth', value: '2.3 GB' },

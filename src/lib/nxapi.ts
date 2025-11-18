@@ -299,6 +299,17 @@ class NxWitnessAPI {
     }
   }
 
+  // Storage information (may not be available in all Nx Witness versions)
+  async getStorageInfo(): Promise<any> {
+    try {
+      const storage = await this.apiRequest<any>(API_ENDPOINTS.storageInfo)
+      return storage === null ? null : storage
+    } catch (error) {
+      console.log('[getStorageInfo] Storage endpoint not available:', error)
+      return null // Storage info not available in this Nx Witness version
+    }
+  }
+
   // Get authentication status
   isAuthenticated(): boolean {
     return !!this.authToken

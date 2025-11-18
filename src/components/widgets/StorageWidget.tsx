@@ -1,16 +1,77 @@
 'use client'
 
-import { Database, HardDrive, TrendingUp } from 'lucide-react'
+import { Database, HardDrive, TrendingUp, AlertCircle } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { nxAPI } from '@/lib/nxapi'
+
+interface StorageInfo {
+  totalCapacity?: string
+  usedSpace?: string
+  availableSpace?: string
+  usagePercentage?: number
+  growthRate?: string
+  retentionDays?: number
+  compressionRatio?: string
+}
 
 export default function StorageWidget() {
-  const storageData = {
-    totalCapacity: '50 TB',
-    usedSpace: '39.2 TB',
-    availableSpace: '10.8 TB',
-    usagePercentage: 78.5,
-    growthRate: '+2.3% this month',
-    retentionDays: 30,
-    compressionRatio: '4:1'
+  const [storageData, setStorageData] = useState<StorageInfo>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchStorageInfo = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        // Try to get storage info from Nx Witness API
+        const storage = await nxAPI.getStorageInfo()
+        if (storage) {
+          setStorageData(storage)
+        } else {
+          setError('Storage information not available')
+        }
+      } catch (err) {
+        setError('Unable to load storage data')
+        console.error('Storage fetch error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchStorageInfo()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Storage Management</h3>
+          <Database className="w-5 h-5 text-gray-600" />
+        </div>
+        <div className="flex items-center justify-center h-48">
+          <div className="text-gray-500">Loading storage information...</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !storageData.usagePercentage) {
+    return (
+      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Storage Management</h3>
+          <Database className="w-5 h-5 text-gray-600" />
+        </div>
+        <div className="flex items-center justify-center h-48 text-center">
+          <div className="space-y-2">
+            <AlertCircle className="w-8 h-8 text-yellow-500 mx-auto" />
+            <div className="text-gray-600">{error || 'Storage data not available'}</div>
+            <div className="text-sm text-gray-500">Check Nx Witness server connection</div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const getUsageColor = (percentage: number) => {

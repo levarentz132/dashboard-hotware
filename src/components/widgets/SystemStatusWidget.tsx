@@ -1,14 +1,30 @@
 'use client'
 
-import { Server, Wifi, Database, Cpu } from 'lucide-react'
+import { Server, Wifi, Database, Cpu, AlertCircle } from 'lucide-react'
+import { useSystemInfo } from '@/hooks/useNxAPI'
 
 export default function SystemStatusWidget() {
-  const systemStats = [
-    { label: 'Server Status', value: 'Online', status: 'healthy', icon: Server },
-    { label: 'Network', value: '98.5%', status: 'healthy', icon: Wifi },
-    { label: 'Database', value: 'Connected', status: 'healthy', icon: Database },
-    { label: 'CPU Usage', value: '45%', status: 'warning', icon: Cpu },
-  ]
+  const { systemInfo, connected, loading, error } = useSystemInfo()
+
+  const getSystemStats = () => {
+    if (!connected || !systemInfo) {
+      return [
+        { label: 'Server Status', value: 'Offline', status: 'critical', icon: Server },
+        { label: 'Network', value: 'Disconnected', status: 'critical', icon: Wifi },
+        { label: 'Database', value: 'Unavailable', status: 'critical', icon: Database },
+        { label: 'System', value: 'Unknown', status: 'critical', icon: Cpu },
+      ]
+    }
+
+    return [
+      { label: 'Server Status', value: 'Online', status: 'healthy', icon: Server },
+      { label: 'Network', value: 'Connected', status: 'healthy', icon: Wifi },
+      { label: 'Database', value: 'Active', status: 'healthy', icon: Database },
+      { label: 'System', value: systemInfo.name || 'Running', status: 'healthy', icon: Cpu },
+    ]
+  }
+
+  const systemStats = getSystemStats()
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -36,9 +52,25 @@ export default function SystemStatusWidget() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">System Status</h3>
+        <div className="flex items-center justify-center h-32">
+          <div className="text-gray-500">Loading system status...</div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">System Status</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-gray-900">System Status</h3>
+        {error && (
+          <AlertCircle className="w-5 h-5 text-red-500" title={error} />
+        )}
+      </div>
       
       <div className="space-y-4">
         {systemStats.map((stat, index) => {

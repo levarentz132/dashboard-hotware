@@ -119,7 +119,7 @@ export default function ConnectionStatusWidget({ className = '' }: ConnectionSta
 
       <div className="mt-3 text-xs text-gray-600">
         <div>Endpoint: https://localhost:7001/rest/v3</div>
-        <div>Status: {status === 'connected' ? 'Using live data' : 'Using mock data'}</div>
+        <div>Status: {status === 'connected' ? 'Live data active' : 'No connection'}</div>
       </div>
     </div>
   )
