@@ -8,6 +8,7 @@ import CameraStatusGrid from '@/components/widgets/CameraStatusGrid'
 import RecentAlarmsWidget from '@/components/widgets/RecentAlarmsWidget'
 import StorageWidget from '@/components/widgets/StorageWidget'
 import APIStatusWidget from '@/components/widgets/APIStatusWidget'
+import ConnectionStatusWidget from '@/components/widgets/ConnectionStatusWidget'
 
 export default function DashboardOverview() {
   // API hooks
@@ -105,6 +106,9 @@ export default function DashboardOverview() {
           <StatsCard key={index} {...stat} />
         ))}
       </div>
+
+      {/* Connection Status - Full Width */}
+      <ConnectionStatusWidget className="mb-4" />
 
       {/* Widgets Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">

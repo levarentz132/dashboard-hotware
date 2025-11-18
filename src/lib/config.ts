@@ -1,32 +1,44 @@
 // Nx Witness API Configuration
 export const API_CONFIG = {
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:7001/api',
-  wsURL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:7001/ws',
+  // Use Next.js API proxy to avoid CORS issues
+  baseURL: '/api/nx',
+  // Direct server URL for server-side requests
+  serverURL: process.env.NEXT_PUBLIC_API_URL || 'https://localhost:7001/rest/v3',
+  wsURL: process.env.NEXT_PUBLIC_WS_URL || 'wss://localhost:7001/ws',
   username: process.env.NEXT_PUBLIC_NX_USERNAME || 'admin',
   password: process.env.NEXT_PUBLIC_NX_PASSWORD || 'Highlander123@@',
   serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST || 'localhost',
   serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT || '7001',
+  // Fallback URLs to try (now through proxy)
+  fallbackURLs: [
+    '/api/nx'
+  ]
 }
 
-// API Endpoints
+// Nx Witness REST v3 API Endpoints
 export const API_ENDPOINTS = {
   // Authentication
-  login: '/login',
+  login: '/login/sessions',
   logout: '/logout',
   
-  // Cameras
-  cameras: '/cameras',
-  cameraById: (id: string) => `/cameras/${id}`,
-  cameraStatus: '/cameras/status',
+  // Server Information
+  servers: '/servers',
+  serverInfo: '/servers/{id}',
+  serverStatus: '/servers/{id}/status',
   
-  // Events and Alarms
+  // Cameras (REST v3)
+  devices: '/devices',
+  deviceById: (id: string) => `/devices/${id}`,
+  deviceStatus: '/devices/status',
+  
+  // Events and Rules (REST v3)
   events: '/events',
-  alarms: '/alarms',
-  eventHistory: '/events/history',
+  rules: '/rules',
+  bookmarks: '/bookmarks',
   
-  // System Health
+  // System Information
   systemInfo: '/system/info',
-  serverStatus: '/system/status',
+  moduleInformation: '/moduleInformation',
   
   // Storage
   storageInfo: '/storage',

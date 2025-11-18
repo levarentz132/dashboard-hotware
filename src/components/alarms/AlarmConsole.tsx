@@ -13,74 +13,7 @@ export default function AlarmConsole() {
   const { events, loading: eventsLoading, refetch: refetchEvents } = useEvents()
   const { cameras } = useCameras()
   
-  // Mock data for fallback
-  const mockAlarms = [
-    {
-      id: 'ALM-2024-001',
-      type: 'Motion Detection',
-      camera: 'Main Entrance',
-      cameraId: 'CAM-001',
-      location: 'Building A - Floor 1',
-      severity: 'high',
-      timestamp: new Date('2024-11-10T10:25:00'),
-      status: 'active',
-      description: 'Unauthorized motion detected outside business hours',
-      screenshot: null,
-      assignedTo: null
-    },
-    {
-      id: 'ALM-2024-002',
-      type: 'Camera Offline',
-      camera: 'Reception Area',
-      cameraId: 'CAM-003',
-      location: 'Building A - Floor 1',
-      severity: 'critical',
-      timestamp: new Date('2024-11-10T10:10:00'),
-      status: 'acknowledged',
-      description: 'Camera connection lost - potential network issue',
-      screenshot: null,
-      assignedTo: 'John Smith'
-    },
-    {
-      id: 'ALM-2024-003',
-      type: 'Tampering Alert',
-      camera: 'Parking Lot North',
-      cameraId: 'CAM-002',
-      location: 'Outdoor - North Side',
-      severity: 'medium',
-      timestamp: new Date('2024-11-10T09:45:00'),
-      status: 'resolved',
-      description: 'Camera orientation changed unexpectedly',
-      screenshot: 'tamper_cam002_094500.jpg',
-      assignedTo: 'Sarah Johnson'
-    },
-    {
-      id: 'ALM-2024-004',
-      type: 'Storage Warning',
-      camera: 'System',
-      cameraId: 'SYS-001',
-      location: 'Server Room',
-      severity: 'medium',
-      timestamp: new Date('2024-11-10T08:30:00'),
-      status: 'active',
-      description: 'Storage usage exceeded 75% threshold',
-      screenshot: null,
-      assignedTo: null
-    },
-    {
-      id: 'ALM-2024-005',
-      type: 'Face Recognition',
-      camera: 'Main Entrance',
-      cameraId: 'CAM-001',
-      location: 'Building A - Floor 1',
-      severity: 'low',
-      timestamp: new Date('2024-11-10T08:15:00'),
-      status: 'resolved',
-      description: 'Unknown person detected - visitor badge required',
-      screenshot: 'face_cam001_081500.jpg',
-      assignedTo: 'Mike Davis'
-    }
-  ]
+
 
   // Process API alarms and events into unified format
   const processedAlarms = [...apiAlarms, ...events].map(item => {
@@ -104,8 +37,8 @@ export default function AlarmConsole() {
     }
   })
   
-  // Use API data or fallback to mock data
-  const allAlarms = processedAlarms.length > 0 ? processedAlarms : mockAlarms
+  // Use only processed alarms from server
+  const allAlarms = processedAlarms
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {

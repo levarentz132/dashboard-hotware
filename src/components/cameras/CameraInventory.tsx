@@ -1,7 +1,7 @@
 'use client'
 
 import { Search, Filter, Grid, List, MapPin, Camera, Wifi, WifiOff, Settings, RefreshCw, AlertCircle } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useCameras, useSystemInfo } from '@/hooks/useNxAPI'
 
 export default function CameraInventory() {
@@ -11,65 +11,18 @@ export default function CameraInventory() {
   // API hooks
   const { cameras, loading, error, refetch } = useCameras()
   const { connected, testConnection } = useSystemInfo()
-
-  // Mock data for fallback (keeping original structure)
-  const mockCameras = [
-    {
-      id: 'CAM-001',
-      name: 'Main Entrance',
-      location: 'Building A - Floor 1',
-      type: 'Dome Camera',
-      model: 'Axis P3245-LVE',
-      ip: '192.168.1.101',
-      status: 'online',
-      resolution: '1080p',
-      fps: 30,
-      lastSeen: '2 minutes ago',
-      recordingStatus: 'active'
-    },
-    {
-      id: 'CAM-002',
-      name: 'Parking Lot North',
-      location: 'Outdoor - North Side',
-      type: 'PTZ Camera',
-      model: 'Hikvision DS-2DE5425IW-AE',
-      ip: '192.168.1.102',
-      status: 'online',
-      resolution: '4K',
-      fps: 25,
-      lastSeen: '1 minute ago',
-      recordingStatus: 'active'
-    },
-    {
-      id: 'CAM-003',
-      name: 'Reception Area',
-      location: 'Building A - Floor 1',
-      type: 'Fixed Camera',
-      model: 'Dahua IPC-HFW5831E-ZE',
-      ip: '192.168.1.103',
-      status: 'offline',
-      resolution: '4K',
-      fps: 0,
-      lastSeen: '15 minutes ago',
-      recordingStatus: 'stopped'
-    },
-    {
-      id: 'CAM-004',
-      name: 'Server Room',
-      location: 'Building B - Basement',
-      type: 'Thermal Camera',
-      model: 'FLIR A310f',
-      ip: '192.168.1.104',
-      status: 'online',
-      resolution: '320x240',
-      fps: 30,
-      lastSeen: '30 seconds ago',
-      recordingStatus: 'active'
+  
+  // Auto-retry connection when component mounts
+  useEffect(() => {
+    if (!connected && !loading) {
+      testConnection()
     }
-  ]
+  }, [])
+
+
 
   // Use API data or fallback to mock data
-  const displayCameras = cameras.length > 0 ? cameras : mockCameras
+  const displayCameras = cameras
   
   const getStatusIcon = (status: string) => {
     return status === 'online' ? (
@@ -97,6 +50,67 @@ export default function CameraInventory() {
   const offlineCameras = totalCameras - onlineCameras
   const recordingCameras = displayCameras.filter(c => c.status.toLowerCase() === 'recording' || c.status.toLowerCase() === 'online').length
 
+  // Show empty state when no cameras found and not loading
+  if (!loading && displayCameras.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <h1 className="text-3xl font-bold text-gray-900">Camera Inventory</h1>
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${
+                connected ? 'bg-green-500' : 'bg-red-500'
+              }`}></div>
+              <span className="text-sm text-gray-600">
+                {connected ? 'Nx Witness Connected' : 'API Disconnected'}
+              </span>
+              {error && (
+                <AlertCircle className="w-4 h-4 text-red-500" />
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              refetch()
+              testConnection()
+            }}
+            className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Refresh</span>
+          </button>
+        </div>
+        
+        {/* Empty State */}
+        <div className="bg-white rounded-lg border p-12 text-center">
+          <Camera className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No Cameras Found</h3>
+          <p className="text-gray-500 mb-6">
+            {error 
+              ? 'Unable to connect to Nx Witness server. Please check your server configuration and network connection.'
+              : 'No cameras are configured in your Nx Witness system. Add cameras through the Nx Witness Desktop Client to get started.'}
+          </p>
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm mb-6">
+              <AlertCircle className="h-4 w-4 inline mr-2" />
+              {error}
+            </div>
+          )}
+          <button
+            onClick={() => {
+              refetch()
+              testConnection()
+            }}
+            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -111,7 +125,7 @@ export default function CameraInventory() {
               {connected ? 'Nx Witness Connected' : 'API Disconnected'}
             </span>
             {error && (
-              <AlertCircle className="w-4 h-4 text-red-500" title={error} />
+              <AlertCircle className="w-4 h-4 text-red-500" />
             )}
           </div>
         </div>

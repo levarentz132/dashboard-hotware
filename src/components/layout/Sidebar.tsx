@@ -1,6 +1,6 @@
 'use client'
 
-import { Camera, Home, Activity, AlertTriangle, BarChart3, Settings, Users, Database } from 'lucide-react'
+import { Camera, Home, Activity, AlertTriangle, BarChart3, Settings, Users, Database, Server } from 'lucide-react'
 
 interface SidebarProps {
   activeSection: string
@@ -10,9 +10,11 @@ interface SidebarProps {
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: Home },
   { id: 'cameras', label: 'Camera Inventory', icon: Camera },
+  { id: 'servers', label: 'Server Options', icon: Server },
   { id: 'health', label: 'System Health', icon: Activity },
   { id: 'alarms', label: 'Alarm Console', icon: AlertTriangle },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'debug', label: 'Connection Debug', icon: Settings },
   { id: 'storage', label: 'Storage', icon: Database },
   { id: 'users', label: 'User Management', icon: Users },
   { id: 'settings', label: 'Settings', icon: Settings },

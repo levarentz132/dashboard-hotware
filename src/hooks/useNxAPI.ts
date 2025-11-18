@@ -100,11 +100,36 @@ export function useSystemInfo() {
     try {
       setLoading(true)
       setError(null)
+      console.log('[useSystemInfo] Fetching system info...')
+      
+      // First test the connection which handles authentication
+      const connectionTest = await nxAPI.testConnection()
+      console.log('[useSystemInfo] Connection test result:', connectionTest)
+      
+      if (!connectionTest) {
+        setSystemInfo(null)
+        setConnected(false)
+        setError('Cannot connect to Nx Witness server. Check server status and credentials.')
+        return
+      }
+
+      // If connection is good, get system info
       const info = await nxAPI.getSystemInfo()
-      setSystemInfo(info)
-      setConnected(true)
+      console.log('[useSystemInfo] System info result:', info)
+      
+      if (info) {
+        setSystemInfo(info)
+        setConnected(true)
+        setError(null)
+      } else {
+        setSystemInfo(null)
+        setConnected(false)
+        setError('Connected but no system info available.')
+      }
     } catch (err) {
+      console.error('[useSystemInfo] Error:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch system info')
+      setSystemInfo(null)
       setConnected(false)
     } finally {
       setLoading(false)
@@ -113,21 +138,35 @@ export function useSystemInfo() {
 
   const testConnection = useCallback(async () => {
     try {
+      console.log('[useSystemInfo] Manual connection test triggered')
+      setLoading(true)
       const isConnected = await nxAPI.testConnection()
+      console.log('[useSystemInfo] Manual connection test result:', isConnected)
+      
       setConnected(isConnected)
       if (isConnected) {
         await fetchSystemInfo()
+      } else {
+        setError('Connection test failed - check server and credentials')
       }
       return isConnected
     } catch (err) {
+      console.error('[useSystemInfo] Connection test error:', err)
       setConnected(false)
       setError('Connection test failed')
       return false
+    } finally {
+      setLoading(false)
     }
   }, [fetchSystemInfo])
 
   useEffect(() => {
-    fetchSystemInfo()
+    // Add a small delay to ensure environment variables are loaded
+    const timer = setTimeout(() => {
+      fetchSystemInfo()
+    }, 1000)
+    
+    return () => clearTimeout(timer)
   }, [fetchSystemInfo])
 
   return { 
@@ -157,4 +196,78 @@ export function useRealTimeUpdates() {
   }, [])
 
   return { isConnected, lastUpdate }
+}
+
+// Hook for server information
+export function useServers() {
+  const [servers, setServers] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchServers = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const data = await nxAPI.getServers()
+        console.log('Server data received:', data) // Debug log
+        
+        // The API returns servers directly as an array, not wrapped in an object
+        if (Array.isArray(data) && data.length > 0) {
+          setServers(data)
+          setError(null)
+        } else if (data && typeof data === 'object' && data.servers) {
+          // Fallback for wrapped response
+          setServers(data.servers)
+          setError(null)
+        } else {
+          setServers([])
+          setError('Server connected but no servers found. Check your Nx Witness configuration.')
+        }
+      } catch (err) {
+        console.error('Error fetching servers:', err) // Debug log
+        setError('Cannot connect to Nx Witness server. Check server status and configuration.')
+        setServers([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchServers()
+  }, [])
+
+  return { servers, loading, error }
+}
+
+// Hook for module information
+export function useModules() {
+  const [modules, setModules] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchModules = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const data = await nxAPI.getModuleInformation()
+        if (data && data.modules && data.modules.length > 0) {
+          setModules(data.modules)
+          setError(null)
+        } else {
+          setModules([])
+          setError('Server connected but no modules found. Check your Nx Witness system status.')
+        }
+      } catch (err) {
+        setError('Cannot connect to Nx Witness server to fetch module information.')
+        setModules([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchModules()
+  }, [])
+
+  return { modules, loading, error }
 }
