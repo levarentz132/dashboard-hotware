@@ -1,13 +1,19 @@
 'use client'
 
-import { Search, Filter, Grid, List, MapPin, Camera, Wifi, WifiOff, Settings } from 'lucide-react'
+import { Search, Filter, Grid, List, MapPin, Camera, Wifi, WifiOff, Settings, RefreshCw, AlertCircle } from 'lucide-react'
 import { useState } from 'react'
+import { useCameras, useSystemInfo } from '@/hooks/useNxAPI'
 
 export default function CameraInventory() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [searchTerm, setSearchTerm] = useState('')
+  
+  // API hooks
+  const { cameras, loading, error, refetch } = useCameras()
+  const { connected, testConnection } = useSystemInfo()
 
-  const cameras = [
+  // Mock data for fallback (keeping original structure)
+  const mockCameras = [
     {
       id: 'CAM-001',
       name: 'Main Entrance',
@@ -62,6 +68,9 @@ export default function CameraInventory() {
     }
   ]
 
+  // Use API data or fallback to mock data
+  const displayCameras = cameras.length > 0 ? cameras : mockCameras
+  
   const getStatusIcon = (status: string) => {
     return status === 'online' ? (
       <Wifi className="w-4 h-4 text-green-600" />
@@ -76,18 +85,50 @@ export default function CameraInventory() {
       : 'bg-red-100 text-red-800 border-red-200'
   }
 
-  const filteredCameras = cameras.filter(camera =>
+  const filteredCameras = displayCameras.filter(camera =>
     camera.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    camera.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (camera.location || camera.ip || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     camera.id.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  // Calculate stats
+  const totalCameras = displayCameras.length
+  const onlineCameras = displayCameras.filter(c => c.status.toLowerCase() === 'online').length
+  const offlineCameras = totalCameras - onlineCameras
+  const recordingCameras = displayCameras.filter(c => c.status.toLowerCase() === 'recording' || c.status.toLowerCase() === 'online').length
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Camera Inventory</h1>
         <div className="flex items-center space-x-4">
+          <h1 className="text-3xl font-bold text-gray-900">Camera Inventory</h1>
+          <div className="flex items-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${
+              connected ? 'bg-green-500' : 'bg-red-500'
+            }`}></div>
+            <span className="text-sm text-gray-600">
+              {connected ? 'Nx Witness Connected' : 'API Disconnected'}
+            </span>
+            {error && (
+              <AlertCircle className="w-4 h-4 text-red-500" title={error} />
+            )}
+          </div>
+        </div>
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={() => {
+              refetch()
+              testConnection()
+            }}
+            disabled={loading}
+            className={`flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50 ${
+              loading ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
           <div className="flex items-center space-x-2 bg-white rounded-lg border p-1">
             <button
               onClick={() => setViewMode('grid')}
@@ -126,25 +167,47 @@ export default function CameraInventory() {
       {/* Stats Summary */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-lg border">
-          <div className="text-2xl font-bold text-gray-900">248</div>
+          <div className="text-2xl font-bold text-gray-900">{totalCameras}</div>
           <div className="text-sm text-gray-600">Total Cameras</div>
         </div>
         <div className="bg-white p-4 rounded-lg border">
-          <div className="text-2xl font-bold text-green-600">236</div>
+          <div className="text-2xl font-bold text-green-600">{onlineCameras}</div>
           <div className="text-sm text-gray-600">Online</div>
         </div>
         <div className="bg-white p-4 rounded-lg border">
-          <div className="text-2xl font-bold text-red-600">12</div>
+          <div className="text-2xl font-bold text-red-600">{offlineCameras}</div>
           <div className="text-sm text-gray-600">Offline</div>
         </div>
         <div className="bg-white p-4 rounded-lg border">
-          <div className="text-2xl font-bold text-blue-600">234</div>
+          <div className="text-2xl font-bold text-blue-600">{recordingCameras}</div>
           <div className="text-sm text-gray-600">Recording</div>
         </div>
       </div>
 
       {/* Camera Grid/List */}
       <div className="bg-white rounded-lg shadow-sm border">
+        {loading && (
+          <div className="flex items-center justify-center p-8">
+            <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+            <span className="text-gray-600">Loading cameras...</span>
+          </div>
+        )}
+        
+        {error && !loading && (
+          <div className="flex items-center justify-center p-8 text-red-600">
+            <AlertCircle className="w-6 h-6 mr-2" />
+            <span>Error loading cameras: {error}</span>
+          </div>
+        )}
+        
+        {!loading && !error && filteredCameras.length === 0 && (
+          <div className="flex items-center justify-center p-8 text-gray-500">
+            <Camera className="w-6 h-6 mr-2" />
+            <span>No cameras found</span>
+          </div>
+        )}
+        
+        {!loading && filteredCameras.length > 0 && (
         {viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
             {filteredCameras.map((camera) => (
@@ -160,12 +223,17 @@ export default function CameraInventory() {
                 <div className="space-y-2 text-sm text-gray-600">
                   <div className="flex items-center space-x-1">
                     <MapPin className="w-3 h-3" />
-                    <span>{camera.location}</span>
+                    <span>{camera.location || camera.ip || 'Unknown location'}</span>
                   </div>
-                  <div>Type: {camera.type}</div>
-                  <div>Model: {camera.model}</div>
+                  <div>Type: {camera.type || camera.typeId || 'Unknown'}</div>
+                  <div>Model: {camera.model || 'Unknown model'}</div>
                   <div>IP: {camera.ip}</div>
-                  <div>Resolution: {camera.resolution} @ {camera.fps}fps</div>
+                  {camera.resolution && camera.fps && (
+                    <div>Resolution: {camera.resolution} @ {camera.fps}fps</div>
+                  )}
+                  {camera.vendor && (
+                    <div>Vendor: {camera.vendor}</div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between mt-4 pt-3 border-t">
@@ -245,6 +313,7 @@ export default function CameraInventory() {
               </tbody>
             </table>
           </div>
+        )}
         )}
       </div>
     </div>

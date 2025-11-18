@@ -1,13 +1,20 @@
 'use client'
 
-import { AlertTriangle, Bell, Filter, Search, MapPin, Camera, Clock, X, Check } from 'lucide-react'
+import { AlertTriangle, Bell, Filter, Search, MapPin, Camera, Clock, X, Check, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
+import { useAlarms, useEvents, useCameras } from '@/hooks/useNxAPI'
 
 export default function AlarmConsole() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterSeverity, setFilterSeverity] = useState('all')
   
-  const alarms = [
+  // API hooks
+  const { alarms: apiAlarms, loading: alarmsLoading, refetch: refetchAlarms } = useAlarms()
+  const { events, loading: eventsLoading, refetch: refetchEvents } = useEvents()
+  const { cameras } = useCameras()
+  
+  // Mock data for fallback
+  const mockAlarms = [
     {
       id: 'ALM-2024-001',
       type: 'Motion Detection',
@@ -74,6 +81,31 @@ export default function AlarmConsole() {
       assignedTo: 'Mike Davis'
     }
   ]
+
+  // Process API alarms and events into unified format
+  const processedAlarms = [...apiAlarms, ...events].map(item => {
+    // Find camera info
+    const camera = cameras.find(c => c.id === item.cameraId)
+    
+    return {
+      id: item.id,
+      type: item.type,
+      camera: camera?.name || `Camera ${item.cameraId}`,
+      cameraId: item.cameraId,
+      location: camera?.ip || 'Unknown location',
+      severity: item.type.toLowerCase().includes('offline') ? 'critical' :
+                item.type.toLowerCase().includes('motion') ? 'high' :
+                item.type.toLowerCase().includes('tamper') ? 'medium' : 'low',
+      timestamp: new Date(item.timestamp),
+      status: item.type.toLowerCase().includes('offline') ? 'active' : 'acknowledged',
+      description: item.description,
+      screenshot: null,
+      assignedTo: null
+    }
+  })
+  
+  // Use API data or fallback to mock data
+  const allAlarms = processedAlarms.length > 0 ? processedAlarms : mockAlarms
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -147,15 +179,15 @@ export default function AlarmConsole() {
     }
   }
 
-  const filteredAlarms = alarms.filter(alarm => {
+  const filteredAlarms = allAlarms.filter(alarm => {
     const statusMatch = filterStatus === 'all' || alarm.status === filterStatus
     const severityMatch = filterSeverity === 'all' || alarm.severity === filterSeverity
     return statusMatch && severityMatch
   })
 
-  const activeAlarms = alarms.filter(alarm => alarm.status === 'active').length
-  const acknowledgedAlarms = alarms.filter(alarm => alarm.status === 'acknowledged').length
-  const resolvedAlarms = alarms.filter(alarm => alarm.status === 'resolved').length
+  const activeAlarms = allAlarms.filter(alarm => alarm.status === 'active').length
+  const acknowledgedAlarms = allAlarms.filter(alarm => alarm.status === 'acknowledged').length
+  const resolvedAlarms = allAlarms.filter(alarm => alarm.status === 'resolved').length
 
   return (
     <div className="space-y-6">
@@ -167,6 +199,19 @@ export default function AlarmConsole() {
             <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
             <span className="text-sm text-gray-600">Real-time monitoring</span>
           </div>
+          <button
+            onClick={() => {
+              refetchAlarms()
+              refetchEvents()
+            }}
+            disabled={alarmsLoading || eventsLoading}
+            className={`flex items-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 mr-2 ${
+              (alarmsLoading || eventsLoading) ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            <RefreshCw className={`w-4 h-4 ${(alarmsLoading || eventsLoading) ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
           <button className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
             <Bell className="w-4 h-4" />
             <span>Configure Alerts</span>
@@ -207,7 +252,7 @@ export default function AlarmConsole() {
           <div className="flex items-center space-x-3">
             <AlertTriangle className="w-6 h-6 text-gray-600" />
             <div>
-              <div className="text-2xl font-bold text-gray-900">{alarms.length}</div>
+              <div className="text-2xl font-bold text-gray-900">{allAlarms.length}</div>
               <div className="text-sm text-gray-600">Total Today</div>
             </div>
           </div>
@@ -265,6 +310,9 @@ export default function AlarmConsole() {
         <div className="px-6 py-4 border-b">
           <h3 className="text-lg font-semibold text-gray-900">
             Recent Alarms ({filteredAlarms.length})
+            {(alarmsLoading || eventsLoading) && (
+              <RefreshCw className="inline w-4 h-4 ml-2 animate-spin" />
+            )}
           </h3>
         </div>
         
