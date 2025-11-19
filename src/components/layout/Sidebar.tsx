@@ -8,7 +8,7 @@ interface SidebarProps {
 }
 
 const navigationItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: Home },
+  { id: 'dashboard', label: 'Dashboard 123', icon: Home },
   { id: 'cameras', label: 'Camera Inventory', icon: Camera },
   { id: 'servers', label: 'Server Options', icon: Server },
   { id: 'health', label: 'System Health', icon: Activity },
