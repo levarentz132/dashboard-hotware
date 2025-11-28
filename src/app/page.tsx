@@ -11,6 +11,7 @@ import AlarmConsole from '@/components/alarms/AlarmConsole'
 import Analytics from '@/components/analytics/Analytics'
 import NotificationSystem from '@/components/ui/NotificationSystem'
 import ConnectionTest from '@/components/debug/ConnectionTest'
+import StorageManagement from '@/components/storage/StorageManagement'
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState('dashboard')
@@ -29,6 +30,8 @@ export default function Home() {
         return <AlarmConsole />
       case 'analytics':
         return <Analytics />
+      case 'storage':
+        return <StorageManagement />
       case 'debug':
         return <ConnectionTest />
       default:
