@@ -68,6 +68,11 @@ export default function CameraStatusGrid() {
     }
   }
 
+  const handleCameraClick = (cameraId: string) => {
+    const streamUrl = `https://localhost:7001/media/ac${cameraId}.webm`
+    window.open(streamUrl, '_blank')
+  }
+
   return (
     <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between mb-4">
@@ -94,7 +99,11 @@ export default function CameraStatusGrid() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {cameras.slice(0, 6).map((camera) => (
-          <div key={camera.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+          <div 
+            key={camera.id} 
+            onClick={() => handleCameraClick(camera.id)}
+            className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-400"
+          >
             <div className="flex items-start justify-between">
               <div className="flex items-start space-x-3">
                 <div className="p-2 bg-gray-50 rounded-lg">
