@@ -299,14 +299,168 @@ class NxWitnessAPI {
     }
   }
 
-  // Storage information (may not be available in all Nx Witness versions)
+  // Storage information - Get storages for a specific server
+  async getStorages(serverId: string = 'this'): Promise<any> {
+    try {
+      const endpoint = API_ENDPOINTS.storages.replace('{serverId}', serverId)
+      console.log('[getStorages] Fetching from endpoint:', endpoint)
+      const storages = await this.apiRequest<any>(endpoint)
+      console.log('[getStorages] Received storages:', storages)
+      return storages === null ? [] : storages
+    } catch (error) {
+      console.error('[getStorages] Storages endpoint error:', error)
+      return []
+    }
+  }
+
+  // Create a new storage on a server
+  async createStorage(serverId: string, storageData: {
+    name: string
+    path: string
+    type: string
+    spaceLimitB?: number
+    isUsedForWriting?: boolean
+    isBackup?: boolean
+    parameters?: Record<string, any>
+  }): Promise<any> {
+    try {
+      const endpoint = API_ENDPOINTS.createStorage(serverId)
+      console.log('[createStorage] Creating storage on server:', serverId, 'with data:', storageData)
+      
+      const body = {
+        name: storageData.name,
+        path: storageData.path,
+        type: storageData.type,
+        spaceLimitB: storageData.spaceLimitB || 0,
+        isUsedForWriting: storageData.isUsedForWriting !== false, // Default to true
+        isBackup: storageData.isBackup || false,
+        status: 'Offline', // New storages start offline
+        parameters: storageData.parameters || {}
+      }
+      
+      const response = await this.apiRequest<any>(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      })
+      
+      console.log('[createStorage] Storage created:', response)
+      return response
+    } catch (error) {
+      console.error('[createStorage] Failed to create storage:', error)
+      throw error
+    }
+  }
+
+  // Get a specific storage by ID
+  async getStorageById(serverId: string, storageId: string): Promise<any> {
+    try {
+      const endpoint = API_ENDPOINTS.storageById(serverId, storageId)
+      console.log('[getStorageById] Fetching storage:', storageId, 'from server:', serverId)
+      
+      const response = await this.apiRequest<any>(endpoint)
+      console.log('[getStorageById] Storage details:', response)
+      
+      return response
+    } catch (error) {
+      console.error('[getStorageById] Failed to get storage:', error)
+      throw error
+    }
+  }
+
+  // Update/modify an existing storage
+  async updateStorage(serverId: string, storageId: string, updateData: {
+    name?: string
+    path?: string
+    type?: string
+    spaceLimitB?: number
+    isUsedForWriting?: boolean
+    isBackup?: boolean
+    status?: string
+    parameters?: Record<string, any>
+  }): Promise<any> {
+    try {
+      const endpoint = API_ENDPOINTS.updateStorage(serverId, storageId)
+      console.log('[updateStorage] Updating storage:', storageId, 'on server:', serverId, 'with data:', updateData)
+      
+      const response = await this.apiRequest<any>(endpoint, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateData)
+      })
+      
+      console.log('[updateStorage] Storage updated:', response)
+      return response
+    } catch (error) {
+      console.error('[updateStorage] Failed to update storage:', error)
+      throw error
+    }
+  }
+
+  // Get storage info (legacy method for compatibility)
   async getStorageInfo(): Promise<any> {
     try {
-      const storage = await this.apiRequest<any>(API_ENDPOINTS.storageInfo)
-      return storage === null ? null : storage
+      // Try to get storages from current server
+      const storages = await this.getStorages('this')
+      return storages
     } catch (error) {
       console.log('[getStorageInfo] Storage endpoint not available:', error)
-      return null // Storage info not available in this Nx Witness version
+      return null
+    }
+  }
+
+  // Get all storage data across all servers
+  async getAllStorageData(): Promise<any> {
+    try {
+      console.log('[getAllStorageData] Starting to fetch storage data')
+      const servers = await this.getServers()
+      console.log('[getAllStorageData] Servers:', servers)
+      
+      const storageData = {
+        servers: [],
+        totalCapacity: 0,
+        usedSpace: 0,
+        freeSpace: 0
+      }
+
+      // Fetch storages for each server
+      if (Array.isArray(servers) && servers.length > 0) {
+        console.log('[getAllStorageData] Found', servers.length, 'servers')
+        for (const server of servers) {
+          console.log('[getAllStorageData] Fetching storages for server:', server.id, server.name)
+          const storages = await this.getStorages(server.id)
+          console.log('[getAllStorageData] Storages for server', server.id, ':', storages)
+          if (Array.isArray(storages) && storages.length > 0) {
+            storageData.servers.push({
+              serverId: server.id,
+              serverName: server.name,
+              storages: storages
+            })
+          }
+        }
+      } else {
+        // If no servers found, try 'this' server
+        console.log('[getAllStorageData] No servers array, trying "this" server')
+        const storages = await this.getStorages('this')
+        console.log('[getAllStorageData] Storages for "this" server:', storages)
+        if (Array.isArray(storages) && storages.length > 0) {
+          storageData.servers.push({
+            serverId: 'this',
+            serverName: 'Current Server',
+            storages: storages
+          })
+        }
+      }
+
+      console.log('[getAllStorageData] Final storage data:', storageData)
+      return storageData
+    } catch (error) {
+      console.error('[getAllStorageData] Error fetching storage data:', error)
+      return null
     }
   }
 

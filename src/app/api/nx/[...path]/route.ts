@@ -26,6 +26,10 @@ export async function PUT(request: NextRequest) {
   return handleRequest(request, 'PUT')
 }
 
+export async function PATCH(request: NextRequest) {
+  return handleRequest(request, 'PATCH')
+}
+
 export async function DELETE(request: NextRequest) {
   return handleRequest(request, 'DELETE')
 }
@@ -49,8 +53,8 @@ async function handleRequest(request: NextRequest, method: string) {
       }
     }
     
-    // Add body for POST/PUT requests
-    if (method === 'POST' || method === 'PUT') {
+    // Add body for POST/PUT/PATCH requests
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
       const body = await request.text()
       if (body) {
         requestOptions.body = body
@@ -90,7 +94,7 @@ async function handleRequest(request: NextRequest, method: string) {
         headers: {
           'Content-Type': contentType || 'application/json',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
           'Access-Control-Allow-Credentials': 'true',
         }
