@@ -43,6 +43,7 @@ export const API_ENDPOINTS = {
   storageById: (serverId: string, storageId: string) => `/servers/${serverId}/storages/${storageId}`,
   createStorage: (serverId: string) => `/servers/${serverId}/storages`,
   updateStorage: (serverId: string, storageId: string) => `/servers/${serverId}/storages/${storageId}`,
+  deleteStorage: (serverId: string, storageId: string) => `/servers/${serverId}/storages/${storageId}`,
 
   // Analytics
   analytics: "/analytics",

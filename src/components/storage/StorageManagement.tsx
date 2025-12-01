@@ -194,6 +194,24 @@ export default function StorageManagement() {
     }
   }
 
+  const handleDeleteStorage = async (device: StorageDevice) => {
+    const confirmDelete = confirm(
+      `Are you sure you want to delete storage "${device.name}"?\n\nPath: ${device.path}\nThis action cannot be undone.`
+    )
+
+    if (!confirmDelete) return
+
+    try {
+      await nxAPI.deleteStorage(device.serverId, device.id)
+      alert('Storage deleted successfully!')
+      // Refresh storage list
+      window.location.reload()
+    } catch (error) {
+      console.error('Failed to delete storage:', error)
+      alert('Failed to delete storage. Please check the console for details.')
+    }
+  }
+
   const handleCreateStorage = async () => {
     try {
       if (!createForm.serverId || !createForm.name || !createForm.path) {
@@ -669,7 +687,11 @@ export default function StorageManagement() {
                     >
                       <Settings className="w-5 h-5" />
                     </button>
-                    <button className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Delete storage">
+                    <button 
+                      onClick={() => handleDeleteStorage(device)}
+                      className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg" 
+                      title="Delete storage"
+                    >
                       <Trash2 className="w-5 h-5" />
                     </button>
                   </div>

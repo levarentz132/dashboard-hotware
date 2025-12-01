@@ -401,6 +401,24 @@ class NxWitnessAPI {
     }
   }
 
+  // Delete a storage
+  async deleteStorage(serverId: string, storageId: string): Promise<boolean> {
+    try {
+      const endpoint = API_ENDPOINTS.deleteStorage(serverId, storageId)
+      console.log('[deleteStorage] Deleting storage:', storageId, 'from server:', serverId)
+      
+      const response = await this.apiRequest<any>(endpoint, {
+        method: 'DELETE'
+      })
+      
+      console.log('[deleteStorage] Storage deleted:', response)
+      return true
+    } catch (error) {
+      console.error('[deleteStorage] Failed to delete storage:', error)
+      throw error
+    }
+  }
+
   // Get storage info (legacy method for compatibility)
   async getStorageInfo(): Promise<any> {
     try {
