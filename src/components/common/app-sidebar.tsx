@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, Coffee, LogOut } from "lucide-react";
+import { Camera, CameraIcon, Coffee, LogOut } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -39,9 +39,9 @@ export default function AppSidebar() {
             <SidebarMenuButton size="lg" asChild>
               <div className="font-semibold">
                 <div className="bg-teal-500 flex p-2 items-center justify-center rounded-md">
-                  <Coffee className="size-4" />
+                  <CameraIcon className="size-4" />
                 </div>
-                WPU Cafe
+                <div className="mt-2">CCTV Monitoring</div>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
