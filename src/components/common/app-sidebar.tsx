@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, Coffee, LogOut } from "lucide-react";
+import { Camera, CameraIcon, Coffee, LogOut } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -30,11 +30,7 @@ export default function AppSidebar() {
   const { cameras, error, loading, refetch } = useCameras();
   const { isMobile } = useSidebar();
   const pathname = usePathname();
-  const profile = {
-    name: "Avip Syaifulloh",
-    role: "admin",
-    avatar_url: "",
-  };
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -43,9 +39,9 @@ export default function AppSidebar() {
             <SidebarMenuButton size="lg" asChild>
               <div className="font-semibold">
                 <div className="bg-teal-500 flex p-2 items-center justify-center rounded-md">
-                  <Coffee className="size-4" />
+                  <CameraIcon className="size-4" />
                 </div>
-                WPU Cafe
+                <div className="mt-2">CCTV Monitoring</div>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -54,19 +50,58 @@ export default function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent className="flex flex-col gap-2">
-            <SidebarMenu>
-              {cameras.map((camera) => (
-                <SidebarMenuItem key={camera.id}>
-                  <SidebarMenuButton
-                    size="lg"
-                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                  >
-                    <Camera className="mr-2 size-4" />
-                    {camera.name}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+            {/* Loading State */}
+            {loading && <div className="p-4 text-center text-sm text-muted-foreground">Loading cameras...</div>}
+
+            {/* Error State */}
+            {error && <div className="p-4 text-center text-sm text-red-500">Failed to load cameras</div>}
+
+            {/* Empty State */}
+            {!loading && !error && cameras.length === 0 && (
+              <div className="p-4 text-center text-sm text-muted-foreground">No cameras available</div>
+            )}
+
+            {/* Camera List */}
+            {!loading && !error && cameras.length > 0 && (
+              <SidebarMenu>
+                {cameras.map((camera) => (
+                  <SidebarMenuItem key={camera.id}>
+                    <SidebarMenuButton
+                      size="lg"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData(
+                          "camera",
+                          JSON.stringify({
+                            id: camera.id,
+                            name: camera.name,
+                          })
+                        );
+                        e.currentTarget.style.opacity = "0.5";
+                      }}
+                      onDragEnd={(e) => {
+                        e.currentTarget.style.opacity = "1";
+                      }}
+                      onTouchStart={(e) => {
+                        e.currentTarget.dataset.camera = JSON.stringify({
+                          id: camera.id,
+                          name: camera.name,
+                        });
+                        e.currentTarget.style.opacity = "0.5";
+                      }}
+                      onTouchEnd={(e) => {
+                        e.currentTarget.style.opacity = "1";
+                      }}
+                      className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground cursor-grab active:cursor-grabbing hover:bg-accent transition-all touch-none"
+                    >
+                      <Camera className="mr-2 size-4" />
+                      {camera.name}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            )}
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

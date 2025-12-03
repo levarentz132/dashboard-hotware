@@ -1,3 +1,5 @@
+import { ICamera } from "@/types/Device";
+
 // Nx Witness API Configuration
 export const API_CONFIG = {
   // Use Next.js API proxy to avoid CORS issues
@@ -28,6 +30,7 @@ export const API_ENDPOINTS = {
   devices: "/devices",
   deviceById: (id: string) => `/devices/${id}`,
   deviceStatus: "/devices/status",
+  createDevice: (payload: ICamera) => "/devices",
 
   // Events and Rules (REST v3)
   events: "/events",
