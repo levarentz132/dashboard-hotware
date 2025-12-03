@@ -221,11 +221,57 @@ class NxWitnessAPI {
   }
 
   async getAlarms(limit: number = 20): Promise<NxEvent[]> {
-    const alarms = await this.apiRequest<NxEvent[]>(`${API_ENDPOINTS.events}?type=alarm&limit=${limit}`)
-    if (alarms === null || !Array.isArray(alarms)) {
-      return [] // Return empty array when server unavailable
+    try {
+      const endpoint = (API_ENDPOINTS as any).metricsAlarms || '/system/metrics/alarms'
+      console.log('[getAlarms] Fetching metrics alarms from:', endpoint)
+      const data = await this.apiRequest<any>(endpoint)
+      console.log('[getAlarms] Raw metrics alarms response:', data)
+
+      if (!data) return []
+
+      const alarms: NxEvent[] = []
+
+      // Response format is { servers: { <serverId>: { info: { <key>: [ { level, text, ... } ] } } } }
+      if (data.servers && typeof data.servers === 'object') {
+        for (const [serverId, serverObj] of Object.entries<any>(data.servers)) {
+          const info = serverObj?.info || {}
+          for (const [infoKey, infoArr] of Object.entries<any>(info)) {
+            if (!Array.isArray(infoArr)) continue
+            for (const item of infoArr) {
+              const id = `${serverId}-${infoKey}-${Math.random().toString(36).slice(2,9)}`
+              const timestamp = new Date().toISOString()
+              alarms.push({
+                id,
+                timestamp,
+                cameraId: '',
+                type: infoKey,
+                description: item?.text || item?.message || JSON.stringify(item),
+                metadata: {
+                  level: item?.level,
+                  serverId,
+                  raw: item
+                }
+              })
+            }
+          }
+        }
+      }
+
+      // If there were zero alarms parsed, fall back to events endpoint (legacy behavior)
+      if (alarms.length === 0) {
+        try {
+          const eventsAlarms = await this.apiRequest<NxEvent[]>(`${API_ENDPOINTS.events}?type=alarm&limit=${limit}`)
+          if (Array.isArray(eventsAlarms)) return eventsAlarms
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      return alarms
+    } catch (error) {
+      console.error('[getAlarms] Failed to fetch metrics alarms:', error)
+      return []
     }
-    return alarms
   }
 
   // System methods

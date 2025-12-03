@@ -19,19 +19,25 @@ export default function AlarmConsole() {
   const processedAlarms = [...apiAlarms, ...events].map(item => {
     // Find camera info
     const camera = cameras.find(c => c.id === item.cameraId)
-    
+    const metaLevel = (item as any).metadata?.level || ''
+
+    // Prefer metadata.level from metrics alarms when available, otherwise infer from type
+    const inferredSeverity = metaLevel ? (metaLevel === 'warning' ? 'medium' : metaLevel === 'error' || metaLevel === 'critical' ? 'critical' : 'low') : (
+      item.type.toLowerCase().includes('offline') ? 'critical' :
+      item.type.toLowerCase().includes('motion') ? 'high' :
+      item.type.toLowerCase().includes('tamper') ? 'medium' : 'low'
+    )
+
     return {
       id: item.id,
       type: item.type,
       camera: camera?.name || `Camera ${item.cameraId}`,
       cameraId: item.cameraId,
       location: camera?.ip || 'Unknown location',
-      severity: item.type.toLowerCase().includes('offline') ? 'critical' :
-                item.type.toLowerCase().includes('motion') ? 'high' :
-                item.type.toLowerCase().includes('tamper') ? 'medium' : 'low',
+      severity: inferredSeverity,
       timestamp: new Date(item.timestamp),
       status: item.type.toLowerCase().includes('offline') ? 'active' : 'acknowledged',
-      description: item.description,
+      description: item.description || (item as any).description || (item as any).metadata?.text || '',
       screenshot: null,
       assignedTo: null
     }

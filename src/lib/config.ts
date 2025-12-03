@@ -45,6 +45,8 @@ export const API_ENDPOINTS = {
   updateStorage: (serverId: string, storageId: string) => `/servers/${serverId}/storages/${storageId}`,
   deleteStorage: (serverId: string, storageId: string) => `/servers/${serverId}/storages/${storageId}`,
 
+  // Metrics / Alarms
+  metricsAlarms: '/system/metrics/alarms',
   // Analytics
   analytics: "/analytics",
   reports: "/reports",
