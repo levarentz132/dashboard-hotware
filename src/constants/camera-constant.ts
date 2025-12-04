@@ -18,17 +18,27 @@ export const INITIAL_CAMERA = {
   logicalId: "",
 };
 
-export const INITIAL_STATE_MENU = {
+export const INITIAL_STATE_CAMERA = {
   status: "idle",
   errors: {
     id: [],
+    physicalId: [],
+    url: [],
+    typeId: [],
     name: [],
-    description: [],
-    price: [],
-    discount: [],
-    category: [],
-    is_available: [],
-    image_url: [],
+    mac: [],
+    serverId: [],
+    vendor: [],
+    model: [],
+    group: {
+      id: [],
+      name: [],
+    },
+    credentials: {
+      user: [],
+      password: [],
+    },
+    logicalId: [],
     _form: [],
   },
 };
