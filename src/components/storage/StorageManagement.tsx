@@ -1,160 +1,160 @@
-'use client'
+"use client";
 
-import { Database, HardDrive, TrendingUp, AlertCircle, Server, Trash2, Settings, Download, Plus } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { nxAPI } from '@/lib/nxapi'
+import { Database, HardDrive, TrendingUp, AlertCircle, Server, Trash2, Settings, Download, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { nxAPI } from "@/lib/nxapi";
 
 interface StorageDevice {
-  id: string
-  serverId: string
-  name: string
-  path: string
-  type: 'local' | 'network' | 'cloud'
-  spaceLimitB: number
-  totalSpace: string
-  usedSpace: string
-  freeSpace: string
-  usagePercentage: number
-  isUsedForWriting: boolean
-  isBackup: boolean
-  status: 'healthy' | 'warning' | 'critical'
-  rawStatus: string
-  parameters?: Record<string, any>
+  id: string;
+  serverId: string;
+  name: string;
+  path: string;
+  type: "local" | "network" | "cloud";
+  spaceLimitB: number;
+  totalSpace: string;
+  usedSpace: string;
+  freeSpace: string;
+  usagePercentage: number;
+  isUsedForWriting: boolean;
+  isBackup: boolean;
+  status: "healthy" | "warning" | "critical";
+  rawStatus: string;
+  parameters?: Record<string, any>;
 }
 
 // Helper function to format bytes to human-readable format
 const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '0 Bytes'
-  const k = 1024
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
-}
+  if (bytes === 0) return "0 Bytes";
+  const k = 1024;
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
+};
 
 export default function StorageManagement() {
-  const [loading, setLoading] = useState(true)
-  const [storageDevices, setStorageDevices] = useState<StorageDevice[]>([])
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [showEditModal, setShowEditModal] = useState(false)
-  const [selectedStorage, setSelectedStorage] = useState<StorageDevice | null>(null)
-  const [servers, setServers] = useState<any[]>([])
+  const [loading, setLoading] = useState(true);
+  const [storageDevices, setStorageDevices] = useState<StorageDevice[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedStorage, setSelectedStorage] = useState<StorageDevice | null>(null);
+  const [servers, setServers] = useState<any[]>([]);
   const [createForm, setCreateForm] = useState({
-    serverId: '',
-    name: '',
-    path: '',
-    type: 'local',
-    spaceLimitB: 0,
-    isUsedForWriting: true,
-    isBackup: false
-  })
-  const [editForm, setEditForm] = useState({
-    name: '',
-    path: '',
-    type: 'local',
+    serverId: "",
+    name: "",
+    path: "",
+    type: "local",
     spaceLimitB: 0,
     isUsedForWriting: true,
     isBackup: false,
-    status: 'Offline'
-  })
+  });
+  const [editForm, setEditForm] = useState({
+    name: "",
+    path: "",
+    type: "local",
+    spaceLimitB: 0,
+    isUsedForWriting: true,
+    isBackup: false,
+    status: "Offline",
+  });
   const [totalStorage, setTotalStorage] = useState({
-    total: '0 Bytes',
-    used: '0 Bytes',
-    free: '0 Bytes',
-    usagePercentage: 0
-  })
+    total: "0 Bytes",
+    used: "0 Bytes",
+    free: "0 Bytes",
+    usagePercentage: 0,
+  });
 
   useEffect(() => {
     const fetchStorageData = async () => {
       try {
-        setLoading(true)
-        
+        setLoading(true);
+
         // Fetch servers for the create form
-        const serverList = await nxAPI.getServers()
+        const serverList = await nxAPI.getServers();
         if (serverList && Array.isArray(serverList)) {
-          setServers(serverList)
+          setServers(serverList);
           if (serverList.length > 0 && !createForm.serverId) {
-            setCreateForm(prev => ({ ...prev, serverId: serverList[0].id }))
+            setCreateForm((prev) => ({ ...prev, serverId: serverList[0].id }));
           }
         }
-        
+
         // Try to fetch comprehensive storage data from API
-        const storageData = await nxAPI.getAllStorageData()
-        console.log('[StorageManagement] Raw storage data:', storageData)
-        
+        const storageData = await nxAPI.getAllStorageData();
+        console.log("[StorageManagement] Raw storage data:", storageData);
+
         if (storageData && storageData.servers && storageData.servers.length > 0) {
           // Process real storage data from Nx Witness API
-          const devices: StorageDevice[] = []
-          let totalCapacityBytes = 0
-          let usedSpaceBytes = 0
+          const devices: StorageDevice[] = [];
+          let totalCapacityBytes = 0;
+          let usedSpaceBytes = 0;
 
           storageData.servers.forEach((server: any) => {
-            console.log('[StorageManagement] Processing server:', server.serverId, 'storages:', server.storages)
-            
+            console.log("[StorageManagement] Processing server:", server.serverId, "storages:", server.storages);
+
             if (Array.isArray(server.storages)) {
               server.storages.forEach((storage: any) => {
-                console.log('[StorageManagement] Storage item:', storage)
-                
-                const spaceLimitBytes = storage.spaceLimitB || 0
-                const isOnline = storage.status === 'Online'
-                const isBackup = storage.isBackup || false
-                const isUsedForWriting = storage.isUsedForWriting || false
-                
+                console.log("[StorageManagement] Storage item:", storage);
+
+                const spaceLimitBytes = storage.spaceLimitB || 0;
+                const isOnline = storage.status === "Online";
+                const isBackup = storage.isBackup || false;
+                const isUsedForWriting = storage.isUsedForWriting || false;
+
                 // Add to total capacity
-                totalCapacityBytes += spaceLimitBytes
-                
+                totalCapacityBytes += spaceLimitBytes;
+
                 // Extract storage status from parameters if available
-                const statusFlags = storage.parameters?.persistentStorageStatusFlags || ''
-                const hasDBReady = statusFlags.includes('dbReady')
-                const isSystemStorage = statusFlags.includes('system')
+                const statusFlags = storage.parameters?.persistentStorageStatusFlags || "";
+                const hasDBReady = statusFlags.includes("dbReady");
+                const isSystemStorage = statusFlags.includes("system");
 
                 devices.push({
                   id: storage.id,
                   serverId: storage.serverId || server.serverId,
-                  name: `${storage.name}${isSystemStorage ? ' (System)' : ''}${isBackup ? ' (Backup)' : ''}`,
-                  path: storage.path || 'Unknown path',
-                  type: storage.type === 'local' ? 'local' : storage.type === 'network' ? 'network' : 'cloud',
+                  name: `${storage.name}${isSystemStorage ? " (System)" : ""}${isBackup ? " (Backup)" : ""}`,
+                  path: storage.path || "Unknown path",
+                  type: storage.type === "local" ? "local" : storage.type === "network" ? "network" : "cloud",
                   spaceLimitB: spaceLimitBytes,
                   totalSpace: formatBytes(spaceLimitBytes),
-                  usedSpace: isUsedForWriting ? 'In Use' : 'Not Used',
+                  usedSpace: isUsedForWriting ? "In Use" : "Not Used",
                   freeSpace: formatBytes(spaceLimitBytes),
                   usagePercentage: 0,
                   isUsedForWriting: isUsedForWriting,
                   isBackup: isBackup,
-                  status: isOnline && hasDBReady ? 'healthy' : isOnline ? 'warning' : 'critical',
+                  status: isOnline && hasDBReady ? "healthy" : isOnline ? "warning" : "critical",
                   rawStatus: storage.status,
-                  parameters: storage.parameters || {}
-                })
-              })
+                  parameters: storage.parameters || {},
+                });
+              });
             }
-          })
+          });
 
-          console.log('[StorageManagement] Processed devices:', devices)
-          console.log('[StorageManagement] Total capacity bytes:', totalCapacityBytes)
+          console.log("[StorageManagement] Processed devices:", devices);
+          console.log("[StorageManagement] Total capacity bytes:", totalCapacityBytes);
 
           if (devices.length > 0) {
-            setStorageDevices(devices)
+            setStorageDevices(devices);
             setTotalStorage({
               total: formatBytes(totalCapacityBytes),
-              used: 'N/A',
+              used: "N/A",
               free: formatBytes(totalCapacityBytes),
-              usagePercentage: 0
-            })
+              usagePercentage: 0,
+            });
           }
         } else {
-          console.log('[StorageManagement] No storage data available')
+          console.log("[StorageManagement] No storage data available");
         }
       } catch (error) {
-        console.error('Failed to fetch storage data:', error)
+        console.error("Failed to fetch storage data:", error);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    fetchStorageData()
-  }, [])
+    fetchStorageData();
+  }, []);
 
   const handleEditStorage = (device: StorageDevice) => {
-    setSelectedStorage(device)
+    setSelectedStorage(device);
     setEditForm({
       name: device.name,
       path: device.path,
@@ -162,14 +162,14 @@ export default function StorageManagement() {
       spaceLimitB: device.spaceLimitB,
       isUsedForWriting: device.isUsedForWriting,
       isBackup: device.isBackup,
-      status: device.rawStatus
-    })
-    setShowEditModal(true)
-  }
+      status: device.rawStatus,
+    });
+    setShowEditModal(true);
+  };
 
   const handleUpdateStorage = async () => {
     try {
-      if (!selectedStorage) return
+      if (!selectedStorage) return;
 
       const result = await nxAPI.updateStorage(selectedStorage.serverId, selectedStorage.id, {
         name: editForm.name,
@@ -178,45 +178,45 @@ export default function StorageManagement() {
         spaceLimitB: editForm.spaceLimitB,
         isUsedForWriting: editForm.isUsedForWriting,
         isBackup: editForm.isBackup,
-        status: editForm.status
-      })
+        status: editForm.status,
+      });
 
       if (result) {
-        alert('Storage updated successfully!')
-        setShowEditModal(false)
-        setSelectedStorage(null)
+        alert("Storage updated successfully!");
+        setShowEditModal(false);
+        setSelectedStorage(null);
         // Refresh storage list
-        window.location.reload()
+        window.location.reload();
       }
     } catch (error) {
-      console.error('Failed to update storage:', error)
-      alert('Failed to update storage. Please check the console for details.')
+      console.error("Failed to update storage:", error);
+      alert("Failed to update storage. Please check the console for details.");
     }
-  }
+  };
 
   const handleDeleteStorage = async (device: StorageDevice) => {
     const confirmDelete = confirm(
       `Are you sure you want to delete storage "${device.name}"?\n\nPath: ${device.path}\nThis action cannot be undone.`
-    )
+    );
 
-    if (!confirmDelete) return
+    if (!confirmDelete) return;
 
     try {
-      await nxAPI.deleteStorage(device.serverId, device.id)
-      alert('Storage deleted successfully!')
+      await nxAPI.deleteStorage(device.serverId, device.id);
+      alert("Storage deleted successfully!");
       // Refresh storage list
-      window.location.reload()
+      window.location.reload();
     } catch (error) {
-      console.error('Failed to delete storage:', error)
-      alert('Failed to delete storage. Please check the console for details.')
+      console.error("Failed to delete storage:", error);
+      alert("Failed to delete storage. Please check the console for details.");
     }
-  }
+  };
 
   const handleCreateStorage = async () => {
     try {
       if (!createForm.serverId || !createForm.name || !createForm.path) {
-        alert('Please fill in all required fields')
-        return
+        alert("Please fill in all required fields");
+        return;
       }
 
       const result = await nxAPI.createStorage(createForm.serverId, {
@@ -225,62 +225,62 @@ export default function StorageManagement() {
         type: createForm.type,
         spaceLimitB: createForm.spaceLimitB,
         isUsedForWriting: createForm.isUsedForWriting,
-        isBackup: createForm.isBackup
-      })
+        isBackup: createForm.isBackup,
+      });
 
       if (result) {
-        alert('Storage created successfully!')
-        setShowCreateModal(false)
+        alert("Storage created successfully!");
+        setShowCreateModal(false);
         // Reset form
         setCreateForm({
-          serverId: servers.length > 0 ? servers[0].id : '',
-          name: '',
-          path: '',
-          type: 'local',
+          serverId: servers.length > 0 ? servers[0].id : "",
+          name: "",
+          path: "",
+          type: "local",
           spaceLimitB: 0,
           isUsedForWriting: true,
-          isBackup: false
-        })
+          isBackup: false,
+        });
         // Refresh storage list
-        window.location.reload()
+        window.location.reload();
       }
     } catch (error) {
-      console.error('Failed to create storage:', error)
-      alert('Failed to create storage. Please check the console for details.')
+      console.error("Failed to create storage:", error);
+      alert("Failed to create storage. Please check the console for details.");
     }
-  }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'healthy':
-        return 'bg-green-100 text-green-800 border-green-200'
-      case 'warning':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-      case 'critical':
-        return 'bg-red-100 text-red-800 border-red-200'
+      case "healthy":
+        return "bg-green-100 text-green-800 border-green-200";
+      case "warning":
+        return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      case "critical":
+        return "bg-red-100 text-red-800 border-red-200";
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200'
+        return "bg-gray-100 text-gray-800 border-gray-200";
     }
-  }
+  };
 
   const getUsageColor = (percentage: number) => {
-    if (percentage >= 90) return 'bg-red-500'
-    if (percentage >= 75) return 'bg-yellow-500'
-    return 'bg-green-500'
-  }
+    if (percentage >= 90) return "bg-red-500";
+    if (percentage >= 75) return "bg-yellow-500";
+    return "bg-green-500";
+  };
 
   const getTypeIcon = (type: string) => {
     switch (type) {
-      case 'local':
-        return <HardDrive className="w-5 h-5" />
-      case 'network':
-        return <Server className="w-5 h-5" />
-      case 'cloud':
-        return <Database className="w-5 h-5" />
+      case "local":
+        return <HardDrive className="w-5 h-5" />;
+      case "network":
+        return <Server className="w-5 h-5" />;
+      case "cloud":
+        return <Database className="w-5 h-5" />;
       default:
-        return <HardDrive className="w-5 h-5" />
+        return <HardDrive className="w-5 h-5" />;
     }
-  }
+  };
 
   if (loading) {
     return (
@@ -292,7 +292,7 @@ export default function StorageManagement() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -300,7 +300,7 @@ export default function StorageManagement() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Storage Management</h1>
         <div className="flex items-center space-x-3">
-          <button 
+          <button
             onClick={() => setShowCreateModal(true)}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2"
           >
@@ -319,7 +319,7 @@ export default function StorageManagement() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Create New Storage</h2>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Server</label>
@@ -328,7 +328,7 @@ export default function StorageManagement() {
                   onChange={(e) => setCreateForm({ ...createForm, serverId: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {servers.map(server => (
+                  {servers.map((server) => (
                     <option key={server.id} value={server.id}>
                       {server.name || server.id}
                     </option>
@@ -428,7 +428,7 @@ export default function StorageManagement() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Edit Storage</h2>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Storage ID</label>
@@ -521,8 +521,8 @@ export default function StorageManagement() {
             <div className="flex items-center justify-end space-x-3 mt-6">
               <button
                 onClick={() => {
-                  setShowEditModal(false)
-                  setSelectedStorage(null)
+                  setShowEditModal(false);
+                  setSelectedStorage(null);
                 }}
                 className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
               >
@@ -618,7 +618,7 @@ export default function StorageManagement() {
                 <span className="font-medium text-gray-900">{totalStorage.total}</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-blue-600 h-2 rounded-full" style={{ width: '100%' }}></div>
+                <div className="bg-blue-600 h-2 rounded-full" style={{ width: "100%" }}></div>
               </div>
             </div>
 
@@ -628,7 +628,16 @@ export default function StorageManagement() {
                 <span className="font-medium text-gray-900">{totalStorage.used}</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className={`h-2 rounded-full ${totalStorage.usagePercentage >= 90 ? 'bg-red-500' : totalStorage.usagePercentage >= 75 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${totalStorage.usagePercentage}%` }}></div>
+                <div
+                  className={`h-2 rounded-full ${
+                    totalStorage.usagePercentage >= 90
+                      ? "bg-red-500"
+                      : totalStorage.usagePercentage >= 75
+                      ? "bg-yellow-500"
+                      : "bg-green-500"
+                  }`}
+                  style={{ width: `${totalStorage.usagePercentage}%` }}
+                ></div>
               </div>
             </div>
 
@@ -638,7 +647,10 @@ export default function StorageManagement() {
                 <span className="font-medium text-gray-900">{totalStorage.free}</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-green-500 h-2 rounded-full" style={{ width: `${100 - totalStorage.usagePercentage}%` }}></div>
+                <div
+                  className="bg-green-500 h-2 rounded-full"
+                  style={{ width: `${100 - totalStorage.usagePercentage}%` }}
+                ></div>
               </div>
             </div>
           </div>
@@ -661,35 +673,47 @@ export default function StorageManagement() {
               <div key={device.id} className="border border-gray-200 rounded-lg p-5 hover:shadow-md transition-shadow">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-start space-x-4">
-                    <div className={`p-3 rounded-lg ${device.status === 'healthy' ? 'bg-green-50' : device.status === 'warning' ? 'bg-yellow-50' : 'bg-red-50'}`}>
+                    <div
+                      className={`p-3 rounded-lg ${
+                        device.status === "healthy"
+                          ? "bg-green-50"
+                          : device.status === "warning"
+                          ? "bg-yellow-50"
+                          : "bg-red-50"
+                      }`}
+                    >
                       {getTypeIcon(device.type)}
                     </div>
                     <div>
                       <h3 className="font-semibold text-gray-900">{device.name}</h3>
                       <p className="text-sm text-gray-600 mt-1">{device.path}</p>
                       <div className="flex items-center space-x-2 mt-2">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(device.status)}`}>
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(
+                            device.status
+                          )}`}
+                        >
                           {device.status}
                         </span>
                         <span className="text-xs text-gray-500">{device.type}</span>
                       </div>
-                      <div className="mt-2">
+                      {/* <div className="mt-2">
                         <p className="text-xs text-gray-500">Storage ID: <span className="font-mono text-gray-700">{device.id}</span></p>
-                      </div>
+                      </div> */}
                     </div>
                   </div>
 
                   <div className="flex items-center space-x-2">
-                    <button 
+                    <button
                       onClick={() => handleEditStorage(device)}
                       className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
                       title="Edit storage"
                     >
                       <Settings className="w-5 h-5" />
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleDeleteStorage(device)}
-                      className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg" 
+                      className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
                       title="Delete storage"
                     >
                       <Trash2 className="w-5 h-5" />
@@ -716,10 +740,10 @@ export default function StorageManagement() {
                 <div className="bg-gray-50 rounded-lg p-3 mb-3">
                   <h4 className="text-xs font-semibold text-gray-700 mb-2">Storage Details</h4>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                    <div>
+                    {/* <div>
                       <span className="text-gray-600">Server ID:</span>
                       <p className="font-mono text-gray-900 break-all">{device.serverId}</p>
-                    </div>
+                    </div> */}
                     <div>
                       <span className="text-gray-600">Space Limit:</span>
                       <p className="text-gray-900">{device.spaceLimitB.toLocaleString()} bytes</p>
@@ -730,20 +754,20 @@ export default function StorageManagement() {
                     </div>
                     <div>
                       <span className="text-gray-600">Used for Writing:</span>
-                      <p className="text-gray-900">{device.isUsedForWriting ? '✓ Yes' : '✗ No'}</p>
+                      <p className="text-gray-900">{device.isUsedForWriting ? "✓ Yes" : "✗ No"}</p>
                     </div>
                     <div>
                       <span className="text-gray-600">Backup Storage:</span>
-                      <p className="text-gray-900">{device.isBackup ? '✓ Yes' : '✗ No'}</p>
+                      <p className="text-gray-900">{device.isBackup ? "✓ Yes" : "✗ No"}</p>
                     </div>
-                    {device.parameters && Object.keys(device.parameters).length > 0 && (
+                    {/* {device.parameters && Object.keys(device.parameters).length > 0 && (
                       <div className="col-span-2">
                         <span className="text-gray-600">Parameters:</span>
                         <pre className="text-gray-900 mt-1 bg-white p-2 rounded border border-gray-200 overflow-x-auto">
                           {JSON.stringify(device.parameters, null, 2)}
                         </pre>
                       </div>
-                    )}
+                    )} */}
                   </div>
                 </div>
 
@@ -753,7 +777,7 @@ export default function StorageManagement() {
                     <span>{device.usagePercentage}%</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div 
+                    <div
                       className={`h-2 rounded-full ${getUsageColor(device.usagePercentage)}`}
                       style={{ width: `${device.usagePercentage}%` }}
                     ></div>
@@ -818,5 +842,5 @@ export default function StorageManagement() {
         </div>
       </div>
     </div>
-  )
+  );
 }
