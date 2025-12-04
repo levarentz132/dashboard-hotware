@@ -20,4 +20,11 @@ interface ICamera {
   logicalId?: string;
 }
 
-export type { ICamera };
+interface IDeviceType {
+  id: string;
+  parentId: string;
+  name: string;
+  manufacturer: string;
+}
+
+export type { ICamera, IDeviceType };
