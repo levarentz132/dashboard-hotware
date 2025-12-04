@@ -1,4 +1,3 @@
-import { group } from "console";
 import z from "zod";
 
 const credentialsFormSchema = z.object({
@@ -13,6 +12,7 @@ const groupFormSchema = z.object({
 });
 
 export const cameraFormSchema = z.object({
+  id: z.string(),
   physicalId: z.string().optional(),
   url: z.string().min(1, "URL is required"),
   typeId: z.string().optional(),
