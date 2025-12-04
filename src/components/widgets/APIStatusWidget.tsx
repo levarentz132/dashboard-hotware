@@ -12,9 +12,9 @@ export default function APIStatusWidget() {
   }
 
   return (
-    <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-900">API Status</h3>
+    <div className="bg-white rounded-lg p-4 sm:p-6 shadow-sm border border-gray-100 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-3 sm:mb-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900">API Status</h3>
         <button
           onClick={handleTestConnection}
           disabled={loading}
@@ -24,7 +24,7 @@ export default function APIStatusWidget() {
         </button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 sm:space-y-4 flex-1">
         {/* Nx Witness Connection */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">

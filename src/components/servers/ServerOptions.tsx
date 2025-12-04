@@ -1,73 +1,73 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Server, Cpu, HardDrive, Network, RefreshCw, AlertTriangle } from 'lucide-react'
+import { useState, useEffect } from "react";
+import { Server, Cpu, HardDrive, Network, RefreshCw, AlertTriangle } from "lucide-react";
 
 interface ServerInfo {
-  id: string
-  name: string
-  version?: string
-  status: string
-  endpoints: string[]
+  id: string;
+  name: string;
+  version?: string;
+  status: string;
+  endpoints: string[];
   osInfo: {
-    platform: string
-    variant: string
-    variantVersion: string
-  }
-  maxCameras: number
-  isFailoverEnabled: boolean
-  cpuArchitecture?: string
-  cpuModelName?: string
-  physicalMemory?: number
-  systemRuntime?: string
+    platform: string;
+    variant: string;
+    variantVersion: string;
+  };
+  maxCameras: number;
+  isFailoverEnabled: boolean;
+  cpuArchitecture?: string;
+  cpuModelName?: string;
+  physicalMemory?: number;
+  systemRuntime?: string;
 }
 
 export default function ServerOptions() {
-  const [servers, setServers] = useState<ServerInfo[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [servers, setServers] = useState<ServerInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchServers = async () => {
     try {
-      setLoading(true)
-      setError(null)
+      setLoading(true);
+      setError(null);
 
-      const response = await fetch('https://localhost:7001/rest/v3/servers', {
-        method: 'GET',
-        credentials: 'include',
+      const response = await fetch("https://localhost:7001/rest/v3/servers", {
+        method: "GET",
+        credentials: "include",
         headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
+          Accept: "application/json",
+          "Content-Type": "application/json",
         },
-      })
+      });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json()
-      console.log('Servers API Response:', data)
-      
-      setServers(Array.isArray(data) ? data : [])
+      const data = await response.json();
+      console.log("Servers API Response:", data);
+
+      setServers(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Error fetching servers:', err)
-      setError(err instanceof Error ? err.message : 'Failed to fetch servers')
+      console.error("Error fetching servers:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch servers");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    fetchServers()
-  }, [])
+    fetchServers();
+  }, []);
 
   const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
 
   if (loading) {
     return (
@@ -79,7 +79,7 @@ export default function ServerOptions() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   if (error) {
@@ -91,15 +91,12 @@ export default function ServerOptions() {
             <h3 className="text-lg font-medium text-red-800">Connection Error</h3>
           </div>
           <p className="text-red-700 mb-4">{error}</p>
-          <button
-            onClick={fetchServers}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-          >
+          <button onClick={fetchServers} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
             Try Again
           </button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -114,7 +111,7 @@ export default function ServerOptions() {
           disabled={loading}
           className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           <span>Refresh</span>
         </button>
       </div>
@@ -140,12 +137,9 @@ export default function ServerOptions() {
                   <div>
                     <h3 className="text-xl font-semibold text-gray-800">{server.name}</h3>
                     <p className="text-sm text-gray-500">Version: {server.version}</p>
-                    <p className="text-xs text-gray-400">ID: {server.id}</p>
                   </div>
                 </div>
-                <div className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  Online
-                </div>
+                <div className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Online</div>
               </div>
 
               {/* Server Info Grid */}
@@ -157,9 +151,7 @@ export default function ServerOptions() {
                   </div>
                   <p className="text-xs text-gray-600">Platform: {server.osInfo?.platform}</p>
                   <p className="text-xs text-gray-600">Version: {server.osInfo?.variantVersion}</p>
-                  {server.systemRuntime && (
-                    <p className="text-xs text-gray-600">Runtime: {server.systemRuntime}</p>
-                  )}
+                  {server.systemRuntime && <p className="text-xs text-gray-600">Runtime: {server.systemRuntime}</p>}
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-4">
@@ -167,9 +159,7 @@ export default function ServerOptions() {
                     <HardDrive className="w-4 h-4 text-gray-500" />
                     <span className="text-sm font-medium text-gray-700">Hardware</span>
                   </div>
-                  {server.cpuModelName && (
-                    <p className="text-xs text-gray-600">CPU: {server.cpuModelName}</p>
-                  )}
+                  {server.cpuModelName && <p className="text-xs text-gray-600">CPU: {server.cpuModelName}</p>}
                   {server.physicalMemory && (
                     <p className="text-xs text-gray-600">Memory: {formatBytes(server.physicalMemory)}</p>
                   )}
@@ -179,11 +169,13 @@ export default function ServerOptions() {
                 <div className="bg-gray-50 rounded-lg p-4">
                   <div className="flex items-center space-x-2 mb-2">
                     <Network className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm font-medium text-gray-700">Network</span>
+                    <span className="text-sm font-med ium text-gray-700">Network</span>
                   </div>
                   <p className="text-xs text-gray-600">Endpoints:</p>
                   {server.endpoints?.slice(0, 2).map((endpoint, index) => (
-                    <p key={index} className="text-xs text-gray-500 truncate">{endpoint}</p>
+                    <p key={index} className="text-xs text-gray-500 truncate">
+                      {endpoint}
+                    </p>
                   ))}
                   {server.endpoints?.length > 2 && (
                     <p className="text-xs text-gray-400">+{server.endpoints.length - 2} more</p>
@@ -196,7 +188,7 @@ export default function ServerOptions() {
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Additional Information</h4>
                 <div className="grid grid-cols-2 gap-4 text-xs text-gray-600">
                   <div>
-                    <span className="font-medium">Failover Enabled:</span> {server.isFailoverEnabled ? 'Yes' : 'No'}
+                    <span className="font-medium">Failover Enabled:</span> {server.isFailoverEnabled ? "Yes" : "No"}
                   </div>
                   {server.cpuArchitecture && (
                     <div>
@@ -210,5 +202,5 @@ export default function ServerOptions() {
         </div>
       )}
     </div>
-  )
+  );
 }

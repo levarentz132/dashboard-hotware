@@ -1,7 +1,8 @@
 "use client";
 
-import { Camera, MapPin, Wifi, WifiOff, AlertCircle } from "lucide-react";
+import { Camera, Wifi, WifiOff, AlertCircle } from "lucide-react";
 import { useCameras } from "@/hooks/useNxAPI";
+import Link from "next/link";
 
 export default function CameraStatusGrid() {
   const { cameras, loading, error } = useCameras();
@@ -9,9 +10,9 @@ export default function CameraStatusGrid() {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+      <div className="bg-white rounded-lg p-4 sm:p-6 shadow-sm border border-gray-100">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Camera Status</h3>
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Camera Status</h3>
         </div>
         <div className="flex items-center justify-center h-48">
           <div className="text-gray-500">Loading cameras...</div>
@@ -22,10 +23,10 @@ export default function CameraStatusGrid() {
 
   if (error || !cameras || cameras.length === 0) {
     return (
-      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+      <div className="bg-white rounded-lg p-4 sm:p-6 shadow-sm border border-gray-100">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Camera Status</h3>
-          {error && <AlertCircle className="w-5 h-5 text-red-500" title={error} />}
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Camera Status</h3>
+          {error && <AlertCircle className="w-5 h-5 text-red-500" />}
         </div>
         <div className="flex items-center justify-center h-48 text-center">
           <div className="space-y-2">
@@ -43,8 +44,20 @@ export default function CameraStatusGrid() {
   const offlineCameras = cameras.filter((c) => c.status?.toLowerCase() === "offline").length;
   const warningCameras = cameras.length - onlineCameras - offlineCameras;
 
+  // Sort cameras: offline first, then warning, then online
+  const sortedCameras = [...cameras].sort((a, b) => {
+    const statusOrder: Record<string, number> = {
+      offline: 0,
+      warning: 1,
+      online: 2,
+    };
+    const statusA = a.status?.toLowerCase() || "unknown";
+    const statusB = b.status?.toLowerCase() || "unknown";
+    return (statusOrder[statusA] ?? 3) - (statusOrder[statusB] ?? 3);
+  });
+
   const getStatusColor = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case "online":
         return "bg-green-100 text-green-800 border-green-200";
       case "offline":
@@ -57,15 +70,15 @@ export default function CameraStatusGrid() {
   };
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case "online":
-        return <Wifi className="w-4 h-4 text-green-600" />;
+        return <Wifi className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />;
       case "offline":
-        return <WifiOff className="w-4 h-4 text-red-600" />;
+        return <WifiOff className="w-3 h-3 sm:w-4 sm:h-4 text-red-600" />;
       case "warning":
-        return <Wifi className="w-4 h-4 text-yellow-600" />;
+        return <Wifi className="w-3 h-3 sm:w-4 sm:h-4 text-yellow-600" />;
       default:
-        return <Wifi className="w-4 h-4 text-gray-600" />;
+        return <Wifi className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />;
     }
   };
 
@@ -75,10 +88,11 @@ export default function CameraStatusGrid() {
   };
 
   return (
-    <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">Camera Status</h3>
-        <div className="flex items-center space-x-4 text-sm">
+    <div className="bg-white rounded-lg p-4 sm:p-6 shadow-sm border border-gray-100">
+      {/* Header - responsive */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 mb-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900">Camera Status</h3>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm">
           <div className="flex items-center space-x-1">
             <div className="w-2 h-2 bg-green-500 rounded-full"></div>
             <span className="text-gray-600">Online ({onlineCameras})</span>
@@ -98,51 +112,57 @@ export default function CameraStatusGrid() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {cameras.slice(0, 6).map((camera) => (
-          <div
-            key={camera.id}
-            onClick={() => handleCameraClick(camera.id)}
-            className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-400"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-start space-x-3">
-                <div className="p-2 bg-gray-50 rounded-lg">
-                  <Camera className="w-5 h-5 text-gray-600" />
-                </div>
-                <div className="flex-1">
-                  <h4 className="font-medium text-gray-900">{camera.name || `Camera ${camera.id}`}</h4>
-                  <div className="flex items-center space-x-1 text-sm text-gray-500 mt-1">
-                    <MapPin className="w-3 h-3" />
-                    <span>{camera.groupName || "Unknown location"}</span>
+      {/* Grid - responsive: 1 col mobile, 2 col tablet, 3 col desktop */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        {sortedCameras.slice(0, 6).map((camera) => {
+          const isOffline = camera.status?.toLowerCase() === "offline";
+          return (
+            <div
+              key={camera.id}
+              onClick={() => handleCameraClick(camera.id)}
+              className={`border rounded-lg p-3 sm:p-4 hover:shadow-md transition-all cursor-pointer active:scale-[0.98] ${
+                isOffline ? "border-red-300 bg-red-50/50 hover:border-red-400" : "hover:border-blue-400"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start space-x-2 sm:space-x-3 min-w-0 flex-1">
+                  <div className={`p-1.5 sm:p-2 rounded-lg flex-shrink-0 ${isOffline ? "bg-red-100" : "bg-gray-50"}`}>
+                    <Camera className={`w-4 h-4 sm:w-5 sm:h-5 ${isOffline ? "text-red-600" : "text-gray-600"}`} />
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    {camera.id} • {camera.typeId || "Camera"}
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-medium text-gray-900 text-sm sm:text-base truncate">
+                      {camera.name || `Camera ${camera.id}`}
+                    </h4>
+                    {isOffline && <p className="text-[10px] sm:text-xs text-red-600 mt-0.5">Requires attention</p>}
                   </div>
                 </div>
-              </div>
 
-              <div className="flex flex-col items-end space-y-2">
-                {getStatusIcon(camera.status)}
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(
-                    camera.status || "unknown"
-                  )}`}
-                >
-                  {camera.status || "unknown"}
-                </span>
+                <div className="flex flex-col items-end space-y-1 sm:space-y-2 flex-shrink-0">
+                  {getStatusIcon(camera.status)}
+                  <span
+                    className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium border ${getStatusColor(
+                      camera.status || "unknown"
+                    )}`}
+                  >
+                    {camera.status || "unknown"}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {cameras.length === 0 && (
           <div className="col-span-full text-center py-8 text-gray-500">No cameras available</div>
         )}
       </div>
 
-      <div className="mt-4 pt-4 border-t border-gray-100">
-        <button className="text-blue-600 hover:text-blue-800 text-sm font-medium">View all cameras →</button>
-      </div>
+      <Link href="/monitoring-cctv">
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <button className="text-blue-600 hover:text-blue-800 text-xs sm:text-sm font-medium">
+            View all cameras →
+          </button>
+        </div>
+      </Link>
     </div>
   );
 }

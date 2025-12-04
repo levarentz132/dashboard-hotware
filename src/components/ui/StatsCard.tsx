@@ -1,30 +1,30 @@
-import { LucideIcon } from 'lucide-react'
+import { LucideIcon } from "lucide-react";
 
 interface StatsCardProps {
-  title: string
-  value: string
-  change: string
-  changeType: 'positive' | 'negative' | 'neutral'
-  icon: LucideIcon
+  title?: string;
+  value?: string;
+  change?: string;
+  changeType?: "positive" | "negative" | "neutral";
+  icon: LucideIcon;
 }
 
 export default function StatsCard({ title, value, change, changeType, icon: Icon }: StatsCardProps) {
   const getChangeColor = () => {
     switch (changeType) {
-      case 'positive':
-        return 'text-green-600'
-      case 'negative':
-        return 'text-red-600'
+      case "positive":
+        return "text-green-600";
+      case "negative":
+        return "text-red-600";
       default:
-        return 'text-gray-600'
+        return "text-gray-600";
     }
-  }
+  };
 
   const getChangeSymbol = () => {
-    if (changeType === 'positive') return '↗'
-    if (changeType === 'negative') return '↘'
-    return ''
-  }
+    if (changeType === "positive") return "↗";
+    if (changeType === "negative") return "↘";
+    return "";
+  };
 
   return (
     <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
@@ -38,11 +38,11 @@ export default function StatsCard({ title, value, change, changeType, icon: Icon
           {getChangeSymbol()} {change}
         </div>
       </div>
-      
+
       <div className="mt-4">
         <div className="text-2xl font-bold text-gray-900">{value}</div>
         <div className="text-sm text-gray-600">{title}</div>
       </div>
     </div>
-  )
+  );
 }
