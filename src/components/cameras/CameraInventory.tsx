@@ -12,12 +12,33 @@ import {
   Settings,
   RefreshCw,
   AlertCircle,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useCameras, useSystemInfo } from "@/hooks/useNxAPI";
-import { Dialog, DialogTrigger } from "../ui/dialog";
-import { Button } from "../ui/button";
-import DialogCreateCamera from "./_components/dialog-create-camera";
+import { useCameras, useSystemInfo, useServers, useDeviceType } from "@/hooks/useNxAPI";
+import { nxAPI } from "@/lib/nxapi";
+
+interface CameraDevice {
+  id: string;
+  name: string;
+  physicalId: string;
+  url: string;
+  typeId: string;
+  mac: string;
+  serverId: string;
+  vendor: string;
+  model: string;
+  logicalId: string;
+  status: string;
+  ip?: string;
+  location?: string;
+  type?: string;
+  resolution?: string;
+  fps?: number;
+  group?: { id: string; name: string };
+  credentials?: { user: string; password: string };
+}
 
 export default function CameraInventory() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -26,19 +47,69 @@ export default function CameraInventory() {
   // API hooks
   const { cameras, loading, error, refetch } = useCameras();
   const { connected, testConnection } = useSystemInfo();
+  const { servers } = useServers();
+  const { deviceType } = useDeviceType();
+
+  // Modal states
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedCamera, setSelectedCamera] = useState<CameraDevice | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Create form state
+  const [createForm, setCreateForm] = useState({
+    name: "",
+    physicalId: "",
+    url: "",
+    typeId: "",
+    mac: "",
+    serverId: "",
+    vendor: "",
+    model: "",
+    logicalId: "",
+    groupId: "",
+    groupName: "",
+    credentialsUser: "",
+    credentialsPassword: "",
+  });
+
+  // Edit form state
+  const [editForm, setEditForm] = useState({
+    name: "",
+    physicalId: "",
+    url: "",
+    typeId: "",
+    mac: "",
+    serverId: "",
+    vendor: "",
+    model: "",
+    logicalId: "",
+    groupId: "",
+    groupName: "",
+    credentialsUser: "",
+    credentialsPassword: "",
+  });
 
   // Auto-retry connection when component mounts
   useEffect(() => {
     if (!connected && !loading) {
       testConnection();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Use API data or fallback to mock data
-  const displayCameras = cameras;
+  // Set default serverId when servers load
+  useEffect(() => {
+    if (servers.length > 0 && !createForm.serverId) {
+      setCreateForm((prev) => ({ ...prev, serverId: servers[0].id }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [servers]);
+
+  const displayCameras = cameras as CameraDevice[];
 
   const getStatusIcon = (status: string) => {
-    return status === "online" ? (
+    return status?.toLowerCase() === "online" ? (
       <Wifi className="w-4 h-4 text-green-600" />
     ) : (
       <WifiOff className="w-4 h-4 text-red-600" />
@@ -46,25 +117,532 @@ export default function CameraInventory() {
   };
 
   const getStatusColor = (status: string) => {
-    return status === "online"
+    return status?.toLowerCase() === "online"
       ? "bg-green-100 text-green-800 border-green-200"
       : "bg-red-100 text-red-800 border-red-200";
   };
 
   const filteredCameras = displayCameras.filter(
     (camera) =>
-      camera.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      camera.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (camera.location || camera.ip || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      camera.id.toLowerCase().includes(searchTerm.toLowerCase())
+      camera.id?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Calculate stats
   const totalCameras = displayCameras.length;
-  const onlineCameras = displayCameras.filter((c) => c.status.toLowerCase() === "online").length;
+  const onlineCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "online").length;
   const offlineCameras = totalCameras - onlineCameras;
   const recordingCameras = displayCameras.filter(
-    (c) => c.status.toLowerCase() === "recording" || c.status.toLowerCase() === "online"
+    (c) => c.status?.toLowerCase() === "recording" || c.status?.toLowerCase() === "online"
   ).length;
+
+  // Handle Edit Camera
+  const handleEditCamera = (camera: CameraDevice) => {
+    setSelectedCamera(camera);
+    setEditForm({
+      name: camera.name || "",
+      physicalId: camera.physicalId || "",
+      url: camera.url || "",
+      typeId: camera.typeId || "",
+      mac: camera.mac || "",
+      serverId: camera.serverId || "",
+      vendor: camera.vendor || "",
+      model: camera.model || "",
+      logicalId: camera.logicalId || "",
+      groupId: camera.group?.id || "",
+      groupName: camera.group?.name || "",
+      credentialsUser: camera.credentials?.user || "",
+      credentialsPassword: camera.credentials?.password || "",
+    });
+    setShowEditModal(true);
+  };
+
+  // Handle Create Camera
+  const handleCreateCamera = async () => {
+    try {
+      if (!createForm.name || !createForm.url || !createForm.serverId) {
+        alert("Please fill in required fields: Name, URL, and Server");
+        return;
+      }
+
+      setIsSubmitting(true);
+
+      const payload = {
+        name: createForm.name,
+        physicalId: createForm.physicalId,
+        url: createForm.url,
+        typeId: createForm.typeId,
+        mac: createForm.mac,
+        serverId: createForm.serverId,
+        vendor: createForm.vendor,
+        model: createForm.model,
+        logicalId: createForm.logicalId,
+        group:
+          createForm.groupId || createForm.groupName
+            ? {
+                id: createForm.groupId,
+                name: createForm.groupName,
+              }
+            : undefined,
+        credentials: {
+          user: createForm.credentialsUser || "",
+          password: createForm.credentialsPassword || "",
+        },
+      };
+
+      console.log("[CameraInventory] Creating camera with payload:", payload);
+
+      const result = await nxAPI.addCamera(payload);
+
+      if (result) {
+        alert("Camera created successfully!");
+        setShowCreateModal(false);
+        // Reset form
+        setCreateForm({
+          name: "",
+          physicalId: "",
+          url: "",
+          typeId: "",
+          mac: "",
+          serverId: servers.length > 0 ? servers[0].id : "",
+          vendor: "",
+          model: "",
+          logicalId: "",
+          groupId: "",
+          groupName: "",
+          credentialsUser: "",
+          credentialsPassword: "",
+        });
+        refetch();
+      }
+    } catch (error: unknown) {
+      console.error("[CameraInventory] Failed to create camera:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to create camera: ${errorMessage}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Update Camera
+  const handleUpdateCamera = async () => {
+    try {
+      if (!selectedCamera) return;
+
+      if (!editForm.name || !editForm.url || !editForm.serverId) {
+        alert("Please fill in required fields: Name, URL, and Server");
+        return;
+      }
+
+      setIsSubmitting(true);
+
+      const payload = {
+        id: selectedCamera.id,
+        name: editForm.name,
+        physicalId: editForm.physicalId,
+        url: editForm.url,
+        typeId: editForm.typeId,
+        mac: editForm.mac,
+        serverId: editForm.serverId,
+        vendor: editForm.vendor,
+        model: editForm.model,
+        logicalId: editForm.logicalId,
+        group:
+          editForm.groupId || editForm.groupName
+            ? {
+                id: editForm.groupId,
+                name: editForm.groupName,
+              }
+            : undefined,
+        credentials: {
+          user: editForm.credentialsUser,
+          password: editForm.credentialsPassword,
+        },
+      };
+
+      console.log("[CameraInventory] Updating camera with payload:", payload);
+
+      const result = await nxAPI.updateCamera(selectedCamera.id, payload);
+
+      if (result) {
+        alert("Camera updated successfully!");
+        setShowEditModal(false);
+        setSelectedCamera(null);
+        refetch();
+      }
+    } catch (error: unknown) {
+      console.error("[CameraInventory] Failed to update camera:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to update camera: ${errorMessage}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Delete Camera
+  const handleDeleteCamera = async (camera: CameraDevice) => {
+    const confirmDelete = confirm(
+      `Are you sure you want to delete camera "${camera.name}"?\n\nThis action cannot be undone.`
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      setIsSubmitting(true);
+      await nxAPI.deleteCamera(camera.id);
+      alert("Camera deleted successfully!");
+      // Force refresh the camera list
+      await refetch();
+    } catch (error: unknown) {
+      console.error("[CameraInventory] Failed to delete camera:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      // If it's a JSON parse error but the delete might have succeeded, still refresh
+      if (errorMessage.includes("JSON") || errorMessage.includes("Unexpected end")) {
+        alert("Camera may have been deleted. Refreshing list...");
+        await refetch();
+      } else {
+        alert(`Failed to delete camera: ${errorMessage}`);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Render Create Modal
+  const renderCreateModal = () => {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Create New Camera</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Camera Name *</label>
+              <input
+                type="text"
+                value={createForm.name}
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Camera 1"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">URL *</label>
+              <input
+                type="text"
+                value={createForm.url}
+                onChange={(e) => setCreateForm({ ...createForm, url: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="rtsp://192.168.1.100:554/stream"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Server *</label>
+              <select
+                value={createForm.serverId}
+                onChange={(e) => setCreateForm({ ...createForm, serverId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select Server</option>
+                {servers.map((server) => (
+                  <option key={server.id} value={server.id}>
+                    {server.name || server.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Device Type</label>
+              <select
+                value={createForm.typeId}
+                onChange={(e) => setCreateForm({ ...createForm, typeId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select Device Type</option>
+                {deviceType.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name} - {type.manufacturer}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Physical ID</label>
+                <input
+                  type="text"
+                  value={createForm.physicalId}
+                  onChange={(e) => setCreateForm({ ...createForm, physicalId: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">MAC Address</label>
+                <input
+                  type="text"
+                  value={createForm.mac}
+                  onChange={(e) => setCreateForm({ ...createForm, mac: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
+                <input
+                  type="text"
+                  value={createForm.vendor}
+                  onChange={(e) => setCreateForm({ ...createForm, vendor: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                <input
+                  type="text"
+                  value={createForm.model}
+                  onChange={(e) => setCreateForm({ ...createForm, model: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Logical ID</label>
+              <input
+                type="text"
+                value={createForm.logicalId}
+                onChange={(e) => setCreateForm({ ...createForm, logicalId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Credentials</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <input
+                    type="text"
+                    value={createForm.credentialsUser}
+                    onChange={(e) => setCreateForm({ ...createForm, credentialsUser: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <input
+                    type="password"
+                    value={createForm.credentialsPassword}
+                    onChange={(e) => setCreateForm({ ...createForm, credentialsPassword: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end space-x-3 mt-6">
+            <button
+              onClick={() => setShowCreateModal(false)}
+              disabled={isSubmitting}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateCamera}
+              disabled={isSubmitting}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+            >
+              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin" />}
+              <span>{isSubmitting ? "Creating..." : "Create Camera"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render Edit Modal
+  const renderEditModal = () => {
+    if (!selectedCamera) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Edit Camera</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Camera ID</label>
+              <input
+                type="text"
+                value={selectedCamera.id}
+                disabled
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 font-mono text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Camera Name *</label>
+              <input
+                type="text"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">URL *</label>
+              <input
+                type="text"
+                value={editForm.url}
+                onChange={(e) => setEditForm({ ...editForm, url: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Server *</label>
+              <select
+                value={editForm.serverId}
+                onChange={(e) => setEditForm({ ...editForm, serverId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select Server</option>
+                {servers.map((server) => (
+                  <option key={server.id} value={server.id}>
+                    {server.name || server.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Device Type</label>
+              <select
+                value={editForm.typeId}
+                onChange={(e) => setEditForm({ ...editForm, typeId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select Device Type</option>
+                {deviceType.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name} - {type.manufacturer}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Physical ID</label>
+                <input
+                  type="text"
+                  value={editForm.physicalId}
+                  onChange={(e) => setEditForm({ ...editForm, physicalId: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">MAC Address</label>
+                <input
+                  type="text"
+                  value={editForm.mac}
+                  onChange={(e) => setEditForm({ ...editForm, mac: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
+                <input
+                  type="text"
+                  value={editForm.vendor}
+                  onChange={(e) => setEditForm({ ...editForm, vendor: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                <input
+                  type="text"
+                  value={editForm.model}
+                  onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Logical ID</label>
+              <input
+                type="text"
+                value={editForm.logicalId}
+                onChange={(e) => setEditForm({ ...editForm, logicalId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Credentials</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <input
+                    type="text"
+                    value={editForm.credentialsUser}
+                    onChange={(e) => setEditForm({ ...editForm, credentialsUser: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <input
+                    type="password"
+                    value={editForm.credentialsPassword}
+                    onChange={(e) => setEditForm({ ...editForm, credentialsPassword: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end space-x-3 mt-6">
+            <button
+              onClick={() => {
+                setShowEditModal(false);
+                setSelectedCamera(null);
+              }}
+              disabled={isSubmitting}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleUpdateCamera}
+              disabled={isSubmitting}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+            >
+              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin" />}
+              <span>{isSubmitting ? "Updating..." : "Update Camera"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // Show empty state when no cameras found and not loading
   if (!loading && displayCameras.length === 0) {
@@ -79,17 +657,29 @@ export default function CameraInventory() {
               {error && <AlertCircle className="w-4 h-4 text-red-500" />}
             </div>
           </div>
-          <button
-            onClick={() => {
-              refetch();
-              testConnection();
-            }}
-            className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Refresh</span>
-          </button>
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Camera</span>
+            </button>
+            <button
+              onClick={() => {
+                refetch();
+                testConnection();
+              }}
+              className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
+
+        {/* Modals */}
+        {showCreateModal && renderCreateModal()}
 
         {/* Empty State */}
         <div className="bg-white rounded-lg border p-12 text-center">
@@ -98,7 +688,7 @@ export default function CameraInventory() {
           <p className="text-gray-500 mb-6">
             {error
               ? "Unable to connect to Nx Witness server. Please check your server configuration and network connection."
-              : "No cameras are configured in your Nx Witness system. Add cameras through the Nx Witness Desktop Client to get started."}
+              : "No cameras are configured in your Nx Witness system. Click 'Add Camera' to add one."}
           </p>
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm mb-6">
@@ -106,16 +696,6 @@ export default function CameraInventory() {
               {error}
             </div>
           )}
-          <button
-            onClick={() => {
-              refetch();
-              testConnection();
-            }}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Try Again
-          </button>
         </div>
       </div>
     );
@@ -123,6 +703,10 @@ export default function CameraInventory() {
 
   return (
     <div className="space-y-6">
+      {/* Modals */}
+      {showCreateModal && renderCreateModal()}
+      {showEditModal && renderEditModal()}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -133,13 +717,14 @@ export default function CameraInventory() {
             {error && <AlertCircle className="w-4 h-4 text-red-500" />}
           </div>
         </div>
-        <div className="flex items-center space-x-4">
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="outline">Create Camera</Button>
-            </DialogTrigger>
-            <DialogCreateCamera refetch={refetch} />
-          </Dialog>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Camera</span>
+          </button>
           <button
             onClick={() => {
               refetch();
@@ -267,9 +852,22 @@ export default function CameraInventory() {
                     >
                       {camera.status}
                     </span>
-                    <button className="text-blue-600 hover:text-blue-800">
-                      <Settings className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleEditCamera(camera)}
+                        className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                        title="Edit camera"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCamera(camera)}
+                        className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                        title="Delete camera"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -292,9 +890,6 @@ export default function CameraInventory() {
                       Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Resolution
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
@@ -307,14 +902,16 @@ export default function CameraInventory() {
                           <Camera className="w-5 h-5 text-gray-600 mr-3" />
                           <div>
                             <div className="text-sm font-medium text-gray-900">{camera.name}</div>
-                            <div className="text-sm text-gray-500">{camera.id}</div>
+                            <div className="text-xs text-gray-500 font-mono">{camera.id}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{camera.location}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {camera.location || camera.ip || "-"}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{camera.type}</div>
-                        <div className="text-sm text-gray-500">{camera.model}</div>
+                        <div className="text-sm text-gray-900">{camera.vendor || "-"}</div>
+                        <div className="text-sm text-gray-500">{camera.model || "-"}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-2">
@@ -328,14 +925,23 @@ export default function CameraInventory() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {camera.resolution} @ {camera.fps}fps
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button className="text-blue-600 hover:text-blue-800 mr-3">View</button>
-                        <button className="text-gray-600 hover:text-gray-800">
-                          <Settings className="w-4 h-4" />
-                        </button>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleEditCamera(camera)}
+                            className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                            title="Edit camera"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCamera(camera)}
+                            className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                            title="Delete camera"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
