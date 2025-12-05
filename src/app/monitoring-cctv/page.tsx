@@ -40,7 +40,7 @@ function DropZone({
 
   // Hardcode API URL atau gunakan window untuk environment variables
   const API_BASE_URL = "https://localhost:7001";
-  const streamUrl = camera ? `${API_BASE_URL}/rest/v3/devices/${camera.id}/media.webm` : "";
+  const streamUrl = camera ? `${API_BASE_URL}/media/${camera.id}.mp4` : "";
 
   // Mouse drag handlers
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
