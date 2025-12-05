@@ -114,7 +114,7 @@ export default function CameraStatusGrid() {
 
       {/* Grid - responsive: 1 col mobile, 2 col tablet, 3 col desktop */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-        {sortedCameras.slice(0, 6).map((camera) => {
+        {sortedCameras.slice(0, 9).map((camera) => {
           const isOffline = camera.status?.toLowerCase() === "offline";
           return (
             <div
