@@ -1,5 +1,6 @@
-import { ICamera } from "@/types/Device";
+import { ICamera, IDeviceType } from "@/types/Device";
 import { API_CONFIG, API_ENDPOINTS } from "./config";
+import { IServer } from "@/types/Server";
 
 export interface NxCamera {
   id: string;
@@ -20,6 +21,17 @@ export interface NxCamera {
   fps?: number;
   lastSeen?: string;
   recordingStatus?: string;
+  serverId: string;
+  isManuallyAdded?: boolean;
+  group?: {
+    id?: string;
+    name?: string;
+  };
+  credentials: {
+    user: string;
+    password: string;
+  };
+  logicalId?: string;
 }
 
 export interface NxEvent {
@@ -177,10 +189,18 @@ class NxWitnessAPI {
         throw new Error(`HTTP_${response.status}: ${errorText}`);
       }
 
+      // Handle 204 No Content (common for DELETE operations)
+      if (response.status === 204 || response.headers.get("content-length") === "0") {
+        return undefined as unknown as T;
+      }
+
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("application/json")) {
-        const jsonData = await response.json();
-        return jsonData;
+        const text = await response.text();
+        if (!text || text.trim() === "") {
+          return undefined as unknown as T;
+        }
+        return JSON.parse(text);
       }
 
       const textData = await response.text();
@@ -210,10 +230,47 @@ class NxWitnessAPI {
     return status === null ? {} : status;
   }
 
-  async addCamera(payload: ICamera) {
+  async getDevices(): Promise<ICamera[]> {
+    const devices = await this.apiRequest<ICamera[]>(API_ENDPOINTS.devices);
+    return devices === null ? [] : devices;
+  }
+
+  // Device type methods
+  async getDeviceTypes(): Promise<IDeviceType[]> {
+    const types = await this.apiRequest<IDeviceType[]>(API_ENDPOINTS.deviceTypes);
+    return types === null ? [] : types;
+  }
+  async addCamera(payload: Partial<ICamera> & { name: string; url: string; serverId: string }) {
     try {
-      const endpoint = API_ENDPOINTS.createDevice(payload);
-      console.log("payload", payload);
+      const endpoint = API_ENDPOINTS.createDevice;
+      const [deviceTypes, servers] = await Promise.all([
+        this.apiRequest<IDeviceType[]>(API_ENDPOINTS.deviceTypes),
+        this.apiRequest<IServer[]>(API_ENDPOINTS.servers),
+      ]);
+
+      console.log("Device Types:", deviceTypes);
+      console.log("Servers:", servers);
+      console.log("Payload:", payload);
+
+      // Validasi typeId (optional field)
+      if (payload.typeId) {
+        const deviceType = deviceTypes.find((type) => type.id === payload.typeId);
+        if (!deviceType) {
+          throw new Error(
+            `Device type not found: ${payload.typeId}. Available types: ${deviceTypes.map((t) => t.name).join(", ")}`
+          );
+        }
+        console.log("Selected Device Type:", deviceType.name);
+      }
+
+      // Validasi serverId (required field)
+      const server = servers.find((s) => s.id === payload.serverId);
+      if (!server) {
+        throw new Error(
+          `Server not found: ${payload.serverId}. Available servers: ${servers.map((s) => s.name).join(", ")}`
+        );
+      }
+      console.log("Selected Server:", server.name);
 
       const body = {
         physicalId: payload.physicalId,
@@ -226,16 +283,19 @@ class NxWitnessAPI {
         vendor: payload.vendor,
         model: payload.model,
         // Mengirim null/undefined jika group tidak ada
-        group: payload.group
+        group:
+          payload.group?.id && payload.group?.name
+            ? {
+                id: payload.group.id,
+                name: payload.group.name,
+              }
+            : undefined,
+        credentials: payload.credentials
           ? {
-              id: payload.group.id,
-              name: payload.group.name,
+              user: payload.credentials.user || "",
+              password: payload.credentials.password || "",
             }
-          : undefined,
-        credentials: {
-          user: payload.credentials.user,
-          password: payload.credentials.password,
-        },
+          : { user: "", password: "" },
         logicalId: payload.logicalId,
       };
 
@@ -247,10 +307,128 @@ class NxWitnessAPI {
         body: JSON.stringify(body),
       });
 
-      console.log("[createCamera] Camera created:", response);
+      console.log("[createCamera] Camera created successfully:", response);
       return response;
     } catch (error) {
-      console.error("[createCamera] Failed to create storage:", error);
+      console.error("[createCamera] Failed to create camera:", error);
+      throw error;
+    }
+  }
+  async updateCamera(id: string, payload: Partial<ICamera>) {
+    try {
+      const endpoint = API_ENDPOINTS.modifyDevice(id);
+
+      // Fetch reference data jika ada field yang perlu divalidasi
+      const validationNeeded = payload.typeId || payload.serverId;
+      let deviceTypes: IDeviceType[] = [];
+      let servers: IServer[] = [];
+
+      if (validationNeeded) {
+        [deviceTypes, servers] = await Promise.all([
+          payload.typeId ? this.apiRequest<IDeviceType[]>(API_ENDPOINTS.deviceTypes) : Promise.resolve([]),
+          payload.serverId ? this.apiRequest<IServer[]>(API_ENDPOINTS.servers) : Promise.resolve([]),
+        ]);
+      }
+
+      // Validasi typeId jika ada
+      if (payload.typeId && deviceTypes.length > 0) {
+        const deviceType = deviceTypes.find((type) => type.id === payload.typeId);
+        if (!deviceType) {
+          throw new Error(
+            `Device type not found: ${payload.typeId}. Available types: ${deviceTypes.map((t) => t.name).join(", ")}`
+          );
+        }
+        console.log("Selected Device Type:", deviceType.name);
+      }
+
+      // Validasi serverId jika ada
+      if (payload.serverId && servers.length > 0) {
+        const server = servers.find((s) => s.id === payload.serverId);
+        if (!server) {
+          throw new Error(
+            `Server not found: ${payload.serverId}. Available servers: ${servers.map((s) => s.name).join(", ")}`
+          );
+        }
+        console.log("Selected Server:", server.name);
+      }
+
+      const body: any = {};
+
+      if (payload.physicalId !== undefined) body.physicalId = payload.physicalId;
+      if (payload.url !== undefined) body.url = payload.url;
+      if (payload.typeId !== undefined) body.typeId = payload.typeId;
+      if (payload.name !== undefined) body.name = payload.name;
+      if (payload.mac !== undefined) body.mac = payload.mac;
+      if (payload.serverId !== undefined) body.serverId = payload.serverId;
+      if (payload.vendor !== undefined) body.vendor = payload.vendor;
+      if (payload.model !== undefined) body.model = payload.model;
+      if (payload.logicalId !== undefined) body.logicalId = payload.logicalId;
+
+      // Handle group
+      if (payload.group !== undefined) {
+        body.group =
+          payload.group?.id && payload.group?.name
+            ? {
+                id: payload.group.id,
+                name: payload.group.name,
+              }
+            : null;
+      }
+
+      // Handle credentials
+      if (payload.credentials !== undefined) {
+        body.credentials = {
+          user: payload.credentials.user,
+          password: payload.credentials.password,
+        };
+      }
+
+      // Try PATCH first (correct method for NX Witness API)
+      try {
+        const response = await this.apiRequest<ICamera>(endpoint, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+
+        console.log("[updateCamera] Camera updated successfully with PATCH:", response);
+        return response;
+      } catch (patchError) {
+        // Fallback to PUT if PATCH fails
+        console.log("[updateCamera] PATCH failed, trying PUT...");
+        const response = await this.apiRequest<ICamera>(endpoint, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+
+        console.log("[updateCamera] Camera updated successfully with PUT:", response);
+        return response;
+      }
+    } catch (error) {
+      console.error("[updateCamera] Failed to update camera:", error);
+      throw error;
+    }
+  }
+
+  // Delete a camera
+  async deleteCamera(id: string): Promise<boolean> {
+    try {
+      const endpoint = API_ENDPOINTS.deleteDevice(id);
+      console.log("[deleteCamera] Deleting camera:", id);
+
+      await this.apiRequest<void>(endpoint, {
+        method: "DELETE",
+      });
+
+      console.log("[deleteCamera] Camera deleted successfully");
+      return true;
+    } catch (error) {
+      console.error("[deleteCamera] Failed to delete camera:", error);
       throw error;
     }
   }
@@ -266,36 +444,36 @@ class NxWitnessAPI {
 
   async getAlarms(limit: number = 20): Promise<NxEvent[]> {
     try {
-      const endpoint = (API_ENDPOINTS as any).metricsAlarms || "/system/metrics/alarms"
-      console.log('[getAlarms] Fetching metrics alarms from:', endpoint)
-      const data = await this.apiRequest<any>(endpoint)
-      console.log('[getAlarms] Raw metrics alarms response:', data)
+      const endpoint = (API_ENDPOINTS as any).metricsAlarms || "/system/metrics/alarms";
+      console.log("[getAlarms] Fetching metrics alarms from:", endpoint);
+      const data = await this.apiRequest<any>(endpoint);
+      console.log("[getAlarms] Raw metrics alarms response:", data);
 
-      if (!data) return []
+      if (!data) return [];
 
-      const alarms: NxEvent[] = []
+      const alarms: NxEvent[] = [];
 
       // Response format is { servers: { <serverId>: { info: { <key>: [ { level, text, ... } ] } } } }
-      if (data.servers && typeof data.servers === 'object') {
+      if (data.servers && typeof data.servers === "object") {
         for (const [serverId, serverObj] of Object.entries<any>(data.servers)) {
-          const info = serverObj?.info || {}
+          const info = serverObj?.info || {};
           for (const [infoKey, infoArr] of Object.entries<any>(info)) {
-            if (!Array.isArray(infoArr)) continue
+            if (!Array.isArray(infoArr)) continue;
             for (const item of infoArr) {
-              const id = `${serverId}-${infoKey}-${Math.random().toString(36).slice(2,9)}`
-              const timestamp = new Date().toISOString()
+              const id = `${serverId}-${infoKey}-${Math.random().toString(36).slice(2, 9)}`;
+              const timestamp = new Date().toISOString();
               alarms.push({
                 id,
                 timestamp,
-                cameraId: '',
+                cameraId: "",
                 type: infoKey,
                 description: item?.text || item?.message || JSON.stringify(item),
                 metadata: {
                   level: item?.level,
                   serverId,
-                  raw: item
-                }
-              })
+                  raw: item,
+                },
+              });
             }
           }
         }
@@ -304,17 +482,17 @@ class NxWitnessAPI {
       // If there were zero alarms parsed, fall back to events endpoint (legacy behavior)
       if (alarms.length === 0) {
         try {
-          const eventsAlarms = await this.apiRequest<NxEvent[]>(`${API_ENDPOINTS.events}?type=alarm&limit=${limit}`)
-          if (Array.isArray(eventsAlarms)) return eventsAlarms
+          const eventsAlarms = await this.apiRequest<NxEvent[]>(`${API_ENDPOINTS.events}?type=alarm&limit=${limit}`);
+          if (Array.isArray(eventsAlarms)) return eventsAlarms;
         } catch (e) {
           // ignore
         }
       }
 
-      return alarms
+      return alarms;
     } catch (error) {
-      console.error('[getAlarms] Failed to fetch metrics alarms:', error)
-      return []
+      console.error("[getAlarms] Failed to fetch metrics alarms:", error);
+      return [];
     }
   }
 
