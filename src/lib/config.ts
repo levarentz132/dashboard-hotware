@@ -30,7 +30,10 @@ export const API_ENDPOINTS = {
   devices: "/devices",
   deviceById: (id: string) => `/devices/${id}`,
   deviceStatus: "/devices/status",
-  createDevice: (payload: ICamera) => "/devices",
+  deviceTypes: "/devices/*/types",
+  createDevice: "/devices",
+  modifyDevice: (id: string) => `/devices/${id}`,
+  deleteDevice: (id: string) => `/devices/${id}`,
 
   // Events and Rules (REST v3)
   events: "/events",
@@ -49,7 +52,7 @@ export const API_ENDPOINTS = {
   deleteStorage: (serverId: string, storageId: string) => `/servers/${serverId}/storages/${storageId}`,
 
   // Metrics / Alarms
-  metricsAlarms: '/system/metrics/alarms',
+  metricsAlarms: "/system/metrics/alarms",
   // Analytics
   analytics: "/analytics",
   reports: "/reports",
