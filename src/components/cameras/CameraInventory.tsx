@@ -18,6 +18,7 @@ import {
 import { useState, useEffect } from "react";
 import { useCameras, useSystemInfo, useServers, useDeviceType } from "@/hooks/useNxAPI";
 import { nxAPI } from "@/lib/nxapi";
+import { Button } from "../ui/button";
 
 interface CameraDevice {
   id: string;
@@ -658,23 +659,24 @@ export default function CameraInventory() {
             </div>
           </div>
           <div className="flex items-center space-x-3">
-            <button
+            <Button
               onClick={() => setShowCreateModal(true)}
-              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              className="flex items-center space-x-2 px-4 py-2 text-white rounded-lg"
             >
-              <Plus className="w-4 h-4" />
-              <span>Add Camera</span>
-            </button>
-            <button
+              Add Camera
+            </Button>
+
+            <Button
               onClick={() => {
                 refetch();
                 testConnection();
               }}
               className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
+              variant="outline"
             >
               <RefreshCw className="w-4 h-4" />
-              <span>Refresh</span>
-            </button>
+              Refresh
+            </Button>
           </div>
         </div>
 
@@ -718,26 +720,32 @@ export default function CameraInventory() {
           </div>
         </div>
         <div className="flex items-center space-x-3">
-          <button
+          {/* <button
             onClick={() => setShowCreateModal(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Camera</span>
-          </button>
-          <button
+            <span>Add Cameras</span>
+          </button> */}
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center space-x-2 px-4 py-2 rounded-lg"
+            variant="outline"
+          >
+            Add Camera
+          </Button>
+
+          <Button
             onClick={() => {
               refetch();
               testConnection();
             }}
             disabled={loading}
-            className={`flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50 ${
-              loading ? "opacity-50 cursor-not-allowed" : ""
-            }`}
+            className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
+            variant="outline"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </button>
+            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Refresh
+          </Button>
           <div className="flex items-center space-x-2 bg-white rounded-lg border p-1">
             <button
               onClick={() => setViewMode("grid")}
