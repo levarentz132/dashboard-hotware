@@ -1,10 +1,12 @@
 "use client";
 
-import { Camera, Home, Activity, AlertTriangle, BarChart3, Settings, Users, Database, Server, Dog } from "lucide-react";
+import { Camera, Home, Activity, AlertTriangle, BarChart3, Settings, Users, Database, Server, X } from "lucide-react";
 
 interface SidebarProps {
   activeSection: string;
   onSectionChange: (section: string) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 const navigationItems = [
@@ -18,36 +20,67 @@ const navigationItems = [
   { id: "storage", label: "Storage", icon: Database },
   { id: "users", label: "User Management", icon: Users },
   { id: "settings", label: "Settings", icon: Settings },
-  { id: "cctv", label: "CCTV", icon: Dog },
 ];
 
-export default function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
-  return (
-    <div className="w-64 bg-white shadow-lg">
-      <div className="p-6 border-b">
-        <h1 className="text-xl font-bold text-gray-800">Hotware</h1>
-        <p className="text-sm text-gray-600">Camera Dashboard</p>
-      </div>
+export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose }: SidebarProps) {
+  const handleNavClick = (sectionId: string) => {
+    onSectionChange(sectionId);
+    // Close sidebar on mobile after selection
+    if (onClose) {
+      onClose();
+    }
+  };
 
-      <nav className="mt-6">
-        {navigationItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onSectionChange(item.id)}
-              className={`w-full flex items-center px-6 py-3 text-left transition-colors ${
-                activeSection === item.id
-                  ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
-                  : "text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              <Icon className="w-5 h-5 mr-3" />
-              {item.label}
-            </button>
-          );
-        })}
-      </nav>
-    </div>
+  return (
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={onClose} />}
+
+      {/* Sidebar */}
+      <div
+        className={`
+        fixed lg:static inset-y-0 left-0 z-50
+        w-64 bg-white shadow-lg
+        transform transition-transform duration-300 ease-in-out
+        ${isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
+      `}
+      >
+        {/* Header */}
+        <div className="p-4 sm:p-6 border-b flex items-center justify-between">
+          <div>
+            <h1 className="text-lg sm:text-xl font-bold text-gray-800">Hotware</h1>
+            <p className="text-xs sm:text-sm text-gray-600">Camera Dashboard</p>
+          </div>
+          {/* Close button for mobile */}
+          <button
+            onClick={onClose}
+            className="lg:hidden p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Navigation */}
+        <nav className="mt-4 sm:mt-6 overflow-y-auto max-h-[calc(100vh-100px)]">
+          {navigationItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => handleNavClick(item.id)}
+                className={`w-full flex items-center px-4 sm:px-6 py-2.5 sm:py-3 text-left transition-colors text-sm sm:text-base ${
+                  activeSection === item.id
+                    ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
+                    : "text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                <Icon className="w-5 h-5 mr-3 flex-shrink-0" />
+                <span className="truncate">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+    </>
   );
 }

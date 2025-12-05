@@ -296,31 +296,32 @@ export default function StorageManagement() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Storage Management</h1>
-        <div className="flex items-center space-x-3">
+    <div className="space-y-4 md:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Storage Management</h1>
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2"
+            className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center space-x-2 text-sm md:text-base"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Storage</span>
+            <span className="hidden sm:inline">Add Storage</span>
+            <span className="sm:hidden">Add</span>
           </button>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2">
+          <button className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2 text-sm md:text-base">
             <Settings className="w-4 h-4" />
-            <span>Configure Storage</span>
+            <span className="hidden sm:inline">Configure</span>
           </button>
         </div>
       </div>
 
       {/* Create Storage Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Create New Storage</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 md:p-4">
+          <div className="bg-white rounded-lg p-4 md:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">Create New Storage</h2>
 
-            <div className="space-y-4">
+            <div className="space-y-3 md:space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Server</label>
                 <select
@@ -382,7 +383,7 @@ export default function StorageManagement() {
                 />
               </div>
 
-              <div className="flex items-center space-x-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
                 <label className="flex items-center">
                   <input
                     type="checkbox"
@@ -405,16 +406,16 @@ export default function StorageManagement() {
               </div>
             </div>
 
-            <div className="flex items-center justify-end space-x-3 mt-6">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4 md:mt-6">
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                className="w-full sm:w-auto px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateStorage}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
               >
                 Create Storage
               </button>
@@ -425,11 +426,11 @@ export default function StorageManagement() {
 
       {/* Edit Storage Modal */}
       {showEditModal && selectedStorage && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Edit Storage</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 md:p-4">
+          <div className="bg-white rounded-lg p-4 md:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">Edit Storage</h2>
 
-            <div className="space-y-4">
+            <div className="space-y-3 md:space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Storage ID</label>
                 <input
@@ -495,7 +496,7 @@ export default function StorageManagement() {
                 </select>
               </div>
 
-              <div className="flex items-center space-x-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
                 <label className="flex items-center">
                   <input
                     type="checkbox"
@@ -518,19 +519,19 @@ export default function StorageManagement() {
               </div>
             </div>
 
-            <div className="flex items-center justify-end space-x-3 mt-6">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4 md:mt-6">
               <button
                 onClick={() => {
                   setShowEditModal(false);
                   setSelectedStorage(null);
                 }}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                className="w-full sm:w-auto px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm"
               >
                 Cancel
               </button>
               <button
                 onClick={handleUpdateStorage}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
               >
                 Update Storage
               </button>
@@ -540,50 +541,50 @@ export default function StorageManagement() {
       )}
 
       {/* Overall Storage Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600">Total Capacity</span>
-            <Database className="w-5 h-5 text-gray-400" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-1 md:mb-2">
+            <span className="text-xs md:text-sm text-gray-600">Total Capacity</span>
+            <Database className="w-4 h-4 md:w-5 md:h-5 text-gray-400" />
           </div>
-          <div className="text-2xl font-bold text-gray-900">{totalStorage.total}</div>
-          <div className="text-xs text-gray-500 mt-1">Across all devices</div>
+          <div className="text-lg md:text-2xl font-bold text-gray-900">{totalStorage.total}</div>
+          <div className="text-xs text-gray-500 mt-1 hidden sm:block">Across all devices</div>
         </div>
 
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600">Used Space</span>
-            <HardDrive className="w-5 h-5 text-blue-400" />
+        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-1 md:mb-2">
+            <span className="text-xs md:text-sm text-gray-600">Used Space</span>
+            <HardDrive className="w-4 h-4 md:w-5 md:h-5 text-blue-400" />
           </div>
-          <div className="text-2xl font-bold text-gray-900">{totalStorage.used}</div>
-          <div className="text-xs text-gray-500 mt-1">{totalStorage.usagePercentage}% utilized</div>
+          <div className="text-lg md:text-2xl font-bold text-gray-900">{totalStorage.used}</div>
+          <div className="text-xs text-gray-500 mt-1 hidden sm:block">{totalStorage.usagePercentage}% utilized</div>
         </div>
 
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600">Free Space</span>
-            <TrendingUp className="w-5 h-5 text-green-400" />
+        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-1 md:mb-2">
+            <span className="text-xs md:text-sm text-gray-600">Free Space</span>
+            <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-green-400" />
           </div>
-          <div className="text-2xl font-bold text-gray-900">{totalStorage.free}</div>
-          <div className="text-xs text-gray-500 mt-1">Available for recordings</div>
+          <div className="text-lg md:text-2xl font-bold text-gray-900">{totalStorage.free}</div>
+          <div className="text-xs text-gray-500 mt-1 hidden sm:block">Available for recordings</div>
         </div>
 
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600">Storage Devices</span>
-            <Server className="w-5 h-5 text-purple-400" />
+        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-1 md:mb-2">
+            <span className="text-xs md:text-sm text-gray-600">Storage Devices</span>
+            <Server className="w-4 h-4 md:w-5 md:h-5 text-purple-400" />
           </div>
-          <div className="text-2xl font-bold text-gray-900">{storageDevices.length}</div>
-          <div className="text-xs text-gray-500 mt-1">Active devices</div>
+          <div className="text-lg md:text-2xl font-bold text-gray-900">{storageDevices.length}</div>
+          <div className="text-xs text-gray-500 mt-1 hidden sm:block">Active devices</div>
         </div>
       </div>
 
       {/* Overall Usage Visualization */}
-      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Overall Storage Usage</h2>
-        <div className="flex items-center space-x-6">
-          <div className="relative w-40 h-40">
-            <svg className="w-40 h-40 transform -rotate-90" viewBox="0 0 100 100">
+      <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
+        <h2 className="text-base md:text-lg font-semibold text-gray-900 mb-4">Overall Storage Usage</h2>
+        <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
+          <div className="relative w-32 h-32 md:w-40 md:h-40 flex-shrink-0">
+            <svg className="w-32 h-32 md:w-40 md:h-40 transform -rotate-90" viewBox="0 0 100 100">
               <circle
                 cx="50"
                 cy="50"
@@ -606,12 +607,12 @@ export default function StorageManagement() {
               />
             </svg>
             <div className="absolute inset-0 flex items-center justify-center flex-col">
-              <div className="text-3xl font-bold text-gray-900">{totalStorage.usagePercentage}%</div>
-              <div className="text-sm text-gray-600">Used</div>
+              <div className="text-2xl md:text-3xl font-bold text-gray-900">{totalStorage.usagePercentage}%</div>
+              <div className="text-xs md:text-sm text-gray-600">Used</div>
             </div>
           </div>
 
-          <div className="flex-1 space-y-4">
+          <div className="flex-1 w-full space-y-3 md:space-y-4">
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-gray-600">Total Capacity</span>
@@ -658,23 +659,27 @@ export default function StorageManagement() {
       </div>
 
       {/* Storage Devices List */}
-      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-gray-900">Storage Devices</h2>
-          <button className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center space-x-1">
-            <Download className="w-4 h-4" />
-            <span>Export Report</span>
+      <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-4 md:mb-6">
+          <h2 className="text-base md:text-lg font-semibold text-gray-900">Storage Devices</h2>
+          <button className="px-2 md:px-3 py-1.5 text-xs md:text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center space-x-1">
+            <Download className="w-3 h-3 md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
           </button>
         </div>
 
         <div className="space-y-4">
           {storageDevices.length > 0 ? (
             storageDevices.map((device) => (
-              <div key={device.id} className="border border-gray-200 rounded-lg p-5 hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-start space-x-4">
+              <div
+                key={device.id}
+                className="border border-gray-200 rounded-lg p-3 md:p-5 hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start justify-between mb-3 md:mb-4">
+                  <div className="flex items-start space-x-3 md:space-x-4 min-w-0 flex-1">
                     <div
-                      className={`p-3 rounded-lg ${
+                      className={`p-2 md:p-3 rounded-lg flex-shrink-0 ${
                         device.status === "healthy"
                           ? "bg-green-50"
                           : device.status === "warning"
@@ -684,12 +689,12 @@ export default function StorageManagement() {
                     >
                       {getTypeIcon(device.type)}
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{device.name}</h3>
-                      <p className="text-sm text-gray-600 mt-1">{device.path}</p>
-                      <div className="flex items-center space-x-2 mt-2">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold text-gray-900 text-sm md:text-base truncate">{device.name}</h3>
+                      <p className="text-xs md:text-sm text-gray-600 mt-1 truncate">{device.path}</p>
+                      <div className="flex items-center flex-wrap gap-2 mt-2">
                         <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(
+                          className={`px-2 py-0.5 md:py-1 rounded-full text-xs font-medium border ${getStatusColor(
                             device.status
                           )}`}
                         >
@@ -703,43 +708,43 @@ export default function StorageManagement() {
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-1">
                     <button
                       onClick={() => handleEditStorage(device)}
-                      className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                      className="p-1.5 md:p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
                       title="Edit storage"
                     >
-                      <Settings className="w-5 h-5" />
+                      <Settings className="w-4 h-4 md:w-5 md:h-5" />
                     </button>
                     <button
                       onClick={() => handleDeleteStorage(device)}
-                      className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                      className="p-1.5 md:p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
                       title="Delete storage"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
                     </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 mb-3">
+                <div className="grid grid-cols-3 gap-2 md:gap-4 mb-3">
                   <div>
                     <span className="text-xs text-gray-600">Total</span>
-                    <div className="text-sm font-medium text-gray-900">{device.totalSpace}</div>
+                    <div className="text-xs md:text-sm font-medium text-gray-900">{device.totalSpace}</div>
                   </div>
                   <div>
                     <span className="text-xs text-gray-600">Used</span>
-                    <div className="text-sm font-medium text-gray-900">{device.usedSpace}</div>
+                    <div className="text-xs md:text-sm font-medium text-gray-900">{device.usedSpace}</div>
                   </div>
                   <div>
                     <span className="text-xs text-gray-600">Free</span>
-                    <div className="text-sm font-medium text-gray-900">{device.freeSpace}</div>
+                    <div className="text-xs md:text-sm font-medium text-gray-900">{device.freeSpace}</div>
                   </div>
                 </div>
 
                 {/* Additional Storage Details */}
-                <div className="bg-gray-50 rounded-lg p-3 mb-3">
+                <div className="bg-gray-50 rounded-lg p-2 md:p-3 mb-3">
                   <h4 className="text-xs font-semibold text-gray-700 mb-2">Storage Details</h4>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 md:gap-y-2 text-xs">
                     {/* <div>
                       <span className="text-gray-600">Server ID:</span>
                       <p className="font-mono text-gray-900 break-all">{device.serverId}</p>
@@ -796,47 +801,47 @@ export default function StorageManagement() {
       </div>
 
       {/* Storage Settings */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Retention Settings</h2>
-          <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
+          <h2 className="text-base md:text-lg font-semibold text-gray-900 mb-3 md:mb-4">Retention Settings</h2>
+          <div className="space-y-3 md:space-y-4">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Default Retention Period</span>
-              <span className="text-sm font-medium text-gray-900">30 days</span>
+              <span className="text-xs md:text-sm text-gray-600">Default Retention Period</span>
+              <span className="text-xs md:text-sm font-medium text-gray-900">30 days</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Archive Retention</span>
-              <span className="text-sm font-medium text-gray-900">90 days</span>
+              <span className="text-xs md:text-sm text-gray-600">Archive Retention</span>
+              <span className="text-xs md:text-sm font-medium text-gray-900">90 days</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Motion-based Recording</span>
-              <span className="text-sm font-medium text-green-600">Enabled</span>
+              <span className="text-xs md:text-sm text-gray-600">Motion-based Recording</span>
+              <span className="text-xs md:text-sm font-medium text-green-600">Enabled</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Auto-cleanup</span>
-              <span className="text-sm font-medium text-green-600">Active</span>
+              <span className="text-xs md:text-sm text-gray-600">Auto-cleanup</span>
+              <span className="text-xs md:text-sm font-medium text-green-600">Active</span>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Compression & Quality</h2>
-          <div className="space-y-4">
+        <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
+          <h2 className="text-base md:text-lg font-semibold text-gray-900 mb-3 md:mb-4">Compression & Quality</h2>
+          <div className="space-y-3 md:space-y-4">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Compression Ratio</span>
-              <span className="text-sm font-medium text-gray-900">4:1</span>
+              <span className="text-xs md:text-sm text-gray-600">Compression Ratio</span>
+              <span className="text-xs md:text-sm font-medium text-gray-900">4:1</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Recording Quality</span>
-              <span className="text-sm font-medium text-gray-900">High</span>
+              <span className="text-xs md:text-sm text-gray-600">Recording Quality</span>
+              <span className="text-xs md:text-sm font-medium text-gray-900">High</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Stream Quality</span>
-              <span className="text-sm font-medium text-gray-900">1080p</span>
+              <span className="text-xs md:text-sm text-gray-600">Stream Quality</span>
+              <span className="text-xs md:text-sm font-medium text-gray-900">1080p</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Dual Stream</span>
-              <span className="text-sm font-medium text-green-600">Enabled</span>
+              <span className="text-xs md:text-sm text-gray-600">Dual Stream</span>
+              <span className="text-xs md:text-sm font-medium text-green-600">Enabled</span>
             </div>
           </div>
         </div>

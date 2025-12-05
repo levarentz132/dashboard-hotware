@@ -15,6 +15,7 @@ import StorageManagement from "@/components/storage/StorageManagement";
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const renderContent = () => {
     switch (activeSection) {
@@ -41,10 +42,15 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <Sidebar activeSection={activeSection} onSectionChange={setActiveSection} />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar />
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-6">{renderContent()}</main>
+      <Sidebar
+        activeSection={activeSection}
+        onSectionChange={setActiveSection}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+      <div className="flex-1 flex flex-col overflow-hidden w-full lg:w-auto">
+        <TopBar onMenuClick={() => setSidebarOpen(true)} />
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-4 md:p-6">{renderContent()}</main>
       </div>
       <NotificationSystem />
     </div>
