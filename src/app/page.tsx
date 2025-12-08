@@ -36,7 +36,7 @@ export default function Home() {
       case "debug":
         return <ConnectionTest />;
       default:
-        return <DashboardOverview />;
+        return <h1 className="font-bold text-2xl">Tahap pegembangan</h1>;
     }
   };
 
