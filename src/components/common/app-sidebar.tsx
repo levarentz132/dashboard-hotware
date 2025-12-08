@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, CameraIcon, Coffee, LogOut } from "lucide-react";
+import { Camera, CameraIcon, LogOut, Wifi, WifiOff } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -23,13 +23,15 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
-import { usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useCameras } from "@/hooks/useNxAPI";
+import Image from "next/image";
+import LogoImage from "@/images/image.png";
 
 export default function AppSidebar() {
   const { cameras, error, loading, refetch } = useCameras();
   const { isMobile } = useSidebar();
-  const pathname = usePathname();
+  const router = useRouter();
 
   return (
     <Sidebar collapsible="icon">
@@ -37,11 +39,8 @@ export default function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <div className="font-semibold">
-                <div className="bg-teal-500 flex p-2 items-center justify-center rounded-md">
-                  <CameraIcon className="size-4" />
-                </div>
-                <div className="mt-2">CCTV Monitoring</div>
+              <div className="flex p-1 items-center justify-center rounded-md">
+                <Image src={LogoImage} alt="Hotware Logo" width={110} height={110} className="rounded-md" />
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -95,8 +94,21 @@ export default function AppSidebar() {
                       }}
                       className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground cursor-grab active:cursor-grabbing hover:bg-accent transition-all touch-none"
                     >
-                      <Camera className="mr-2 size-4" />
-                      {camera.name}
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <Camera className="size-4 flex-shrink-0" />
+                        <span className="truncate">{camera.name}</span>
+                      </div>
+                      {camera.status?.toLowerCase() === "online" ? (
+                        <div className="flex items-center gap-1 flex-shrink-0" title="Online">
+                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          <Wifi className="size-3 text-green-500" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 flex-shrink-0" title="Offline">
+                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                          <WifiOff className="size-3 text-red-500" />
+                        </div>
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -119,8 +131,8 @@ export default function AppSidebar() {
                     <AvatarFallback className="rounded-lg">A</AvatarFallback>
                   </Avatar>
                   <div className="leading-tight">
-                    <h4 className="truncate font-medium">Avip Syaifulloh</h4>
-                    <p className="text-muted-foreground truncate text-xs">Admin</p>
+                    <h4 className="truncate font-medium">Admin</h4>
+                    {/* <p className="text-muted-foreground truncate text-xs">Admin</p> */}
                   </div>
                   <Camera className="ml-auto size-4" />
                 </SidebarMenuButton>
@@ -138,16 +150,16 @@ export default function AppSidebar() {
                       <AvatarFallback className="rounded-lg">A</AvatarFallback>
                     </Avatar>
                     <div className="leading-tight">
-                      <h4 className="truncate font-medium">Avip Syaifulloh</h4>
-                      <p className="text-muted-foreground truncate text-xs">Admin</p>
+                      <h4 className="truncate font-medium">Admin</h4>
+                      {/* <p className="text-muted-foreground truncate text-xs">Admin</p> */}
                     </div>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem>
-                    <LogOut />
-                    Logout
+                  <DropdownMenuItem onClick={() => router.push("/")} className="cursor-pointer">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Home
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
