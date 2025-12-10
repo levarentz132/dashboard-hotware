@@ -1,12 +1,37 @@
 "use client";
 
-import { Bell, Search, User, Settings, Menu } from "lucide-react";
+import { Bell, Search, User, Settings, Menu, LogOut, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { nxAPI } from "@/lib/nxapi";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface TopBarProps {
   onMenuClick?: () => void;
 }
 
 export default function TopBar({ onMenuClick }: TopBarProps) {
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      setLoggingOut(true);
+      await nxAPI.logout();
+      window.location.href = "/";
+    } catch (error) {
+      console.error("Logout failed:", error);
+      window.location.href = "/";
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
   return (
     <header className="bg-white shadow-sm border-b px-3 sm:px-6 py-3 sm:py-4">
       <div className="flex items-center justify-between gap-2 sm:gap-4">
@@ -56,13 +81,34 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
             <Settings className="w-5 h-5" />
           </button>
 
-          {/* User Profile */}
-          <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
-            <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-              <User className="w-4 h-4 text-white" />
-            </div>
-            <span className="hidden md:block text-sm font-medium text-gray-700">Admin</span>
-          </div>
+          {/* User Profile with Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-2 pl-2 border-l border-gray-200 hover:bg-gray-50 rounded-lg p-1 transition-colors">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-4 h-4 text-white" />
+                </div>
+                <span className="hidden md:block text-sm font-medium text-gray-700">Admin</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel>
+                <div className="flex flex-col">
+                  <span className="font-medium">Admin</span>
+                  <span className="text-xs text-gray-500">Administrator</span>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
+              >
+                {loggingOut ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                {loggingOut ? "Logging out..." : "Logout"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>

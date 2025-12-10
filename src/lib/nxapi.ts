@@ -765,6 +765,82 @@ class NxWitnessAPI {
     return this.authToken;
   }
 
+  // Logout - Delete session token
+  async logout(): Promise<boolean> {
+    try {
+      // First, get current session info to find the token
+      const sessionsResponse = await fetch(`${this.baseURL}/login/sessions`, {
+        method: "GET",
+        credentials: "include",
+        headers: this.getHeaders(),
+      });
+
+      if (sessionsResponse.ok) {
+        const sessions = await sessionsResponse.json();
+        console.log("[nxAPI] Current sessions:", sessions);
+
+        // Get the current session token (usually the first/only one)
+        let token = null;
+        if (Array.isArray(sessions) && sessions.length > 0) {
+          token = sessions[0].token || sessions[0].id;
+        } else if (sessions.token) {
+          token = sessions.token;
+        }
+
+        if (token) {
+          // Delete the session using the token
+          const deleteResponse = await fetch(`${this.baseURL}/login/sessions/${token}`, {
+            method: "DELETE",
+            credentials: "include",
+            headers: this.getHeaders(),
+          });
+
+          if (deleteResponse.ok || deleteResponse.status === 204) {
+            console.log("[nxAPI] Logout successful - session deleted");
+            this.authToken = null;
+            return true;
+          } else {
+            console.error("[nxAPI] Failed to delete session:", deleteResponse.status);
+          }
+        }
+      }
+
+      // Fallback: Try to delete "current" session
+      const fallbackResponse = await fetch(`${this.baseURL}/login/sessions/current`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: this.getHeaders(),
+      });
+
+      if (fallbackResponse.ok || fallbackResponse.status === 204) {
+        console.log("[nxAPI] Logout successful via current session");
+        this.authToken = null;
+        // Clear auth cookie
+        if (typeof document !== "undefined") {
+          document.cookie = "nx-auth=; path=/; max-age=0";
+        }
+        return true;
+      }
+
+      // Clear local auth token anyway
+      this.authToken = null;
+      // Clear auth cookie
+      if (typeof document !== "undefined") {
+        document.cookie = "nx-auth=; path=/; max-age=0";
+      }
+      return true;
+    } catch (error) {
+      console.error("[nxAPI] Logout error:", error);
+      // Clear local auth token anyway
+      this.authToken = null;
+      // Clear auth cookie
+      if (typeof document !== "undefined") {
+        document.cookie = "nx-auth=; path=/; max-age=0";
+      }
+      return false;
+    }
+  }
+
   // Test connection with automatic login
   async testConnection(): Promise<boolean> {
     try {
