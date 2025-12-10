@@ -2,10 +2,8 @@
 
 import {
   Search,
-  Filter,
   Grid,
   List,
-  MapPin,
   Camera,
   Wifi,
   WifiOff,
@@ -14,13 +12,52 @@ import {
   AlertCircle,
   Plus,
   Trash2,
+  Cloud,
+  Server,
+  ChevronDown,
+  ChevronRight,
+  Filter,
+  MapPin,
 } from "lucide-react";
-import { useState, useEffect } from "react";
-import { nxAPI } from "@/lib/nxapi";
-import { Button } from "../ui/button";
-import { useSystemInfo } from "@/hooks/useNxAPI-system";
+import { useState, useEffect, useCallback } from "react";
 import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
 import { useServers } from "@/hooks/useNxAPI-server";
+import { useSystemInfo } from "@/hooks/useNxAPI-system";
+import { nxAPI } from "@/lib/nxapi";
+import { Button } from "../ui/button";
+
+interface CloudSystem {
+  id: string;
+  name: string;
+  stateOfHealth: string;
+  accessRole: string;
+  version?: string;
+}
+
+interface CloudCamera {
+  id: string;
+  name: string;
+  physicalId?: string;
+  url?: string;
+  typeId?: string;
+  mac?: string;
+  serverId?: string;
+  vendor?: string;
+  model?: string;
+  logicalId?: string;
+  status?: string;
+  systemId: string;
+  systemName: string;
+}
+
+interface CamerasBySystem {
+  systemId: string;
+  systemName: string;
+  stateOfHealth: string;
+  accessRole: string;
+  cameras: CloudCamera[];
+  expanded: boolean;
+}
 
 interface CameraDevice {
   id: string;
@@ -44,7 +81,7 @@ interface CameraDevice {
 }
 
 export default function CameraInventory() {
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list" | "cloud">("cloud");
   const [searchTerm, setSearchTerm] = useState("");
 
   // API hooks
@@ -52,6 +89,133 @@ export default function CameraInventory() {
   const { connected, testConnection } = useSystemInfo();
   const { servers } = useServers();
   const { deviceType } = useDeviceType();
+
+  // Cloud cameras state
+  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
+  const [camerasBySystem, setCamerasBySystem] = useState<CamerasBySystem[]>([]);
+  const [loadingCloud, setLoadingCloud] = useState(false);
+  const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
+
+  // Fetch cloud systems
+  const fetchCloudSystems = useCallback(async () => {
+    try {
+      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) return [];
+
+      const data = await response.json();
+      const systems: CloudSystem[] = data.systems || [];
+
+      // Sort: owner first, then online systems
+      systems.sort((a, b) => {
+        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
+        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
+        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
+        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
+        return 0;
+      });
+
+      setCloudSystems(systems);
+      return systems;
+    } catch (err) {
+      console.error("Error fetching cloud systems:", err);
+      return [];
+    }
+  }, []);
+
+  // Fetch cameras from a specific cloud system
+  const fetchCloudCameras = useCallback(async (system: CloudSystem): Promise<CloudCamera[]> => {
+    if (system.stateOfHealth !== "online") return [];
+
+    try {
+      // Use local API proxy to avoid CORS and handle auth
+      const response = await fetch(
+        `/api/cloud/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        if (errorData.requiresAuth) {
+          console.log(`[CloudCameras] Auth required for ${system.name} - skipping (you're not the owner)`);
+        }
+        return [];
+      }
+
+      const devices = await response.json();
+      const cameraDevices = Array.isArray(devices) ? devices : [];
+
+      return cameraDevices.map((device: Record<string, unknown>) => ({
+        ...device,
+        id: device.id as string,
+        name: device.name as string,
+        systemId: system.id,
+        systemName: system.name,
+      }));
+    } catch (err) {
+      console.error(`Error fetching cameras from ${system.name}:`, err);
+      return [];
+    }
+  }, []);
+
+  // Fetch all cloud cameras
+  const fetchAllCloudCameras = useCallback(async () => {
+    setLoadingCloud(true);
+    const systems = await fetchCloudSystems();
+
+    // Only fetch from systems where user has owner access (to avoid auth dialogs)
+    // Other systems will show "Requires authentication" message
+    const camerasData: CamerasBySystem[] = await Promise.all(
+      systems.map(async (system) => {
+        // Try to fetch cameras - proxy will handle auth errors gracefully
+        const cameras = await fetchCloudCameras(system);
+        return {
+          systemId: system.id,
+          systemName: system.name,
+          stateOfHealth: system.stateOfHealth,
+          accessRole: system.accessRole,
+          cameras,
+          expanded: true,
+        };
+      })
+    );
+
+    setCamerasBySystem(camerasData);
+    // Expand all systems by default
+    setExpandedSystems(new Set(systems.map((s) => s.id)));
+    setLoadingCloud(false);
+  }, [fetchCloudSystems, fetchCloudCameras]);
+
+  // Toggle system expansion
+  const toggleSystemExpansion = (systemId: string) => {
+    setExpandedSystems((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(systemId)) {
+        newSet.delete(systemId);
+      } else {
+        newSet.add(systemId);
+      }
+      return newSet;
+    });
+  };
+
+  // Initial cloud fetch
+  useEffect(() => {
+    fetchAllCloudCameras();
+  }, [fetchAllCloudCameras]);
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -730,25 +894,39 @@ export default function CameraInventory() {
             onClick={() => {
               refetch();
               testConnection();
+              fetchAllCloudCameras();
             }}
-            disabled={loading}
+            disabled={loading || loadingCloud}
             className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
             variant="outline"
           >
-            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {loading || loadingCloud ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
             <span className="hidden sm:inline">Refresh</span>
           </Button>
 
           <div className="flex items-center bg-white rounded-lg border p-1">
             <button
+              onClick={() => setViewMode("cloud")}
+              className={`p-2 rounded ${viewMode === "cloud" ? "bg-blue-100 text-blue-600" : "text-gray-600"}`}
+              title="Cloud Systems View"
+            >
+              <Cloud className="w-4 h-4" />
+            </button>
+            <button
               onClick={() => setViewMode("grid")}
               className={`p-2 rounded ${viewMode === "grid" ? "bg-blue-100 text-blue-600" : "text-gray-600"}`}
+              title="Grid View"
             >
               <Grid className="w-4 h-4" />
             </button>
             <button
               onClick={() => setViewMode("list")}
               className={`p-2 rounded ${viewMode === "list" ? "bg-blue-100 text-blue-600" : "text-gray-600"}`}
+              title="List View"
             >
               <List className="w-4 h-4" />
             </button>
@@ -810,60 +988,325 @@ export default function CameraInventory() {
           </div>
         )}
 
-        {!loading && !error && filteredCameras.length === 0 && (
+        {!loading && !error && filteredCameras.length === 0 && viewMode !== "cloud" && (
           <div className="flex items-center justify-center p-8 text-gray-500">
             <Camera className="w-6 h-6 mr-2" />
             <span>No cameras found</span>
           </div>
         )}
 
-        {!loading &&
-          filteredCameras.length > 0 &&
-          (viewMode === "grid" ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 p-3 md:p-6">
-              {filteredCameras.map((camera) => (
-                <div
-                  key={camera.id}
-                  className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white"
-                >
-                  <div className="flex items-start justify-between mb-2 md:mb-3">
-                    <div className="flex items-center space-x-2 min-w-0 flex-1">
-                      <Camera className="w-4 h-4 md:w-5 md:h-5 text-gray-600 flex-shrink-0" />
-                      <span className="font-medium text-gray-900 text-sm md:text-base truncate">{camera.name}</span>
-                    </div>
-                    {getStatusIcon(camera.status)}
-                  </div>
+        {/* Cloud View - Cameras grouped by System */}
+        {viewMode === "cloud" && (
+          <div className="p-3 md:p-6">
+            {loadingCloud ? (
+              <div className="flex items-center justify-center p-8">
+                <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+                <span className="text-gray-600">Loading cloud systems...</span>
+              </div>
+            ) : camerasBySystem.length === 0 ? (
+              <div className="flex items-center justify-center p-8 text-gray-500">
+                <Cloud className="w-6 h-6 mr-2" />
+                <span>No cloud systems found</span>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {camerasBySystem.map((system) => {
+                  const isExpanded = expandedSystems.has(system.systemId);
+                  const isOnline = system.stateOfHealth === "online";
+                  const filteredSystemCameras = system.cameras.filter(
+                    (cam) =>
+                      cam.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      cam.id?.toLowerCase().includes(searchTerm.toLowerCase())
+                  );
 
-                  <div className="space-y-1 md:space-y-2 text-xs md:text-sm text-gray-600">
-                    <div className="flex items-center space-x-1">
-                      <MapPin className="w-3 h-3 flex-shrink-0" />
-                      <span className="truncate">{camera.location || camera.ip || "Unknown"}</span>
-                    </div>
-                    <div className="truncate">Model: {camera.model || "Unknown"}</div>
-                    <div className="truncate">IP: {camera.ip}</div>
-                    {camera.vendor && <div className="truncate hidden sm:block">Vendor: {camera.vendor}</div>}
-                  </div>
-
-                  <div className="flex items-center justify-between mt-3 md:mt-4 pt-2 md:pt-3 border-t">
-                    <span
-                      className={`px-2 py-0.5 md:py-1 rounded-full text-xs font-medium border ${getStatusColor(
-                        camera.status
-                      )}`}
+                  return (
+                    <div
+                      key={system.systemId}
+                      className={`border rounded-lg overflow-hidden ${
+                        isOnline ? "border-green-200" : "border-gray-200"
+                      }`}
                     >
-                      {camera.status}
-                    </span>
+                      {/* System Header */}
+                      <div
+                        className={`flex items-center justify-between p-4 cursor-pointer ${
+                          isOnline ? "bg-green-50 hover:bg-green-100" : "bg-gray-50 hover:bg-gray-100"
+                        }`}
+                        onClick={() => toggleSystemExpansion(system.systemId)}
+                      >
+                        <div className="flex items-center space-x-3">
+                          {isExpanded ? (
+                            <ChevronDown className="w-5 h-5 text-gray-500" />
+                          ) : (
+                            <ChevronRight className="w-5 h-5 text-gray-500" />
+                          )}
+                          <Server className={`w-5 h-5 ${isOnline ? "text-green-600" : "text-gray-400"}`} />
+                          <div>
+                            <h3 className="font-semibold text-gray-900">{system.systemName}</h3>
+                            <p className="text-xs text-gray-500">
+                              {system.cameras.length} camera{system.cameras.length !== 1 ? "s" : ""} •{" "}
+                              <span className={isOnline ? "text-green-600" : "text-red-500"}>
+                                {isOnline ? "Online" : "Offline"}
+                              </span>
+                              {system.accessRole === "owner" ? (
+                                <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs">
+                                  Owner
+                                </span>
+                              ) : (
+                                <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">
+                                  {system.accessRole}
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm text-gray-500">{filteredSystemCameras.length} shown</span>
+                        </div>
+                      </div>
+
+                      {/* Cameras List */}
+                      {isExpanded && (
+                        <div className="border-t">
+                          {!isOnline ? (
+                            <div className="p-4 text-center text-gray-500 text-sm">
+                              System is offline. Cannot fetch cameras.
+                            </div>
+                          ) : system.cameras.length === 0 && system.accessRole !== "owner" ? (
+                            <div className="p-4 text-center text-yellow-600 text-sm bg-yellow-50">
+                              <AlertCircle className="w-4 h-4 inline mr-2" />
+                              You don&apos;t have owner access to this system. Login to NX Cloud with the owner account
+                              to view cameras.
+                            </div>
+                          ) : filteredSystemCameras.length === 0 ? (
+                            <div className="p-4 text-center text-gray-500 text-sm">
+                              {system.cameras.length === 0
+                                ? "No cameras in this system"
+                                : "No cameras match your search"}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
+                              {filteredSystemCameras.map((camera) => (
+                                <div
+                                  key={`${system.systemId}-${camera.id}`}
+                                  className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white"
+                                >
+                                  <div className="flex items-start justify-between mb-2">
+                                    <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                      <Camera className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                                      <span className="font-medium text-gray-900 text-sm truncate">{camera.name}</span>
+                                    </div>
+                                    {camera.status?.toLowerCase() === "online" ? (
+                                      <Wifi className="w-4 h-4 text-green-600" />
+                                    ) : (
+                                      <WifiOff className="w-4 h-4 text-red-600" />
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-1 text-xs text-gray-600">
+                                    {camera.model && <div className="truncate">Model: {camera.model}</div>}
+                                    {camera.vendor && <div className="truncate">Vendor: {camera.vendor}</div>}
+                                    {camera.mac && <div className="truncate">MAC: {camera.mac}</div>}
+                                    <div className="truncate text-gray-400">Location: Jakarta Barat (Data dummy)</div>
+                                  </div>
+
+                                  <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                                    <span
+                                      className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
+                                        camera.status?.toLowerCase() === "online"
+                                          ? "bg-green-100 text-green-800 border-green-200"
+                                          : "bg-red-100 text-red-800 border-red-200"
+                                      }`}
+                                    >
+                                      {camera.status || "Unknown"}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Grid View */}
+        {!loading && viewMode === "grid" && filteredCameras.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 p-3 md:p-6">
+            {filteredCameras.map((camera) => (
+              <div key={camera.id} className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white">
+                <div className="flex items-start justify-between mb-2 md:mb-3">
+                  <div className="flex items-center space-x-2 min-w-0 flex-1">
+                    <Camera className="w-4 h-4 md:w-5 md:h-5 text-gray-600 flex-shrink-0" />
+                    <span className="font-medium text-gray-900 text-sm md:text-base truncate">{camera.name}</span>
+                  </div>
+                  {getStatusIcon(camera.status)}
+                </div>
+
+                <div className="space-y-1 md:space-y-2 text-xs md:text-sm text-gray-600">
+                  <div className="flex items-center space-x-1">
+                    <MapPin className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{camera.location || camera.ip || "Unknown"}</span>
+                  </div>
+                  <div className="truncate">Model: {camera.model || "Unknown"}</div>
+                  <div className="truncate">IP: {camera.ip}</div>
+                  {camera.vendor && <div className="truncate hidden sm:block">Vendor: {camera.vendor}</div>}
+                </div>
+
+                <div className="flex items-center justify-between mt-3 md:mt-4 pt-2 md:pt-3 border-t">
+                  <span
+                    className={`px-2 py-0.5 md:py-1 rounded-full text-xs font-medium border ${getStatusColor(
+                      camera.status
+                    )}`}
+                  >
+                    {camera.status}
+                  </span>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      onClick={() => handleEditCamera(camera)}
+                      className="p-1.5 md:p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                      title="Edit camera"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCamera(camera)}
+                      className="p-1.5 md:p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                      title="Delete camera"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* List View */}
+        {!loading && viewMode === "list" && filteredCameras.length > 0 && (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Camera
+                    </th>
+                    <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Location
+                    </th>
+                    <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Type/Model
+                    </th>
+                    <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredCameras.map((camera) => (
+                    <tr key={camera.id} className="hover:bg-gray-50">
+                      <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <Camera className="w-5 h-5 text-gray-600 mr-3" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">{camera.name}</div>
+                            <div className="text-xs text-gray-500 font-mono truncate max-w-[150px]">{camera.id}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {camera.location || camera.ip || "-"}
+                      </td>
+                      <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{camera.vendor || "-"}</div>
+                        <div className="text-sm text-gray-500">{camera.model || "-"}</div>
+                      </td>
+                      <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          {getStatusIcon(camera.status)}
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(
+                              camera.status
+                            )}`}
+                          >
+                            {camera.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleEditCamera(camera)}
+                            className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                            title="Edit camera"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCamera(camera)}
+                            className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                            title="Delete camera"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card View for List Mode */}
+            <div className="md:hidden space-y-3 p-3">
+              {filteredCameras.map((camera) => (
+                <div key={camera.id} className="bg-white border rounded-lg p-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-2 min-w-0 flex-1">
+                      <Camera className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-gray-900 truncate">{camera.name}</div>
+                        <div className="text-xs text-gray-500 truncate">{camera.location || camera.ip || "-"}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {getStatusIcon(camera.status)}
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(
+                          camera.status
+                        )}`}
+                      >
+                        {camera.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t">
+                    <div className="text-xs text-gray-500">
+                      <span>{camera.vendor || "-"}</span>
+                      {camera.model && <span> / {camera.model}</span>}
+                    </div>
                     <div className="flex items-center space-x-1">
                       <button
                         onClick={() => handleEditCamera(camera)}
-                        className="p-1.5 md:p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                        title="Edit camera"
+                        className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                        title="Edit"
                       >
                         <Settings className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteCamera(camera)}
-                        className="p-1.5 md:p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                        title="Delete camera"
+                        className="p-1.5 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                        title="Delete"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -872,135 +1315,8 @@ export default function CameraInventory() {
                 </div>
               ))}
             </div>
-          ) : (
-            <>
-              {/* Desktop Table View */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Camera
-                      </th>
-                      <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Location
-                      </th>
-                      <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Type/Model
-                      </th>
-                      <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredCameras.map((camera) => (
-                      <tr key={camera.id} className="hover:bg-gray-50">
-                        <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <Camera className="w-5 h-5 text-gray-600 mr-3" />
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">{camera.name}</div>
-                              <div className="text-xs text-gray-500 font-mono truncate max-w-[150px]">{camera.id}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                          {camera.location || camera.ip || "-"}
-                        </td>
-                        <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{camera.vendor || "-"}</div>
-                          <div className="text-sm text-gray-500">{camera.model || "-"}</div>
-                        </td>
-                        <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center space-x-2">
-                            {getStatusIcon(camera.status)}
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(
-                                camera.status
-                              )}`}
-                            >
-                              {camera.status}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => handleEditCamera(camera)}
-                              className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                              title="Edit camera"
-                            >
-                              <Settings className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCamera(camera)}
-                              className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                              title="Delete camera"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile Card View for List Mode */}
-              <div className="md:hidden space-y-3 p-3">
-                {filteredCameras.map((camera) => (
-                  <div key={camera.id} className="bg-white border rounded-lg p-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-2 min-w-0 flex-1">
-                        <Camera className="w-4 h-4 text-gray-600 flex-shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium text-gray-900 truncate">{camera.name}</div>
-                          <div className="text-xs text-gray-500 truncate">{camera.location || camera.ip || "-"}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        {getStatusIcon(camera.status)}
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(
-                            camera.status
-                          )}`}
-                        >
-                          {camera.status}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t">
-                      <div className="text-xs text-gray-500">
-                        <span>{camera.vendor || "-"}</span>
-                        {camera.model && <span> / {camera.model}</span>}
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <button
-                          onClick={() => handleEditCamera(camera)}
-                          className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                          title="Edit"
-                        >
-                          <Settings className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteCamera(camera)}
-                          className="p-1.5 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          ))}
+          </>
+        )}
       </div>
     </div>
   );
