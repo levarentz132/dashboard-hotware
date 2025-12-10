@@ -1,5 +1,3 @@
-import { ICamera } from "@/types/Device";
-
 // Nx Witness API Configuration
 export const API_CONFIG = {
   // Use Next.js API proxy to avoid CORS issues
@@ -11,6 +9,8 @@ export const API_CONFIG = {
   password: process.env.NEXT_PUBLIC_NX_PASSWORD || "Farrel123",
   serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST || "localhost",
   serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT || "7001",
+  cloud_username: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME || "farel.it12@gmail.com",
+  cloud_password: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD || "farrel354313",
   // Fallback URLs to try (now through proxy)
   fallbackURLs: ["/api/nx"],
 };
