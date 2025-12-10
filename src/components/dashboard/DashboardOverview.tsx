@@ -1,7 +1,7 @@
 "use client";
 
-import { Camera, Activity, AlertTriangle, Database, TrendingUp, Users, Wifi, WifiOff } from "lucide-react";
-import { useCameras, useAlarms, useSystemInfo, useRealTimeUpdates } from "@/hooks/useNxAPI";
+import { Camera, Activity, AlertTriangle, Database, Wifi, WifiOff } from "lucide-react";
+import { useAlarms, useRealTimeUpdates } from "@/hooks/useNxAPI";
 import StatsCard from "@/components/ui/StatsCard";
 import SystemStatusWidget from "@/components/widgets/SystemStatusWidget";
 import CameraStatusGrid from "@/components/widgets/CameraStatusGrid";
@@ -9,12 +9,14 @@ import RecentAlarmsWidget from "@/components/widgets/RecentAlarmsWidget";
 import StorageWidget from "@/components/widgets/StorageWidget";
 import APIStatusWidget from "@/components/widgets/APIStatusWidget";
 import ConnectionStatusWidget from "@/components/widgets/ConnectionStatusWidget";
+import { useSystemInfo } from "@/hooks/useNxAPI-system";
+import { useCameras } from "@/hooks/useNxAPI-camera";
 
 export default function DashboardOverview() {
   // API hooks
   const { cameras, loading: camerasLoading } = useCameras();
   const { alarms, loading: alarmsLoading } = useAlarms();
-  const { systemInfo, connected } = useSystemInfo();
+  const { connected } = useSystemInfo();
   const { isConnected: realtimeConnected, lastUpdate } = useRealTimeUpdates();
 
   // Calculate real stats from API data

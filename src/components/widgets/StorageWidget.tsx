@@ -1,65 +1,65 @@
-'use client'
+"use client";
 
-import { Database, HardDrive, TrendingUp, AlertCircle } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { nxAPI } from '@/lib/nxapi'
+import { Database, HardDrive, TrendingUp } from "lucide-react";
+import { useEffect, useState } from "react";
+import { nxAPI } from "@/lib/nxapi";
 
 interface StorageInfo {
-  totalCapacity?: string
-  usedSpace?: string
-  availableSpace?: string
-  usagePercentage?: number
-  growthRate?: string
-  retentionDays?: number
-  compressionRatio?: string
+  totalCapacity?: string;
+  usedSpace?: string;
+  availableSpace?: string;
+  usagePercentage?: number;
+  growthRate?: string;
+  retentionDays?: number;
+  compressionRatio?: string;
 }
 
 export default function StorageWidget() {
-  const [storageData, setStorageData] = useState<StorageInfo>({})
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [storageData, setStorageData] = useState<StorageInfo>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchStorageInfo = async () => {
       try {
-        setLoading(true)
-        setError(null)
-        
+        setLoading(true);
+        setError(null);
+
         // Try to get storage info from Nx Witness API
-        const storage = await nxAPI.getStorageInfo()
+        const storage = await nxAPI.getStorageInfo();
         if (storage) {
-          setStorageData(storage)
+          setStorageData(storage);
         } else {
           // Use dummy data if API doesn't provide storage info
           setStorageData({
-            totalCapacity: '50 TB',
-            usedSpace: '39.2 TB',
-            availableSpace: '10.8 TB',
+            totalCapacity: "50 TB",
+            usedSpace: "39.2 TB",
+            availableSpace: "10.8 TB",
             usagePercentage: 78.5,
-            growthRate: '+2.3% this month',
+            growthRate: "+2.3% this month",
             retentionDays: 30,
-            compressionRatio: '4:1'
-          })
+            compressionRatio: "4:1",
+          });
         }
       } catch (err) {
         // Use dummy data on error
-        console.log('Storage API not available, using dummy data')
+        console.log("Storage API not available, using dummy data");
         setStorageData({
-          totalCapacity: '50 TB',
-          usedSpace: '39.2 TB',
-          availableSpace: '10.8 TB',
+          totalCapacity: "50 TB",
+          usedSpace: "39.2 TB",
+          availableSpace: "10.8 TB",
           usagePercentage: 78.5,
-          growthRate: '+2.3% this month',
+          growthRate: "+2.3% this month",
           retentionDays: 30,
-          compressionRatio: '4:1'
-        })
+          compressionRatio: "4:1",
+        });
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    fetchStorageInfo()
-  }, [])
+    fetchStorageInfo();
+  }, []);
 
   if (loading) {
     return (
@@ -72,14 +72,14 @@ export default function StorageWidget() {
           <div className="text-gray-500">Loading storage information...</div>
         </div>
       </div>
-    )
+    );
   }
 
   const getUsageColor = (percentage: number) => {
-    if (percentage >= 90) return 'bg-red-500'
-    if (percentage >= 75) return 'bg-yellow-500'
-    return 'bg-green-500'
-  }
+    if (percentage >= 90) return "bg-red-500";
+    if (percentage >= 75) return "bg-yellow-500";
+    return "bg-green-500";
+  };
 
   return (
     <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
@@ -126,17 +126,17 @@ export default function StorageWidget() {
           <span className="text-sm text-gray-600">Total Capacity</span>
           <span className="text-sm font-medium text-gray-900">{storageData.totalCapacity}</span>
         </div>
-        
+
         <div className="flex justify-between items-center">
           <span className="text-sm text-gray-600">Used Space</span>
           <span className="text-sm font-medium text-gray-900">{storageData.usedSpace}</span>
         </div>
-        
+
         <div className="flex justify-between items-center">
           <span className="text-sm text-gray-600">Available</span>
           <span className="text-sm font-medium text-gray-900">{storageData.availableSpace}</span>
         </div>
-        
+
         <div className="flex justify-between items-center pt-2 border-t border-gray-100">
           <span className="text-sm text-gray-600">Growth Rate</span>
           <span className="text-sm font-medium text-green-600 flex items-center">
@@ -144,12 +144,12 @@ export default function StorageWidget() {
             {storageData.growthRate}
           </span>
         </div>
-        
+
         <div className="flex justify-between items-center">
           <span className="text-sm text-gray-600">Retention</span>
           <span className="text-sm font-medium text-gray-900">{storageData.retentionDays} days</span>
         </div>
-        
+
         <div className="flex justify-between items-center">
           <span className="text-sm text-gray-600">Compression</span>
           <span className="text-sm font-medium text-gray-900">{storageData.compressionRatio}</span>
@@ -163,5 +163,5 @@ export default function StorageWidget() {
         </button>
       </div>
     </div>
-  )
+  );
 }

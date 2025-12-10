@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, CameraIcon, LogOut, Wifi, WifiOff } from "lucide-react";
+import { Camera, LogOut, Wifi, WifiOff } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -24,9 +24,9 @@ import {
 } from "../ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { useRouter } from "next/navigation";
-import { useCameras } from "@/hooks/useNxAPI";
-import Image from "next/image";
 import LogoImage from "@/images/image.png";
+import { useCameras } from "@/hooks/useNxAPI-camera";
+import Image from "next/image";
 
 export default function AppSidebar() {
   const { cameras, error, loading, refetch } = useCameras();

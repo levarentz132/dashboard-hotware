@@ -1,7 +1,7 @@
 "use client";
 
+import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { Server, Wifi, Database, Cpu, AlertCircle } from "lucide-react";
-import { useSystemInfo } from "@/hooks/useNxAPI";
 
 export default function SystemStatusWidget() {
   const { systemInfo, connected, loading, error } = useSystemInfo();

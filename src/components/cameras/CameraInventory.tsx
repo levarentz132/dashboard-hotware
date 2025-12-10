@@ -16,9 +16,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useCameras, useSystemInfo, useServers, useDeviceType } from "@/hooks/useNxAPI";
 import { nxAPI } from "@/lib/nxapi";
 import { Button } from "../ui/button";
+import { useSystemInfo } from "@/hooks/useNxAPI-system";
+import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
+import { useServers } from "@/hooks/useNxAPI-server";
 
 interface CameraDevice {
   id: string;

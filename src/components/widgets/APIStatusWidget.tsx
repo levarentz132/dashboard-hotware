@@ -1,26 +1,23 @@
-'use client'
+"use client";
 
-import { useSystemInfo, useRealTimeUpdates } from '@/hooks/useNxAPI'
-import { Wifi, WifiOff, Server, Clock, RefreshCw } from 'lucide-react'
+import { useRealTimeUpdates } from "@/hooks/useNxAPI";
+import { useSystemInfo } from "@/hooks/useNxAPI-system";
+import { Wifi, WifiOff, Server, Clock, RefreshCw } from "lucide-react";
 
 export default function APIStatusWidget() {
-  const { systemInfo, connected, loading, testConnection } = useSystemInfo()
-  const { isConnected: realtimeConnected, lastUpdate } = useRealTimeUpdates()
+  const { systemInfo, connected, loading, testConnection } = useSystemInfo();
+  const { isConnected: realtimeConnected, lastUpdate } = useRealTimeUpdates();
 
   const handleTestConnection = async () => {
-    await testConnection()
-  }
+    await testConnection();
+  };
 
   return (
     <div className="bg-white rounded-lg p-4 sm:p-6 shadow-sm border border-gray-100 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3 sm:mb-4">
         <h3 className="text-base sm:text-lg font-semibold text-gray-900">API Status</h3>
-        <button
-          onClick={handleTestConnection}
-          disabled={loading}
-          className="p-1 text-gray-500 hover:text-gray-700"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        <button onClick={handleTestConnection} disabled={loading} className="p-1 text-gray-500 hover:text-gray-700">
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
@@ -28,19 +25,15 @@ export default function APIStatusWidget() {
         {/* Nx Witness Connection */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            {connected ? (
-              <Wifi className="w-4 h-4 text-green-600" />
-            ) : (
-              <WifiOff className="w-4 h-4 text-red-600" />
-            )}
+            {connected ? <Wifi className="w-4 h-4 text-green-600" /> : <WifiOff className="w-4 h-4 text-red-600" />}
             <span className="text-sm text-gray-700">Nx Witness API</span>
           </div>
-          <span className={`text-xs px-2 py-1 rounded-full ${
-            connected 
-              ? 'bg-green-100 text-green-800' 
-              : 'bg-red-100 text-red-800'
-          }`}>
-            {connected ? 'Connected' : 'Disconnected'}
+          <span
+            className={`text-xs px-2 py-1 rounded-full ${
+              connected ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+            }`}
+          >
+            {connected ? "Connected" : "Disconnected"}
           </span>
         </div>
 
@@ -60,14 +53,12 @@ export default function APIStatusWidget() {
         {/* Real-time Updates */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <div className={`w-3 h-3 rounded-full ${
-              realtimeConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
-            }`}></div>
+            <div
+              className={`w-3 h-3 rounded-full ${realtimeConnected ? "bg-green-500 animate-pulse" : "bg-gray-400"}`}
+            ></div>
             <span className="text-sm text-gray-700">Real-time</span>
           </div>
-          <span className="text-xs text-gray-600">
-            {realtimeConnected ? 'Active' : 'Inactive'}
-          </span>
+          <span className="text-xs text-gray-600">{realtimeConnected ? "Active" : "Inactive"}</span>
         </div>
 
         {/* Last Update */}
@@ -77,12 +68,10 @@ export default function APIStatusWidget() {
               <Clock className="w-4 h-4 text-gray-500" />
               <span className="text-sm text-gray-700">Last Update</span>
             </div>
-            <span className="text-xs text-gray-600">
-              {lastUpdate.toLocaleTimeString()}
-            </span>
+            <span className="text-xs text-gray-600">{lastUpdate.toLocaleTimeString()}</span>
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }

@@ -1,7 +1,7 @@
 "use client";
 
+import { useCameras } from "@/hooks/useNxAPI-camera";
 import { Camera, Wifi, WifiOff, AlertCircle } from "lucide-react";
-import { useCameras } from "@/hooks/useNxAPI";
 import Link from "next/link";
 
 export default function CameraStatusGrid() {
