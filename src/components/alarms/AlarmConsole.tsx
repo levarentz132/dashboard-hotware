@@ -2,7 +2,8 @@
 
 import { AlertTriangle, Bell, Filter, Search, MapPin, Camera, Clock, X, Check, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import { useAlarms, useEvents, useCameras } from "@/hooks/useNxAPI";
+import { useAlarms, useEvents } from "@/hooks/useNxAPI";
+import { useCameras } from "@/hooks/useNxAPI-camera";
 
 export default function AlarmConsole() {
   const [filterStatus, setFilterStatus] = useState("all");
