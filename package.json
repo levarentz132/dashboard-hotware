@@ -33,6 +33,7 @@
     "framer-motion": "^10.16.4",
     "hls.js": "^1.6.15",
     "lucide-react": "^0.294.0",
+    "mysql2": "^3.15.3",
     "next": "^15.5.6",
     "postcss": "^8",
     "react": "^18",
