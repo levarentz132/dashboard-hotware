@@ -12,17 +12,27 @@ export async function GET(request: NextRequest) {
   try {
     const cloudUrl = `https://${systemId}.relay.vmsproxy.com/rest/v3/devices`;
 
-    // Forward cookies from the request
+    // Get the system-specific token from cookie
+    const systemToken = request.cookies.get(`nx-cloud-${systemId}`)?.value;
+
+    // Forward all cookies from the request
     const cookies = request.headers.get("cookie") || "";
+
+    // Build headers with authorization if we have a token
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Cookie: cookies,
+    };
+
+    // Add bearer token if available
+    if (systemToken) {
+      headers["Authorization"] = `Bearer ${systemToken}`;
+    }
 
     const response = await fetch(cloudUrl, {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Cookie: cookies,
-      },
-      // Don't follow redirects, let us handle auth errors
+      headers,
       redirect: "manual",
     });
 

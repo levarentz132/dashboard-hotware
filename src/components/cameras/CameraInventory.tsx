@@ -18,6 +18,10 @@ import {
   ChevronRight,
   Filter,
   MapPin,
+  LogIn,
+  Eye,
+  EyeOff,
+  X,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
@@ -25,6 +29,7 @@ import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { nxAPI } from "@/lib/nxapi";
 import { Button } from "../ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
 interface CloudSystem {
   id: string;
@@ -57,6 +62,15 @@ interface CamerasBySystem {
   accessRole: string;
   cameras: CloudCamera[];
   expanded: boolean;
+}
+
+interface SystemCredentials {
+  [systemId: string]: {
+    username: string;
+    password: string;
+    token?: string;
+    loggedIn: boolean;
+  };
 }
 
 interface CameraDevice {
@@ -95,6 +109,13 @@ export default function CameraInventory() {
   const [camerasBySystem, setCamerasBySystem] = useState<CamerasBySystem[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(false);
   const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
+
+  // System login state
+  const [systemCredentials, setSystemCredentials] = useState<SystemCredentials>({});
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
+  const [loggingIn, setLoggingIn] = useState<string | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
@@ -210,6 +231,96 @@ export default function CameraInventory() {
       }
       return newSet;
     });
+  };
+
+  // Login to a specific cloud system
+  const handleSystemLogin = async (systemId: string, systemName: string) => {
+    if (!loginForm.username || !loginForm.password) {
+      setLoginError("Username and password are required");
+      return;
+    }
+
+    setLoggingIn(systemId);
+    setLoginError(null);
+
+    try {
+      const response = await fetch("/api/cloud/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          systemId,
+          username: loginForm.username,
+          password: loginForm.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setLoginError(data.error || "Login failed");
+        return;
+      }
+
+      // Store credentials in state
+      setSystemCredentials((prev) => ({
+        ...prev,
+        [systemId]: {
+          username: loginForm.username,
+          password: loginForm.password,
+          token: data.token,
+          loggedIn: true,
+        },
+      }));
+
+      // Reset form
+      setLoginForm({ username: "", password: "" });
+      setShowPassword(false);
+
+      // Refresh cameras for this system
+      const system = camerasBySystem.find((s) => s.systemId === systemId);
+      if (system) {
+        const cameras = await fetchCloudCameras({
+          id: systemId,
+          name: systemName,
+          stateOfHealth: system.stateOfHealth,
+          accessRole: system.accessRole,
+        });
+
+        setCamerasBySystem((prev) => prev.map((s) => (s.systemId === systemId ? { ...s, cameras } : s)));
+      }
+    } catch (err) {
+      console.error(`Login error for ${systemName}:`, err);
+      setLoginError("Connection error. Please try again.");
+    } finally {
+      setLoggingIn(null);
+    }
+  };
+
+  // Logout from a specific cloud system
+  const handleSystemLogout = async (systemId: string) => {
+    try {
+      await fetch(`/api/cloud/login?systemId=${systemId}`, {
+        method: "DELETE",
+      });
+
+      setSystemCredentials((prev) => {
+        const newCreds = { ...prev };
+        delete newCreds[systemId];
+        return newCreds;
+      });
+
+      // Clear cameras for this system
+      setCamerasBySystem((prev) => prev.map((s) => (s.systemId === systemId ? { ...s, cameras: [] } : s)));
+    } catch (err) {
+      console.error(`Logout error:`, err);
+    }
+  };
+
+  // Check if logged into a system
+  const isLoggedIn = (systemId: string) => {
+    return systemCredentials[systemId]?.loggedIn === true;
   };
 
   // Initial cloud fetch
@@ -1013,6 +1124,7 @@ export default function CameraInventory() {
                 {camerasBySystem.map((system) => {
                   const isExpanded = expandedSystems.has(system.systemId);
                   const isOnline = system.stateOfHealth === "online";
+                  const loggedIn = isLoggedIn(system.systemId);
                   const filteredSystemCameras = system.cameras.filter(
                     (cam) =>
                       cam.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1028,12 +1140,12 @@ export default function CameraInventory() {
                     >
                       {/* System Header */}
                       <div
-                        className={`flex items-center justify-between p-4 cursor-pointer ${
-                          isOnline ? "bg-green-50 hover:bg-green-100" : "bg-gray-50 hover:bg-gray-100"
-                        }`}
-                        onClick={() => toggleSystemExpansion(system.systemId)}
+                        className={`flex items-center justify-between p-4 ${isOnline ? "bg-green-50" : "bg-gray-50"}`}
                       >
-                        <div className="flex items-center space-x-3">
+                        <div
+                          className="flex items-center space-x-3 cursor-pointer flex-1"
+                          onClick={() => toggleSystemExpansion(system.systemId)}
+                        >
                           {isExpanded ? (
                             <ChevronDown className="w-5 h-5 text-gray-500" />
                           ) : (
@@ -1056,11 +1168,123 @@ export default function CameraInventory() {
                                   {system.accessRole}
                                 </span>
                               )}
+                              {loggedIn && (
+                                <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">
+                                  Logged In
+                                </span>
+                              )}
                             </p>
                           </div>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <span className="text-sm text-gray-500">{filteredSystemCameras.length} shown</span>
+                          <span className="text-sm text-gray-500 mr-2">{filteredSystemCameras.length} shown</span>
+
+                          {/* Login/Logout Button with Popover */}
+                          {isOnline && (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className={`${
+                                    loggedIn ? "text-red-600 hover:bg-red-50" : "text-blue-600 hover:bg-blue-50"
+                                  }`}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <LogIn className="w-4 h-4 mr-1" />
+                                  {loggedIn ? "Logout" : "Login"}
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80" align="end">
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="font-semibold text-gray-900">
+                                      {loggedIn ? "Logout from" : "Login to"} {system.systemName}
+                                    </h4>
+                                  </div>
+
+                                  {loggedIn ? (
+                                    <div className="space-y-3">
+                                      <p className="text-sm text-gray-600">
+                                        You are logged in as{" "}
+                                        <span className="font-medium">
+                                          {systemCredentials[system.systemId]?.username}
+                                        </span>
+                                      </p>
+                                      <Button
+                                        variant="destructive"
+                                        className="w-full"
+                                        onClick={() => handleSystemLogout(system.systemId)}
+                                      >
+                                        <X className="w-4 h-4 mr-2" />
+                                        Logout
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-3">
+                                      <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                        <input
+                                          type="text"
+                                          value={
+                                            loggingIn === system.systemId ? loginForm.username : loginForm.username
+                                          }
+                                          onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                          placeholder="admin"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                        <div className="relative">
+                                          <input
+                                            type={showPassword ? "text" : "password"}
+                                            value={loginForm.password}
+                                            onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
+                                            placeholder="••••••••"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => setShowPassword(!showPassword)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                                          >
+                                            {showPassword ? (
+                                              <EyeOff className="w-4 h-4" />
+                                            ) : (
+                                              <Eye className="w-4 h-4" />
+                                            )}
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {loginError && loggingIn === system.systemId && (
+                                        <div className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</div>
+                                      )}
+
+                                      <Button
+                                        className="w-full"
+                                        onClick={() => handleSystemLogin(system.systemId, system.systemName)}
+                                        disabled={loggingIn === system.systemId}
+                                      >
+                                        {loggingIn === system.systemId ? (
+                                          <>
+                                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                            Logging in...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <LogIn className="w-4 h-4 mr-2" />
+                                            Login
+                                          </>
+                                        )}
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
                         </div>
                       </div>
 
