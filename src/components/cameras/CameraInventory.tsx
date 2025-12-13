@@ -133,6 +133,14 @@ export default function CameraInventory() {
   const [viewMode, setViewMode] = useState<"grid" | "list" | "cloud">("cloud");
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Filter state
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterVendor, setFilterVendor] = useState<string>("all");
+  const [filterProvince, setFilterProvince] = useState<string>("all");
+  const [filterDistrict, setFilterDistrict] = useState<string>("all");
+  const [filterVillage, setFilterVillage] = useState<string>("all");
+
   // API hooks
   const { cameras, loading, error, refetch } = useCameras();
   const { connected, testConnection } = useSystemInfo();
@@ -801,19 +809,100 @@ export default function CameraInventory() {
     );
   };
 
-  const filteredCameras = displayCameras.filter(
-    (camera) =>
+  // Helper to search in location data
+  const searchInLocation = (cameraName: string, term: string): boolean => {
+    const loc = cameraLocations[cameraName];
+    if (!loc) return false;
+    const lowerTerm = term.toLowerCase();
+    return (
+      loc.detail_address?.toLowerCase().includes(lowerTerm) ||
+      false ||
+      loc.village_name?.toLowerCase().includes(lowerTerm) ||
+      false ||
+      loc.district_name?.toLowerCase().includes(lowerTerm) ||
+      false ||
+      loc.regency_name?.toLowerCase().includes(lowerTerm) ||
+      false ||
+      loc.province_name?.toLowerCase().includes(lowerTerm) ||
+      false
+    );
+  };
+
+  // Get unique vendors for filter
+  const uniqueVendors = Array.from(new Set(displayCameras.map((c) => c.vendor).filter(Boolean))).sort() as string[];
+
+  // Get unique provinces from camera locations
+  const uniqueProvinces = Array.from(
+    new Set(
+      Object.values(cameraLocations)
+        .map((loc) => loc?.province_name)
+        .filter(Boolean)
+    )
+  ).sort() as string[];
+
+  // Get unique districts (kecamatan) - filtered by selected province
+  const uniqueDistricts = Array.from(
+    new Set(
+      Object.values(cameraLocations)
+        .filter((loc) => filterProvince === "all" || loc?.province_name === filterProvince)
+        .map((loc) => loc?.district_name)
+        .filter(Boolean)
+    )
+  ).sort() as string[];
+
+  // Get unique villages (kelurahan) - filtered by selected district
+  const uniqueVillages = Array.from(
+    new Set(
+      Object.values(cameraLocations)
+        .filter(
+          (loc) =>
+            (filterProvince === "all" || loc?.province_name === filterProvince) &&
+            (filterDistrict === "all" || loc?.district_name === filterDistrict)
+        )
+        .map((loc) => loc?.village_name)
+        .filter(Boolean)
+    )
+  ).sort() as string[];
+
+  const filteredCameras = displayCameras.filter((camera) => {
+    // Search filter
+    const matchesSearch =
+      !searchTerm ||
       camera.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (camera.location || camera.ip || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      camera.id?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      camera.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      camera.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      camera.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      searchInLocation(camera.name, searchTerm);
+
+    // Status filter
+    const matchesStatus = filterStatus === "all" || camera.status?.toLowerCase() === filterStatus.toLowerCase();
+
+    // Vendor filter
+    const matchesVendor = filterVendor === "all" || camera.vendor?.toLowerCase() === filterVendor.toLowerCase();
+
+    // Province filter
+    const matchesProvince = filterProvince === "all" || cameraLocations[camera.name]?.province_name === filterProvince;
+
+    // District filter
+    const matchesDistrict = filterDistrict === "all" || cameraLocations[camera.name]?.district_name === filterDistrict;
+
+    // Village filter
+    const matchesVillage = filterVillage === "all" || cameraLocations[camera.name]?.village_name === filterVillage;
+
+    return matchesSearch && matchesStatus && matchesVendor && matchesProvince && matchesDistrict && matchesVillage;
+  });
 
   // Calculate stats
   const totalCameras = displayCameras.length;
   const onlineCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "online").length;
-  const offlineCameras = totalCameras - onlineCameras;
-  const recordingCameras = displayCameras.filter(
-    (c) => c.status?.toLowerCase() === "recording" || c.status?.toLowerCase() === "online"
+  const offlineCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "offline").length;
+  const recordingCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "recording").length;
+  const unauthorizedCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "unauthorized").length;
+  const notDefinedCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "notdefined").length;
+  const incompatibleCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "incompatible").length;
+  const mismatchedCertCameras = displayCameras.filter(
+    (c) => c.status?.toLowerCase() === "mismatchedcertificate"
   ).length;
 
   // Handle Edit Camera
@@ -1721,35 +1810,213 @@ export default function CameraInventory() {
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           <input
             type="text"
-            placeholder="Search cameras..."
+            placeholder="Search cameras, location, vendor..."
             className="pl-10 pr-4 py-2 w-full border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <button className="flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50">
-          <Filter className="w-4 h-4" />
-          <span>Filters</span>
-        </button>
+        <Popover open={showFilters} onOpenChange={setShowFilters}>
+          <PopoverTrigger asChild>
+            <button
+              className={`flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 ${
+                filterStatus !== "all" ||
+                filterVendor !== "all" ||
+                filterProvince !== "all" ||
+                filterDistrict !== "all" ||
+                filterVillage !== "all"
+                  ? "border-blue-500 bg-blue-50 text-blue-700"
+                  : ""
+              }`}
+            >
+              <Filter className="w-4 h-4" />
+              <span>Filters</span>
+              {(filterStatus !== "all" ||
+                filterVendor !== "all" ||
+                filterProvince !== "all" ||
+                filterDistrict !== "all" ||
+                filterVillage !== "all") && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
+                  {
+                    [
+                      filterStatus !== "all",
+                      filterVendor !== "all",
+                      filterProvince !== "all",
+                      filterDistrict !== "all",
+                      filterVillage !== "all",
+                    ].filter(Boolean).length
+                  }
+                </span>
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-72" align="end">
+            <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+              <div className="flex items-center justify-between sticky top-0 bg-white pb-2">
+                <h4 className="font-semibold text-gray-900">Filters</h4>
+                {(filterStatus !== "all" ||
+                  filterVendor !== "all" ||
+                  filterProvince !== "all" ||
+                  filterDistrict !== "all" ||
+                  filterVillage !== "all") && (
+                  <button
+                    onClick={() => {
+                      setFilterStatus("all");
+                      setFilterVendor("all");
+                      setFilterProvince("all");
+                      setFilterDistrict("all");
+                      setFilterVillage("all");
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">All Status</option>
+                  <option value="online">Online</option>
+                  <option value="offline">Offline</option>
+                  <option value="recording">Recording</option>
+                  <option value="unauthorized">Unauthorized</option>
+                </select>
+              </div>
+
+              {/* Vendor Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
+                <select
+                  value={filterVendor}
+                  onChange={(e) => setFilterVendor(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">All Vendors</option>
+                  {uniqueVendors.map((vendor) => (
+                    <option key={vendor} value={vendor.toLowerCase()}>
+                      {vendor}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Province Filter */}
+              {uniqueProvinces.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Provinsi</label>
+                  <select
+                    value={filterProvince}
+                    onChange={(e) => {
+                      setFilterProvince(e.target.value);
+                      setFilterDistrict("all");
+                      setFilterVillage("all");
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">Semua Provinsi</option>
+                    {uniqueProvinces.map((province) => (
+                      <option key={province} value={province}>
+                        {province}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* District Filter */}
+              {uniqueDistricts.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Kecamatan</label>
+                  <select
+                    value={filterDistrict}
+                    onChange={(e) => {
+                      setFilterDistrict(e.target.value);
+                      setFilterVillage("all");
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">Semua Kecamatan</option>
+                    {uniqueDistricts.map((district) => (
+                      <option key={district} value={district}>
+                        {district}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Village Filter */}
+              {uniqueVillages.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Kelurahan</label>
+                  <select
+                    value={filterVillage}
+                    onChange={(e) => setFilterVillage(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">Semua Kelurahan</option>
+                    {uniqueVillages.map((village) => (
+                      <option key={village} value={village}>
+                        {village}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                onClick={() => setShowFilters(false)}
+                className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 sticky bottom-0"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
 
       {/* Stats Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <div className="bg-white p-3 md:p-4 rounded-lg border">
-          <div className="text-xl md:text-2xl font-bold text-gray-900">{totalCameras}</div>
-          <div className="text-xs md:text-sm text-gray-600">Total Cameras</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
+        <div className="bg-white p-2 md:p-3 rounded-lg border">
+          <div className="text-lg md:text-xl font-bold text-gray-900">{totalCameras}</div>
+          <div className="text-xs text-gray-600">Total</div>
         </div>
-        <div className="bg-white p-3 md:p-4 rounded-lg border">
-          <div className="text-xl md:text-2xl font-bold text-green-600">{onlineCameras}</div>
-          <div className="text-xs md:text-sm text-gray-600">Online</div>
+        <div className="bg-white p-2 md:p-3 rounded-lg border border-green-200 bg-green-50">
+          <div className="text-lg md:text-xl font-bold text-green-600">{onlineCameras}</div>
+          <div className="text-xs text-gray-600">Online</div>
         </div>
-        <div className="bg-white p-3 md:p-4 rounded-lg border">
-          <div className="text-xl md:text-2xl font-bold text-red-600">{offlineCameras}</div>
-          <div className="text-xs md:text-sm text-gray-600">Offline</div>
+        <div className="bg-white p-2 md:p-3 rounded-lg border border-red-200 bg-red-50">
+          <div className="text-lg md:text-xl font-bold text-red-600">{offlineCameras}</div>
+          <div className="text-xs text-gray-600">Offline</div>
         </div>
-        <div className="bg-white p-3 md:p-4 rounded-lg border">
-          <div className="text-xl md:text-2xl font-bold text-blue-600">{recordingCameras}</div>
-          <div className="text-xs md:text-sm text-gray-600">Recording</div>
+        <div className="bg-white p-2 md:p-3 rounded-lg border border-blue-200 bg-blue-50">
+          <div className="text-lg md:text-xl font-bold text-blue-600">{recordingCameras}</div>
+          <div className="text-xs text-gray-600">Recording</div>
+        </div>
+        <div className="bg-white p-2 md:p-3 rounded-lg border border-yellow-200 bg-yellow-50">
+          <div className="text-lg md:text-xl font-bold text-yellow-600">{unauthorizedCameras}</div>
+          <div className="text-xs text-gray-600">Unauthorized</div>
+        </div>
+        <div className="bg-white p-2 md:p-3 rounded-lg border border-gray-200 bg-gray-50">
+          <div className="text-lg md:text-xl font-bold text-gray-500">{notDefinedCameras}</div>
+          <div className="text-xs text-gray-600">NotDefined</div>
+        </div>
+        <div className="bg-white p-2 md:p-3 rounded-lg border border-orange-200 bg-orange-50">
+          <div className="text-lg md:text-xl font-bold text-orange-600">{incompatibleCameras}</div>
+          <div className="text-xs text-gray-600">Incompatible</div>
+        </div>
+        <div className="bg-white p-2 md:p-3 rounded-lg border border-purple-200 bg-purple-50">
+          <div className="text-lg md:text-xl font-bold text-purple-600">{mismatchedCertCameras}</div>
+          <div className="text-xs text-gray-600 truncate" title="Mismatched Certificate">
+            Mismatched Cert
+          </div>
         </div>
       </div>
 
@@ -1795,11 +2062,45 @@ export default function CameraInventory() {
                   const isExpanded = expandedSystems.has(system.systemId);
                   const isOnline = system.stateOfHealth === "online";
                   const loggedIn = isLoggedIn(system.systemId);
-                  const filteredSystemCameras = system.cameras.filter(
-                    (cam) =>
+                  const filteredSystemCameras = system.cameras.filter((cam) => {
+                    // Search filter
+                    const matchesSearch =
+                      !searchTerm ||
                       cam.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      cam.id?.toLowerCase().includes(searchTerm.toLowerCase())
-                  );
+                      cam.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      cam.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      cam.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      searchInLocation(cam.name, searchTerm);
+
+                    // Status filter
+                    const matchesStatus =
+                      filterStatus === "all" || cam.status?.toLowerCase() === filterStatus.toLowerCase();
+
+                    // Vendor filter
+                    const matchesVendor =
+                      filterVendor === "all" || cam.vendor?.toLowerCase() === filterVendor.toLowerCase();
+
+                    // Province filter
+                    const matchesProvince =
+                      filterProvince === "all" || cameraLocations[cam.name]?.province_name === filterProvince;
+
+                    // District filter
+                    const matchesDistrict =
+                      filterDistrict === "all" || cameraLocations[cam.name]?.district_name === filterDistrict;
+
+                    // Village filter
+                    const matchesVillage =
+                      filterVillage === "all" || cameraLocations[cam.name]?.village_name === filterVillage;
+
+                    return (
+                      matchesSearch &&
+                      matchesStatus &&
+                      matchesVendor &&
+                      matchesProvince &&
+                      matchesDistrict &&
+                      matchesVillage
+                    );
+                  });
 
                   return (
                     <div
