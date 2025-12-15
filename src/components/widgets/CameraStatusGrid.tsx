@@ -6,7 +6,7 @@ import Link from "next/link";
 
 export default function CameraStatusGrid() {
   const { cameras, loading, error } = useCameras();
-  console.log("Caameras Farrel:", cameras);
+  // Debug: cameras loaded
 
   if (loading) {
     return (

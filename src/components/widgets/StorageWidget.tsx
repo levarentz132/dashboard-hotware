@@ -108,13 +108,13 @@ export default function StorageWidget() {
               stroke="currentColor"
               strokeWidth="8"
               fill="transparent"
-              strokeDasharray={`${storageData.usagePercentage * 2.827}, 283`}
-              className={getUsageColor(storageData.usagePercentage)}
+              strokeDasharray={`${(storageData.usagePercentage || 0) * 2.827}, 283`}
+              className={getUsageColor(storageData.usagePercentage || 0)}
               strokeLinecap="round"
             />
           </svg>
           <div className="absolute inset-0 flex items-center justify-center flex-col">
-            <div className="text-2xl font-bold text-gray-900">{storageData.usagePercentage}%</div>
+            <div className="text-2xl font-bold text-gray-900">{storageData.usagePercentage || 0}%</div>
             <div className="text-xs text-gray-600">Used</div>
           </div>
         </div>

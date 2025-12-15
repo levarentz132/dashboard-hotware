@@ -43,6 +43,32 @@ export interface NxEvent {
   metadata?: Record<string, any>;
 }
 
+// Metrics alarm item from /rest/v3/system/metrics/alarms
+export interface NxMetricsAlarm {
+  level?: string; // "warning", "error", "critical"
+  text?: string;
+  message?: string;
+  caption?: string;
+  timestamp?: string;
+  deviceId?: string;
+  serverId?: string;
+  [key: string]: any; // Allow additional fields
+}
+
+// Response structure for metrics alarms endpoint
+export interface NxMetricsAlarmsResponse {
+  servers: {
+    [serverId: string]: {
+      info?: {
+        [alarmType: string]: NxMetricsAlarm[];
+      };
+      load?: {
+        [alarmType: string]: NxMetricsAlarm[];
+      };
+    };
+  };
+}
+
 export interface NxSystemInfo {
   name: string;
   customization: string;
@@ -108,7 +134,7 @@ class NxWitnessAPI {
       if (response.ok) {
         // Nx Witness sets session cookie automatically
         // No need to handle tokens manually
-        console.log("[nxAPI] Login successful - session cookie set");
+        // Login successful
         return true;
       } else {
         console.error("[nxAPI] Login failed:", response.status, response.statusText);
@@ -144,7 +170,7 @@ class NxWitnessAPI {
 
       // Accept any non-server-error response (including 401 Unauthorized which is expected)
       if (response.status < 500 || response.status === 401 || response.status === 403) {
-        console.log("[nxAPI] Server is available, status:", response.status);
+        // Server available
         return true;
       }
 
@@ -168,8 +194,6 @@ class NxWitnessAPI {
       },
     };
 
-    console.log(`[apiRequest] ${endpoint}: ${config.method || "GET"} ${url}`);
-
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -181,11 +205,9 @@ class NxWitnessAPI {
 
       clearTimeout(timeoutId);
 
-      console.log(`[apiRequest] ${endpoint}: ${response.status} ${response.statusText}`);
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[apiRequest] ${endpoint}: Error:`, errorText);
+        console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
         throw new Error(`HTTP_${response.status}: ${errorText}`);
       }
 
@@ -496,6 +518,77 @@ class NxWitnessAPI {
     }
   }
 
+  // Get metrics alarms with advanced filtering support
+  async getMetricsAlarms(options?: {
+    _local?: boolean; // Only get from local server
+    _filter?: Record<string, any>; // Filter by object fields
+    _with?: string; // Comma-separated field names to include
+  }): Promise<NxMetricsAlarmsResponse | null> {
+    try {
+      let endpoint = "/system/metrics/alarms";
+      const params = new URLSearchParams();
+
+      if (options) {
+        if (options._local) params.append("_local", "true");
+        if (options._with) params.append("_with", options._with);
+        if (options._filter) {
+          // Add filter parameters
+          Object.entries(options._filter).forEach(([key, value]) => {
+            params.append(`_filter[${key}]`, String(value));
+          });
+        }
+      }
+
+      const queryString = params.toString();
+      if (queryString) {
+        endpoint += `?${queryString}`;
+      }
+
+      console.log("[getMetricsAlarms] Fetching from:", endpoint);
+      const data = await this.apiRequest<NxMetricsAlarmsResponse>(endpoint);
+      console.log("[getMetricsAlarms] Response:", data);
+
+      return data;
+    } catch (error) {
+      console.error("[getMetricsAlarms] Failed to fetch:", error);
+      return null;
+    }
+  }
+
+  // Parse metrics alarms response into simplified alarm events
+  parseMetricsAlarms(response: NxMetricsAlarmsResponse | null): NxEvent[] {
+    if (!response || !response.servers) return [];
+
+    const alarms: NxEvent[] = [];
+
+    for (const [serverId, serverObj] of Object.entries(response.servers)) {
+      const info = serverObj?.info || {};
+      for (const [alarmType, alarmItems] of Object.entries(info)) {
+        if (!Array.isArray(alarmItems)) continue;
+
+        for (const item of alarmItems) {
+          const id = `${serverId}-${alarmType}-${item.deviceId || Math.random().toString(36).slice(2, 9)}`;
+          const timestamp = item.timestamp || new Date().toISOString();
+
+          alarms.push({
+            id,
+            timestamp,
+            cameraId: item.deviceId || "",
+            type: alarmType,
+            description: item.text || item.message || item.caption || alarmType,
+            metadata: {
+              level: item.level || "info",
+              serverId,
+              ...item,
+            },
+          });
+        }
+      }
+    }
+
+    return alarms;
+  }
+
   // System methods
   async getSystemInfo(): Promise<NxSystemInfo | null> {
     try {
@@ -711,7 +804,16 @@ class NxWitnessAPI {
       const servers = await this.getServers();
       console.log("[getAllStorageData] Servers:", servers);
 
-      const storageData = {
+      const storageData: {
+        servers: Array<{
+          serverId: string;
+          serverName: string;
+          storages: any[];
+        }>;
+        totalCapacity: number;
+        usedSpace: number;
+        freeSpace: number;
+      } = {
         servers: [],
         totalCapacity: 0,
         usedSpace: 0,

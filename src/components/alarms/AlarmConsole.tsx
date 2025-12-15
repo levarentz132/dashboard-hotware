@@ -1,345 +1,591 @@
 "use client";
 
-import { AlertTriangle, Bell, Filter, Search, MapPin, Camera, Clock, X, Check, RefreshCw } from "lucide-react";
-import { useState } from "react";
-import { useAlarms, useEvents } from "@/hooks/useNxAPI";
-import { useCameras } from "@/hooks/useNxAPI-camera";
+import { AlertTriangle, Bell, RefreshCw, Server, Settings, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import nxAPI, { NxMetricsAlarmsResponse } from "@/lib/nxapi";
+
+// Interface for cloud system
+interface CloudSystem {
+  id: string;
+  name: string;
+  stateOfHealth: string;
+  accessRole: string;
+  version?: string;
+}
+
+// Interface for server alarms
+interface ServerAlarms {
+  serverId: string;
+  serverName: string;
+  alarms: any[];
+  rawResponse: NxMetricsAlarmsResponse | null;
+  loading: boolean;
+  error: string | null;
+  username: string;
+  password: string;
+  configured: boolean;
+  lastUpdated: string | null;
+  sessionToken: string | null;
+}
 
 export default function AlarmConsole() {
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterSeverity, setFilterSeverity] = useState("all");
+  console.log("🚨 ALARM CONSOLE COMPONENT RENDERED 🚨");
+  
+  const [availableSystems, setAvailableSystems] = useState<CloudSystem[]>([]);
+  const [serverAlarms, setServerAlarms] = useState<ServerAlarms[]>([]);
+  const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set());
 
-  // API hooks
-  const { alarms: apiAlarms, loading: alarmsLoading, refetch: refetchAlarms } = useAlarms();
-  const { events, loading: eventsLoading, refetch: refetchEvents } = useEvents();
-  const { cameras } = useCameras();
+  // Fetch available cloud systems
+  const fetchCloudSystems = useCallback(async () => {
+    try {
+      // Get system info to retrieve cloud ID
+      const systemInfo = await nxAPI.getSystemInfo();
+      
+      if (!systemInfo) {
+        console.error("Failed to get system info");
+        return;
+      }
+      
+      // Check if system has cloud ID
+      if (!systemInfo.cloudId) {
+        console.warn("System is not connected to cloud. Cloud ID not available.");
+        alert("This system is not connected to Nx Cloud. Cloud relay features will not work.");
+        return;
+      }
+      
+      // Create a single cloud system entry
+      const systems: CloudSystem[] = [{
+        id: systemInfo.cloudId,
+        name: systemInfo.name || 'Nx Witness System',
+        stateOfHealth: 'online',
+        accessRole: 'admin',
+        version: systemInfo.version || ''
+      }];
+      
+      console.log("✅ Cloud system loaded:", systems[0]);
+      
+      setAvailableSystems(systems);
+      
+      // Initialize server alarms state
+      const initialServerAlarms: ServerAlarms[] = systems.map((system: CloudSystem) => ({
+        serverId: system.id,
+        serverName: system.name,
+        alarms: [],
+        rawResponse: null,
+        loading: false,
+        error: null,
+        username: '',
+        password: '',
+        configured: false,
+        lastUpdated: null,
+        sessionToken: null
+      }));
+      setServerAlarms(initialServerAlarms);
+    } catch (error) {
+      console.error("Failed to fetch cloud systems:", error);
+    }
+  }, []);
 
-  // Process API alarms and events into unified format
-  const processedAlarms = [...apiAlarms, ...events].map((item) => {
-    // Find camera info
-    const camera = cameras.find((c) => c.id === item.cameraId);
-    const metaLevel = (item as any).metadata?.level || "";
+  // Login to cloud relay and get session token
+  const loginToCloudRelay = useCallback(async (cloudId: string, username: string, password: string): Promise<string | null> => {
+    try {
+      const loginUrl = `https://${cloudId}.relay.vmsproxy.com/rest/v3/login/sessions`;
+      
+      console.log(`[Login] Attempting to login to ${loginUrl}`);
+      
+      const response = await fetch(loginUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: username,
+          password: password,
+          setCookie: false
+        })
+      });
 
-    // Prefer metadata.level from metrics alarms when available, otherwise infer from type
-    const inferredSeverity = metaLevel
-      ? metaLevel === "warning"
-        ? "medium"
-        : metaLevel === "error" || metaLevel === "critical"
-        ? "critical"
-        : "low"
-      : item.type.toLowerCase().includes("offline")
-      ? "critical"
-      : item.type.toLowerCase().includes("motion")
-      ? "high"
-      : item.type.toLowerCase().includes("tamper")
-      ? "medium"
-      : "low";
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Login failed: HTTP ${response.status} - ${errorText}`);
+      }
 
-    return {
-      id: item.id,
-      type: item.type,
-      camera: camera?.name || `Camera ${item.cameraId}`,
-      cameraId: item.cameraId,
-      location: camera?.ip || "Unknown location",
-      severity: inferredSeverity,
-      timestamp: new Date(item.timestamp),
-      status: item.type.toLowerCase().includes("offline") ? "active" : "acknowledged",
-      description: item.description || (item as any).description || (item as any).metadata?.text || "",
-      screenshot: null,
-      assignedTo: null,
-    };
-  });
+      const data = await response.json();
+      console.log(`[Login] Success! Token obtained for ${cloudId}`);
+      console.log(`🎫 Token:`, data.token);
+      console.log(`🎫 Token length:`, data.token.length);
+      
+      return data.token;
+    } catch (error) {
+      console.error(`[Login] Failed for ${cloudId}:`, error);
+      throw error;
+    }
+  }, []);
 
-  // Use only processed alarms from server
-  const allAlarms = processedAlarms;
+  // Fetch alarms for a specific server using cloud relay
+  const fetchServerAlarms = useCallback(async (cloudId: string) => {
+    const server = serverAlarms.find(s => s.serverId === cloudId);
+    if (!server || !server.configured) {
+      console.warn(`Credentials not configured for server ${cloudId}`);
+      return;
+    }
+    
+    // Get or obtain token
+    let token = server.sessionToken;
+    if (!token) {
+      console.log(`[Fetch] No token found, logging in first...`);
+      try {
+        token = await loginToCloudRelay(cloudId, server.username, server.password);
+        if (!token) {
+          throw new Error('Failed to obtain session token');
+        }
+        // Store the token
+        setServerAlarms(prev => prev.map(s => 
+          s.serverId === cloudId ? { ...s, sessionToken: token } : s
+        ));
+      } catch (error) {
+        setServerAlarms(prev => prev.map(s => 
+          s.serverId === cloudId 
+            ? { ...s, loading: false, error: 'Login failed: ' + (error instanceof Error ? error.message : 'Unknown error') }
+            : s
+        ));
+        return;
+      }
+    }
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "critical":
-        return "bg-red-100 text-red-800 border-red-200";
-      case "high":
-        return "bg-orange-100 text-orange-800 border-orange-200";
-      case "medium":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      case "low":
-        return "bg-blue-100 text-blue-800 border-blue-200";
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-200";
+    setServerAlarms(prev => prev.map(s => 
+      s.serverId === cloudId 
+        ? { ...s, loading: true, error: null }
+        : s
+    ));
+
+    try {
+      // Call cloud relay endpoint with session token as Bearer token
+      const cloudRelayUrl = `https://${cloudId}.relay.vmsproxy.com/rest/v3/system/metrics/alarms`;
+      
+      console.log(`[Fetch] Requesting alarms from ${cloudRelayUrl}`);
+      console.log(`🎫 Using token:`, token);
+      
+      const response = await fetch(cloudRelayUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data: NxMetricsAlarmsResponse = await response.json();
+      const timestamp = new Date().toLocaleString();
+        
+      // Log the response to console for debugging
+      console.log(`[${timestamp}] ====== ALARM API RESPONSE ======`);
+      console.log(`Cloud ID: ${cloudId}`);
+      console.log(`URL: ${cloudRelayUrl}`);
+      console.log(`Full Response:`, JSON.stringify(data, null, 2));
+        
+      // Extract alarms from the nested structure
+      let allAlarms: any[] = [];
+      
+      console.log(`[${timestamp}] Checking data.servers:`, data.servers ? 'EXISTS' : 'MISSING');
+      
+      if (data.servers) {
+        const serverIds = Object.keys(data.servers);
+        console.log(`[${timestamp}] Found ${serverIds.length} server(s) in response:`, serverIds);
+        
+        serverIds.forEach(serverId => {
+          const serverData = data.servers[serverId];
+          console.log(`[${timestamp}] Processing server ${serverId}:`, serverData);
+          
+          // Check both 'info' and 'load' structures
+          const alarmSources = [];
+          if (serverData.info) {
+            console.log(`[${timestamp}]   - Found 'info' structure with keys:`, Object.keys(serverData.info));
+            alarmSources.push({ source: 'info', data: serverData.info });
+          }
+          if (serverData.load) {
+            console.log(`[${timestamp}]   - Found 'load' structure with keys:`, Object.keys(serverData.load));
+            alarmSources.push({ source: 'load', data: serverData.load });
+          }
+          
+          if (alarmSources.length === 0) {
+            console.log(`[${timestamp}]   - No 'info' or 'load' found for server ${serverId}`);
+          }
+          
+          alarmSources.forEach(({ source, data: alarmData }) => {
+            Object.keys(alarmData).forEach(alarmType => {
+              const alarmList = alarmData[alarmType];
+              console.log(`[${timestamp}]     - Checking ${source}.${alarmType}:`, Array.isArray(alarmList) ? `Array with ${alarmList.length} items` : typeof alarmList);
+              
+              if (Array.isArray(alarmList)) {
+                // Add metadata for display
+                const enrichedAlarms = alarmList.map(alarm => ({
+                  ...alarm,
+                  alarmType: alarmType,
+                  source: source,
+                  serverId: serverId
+                }));
+                console.log(`[${timestamp}]       - Added ${enrichedAlarms.length} alarm(s) from ${alarmType}`);
+                allAlarms = [...allAlarms, ...enrichedAlarms];
+              }
+            });
+          });
+        });
+      } else {
+        console.log(`[${timestamp}] ERROR: No 'servers' key in response!`);
+      }
+        
+        console.log(`[${timestamp}] Extracted ${allAlarms.length} alarm(s)`);
+        console.log(`=============================`);
+      
+      console.log(`[${timestamp}] Extracted ${allAlarms.length} alarm(s)`);
+      console.log(`=============================`);
+        
+      setServerAlarms(prev => prev.map(s => 
+        s.serverId === cloudId 
+          ? { 
+              ...s, 
+              alarms: allAlarms,
+              rawResponse: data,
+              loading: false,
+              error: null,
+              lastUpdated: timestamp
+            }
+          : s
+      ));
+    } catch (error) {
+      console.error(`Failed to fetch alarms for server ${cloudId}:`, error);
+      setServerAlarms(prev => prev.map(s => 
+        s.serverId === cloudId 
+          ? { 
+              ...s, 
+              loading: false,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            }
+          : s
+      ));
+    }
+  }, [serverAlarms, loginToCloudRelay]);
+
+  // Fetch all server alarms
+  const fetchAllServerAlarms = useCallback(() => {
+    serverAlarms.filter(s => s.configured).forEach(server => {
+      fetchServerAlarms(server.serverId);
+    });
+  }, [serverAlarms, fetchServerAlarms]);
+
+  // Handle credentials configuration for a specific server
+  const handleConfigureServer = async (serverId: string, username: string, password: string) => {
+    if (username && password) {
+      // First, login to get the session token
+      setServerAlarms(prev => prev.map(s => 
+        s.serverId === serverId 
+          ? { ...s, username, password, configured: true, loading: true }
+          : s
+      ));
+      
+      try {
+        const token = await loginToCloudRelay(serverId, username, password);
+        if (token) {
+          setServerAlarms(prev => prev.map(s => 
+            s.serverId === serverId 
+              ? { ...s, sessionToken: token }
+              : s
+          ));
+          // Now fetch alarms
+          setTimeout(() => fetchServerAlarms(serverId), 100);
+        }
+      } catch (error) {
+        setServerAlarms(prev => prev.map(s => 
+          s.serverId === serverId 
+            ? { ...s, loading: false, error: 'Login failed: ' + (error instanceof Error ? error.message : 'Unknown error'), configured: false }
+            : s
+        ));
+      }
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active":
-        return "bg-red-500";
-      case "acknowledged":
-        return "bg-yellow-500";
-      case "resolved":
-        return "bg-green-500";
-      default:
-        return "bg-gray-500";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "active":
-        return <Bell className="w-4 h-4 text-red-600" />;
-      case "acknowledged":
-        return <Clock className="w-4 h-4 text-yellow-600" />;
-      case "resolved":
-        return <Check className="w-4 h-4 text-green-600" />;
-      default:
-        return <AlertTriangle className="w-4 h-4 text-gray-600" />;
-    }
-  };
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
+  // Toggle server expansion
+  const toggleServerExpansion = (serverId: string) => {
+    setExpandedServers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(serverId)) {
+        newSet.delete(serverId);
+      } else {
+        newSet.add(serverId);
+      }
+      return newSet;
     });
   };
 
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
+  // Initial fetch
+  useEffect(() => {
+    console.log("🔄 AlarmConsole useEffect triggered - fetching cloud systems...");
+    fetchCloudSystems();
+  }, [fetchCloudSystems]);
 
-  const getTimeAgo = (date: Date) => {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
+  // Auto-refresh every 30 seconds for configured servers
+  useEffect(() => {
+    const configuredServers = serverAlarms.filter(s => s.configured);
+    if (configuredServers.length === 0) return;
 
-    if (minutes < 60) {
-      return `${minutes} min ago`;
-    } else if (hours < 24) {
-      return `${hours}h ago`;
-    } else {
-      return formatDate(date);
-    }
-  };
+    const interval = setInterval(() => {
+      fetchAllServerAlarms();
+    }, 30000);
 
-  const filteredAlarms = allAlarms.filter((alarm) => {
-    const statusMatch = filterStatus === "all" || alarm.status === filterStatus;
-    const severityMatch = filterSeverity === "all" || alarm.severity === filterSeverity;
-    return statusMatch && severityMatch;
-  });
+    return () => clearInterval(interval);
+  }, [serverAlarms, fetchAllServerAlarms]);
 
-  const activeAlarms = allAlarms.filter((alarm) => alarm.status === "active").length;
-  const acknowledgedAlarms = allAlarms.filter((alarm) => alarm.status === "acknowledged").length;
-  const resolvedAlarms = allAlarms.filter((alarm) => alarm.status === "resolved").length;
+  // Calculate total stats
+  const totalAlarms = serverAlarms.reduce((sum, server) => sum + server.alarms.length, 0);
+  const totalServers = availableSystems.length;
+  const configuredServers = serverAlarms.filter(s => s.configured).length;
+  const serversWithAlarms = serverAlarms.filter(s => s.alarms.length > 0).length;
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <div className="p-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Alarm Console</h1>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-            <span className="text-xs sm:text-sm text-gray-600">Real-time</span>
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Alarm Console</h1>
+            <p className="text-gray-500 mt-1">Cloud Relay - Per Server Alarm Monitoring</p>
           </div>
-          <button
-            onClick={() => {
-              refetchAlarms();
-              refetchEvents();
-            }}
-            disabled={alarmsLoading || eventsLoading}
-            className={`flex items-center space-x-1 sm:space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50 ${
-              alarmsLoading || eventsLoading ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-          >
-            <RefreshCw className={`w-4 h-4 ${alarmsLoading || eventsLoading ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-          <button className="flex items-center space-x-1 sm:space-x-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            <Bell className="w-4 h-4" />
-            <span className="hidden sm:inline">Configure Alerts</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <div className="bg-white p-4 md:p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <div className="w-3 h-3 bg-red-500 rounded-full flex-shrink-0"></div>
-            <div className="min-w-0">
-              <div className="text-xl md:text-2xl font-bold text-red-600">{activeAlarms}</div>
-              <div className="text-xs md:text-sm text-gray-600 truncate">Active Alarms</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-4 md:p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <div className="w-3 h-3 bg-yellow-500 rounded-full flex-shrink-0"></div>
-            <div className="min-w-0">
-              <div className="text-xl md:text-2xl font-bold text-yellow-600">{acknowledgedAlarms}</div>
-              <div className="text-xs md:text-sm text-gray-600 truncate">Acknowledged</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-4 md:p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0"></div>
-            <div className="min-w-0">
-              <div className="text-xl md:text-2xl font-bold text-green-600">{resolvedAlarms}</div>
-              <div className="text-xs md:text-sm text-gray-600 truncate">Resolved</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-4 md:p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <AlertTriangle className="w-5 h-5 md:w-6 md:h-6 text-gray-600 flex-shrink-0" />
-            <div className="min-w-0">
-              <div className="text-xl md:text-2xl font-bold text-gray-900">{allAlarms.length}</div>
-              <div className="text-xs md:text-sm text-gray-600 truncate">Total Today</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters and Search */}
-      <div className="bg-white p-3 md:p-4 rounded-lg border">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                type="text"
-                placeholder="Search alarms..."
-                className="w-full sm:w-auto pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <select
-                className="flex-1 sm:flex-none border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
+          <div className="flex gap-2">
+            {configuredServers > 0 && (
+              <button
+                onClick={fetchAllServerAlarms}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 transition-colors"
               >
-                <option value="all">All Status</option>
-                <option value="active">Active</option>
-                <option value="acknowledged">Acknowledged</option>
-                <option value="resolved">Resolved</option>
-              </select>
+                <RefreshCw className="w-4 h-4" />
+                Refresh All ({configuredServers})
+              </button>
+            )}
+          </div>
+        </div>
 
-              <select
-                className="flex-1 sm:flex-none border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                value={filterSeverity}
-                onChange={(e) => setFilterSeverity(e.target.value)}
-              >
-                <option value="all">All Severity</option>
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Total Servers</p>
+                <p className="text-2xl font-bold text-gray-900">{totalServers}</p>
+              </div>
+              <Server className="w-8 h-8 text-blue-500" />
             </div>
           </div>
 
-          <div className="flex items-center">
-            <button className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
-              <Filter className="w-4 h-4" />
-              <span>More Filters</span>
-            </button>
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Servers with Alarms</p>
+                <p className="text-2xl font-bold text-orange-600">{serversWithAlarms}</p>
+              </div>
+              <AlertTriangle className="w-8 h-8 text-orange-500" />
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Total Alarms</p>
+                <p className="text-2xl font-bold text-red-600">{totalAlarms}</p>
+              </div>
+              <Bell className="w-8 h-8 text-red-500" />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Alarms List */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="px-4 md:px-6 py-3 md:py-4 border-b">
-          <h3 className="text-base md:text-lg font-semibold text-gray-900">
-            Recent Alarms ({filteredAlarms.length})
-            {(alarmsLoading || eventsLoading) && <RefreshCw className="inline w-4 h-4 ml-2 animate-spin" />}
-          </h3>
-        </div>
-
-        <div className="divide-y divide-gray-200">
-          {filteredAlarms.map((alarm) => (
-            <div key={alarm.id} className="p-4 md:p-6 hover:bg-gray-50 transition-colors">
-              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  {/* Title Row */}
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    {getStatusIcon(alarm.status)}
-                    <span className="font-medium text-gray-900 text-sm md:text-base">{alarm.type}</span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium border ${getSeverityColor(
-                        alarm.severity
-                      )}`}
-                    >
-                      {alarm.severity}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <div className={`w-2 h-2 rounded-full ${getStatusColor(alarm.status)}`}></div>
-                      <span className="text-xs text-gray-500 capitalize">{alarm.status}</span>
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  <div className="text-sm text-gray-600 mb-3 line-clamp-2">{alarm.description}</div>
-
-                  {/* Meta Info */}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs md:text-sm text-gray-500">
-                    <div className="flex items-center space-x-1">
-                      <Camera className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" />
-                      <span className="truncate max-w-[150px] md:max-w-none">{alarm.camera}</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <MapPin className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" />
-                      <span className="truncate max-w-[100px] md:max-w-none">{alarm.location}</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <Clock className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" />
-                      <span>
-                        {formatTime(alarm.timestamp)} • {getTimeAgo(alarm.timestamp)}
-                      </span>
-                    </div>
-                    {alarm.assignedTo && <div className="text-blue-600">Assigned: {alarm.assignedTo}</div>}
+      {/* Server Alarms List */}
+      <div className="space-y-4">
+        {serverAlarms.map((server) => (
+          <div key={server.serverId} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            {/* Server Header */}
+            <div
+              className="p-4 bg-gray-50 border-b border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors"
+              onClick={() => toggleServerExpansion(server.serverId)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Server className="w-5 h-5 text-gray-600" />
+                  <div>
+                    <h3 className="font-semibold text-gray-900">{server.serverName}</h3>
+                    <p className="text-xs text-gray-500 font-mono">{server.serverId}</p>
                   </div>
                 </div>
-
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {alarm.status === "active" && (
-                    <>
-                      <button className="px-2 md:px-3 py-1 text-xs md:text-sm bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200">
-                        Acknowledge
-                      </button>
-                      <button className="px-2 md:px-3 py-1 text-xs md:text-sm bg-green-100 text-green-800 rounded hover:bg-green-200">
-                        Resolve
-                      </button>
-                    </>
+                <div className="flex items-center gap-4">
+                  {server.loading && (
+                    <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
                   )}
-                  {alarm.status === "acknowledged" && (
-                    <button className="px-2 md:px-3 py-1 text-xs md:text-sm bg-green-100 text-green-800 rounded hover:bg-green-200">
-                      Resolve
-                    </button>
+                  {server.error && (
+                    <span className="text-sm text-red-600">Error: {server.error}</span>
                   )}
-                  <button className="p-1 text-gray-400 hover:text-gray-600">
-                    <X className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      server.alarms.length > 0 
+                        ? 'bg-red-100 text-red-700' 
+                        : 'bg-green-100 text-green-700'
+                    }`}>
+                      {server.alarms.length} alarm{server.alarms.length !== 1 ? 's' : ''}
+                    </span>
+                    {expandedServers.has(server.serverId) ? (
+                      <ChevronUp className="w-5 h-5 text-gray-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-gray-400" />
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-          ))}
 
-          {filteredAlarms.length === 0 && (
-            <div className="p-8 text-center text-gray-500">
-              <Bell className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-              <p>No alarms found</p>
-            </div>
-          )}
-        </div>
+            {/* Expanded Content */}
+            {expandedServers.has(server.serverId) && (
+              <div className="p-4">
+                {/* Credential Configuration Form (if not configured) */}
+                {!server.configured && (
+                  <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <h4 className="font-medium text-gray-900 mb-3">Configure Server Credentials</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Username
+                        </label>
+                        <input
+                          type="text"
+                          id={`username-${server.serverId}`}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter username"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Password
+                        </label>
+                        <input
+                          type="password"
+                          id={`password-${server.serverId}`}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter password"
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          const usernameInput = document.getElementById(`username-${server.serverId}`) as HTMLInputElement;
+                          const passwordInput = document.getElementById(`password-${server.serverId}`) as HTMLInputElement;
+                          if (usernameInput && passwordInput) {
+                            const username = usernameInput.value.trim();
+                            const password = passwordInput.value.trim();
+                            console.log(`🔐 Configure button clicked for ${server.serverName}`);
+                            console.log(`📝 Username: ${username}`);
+                            console.log(`📝 Password: ${password ? '***' : '(empty)'}`);
+                            if (username && password) {
+                              handleConfigureServer(server.serverId, username, password);
+                            } else {
+                              alert('Please enter both username and password');
+                            }
+                          }
+                        }}
+                        className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors"
+                      >
+                        Configure & Fetch Alarms
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+{/* API Endpoint and Last Updated */}
+                    <div className="mb-4 space-y-2">
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-1">API Endpoint:</p>
+                        <p className="text-sm font-mono text-gray-700">
+                          https://{server.serverId}.relay.vmsproxy.com/rest/v3/system/metrics/alarms
+                        </p>
+                      </div>
+                      {server.lastUpdated && (
+                        <div className="p-3 bg-green-50 rounded-lg">
+                          <p className="text-xs text-green-600 mb-1">Last Updated:</p>
+                          <p className="text-sm font-mono text-green-800">{server.lastUpdated}</p>
+                        </div>
+                      )}
+                </div>
+
+                {/* Alarms List */}
+                {server.alarms.length > 0 ? (
+                  <div className="space-y-2 mb-4">
+                    <h4 className="font-medium text-gray-700 mb-2">Alarms:</h4>
+                    {server.alarms.map((alarm, idx) => {
+                      const level = alarm.level || alarm.metadata?.level || 'info';
+                      const text = alarm.text || alarm.description || alarm.caption || 'No description';
+                      const alarmType = alarm.alarmType || 'Unknown';
+                      
+                      return (
+                        <div key={idx} className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <AlertTriangle className="w-4 h-4 text-red-600" />
+                                <span className="font-medium text-red-900">
+                                  {alarmType}
+                                </span>
+                              </div>
+                              <p className="text-sm text-red-700 ml-6">{text}</p>
+                              {alarm.source && (
+                                <p className="text-xs text-gray-500 ml-6 mt-1">Source: {alarm.source}</p>
+                              )}
+                            </div>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              level === 'error' || level === 'critical'
+                                ? 'bg-red-200 text-red-800'
+                                : level === 'warning'
+                                ? 'bg-yellow-200 text-yellow-800'
+                                : 'bg-blue-200 text-blue-800'
+                            }`}>
+                              {level.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-6 text-center text-gray-500 mb-4">
+                    <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">No alarms for this server</p>
+                  </div>
+                )}
+
+                {/* Raw Response */}
+                {server.rawResponse && (
+                  <details className="mt-4">
+                    <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                      View Raw API Response
+                    </summary>
+                    <pre className="mt-2 p-3 bg-gray-900 text-green-400 rounded-lg overflow-x-auto text-xs">
+                      {JSON.stringify(server.rawResponse, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
+
+      {/* Empty State */}
+      {serverAlarms.length === 0 && (
+        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
+          <Server className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No Servers Found</h3>
+          <p className="text-gray-500">
+            No cloud systems are available. Please check your configuration.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -24,7 +24,7 @@ export function useSystemInfo(cloudId?: string) {
   // Fetch available cloud systems
   const fetchCloudSystems = useCallback(async () => {
     try {
-      console.log("[useSystemInfo] Fetching cloud systems...");
+      // Fetching cloud systems
       const response = await fetch("https://meta.nxvms.com/cdb/systems", {
         method: "GET",
         credentials: "include",
@@ -51,7 +51,7 @@ export function useSystemInfo(cloudId?: string) {
         return 0;
       });
 
-      console.log("[useSystemInfo] Cloud systems:", systems);
+        // Cloud systems loaded
       setAvailableSystems(systems);
       return systems;
     } catch (err) {
@@ -92,7 +92,7 @@ export function useSystemInfo(cloudId?: string) {
     try {
       setLoading(true);
       setError(null);
-      console.log("[useSystemInfo] Fetching system info...");
+      // Fetching system info
 
       // If cloudId is provided, use cloud relay
       if (selectedCloudId) {
