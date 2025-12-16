@@ -35,6 +35,8 @@ export default function Home() {
         return <StorageManagement />;
       case "debug":
         return <ConnectionTest />;
+      case "users":
+        return <ConnectionTest />;
       default:
         return <h1 className="font-bold text-2xl">Tahap pegembangan</h1>;
     }
