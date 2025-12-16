@@ -41,6 +41,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { CLOUD_CONFIG } from "@/lib/config";
 import { CloudLoginDialog } from "./CloudLoginDialog";
 
 // ============================================
@@ -651,6 +652,7 @@ export default function AlarmConsole() {
   const [loginSystemId, setLoginSystemId] = useState("");
   const [loginSystemName, setLoginSystemName] = useState("");
   const [requiresAuth, setRequiresAuth] = useState(false);
+  const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
 
   // Filter state
   const [filterEventType, setFilterEventType] = useState<string>("all");
@@ -708,6 +710,58 @@ export default function AlarmConsole() {
       setLoadingCloud(false);
     }
   }, []);
+
+  // Auto-login function for cloud systems
+  const attemptAutoLogin = useCallback(
+    async (systemId: string, systemName: string): Promise<boolean> => {
+      // Check if auto-login is enabled and credentials are configured
+      if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
+        console.log("[Cloud Auto-Login] Disabled or credentials not configured");
+        return false;
+      }
+
+      // Check if we already attempted auto-login for this system
+      if (autoLoginAttempted.has(systemId)) {
+        console.log(`[Cloud Auto-Login] Already attempted for ${systemName}`);
+        return false;
+      }
+
+      console.log(`[Cloud Auto-Login] Attempting login to ${systemName}...`);
+
+      try {
+        const response = await fetch("/api/cloud/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            systemId,
+            username: CLOUD_CONFIG.username,
+            password: CLOUD_CONFIG.password,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          console.error(`[Cloud Auto-Login] Failed for ${systemName}:`, data.error);
+          // Mark as attempted to avoid retry loops
+          setAutoLoginAttempted((prev) => new Set(prev).add(systemId));
+          return false;
+        }
+
+        console.log(`[Cloud Auto-Login] Success for ${systemName}`);
+        // Mark as attempted (successfully)
+        setAutoLoginAttempted((prev) => new Set(prev).add(systemId));
+        return true;
+      } catch (err) {
+        console.error(`[Cloud Auto-Login] Error for ${systemName}:`, err);
+        setAutoLoginAttempted((prev) => new Set(prev).add(systemId));
+        return false;
+      }
+    },
+    [autoLoginAttempted]
+  );
 
   // Fetch cloud systems on mount
   useEffect(() => {
@@ -782,12 +836,15 @@ export default function AlarmConsole() {
 
   // Fetch cloud servers when a cloud system is selected
   const fetchCloudServers = useCallback(
-    async (systemId: string) => {
+    async (systemId: string, retryAfterLogin: boolean = false) => {
       setLoadingCloudServers(true);
       setCloudServers([]);
       setSelectedCloudServerId("");
       setRequiresAuth(false);
       setError(null);
+
+      const system = cloudSystems.find((s) => s.id === systemId);
+      const systemName = system?.name || systemId;
 
       try {
         const response = await fetch(`/api/cloud/servers?systemId=${encodeURIComponent(systemId)}`, {
@@ -801,11 +858,21 @@ export default function AlarmConsole() {
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           if (errorData.requiresAuth) {
+            // Try auto-login first (only if not already retrying after login)
+            if (!retryAfterLogin && CLOUD_CONFIG.autoLoginEnabled) {
+              console.log(`[Cloud] Auth required for ${systemName}, attempting auto-login...`);
+              const loginSuccess = await attemptAutoLogin(systemId, systemName);
+              if (loginSuccess) {
+                // Retry fetching servers after successful login
+                setLoadingCloudServers(false);
+                return fetchCloudServers(systemId, true);
+              }
+            }
+
+            // Auto-login failed or not available, show login dialog
             setRequiresAuth(true);
-            const system = cloudSystems.find((s) => s.id === systemId);
             setLoginSystemId(systemId);
-            setLoginSystemName(system?.name || systemId);
-            // Auto-show login dialog
+            setLoginSystemName(systemName);
             setShowLoginDialog(true);
             return;
           }
@@ -827,7 +894,7 @@ export default function AlarmConsole() {
         setLoadingCloudServers(false);
       }
     },
-    [cloudSystems]
+    [cloudSystems, attemptAutoLogin]
   );
 
   // Handle server selection change

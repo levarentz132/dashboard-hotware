@@ -1,5 +1,3 @@
-import { ICamera } from "@/types/Device";
-
 // Nx Witness API Configuration
 export const API_CONFIG = {
   // Use Next.js API proxy to avoid CORS issues
@@ -56,6 +54,15 @@ export const API_ENDPOINTS = {
   // Analytics
   analytics: "/analytics",
   reports: "/reports",
+};
+
+// NX Cloud Configuration for auto-login
+export const CLOUD_CONFIG = {
+  // Cloud credentials for auto-login (set via environment variables for security)
+  username: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME || "farel.it12@gmail.com",
+  password: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD || "farrel354313",
+  // Enable auto-login when credentials are configured
+  autoLoginEnabled: !!(process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME && process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD),
 };
 
 export default API_CONFIG;
