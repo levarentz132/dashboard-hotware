@@ -1,591 +1,1428 @@
 "use client";
 
-import { AlertTriangle, Bell, RefreshCw, Server, Settings, ChevronDown, ChevronUp } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
-import nxAPI, { NxMetricsAlarmsResponse } from "@/lib/nxapi";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  RefreshCw,
+  AlertCircle,
+  Bell,
+  Camera,
+  Server,
+  HardDrive,
+  Shield,
+  Activity,
+  Clock,
+  Filter,
+  ChevronDown,
+  ChevronRight,
+  Info,
+  AlertTriangle,
+  XCircle,
+  Search,
+  X,
+  Wifi,
+  WifiOff,
+  Calendar,
+  Zap,
+  MoreHorizontal,
+  Network,
+  Cpu,
+  Cloud,
+  LogIn,
+} from "lucide-react";
+import { useServers } from "@/hooks/useNxAPI-server";
+import { useCameras } from "@/hooks/useNxAPI-camera";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { CloudLoginDialog } from "./CloudLoginDialog";
 
-// Interface for cloud system
+// ============================================
+// INTERFACE DEFINITIONS
+// ============================================
+
 interface CloudSystem {
   id: string;
   name: string;
   stateOfHealth: string;
   accessRole: string;
   version?: string;
+  isOnline?: boolean;
 }
 
-// Interface for server alarms
-interface ServerAlarms {
-  serverId: string;
-  serverName: string;
-  alarms: any[];
-  rawResponse: NxMetricsAlarmsResponse | null;
-  loading: boolean;
-  error: string | null;
-  username: string;
-  password: string;
-  configured: boolean;
-  lastUpdated: string | null;
-  sessionToken: string | null;
+interface CloudServer {
+  id: string;
+  name: string;
+  url: string;
+  status: string;
 }
+
+interface ServerOption {
+  id: string;
+  name: string;
+  type: "local" | "cloud";
+  status?: string;
+  accessRole?: string;
+}
+
+interface EventLog {
+  actionType: string;
+  actionParams: {
+    actionId: string;
+    needConfirmation: boolean;
+    actionResourceId: string;
+    url: string;
+    emailAddress: string;
+    fps: number;
+    streamQuality: string;
+    recordAfter: number;
+    relayOutputId: string;
+    sayText: string;
+    tags: string;
+    text: string;
+    durationMs: number;
+    additionalResources: string[];
+    allUsers: boolean;
+    forced: boolean;
+    presetId: string;
+    useSource: boolean;
+    recordBeforeMs: number;
+    playToClient: boolean;
+    contentType: string;
+    authType: string;
+    httpMethod: string;
+  };
+  eventParams: {
+    eventType: string;
+    eventTimestampUsec: string;
+    eventResourceId: string;
+    resourceName: string;
+    sourceServerId: string;
+    reasonCode: string;
+    inputPortId: string;
+    caption: string;
+    description: string;
+    metadata: {
+      cameraRefs: string[];
+      instigators: string[];
+      allUsers: boolean;
+      level: string;
+    };
+    omitDbLogging: boolean;
+    analyticsEngineId: string;
+    objectTrackId: string;
+    key: string;
+    attributes: { name: string; value: string }[];
+    progress: number;
+  };
+  businessRuleId: string;
+  aggregationCount: number;
+  flags: number;
+  compareString: string;
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+const formatTimestamp = (timestampUsec: string): string => {
+  if (!timestampUsec) return "N/A";
+  const ms = parseInt(timestampUsec) / 1000;
+  if (isNaN(ms)) return timestampUsec;
+  const date = new Date(ms);
+  return date.toLocaleString("id-ID", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
+const formatRelativeTime = (timestampUsec: string): string => {
+  if (!timestampUsec) return "";
+  const ms = parseInt(timestampUsec) / 1000;
+  if (isNaN(ms)) return "";
+
+  const now = Date.now();
+  const diff = now - ms;
+
+  if (diff < 60000) return "Baru saja";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} menit lalu`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} jam lalu`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)} hari lalu`;
+  return formatTimestamp(timestampUsec);
+};
+
+const getEventTypeLabel = (eventType: string): string => {
+  const labels: Record<string, string> = {
+    undefinedEvent: "Undefined Event",
+    cameraMotionEvent: "Motion Detected",
+    cameraInputEvent: "Camera Input",
+    cameraDisconnectEvent: "Camera Offline",
+    storageFailureEvent: "Storage Failure",
+    networkIssueEvent: "Network Issue",
+    cameraIpConflictEvent: "IP Conflict",
+    serverFailureEvent: "Server Failure",
+    serverConflictEvent: "Server Conflict",
+    serverStartEvent: "Server Started",
+    licenseIssueEvent: "License Issue",
+    backupFinishedEvent: "Backup Complete",
+    softwareTriggerEvent: "Software Trigger",
+    analyticsSdkEvent: "Analytics Event",
+    pluginDiagnosticEvent: "Plugin Diagnostic",
+    poeOverBudgetEvent: "PoE Over Budget",
+    fanErrorEvent: "Fan Error",
+    analyticsSdkObjectDetected: "Object Detected",
+    serverCertificateError: "Certificate Error",
+    ldapSyncIssueEvent: "LDAP Sync Issue",
+    saasIssueEvent: "Cloud Issue",
+    systemHealthEvent: "System Health",
+    maxSystemHealthEvent: "Critical Health",
+    anyCameraEvent: "Camera Event",
+    anyServerEvent: "Server Event",
+    anyEvent: "System Event",
+    userDefinedEvent: "Custom Event",
+  };
+  return labels[eventType] || eventType;
+};
+
+const getActionTypeLabel = (actionType: string): string => {
+  const labels: Record<string, string> = {
+    undefinedAction: "Undefined",
+    cameraOutputAction: "Camera Output",
+    bookmarkAction: "Bookmark Created",
+    cameraRecordingAction: "Recording Started",
+    panicRecordingAction: "Panic Recording",
+    sendMailAction: "Email Sent",
+    diagnosticsAction: "Diagnostics",
+    showPopupAction: "Popup Shown",
+    playSoundAction: "Sound Playing",
+    playSoundOnceAction: "Sound Played",
+    sayTextAction: "Text Announced",
+    executePtzPresetAction: "PTZ Preset",
+    showTextOverlayAction: "Text Overlay",
+    showOnAlarmLayoutAction: "Alarm Layout",
+    execHttpRequestAction: "HTTP Request",
+    acknowledgeAction: "Acknowledged",
+    fullscreenCameraAction: "Fullscreen",
+    exitFullscreenAction: "Exit Fullscreen",
+    openLayoutAction: "Layout Opened",
+    buzzerAction: "Buzzer",
+    pushNotificationAction: "Push Sent",
+  };
+  return labels[actionType] || actionType;
+};
+
+const getEventIcon = (eventType: string) => {
+  const iconClass = "h-4 w-4";
+  if (eventType.includes("Motion") || eventType.includes("motion")) return <Zap className={iconClass} />;
+  if (eventType.includes("camera") || eventType.includes("Camera")) return <Camera className={iconClass} />;
+  if (eventType.includes("Disconnect") || eventType.includes("disconnect")) return <WifiOff className={iconClass} />;
+  if (eventType.includes("server") || eventType.includes("Server")) return <Server className={iconClass} />;
+  if (eventType.includes("storage") || eventType.includes("Storage")) return <HardDrive className={iconClass} />;
+  if (eventType.includes("network") || eventType.includes("Network")) return <Network className={iconClass} />;
+  if (eventType.includes("license") || eventType.includes("License")) return <Shield className={iconClass} />;
+  if (eventType.includes("health") || eventType.includes("Health")) return <Activity className={iconClass} />;
+  if (eventType.includes("Conflict") || eventType.includes("conflict")) return <AlertTriangle className={iconClass} />;
+  if (eventType.includes("Start") || eventType.includes("start")) return <Wifi className={iconClass} />;
+  return <Bell className={iconClass} />;
+};
+
+const getLevelConfig = (level: string) => {
+  switch (level?.toLowerCase()) {
+    case "error":
+      return {
+        variant: "destructive" as const,
+        bgClass: "bg-red-50 dark:bg-red-950/20",
+        borderClass: "border-red-200 dark:border-red-800",
+        textClass: "text-red-700 dark:text-red-400",
+        icon: <XCircle className="h-5 w-5 text-red-500" />,
+        label: "Error",
+      };
+    case "warning":
+      return {
+        variant: "outline" as const,
+        bgClass: "bg-amber-50 dark:bg-amber-950/20",
+        borderClass: "border-amber-200 dark:border-amber-800",
+        textClass: "text-amber-700 dark:text-amber-400",
+        icon: <AlertTriangle className="h-5 w-5 text-amber-500" />,
+        label: "Warning",
+      };
+    case "info":
+    default:
+      return {
+        variant: "secondary" as const,
+        bgClass: "bg-blue-50 dark:bg-blue-950/20",
+        borderClass: "border-blue-200 dark:border-blue-800",
+        textClass: "text-blue-700 dark:text-blue-400",
+        icon: <Info className="h-5 w-5 text-blue-500" />,
+        label: "Info",
+      };
+  }
+};
+
+// ============================================
+// STATS CARD COMPONENT
+// ============================================
+
+interface StatsCardProps {
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+  variant: "default" | "error" | "warning" | "info";
+  onClick?: () => void;
+  active?: boolean;
+}
+
+function StatsCard({ title, value, icon, variant, onClick, active }: StatsCardProps) {
+  const variantStyles = {
+    default: "bg-white hover:bg-gray-50 border-gray-200",
+    error: "bg-red-50 hover:bg-red-100 border-red-200 text-red-700",
+    warning: "bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700",
+    info: "bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700",
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-start p-3 sm:p-4 rounded-xl border transition-all duration-200 w-full text-left",
+        variantStyles[variant],
+        active && "ring-2 ring-offset-2",
+        active && variant === "error" && "ring-red-500",
+        active && variant === "warning" && "ring-amber-500",
+        active && variant === "info" && "ring-blue-500",
+        active && variant === "default" && "ring-gray-500"
+      )}
+    >
+      <div className="flex items-center justify-between w-full mb-1 sm:mb-2">
+        <span className="text-[10px] sm:text-xs font-medium uppercase tracking-wider opacity-70">{title}</span>
+        <span className="hidden sm:block">{icon}</span>
+      </div>
+      <span className="text-xl sm:text-2xl md:text-3xl font-bold">{value}</span>
+    </button>
+  );
+}
+
+// ============================================
+// EVENT CARD COMPONENT
+// ============================================
+
+interface EventCardProps {
+  event: EventLog;
+  index: number;
+  isExpanded: boolean;
+  onToggle: () => void;
+  getResourceName: (id: string | undefined) => { name: string; type: "camera" | "server" } | null;
+}
+
+function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardProps) {
+  const eventType = event.eventParams?.eventType || "unknown";
+  const level = event.eventParams?.metadata?.level || "info";
+  const timestamp = event.eventParams?.eventTimestampUsec;
+  const caption = event.eventParams?.caption;
+  const description = event.eventParams?.description;
+  const resourceName = event.eventParams?.resourceName;
+  const actionType = event.actionType;
+
+  const levelConfig = getLevelConfig(level);
+  const resource = getResourceName(event.eventParams?.eventResourceId);
+  const sourceServer = getResourceName(event.eventParams?.sourceServerId);
+
+  return (
+    <Collapsible open={isExpanded} onOpenChange={onToggle}>
+      <div
+        className={cn(
+          "border rounded-xl overflow-hidden transition-all duration-200 shadow-sm hover:shadow-md",
+          levelConfig.borderClass,
+          isExpanded && levelConfig.bgClass
+        )}
+      >
+        <CollapsibleTrigger asChild>
+          <button className="w-full p-3 sm:p-4 text-left hover:bg-gray-50/50 transition-colors">
+            <div className="flex items-start gap-2 sm:gap-3">
+              {/* Level Icon */}
+              <div className="shrink-0 mt-0.5">{levelConfig.icon}</div>
+
+              {/* Main Content */}
+              <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
+                {/* Top Row: Badges */}
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs font-medium px-1.5 sm:px-2">
+                    {getEventIcon(eventType)}
+                    <span className="hidden xs:inline sm:hidden md:inline">{getEventTypeLabel(eventType)}</span>
+                    <span className="xs:hidden sm:inline md:hidden">{getEventTypeLabel(eventType).split(" ")[0]}</span>
+                  </Badge>
+
+                  <Badge
+                    variant={levelConfig.variant}
+                    className={cn(
+                      "text-[10px] sm:text-xs px-1.5 sm:px-2",
+                      level === "warning" && "bg-amber-100 text-amber-700 border-amber-300"
+                    )}
+                  >
+                    {levelConfig.label}
+                  </Badge>
+
+                  {actionType && actionType !== "undefinedAction" && (
+                    <Badge variant="secondary" className="text-[10px] sm:text-xs hidden lg:flex px-1.5 sm:px-2">
+                      {getActionTypeLabel(actionType)}
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Title */}
+                <div className="font-medium text-gray-900 text-sm sm:text-base line-clamp-1">
+                  {caption || resourceName || "No description available"}
+                </div>
+
+                {/* Preview Description */}
+                {description && !isExpanded && (
+                  <p className="text-xs sm:text-sm text-gray-500 line-clamp-1">{description}</p>
+                )}
+
+                {/* Resource & Time Row */}
+                <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[10px] sm:text-xs text-gray-500">
+                  {resource && (
+                    <span className="flex items-center gap-1">
+                      {resource.type === "camera" ? <Camera className="h-3 w-3" /> : <Server className="h-3 w-3" />}
+                      <span className="truncate max-w-[100px] sm:max-w-[150px]">{resource.name}</span>
+                    </span>
+                  )}
+
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatRelativeTime(timestamp)}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{formatTimestamp(timestamp)}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </div>
+
+              {/* Expand Icon */}
+              <div className="shrink-0 self-center">
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+                )}
+              </div>
+            </div>
+          </button>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <div className={cn("px-3 sm:px-4 pb-3 sm:pb-4 space-y-3 sm:space-y-4", levelConfig.bgClass)}>
+            <Separator />
+
+            {/* Description Section */}
+            {description && (
+              <div className="space-y-2">
+                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Description</h4>
+                {eventType === "serverConflictEvent" ? (
+                  <div className="bg-white rounded-lg border p-2.5 sm:p-3 space-y-2">
+                    {(() => {
+                      const parts = description.split(/\s+/);
+                      const ip = parts[0];
+                      const macOrUuid = parts.length > 2 ? parts.slice(2).join(" ") : parts[1];
+                      return (
+                        <>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                            <div className="flex items-center gap-2">
+                              <Server className="h-4 w-4 text-gray-400 shrink-0" />
+                              <span className="text-xs sm:text-sm text-gray-600">Conflict Server:</span>
+                            </div>
+                            <code className="px-2 py-0.5 bg-gray-100 rounded text-xs sm:text-sm font-mono">{ip}</code>
+                          </div>
+                          {macOrUuid && (
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                              <div className="flex items-center gap-2">
+                                <Cpu className="h-4 w-4 text-gray-400 shrink-0" />
+                                <span className="text-xs sm:text-sm text-gray-600">
+                                  {macOrUuid.includes("urn_uuid") ? "UUID:" : "MAC:"}
+                                </span>
+                              </div>
+                              <code className="px-2 py-0.5 bg-gray-100 rounded text-xs sm:text-sm font-mono break-all">
+                                {macOrUuid}
+                              </code>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <p className="text-xs sm:text-sm text-gray-600 bg-white rounded-lg border p-2.5 sm:p-3">
+                    {description}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Details Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+              {/* Resource */}
+              {resource && (
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">
+                    {resource.type === "camera" ? "Camera" : "Server"}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    {resource.type === "camera" ? (
+                      <Camera className="h-4 w-4 text-blue-500 shrink-0" />
+                    ) : (
+                      <Server className="h-4 w-4 text-green-500 shrink-0" />
+                    )}
+                    <span className="font-medium truncate">{resource.name}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Source Server */}
+              {sourceServer && (
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Source Server</div>
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    <Server className="h-4 w-4 text-green-500 shrink-0" />
+                    <span className="font-medium truncate">{sourceServer.name}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Timestamp */}
+              <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Timestamp</div>
+                <div className="flex items-center gap-2 text-xs sm:text-sm">
+                  <Calendar className="h-4 w-4 text-gray-400 shrink-0" />
+                  <span className="truncate">{formatTimestamp(timestamp)}</span>
+                </div>
+              </div>
+
+              {/* Aggregation Count */}
+              {event.aggregationCount > 1 && (
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Occurrences</div>
+                  <div className="flex items-center gap-2 text-xs sm:text-sm">
+                    <MoreHorizontal className="h-4 w-4 text-gray-400 shrink-0" />
+                    <span className="font-medium">{event.aggregationCount} events</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Reason Code */}
+              {event.eventParams?.reasonCode && event.eventParams.reasonCode !== "none" && (
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Reason Code</div>
+                  <Badge variant="outline" className="text-xs">
+                    {event.eventParams.reasonCode}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Input Port */}
+              {event.eventParams?.inputPortId && (
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Input Port</div>
+                  <code className="text-xs sm:text-sm font-mono">{event.eventParams.inputPortId}</code>
+                </div>
+              )}
+
+              {/* Action URL */}
+              {event.actionParams?.url && (
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3 sm:col-span-2">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Action URL</div>
+                  <code className="text-xs sm:text-sm font-mono break-all text-blue-600">{event.actionParams.url}</code>
+                </div>
+              )}
+
+              {/* Email */}
+              {event.actionParams?.emailAddress && (
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Email</div>
+                  <span className="text-xs sm:text-sm">{event.actionParams.emailAddress}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Attributes */}
+            {event.eventParams?.attributes && event.eventParams.attributes.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Attributes</h4>
+                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {event.eventParams.attributes.map((attr, i) => (
+                      <div key={i} className="text-xs sm:text-sm">
+                        <span className="text-gray-500">{attr.name}:</span>{" "}
+                        <span className="font-medium">{attr.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Related Cameras */}
+            {event.eventParams?.metadata?.cameraRefs && event.eventParams.metadata.cameraRefs.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Related Cameras</h4>
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                  {event.eventParams.metadata.cameraRefs.map((ref, i) => {
+                    const camera = getResourceName(ref);
+                    return (
+                      <Badge key={i} variant="secondary" className="gap-1 text-xs">
+                        <Camera className="h-3 w-3" />
+                        {camera ? camera.name : ref}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
+
+// ============================================
+// LOADING SKELETON
+// ============================================
+
+function EventSkeleton() {
+  return (
+    <div className="border rounded-xl p-3 sm:p-4 space-y-3">
+      <div className="flex items-start gap-2 sm:gap-3">
+        <Skeleton className="h-5 w-5 rounded-full shrink-0" />
+        <div className="flex-1 space-y-2">
+          <div className="flex gap-2">
+            <Skeleton className="h-5 w-20 sm:w-24" />
+            <Skeleton className="h-5 w-14 sm:w-16" />
+          </div>
+          <Skeleton className="h-4 w-full sm:w-3/4" />
+          <Skeleton className="h-3 w-2/3 sm:w-1/2" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
 
 export default function AlarmConsole() {
-  console.log("🚨 ALARM CONSOLE COMPONENT RENDERED 🚨");
-  
-  const [availableSystems, setAvailableSystems] = useState<CloudSystem[]>([]);
-  const [serverAlarms, setServerAlarms] = useState<ServerAlarms[]>([]);
-  const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set());
+  const { servers, loading: loadingServers } = useServers();
+  const { cameras } = useCameras();
+  const [selectedServerId, setSelectedServerId] = useState<string>("");
+  const [selectedServerType, setSelectedServerType] = useState<"local" | "cloud">("local");
+  const [selectedCloudSystemId, setSelectedCloudSystemId] = useState<string>("");
+  const [selectedCloudServerId, setSelectedCloudServerId] = useState<string>("");
+  const [events, setEvents] = useState<EventLog[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
 
-  // Fetch available cloud systems
+  // Cloud systems state
+  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
+  const [loadingCloud, setLoadingCloud] = useState(false);
+
+  // Cloud servers state (servers within a cloud system)
+  const [cloudServers, setCloudServers] = useState<CloudServer[]>([]);
+  const [loadingCloudServers, setLoadingCloudServers] = useState(false);
+
+  // Cloud login dialog state
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [loginSystemId, setLoginSystemId] = useState("");
+  const [loginSystemName, setLoginSystemName] = useState("");
+  const [requiresAuth, setRequiresAuth] = useState(false);
+
+  // Filter state
+  const [filterEventType, setFilterEventType] = useState<string>("all");
+  const [filterLevel, setFilterLevel] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Auto-refresh
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(30);
+
+  // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
+    setLoadingCloud(true);
     try {
-      // Get system info to retrieve cloud ID
-      const systemInfo = await nxAPI.getSystemInfo();
-      
-      if (!systemInfo) {
-        console.error("Failed to get system info");
-        return;
-      }
-      
-      // Check if system has cloud ID
-      if (!systemInfo.cloudId) {
-        console.warn("System is not connected to cloud. Cloud ID not available.");
-        alert("This system is not connected to Nx Cloud. Cloud relay features will not work.");
-        return;
-      }
-      
-      // Create a single cloud system entry
-      const systems: CloudSystem[] = [{
-        id: systemInfo.cloudId,
-        name: systemInfo.name || 'Nx Witness System',
-        stateOfHealth: 'online',
-        accessRole: 'admin',
-        version: systemInfo.version || ''
-      }];
-      
-      console.log("✅ Cloud system loaded:", systems[0]);
-      
-      setAvailableSystems(systems);
-      
-      // Initialize server alarms state
-      const initialServerAlarms: ServerAlarms[] = systems.map((system: CloudSystem) => ({
-        serverId: system.id,
-        serverName: system.name,
-        alarms: [],
-        rawResponse: null,
-        loading: false,
-        error: null,
-        username: '',
-        password: '',
-        configured: false,
-        lastUpdated: null,
-        sessionToken: null
-      }));
-      setServerAlarms(initialServerAlarms);
-    } catch (error) {
-      console.error("Failed to fetch cloud systems:", error);
-    }
-  }, []);
-
-  // Login to cloud relay and get session token
-  const loginToCloudRelay = useCallback(async (cloudId: string, username: string, password: string): Promise<string | null> => {
-    try {
-      const loginUrl = `https://${cloudId}.relay.vmsproxy.com/rest/v3/login/sessions`;
-      
-      console.log(`[Login] Attempting to login to ${loginUrl}`);
-      
-      const response = await fetch(loginUrl, {
-        method: 'POST',
+      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+        method: "GET",
+        credentials: "include",
         headers: {
-          'Content-Type': 'application/json',
+          Accept: "application/json",
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          username: username,
-          password: password,
-          setCookie: false
-        })
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Login failed: HTTP ${response.status} - ${errorText}`);
+        setCloudSystems([]);
+        return;
       }
 
       const data = await response.json();
-      console.log(`[Login] Success! Token obtained for ${cloudId}`);
-      console.log(`🎫 Token:`, data.token);
-      console.log(`🎫 Token length:`, data.token.length);
-      
-      return data.token;
-    } catch (error) {
-      console.error(`[Login] Failed for ${cloudId}:`, error);
-      throw error;
+      const systems: CloudSystem[] = (data.systems || []).map((s: CloudSystem) => ({
+        ...s,
+        isOnline: s.stateOfHealth === "online",
+      }));
+
+      // Sort: owner first, then online systems
+      systems.sort((a, b) => {
+        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
+        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
+        if (a.isOnline && !b.isOnline) return -1;
+        if (!a.isOnline && b.isOnline) return 1;
+        return 0;
+      });
+
+      setCloudSystems(systems);
+    } catch (err) {
+      console.error("Error fetching cloud systems:", err);
+      setCloudSystems([]);
+    } finally {
+      setLoadingCloud(false);
     }
   }, []);
 
-  // Fetch alarms for a specific server using cloud relay
-  const fetchServerAlarms = useCallback(async (cloudId: string) => {
-    const server = serverAlarms.find(s => s.serverId === cloudId);
-    if (!server || !server.configured) {
-      console.warn(`Credentials not configured for server ${cloudId}`);
-      return;
-    }
-    
-    // Get or obtain token
-    let token = server.sessionToken;
-    if (!token) {
-      console.log(`[Fetch] No token found, logging in first...`);
-      try {
-        token = await loginToCloudRelay(cloudId, server.username, server.password);
-        if (!token) {
-          throw new Error('Failed to obtain session token');
-        }
-        // Store the token
-        setServerAlarms(prev => prev.map(s => 
-          s.serverId === cloudId ? { ...s, sessionToken: token } : s
-        ));
-      } catch (error) {
-        setServerAlarms(prev => prev.map(s => 
-          s.serverId === cloudId 
-            ? { ...s, loading: false, error: 'Login failed: ' + (error instanceof Error ? error.message : 'Unknown error') }
-            : s
-        ));
-        return;
-      }
-    }
+  // Fetch cloud systems on mount
+  useEffect(() => {
+    fetchCloudSystems();
+  }, [fetchCloudSystems]);
 
-    setServerAlarms(prev => prev.map(s => 
-      s.serverId === cloudId 
-        ? { ...s, loading: true, error: null }
-        : s
-    ));
+  // Combined server options (local + cloud)
+  const serverOptions: ServerOption[] = useMemo(() => {
+    const options: ServerOption[] = [];
 
-    try {
-      // Call cloud relay endpoint with session token as Bearer token
-      const cloudRelayUrl = `https://${cloudId}.relay.vmsproxy.com/rest/v3/system/metrics/alarms`;
-      
-      console.log(`[Fetch] Requesting alarms from ${cloudRelayUrl}`);
-      console.log(`🎫 Using token:`, token);
-      
-      const response = await fetch(cloudRelayUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+    // Add local servers
+    servers.forEach((server) => {
+      options.push({
+        id: server.id,
+        name: server.name || server.id,
+        type: "local",
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data: NxMetricsAlarmsResponse = await response.json();
-      const timestamp = new Date().toLocaleString();
-        
-      // Log the response to console for debugging
-      console.log(`[${timestamp}] ====== ALARM API RESPONSE ======`);
-      console.log(`Cloud ID: ${cloudId}`);
-      console.log(`URL: ${cloudRelayUrl}`);
-      console.log(`Full Response:`, JSON.stringify(data, null, 2));
-        
-      // Extract alarms from the nested structure
-      let allAlarms: any[] = [];
-      
-      console.log(`[${timestamp}] Checking data.servers:`, data.servers ? 'EXISTS' : 'MISSING');
-      
-      if (data.servers) {
-        const serverIds = Object.keys(data.servers);
-        console.log(`[${timestamp}] Found ${serverIds.length} server(s) in response:`, serverIds);
-        
-        serverIds.forEach(serverId => {
-          const serverData = data.servers[serverId];
-          console.log(`[${timestamp}] Processing server ${serverId}:`, serverData);
-          
-          // Check both 'info' and 'load' structures
-          const alarmSources = [];
-          if (serverData.info) {
-            console.log(`[${timestamp}]   - Found 'info' structure with keys:`, Object.keys(serverData.info));
-            alarmSources.push({ source: 'info', data: serverData.info });
-          }
-          if (serverData.load) {
-            console.log(`[${timestamp}]   - Found 'load' structure with keys:`, Object.keys(serverData.load));
-            alarmSources.push({ source: 'load', data: serverData.load });
-          }
-          
-          if (alarmSources.length === 0) {
-            console.log(`[${timestamp}]   - No 'info' or 'load' found for server ${serverId}`);
-          }
-          
-          alarmSources.forEach(({ source, data: alarmData }) => {
-            Object.keys(alarmData).forEach(alarmType => {
-              const alarmList = alarmData[alarmType];
-              console.log(`[${timestamp}]     - Checking ${source}.${alarmType}:`, Array.isArray(alarmList) ? `Array with ${alarmList.length} items` : typeof alarmList);
-              
-              if (Array.isArray(alarmList)) {
-                // Add metadata for display
-                const enrichedAlarms = alarmList.map(alarm => ({
-                  ...alarm,
-                  alarmType: alarmType,
-                  source: source,
-                  serverId: serverId
-                }));
-                console.log(`[${timestamp}]       - Added ${enrichedAlarms.length} alarm(s) from ${alarmType}`);
-                allAlarms = [...allAlarms, ...enrichedAlarms];
-              }
-            });
-          });
-        });
-      } else {
-        console.log(`[${timestamp}] ERROR: No 'servers' key in response!`);
-      }
-        
-        console.log(`[${timestamp}] Extracted ${allAlarms.length} alarm(s)`);
-        console.log(`=============================`);
-      
-      console.log(`[${timestamp}] Extracted ${allAlarms.length} alarm(s)`);
-      console.log(`=============================`);
-        
-      setServerAlarms(prev => prev.map(s => 
-        s.serverId === cloudId 
-          ? { 
-              ...s, 
-              alarms: allAlarms,
-              rawResponse: data,
-              loading: false,
-              error: null,
-              lastUpdated: timestamp
-            }
-          : s
-      ));
-    } catch (error) {
-      console.error(`Failed to fetch alarms for server ${cloudId}:`, error);
-      setServerAlarms(prev => prev.map(s => 
-        s.serverId === cloudId 
-          ? { 
-              ...s, 
-              loading: false,
-              error: error instanceof Error ? error.message : 'Unknown error'
-            }
-          : s
-      ));
-    }
-  }, [serverAlarms, loginToCloudRelay]);
-
-  // Fetch all server alarms
-  const fetchAllServerAlarms = useCallback(() => {
-    serverAlarms.filter(s => s.configured).forEach(server => {
-      fetchServerAlarms(server.serverId);
     });
-  }, [serverAlarms, fetchServerAlarms]);
 
-  // Handle credentials configuration for a specific server
-  const handleConfigureServer = async (serverId: string, username: string, password: string) => {
-    if (username && password) {
-      // First, login to get the session token
-      setServerAlarms(prev => prev.map(s => 
-        s.serverId === serverId 
-          ? { ...s, username, password, configured: true, loading: true }
-          : s
-      ));
-      
-      try {
-        const token = await loginToCloudRelay(serverId, username, password);
-        if (token) {
-          setServerAlarms(prev => prev.map(s => 
-            s.serverId === serverId 
-              ? { ...s, sessionToken: token }
-              : s
-          ));
-          // Now fetch alarms
-          setTimeout(() => fetchServerAlarms(serverId), 100);
-        }
-      } catch (error) {
-        setServerAlarms(prev => prev.map(s => 
-          s.serverId === serverId 
-            ? { ...s, loading: false, error: 'Login failed: ' + (error instanceof Error ? error.message : 'Unknown error'), configured: false }
-            : s
-        ));
+    // Add cloud systems
+    cloudSystems.forEach((system) => {
+      options.push({
+        id: system.id,
+        name: system.name,
+        type: "cloud",
+        status: system.stateOfHealth,
+        accessRole: system.accessRole,
+      });
+    });
+
+    return options;
+  }, [servers, cloudSystems]);
+
+  // Resource lookup map
+  const resourceNameMap = useMemo(() => {
+    const map = new Map<string, { name: string; type: "camera" | "server" }>();
+    cameras.forEach((camera) => {
+      if (camera.id) {
+        map.set(camera.id, { name: camera.name || "Unknown Camera", type: "camera" });
       }
+    });
+    servers.forEach((server) => {
+      if (server.id) {
+        map.set(server.id, { name: server.name || "Unknown Server", type: "server" });
+      }
+    });
+    return map;
+  }, [cameras, servers]);
+
+  const getResourceName = useCallback(
+    (resourceId: string | undefined) => {
+      if (!resourceId) return null;
+      return resourceNameMap.get(resourceId) || null;
+    },
+    [resourceNameMap]
+  );
+
+  // Set default server
+  useEffect(() => {
+    if (serverOptions.length > 0 && !selectedServerId) {
+      // Prefer local server first
+      const localServer = serverOptions.find((s) => s.type === "local");
+      if (localServer) {
+        setSelectedServerId(`local:${localServer.id}`);
+        setSelectedServerType("local");
+      } else if (serverOptions[0]) {
+        setSelectedServerId(`${serverOptions[0].type}:${serverOptions[0].id}`);
+        setSelectedServerType(serverOptions[0].type);
+      }
+    }
+  }, [serverOptions, selectedServerId]);
+
+  // Fetch cloud servers when a cloud system is selected
+  const fetchCloudServers = useCallback(
+    async (systemId: string) => {
+      setLoadingCloudServers(true);
+      setCloudServers([]);
+      setSelectedCloudServerId("");
+      setRequiresAuth(false);
+      setError(null);
+
+      try {
+        const response = await fetch(`/api/cloud/servers?systemId=${encodeURIComponent(systemId)}`, {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          if (errorData.requiresAuth) {
+            setRequiresAuth(true);
+            const system = cloudSystems.find((s) => s.id === systemId);
+            setLoginSystemId(systemId);
+            setLoginSystemName(system?.name || systemId);
+            // Auto-show login dialog
+            setShowLoginDialog(true);
+            return;
+          }
+          throw new Error(`Failed to fetch servers: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const serverList: CloudServer[] = Array.isArray(data) ? data : [];
+        setCloudServers(serverList);
+
+        // Auto-select first server if available
+        if (serverList.length > 0) {
+          setSelectedCloudServerId(serverList[0].id);
+        }
+      } catch (err) {
+        console.error("Error fetching cloud servers:", err);
+        setCloudServers([]);
+      } finally {
+        setLoadingCloudServers(false);
+      }
+    },
+    [cloudSystems]
+  );
+
+  // Handle server selection change
+  const handleServerChange = (value: string) => {
+    // Value format: "local:serverId" or "cloud:systemId"
+    const [type, ...idParts] = value.split(":");
+    const id = idParts.join(":");
+
+    setSelectedServerId(value);
+    setSelectedServerType(type as "local" | "cloud");
+    setEvents([]); // Clear events when switching servers
+    setError(null);
+
+    if (type === "cloud") {
+      setSelectedCloudSystemId(id);
+      fetchCloudServers(id);
+    } else {
+      setSelectedCloudSystemId("");
+      setCloudServers([]);
+      setSelectedCloudServerId("");
     }
   };
 
-  // Toggle server expansion
-  const toggleServerExpansion = (serverId: string) => {
-    setExpandedServers(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(serverId)) {
-        newSet.delete(serverId);
+  // Handle cloud server selection
+  const handleCloudServerChange = (serverId: string) => {
+    setSelectedCloudServerId(serverId);
+    setEvents([]); // Clear events when switching servers
+  };
+
+  // Extract actual ID from selectedServerId (format: "type:id")
+  const getActualServerId = useCallback(() => {
+    if (!selectedServerId) return "";
+    const [, ...idParts] = selectedServerId.split(":");
+    return idParts.join(":");
+  }, [selectedServerId]);
+
+  // Get current cloud system name
+  const getCurrentCloudSystemName = useCallback(() => {
+    const system = cloudSystems.find((s) => s.id === selectedCloudSystemId);
+    return system?.name || selectedCloudSystemId;
+  }, [cloudSystems, selectedCloudSystemId]);
+
+  // Open login dialog for current cloud system
+  const openLoginDialog = useCallback(() => {
+    setLoginSystemId(selectedCloudSystemId);
+    setLoginSystemName(getCurrentCloudSystemName());
+    setShowLoginDialog(true);
+  }, [selectedCloudSystemId, getCurrentCloudSystemName]);
+
+  // Fetch events
+  const fetchEvents = useCallback(async () => {
+    if (!selectedServerId) return;
+
+    // For cloud, we need both systemId and serverId
+    if (selectedServerType === "cloud") {
+      if (!selectedCloudSystemId || !selectedCloudServerId) return;
+    }
+
+    const actualId = getActualServerId();
+    if (!actualId && selectedServerType === "local") return;
+
+    setLoading(true);
+    setError(null);
+    setRequiresAuth(false);
+
+    try {
+      let response;
+
+      if (selectedServerType === "cloud") {
+        // For cloud systems, use systemId and serverId
+        const params = new URLSearchParams({
+          systemId: selectedCloudSystemId,
+          serverId: selectedCloudServerId,
+        });
+        response = await fetch(`/api/cloud/events?${params.toString()}`, {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        });
       } else {
-        newSet.add(serverId);
+        // For local servers
+        response = await fetch(`/api/nx/servers/${actualId}/events`);
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        if (errorData.requiresAuth) {
+          setRequiresAuth(true);
+          throw new Error(`Perlu login untuk mengakses cloud system ini.`);
+        }
+        throw new Error(`Failed to fetch events: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const sortedEvents = Array.isArray(data)
+        ? data.sort((a: EventLog, b: EventLog) => {
+            const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
+            const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
+            return timeB - timeA;
+          })
+        : [];
+
+      setRequiresAuth(false);
+      setEvents(sortedEvents);
+    } catch (err) {
+      console.error("Error fetching events:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch events");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedServerId, selectedServerType, selectedCloudSystemId, selectedCloudServerId, getActualServerId]);
+
+  // Fetch on server change
+  useEffect(() => {
+    if (selectedServerType === "local" && selectedServerId) {
+      fetchEvents();
+    } else if (selectedServerType === "cloud" && selectedCloudSystemId && selectedCloudServerId) {
+      fetchEvents();
+    }
+  }, [selectedServerId, selectedServerType, selectedCloudSystemId, selectedCloudServerId, fetchEvents]);
+
+  // Auto-refresh
+  useEffect(() => {
+    if (!autoRefresh || !selectedServerId) return;
+    if (selectedServerType === "cloud" && (!selectedCloudSystemId || !selectedCloudServerId)) return;
+
+    const interval = setInterval(fetchEvents, refreshInterval * 1000);
+    return () => clearInterval(interval);
+  }, [
+    autoRefresh,
+    refreshInterval,
+    selectedServerId,
+    selectedServerType,
+    selectedCloudSystemId,
+    selectedCloudServerId,
+    fetchEvents,
+  ]);
+
+  // Toggle expansion
+  const toggleEventExpansion = (index: number) => {
+    setExpandedEvents((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
       }
       return newSet;
     });
   };
 
-  // Initial fetch
-  useEffect(() => {
-    console.log("🔄 AlarmConsole useEffect triggered - fetching cloud systems...");
-    fetchCloudSystems();
-  }, [fetchCloudSystems]);
+  // Filter events
+  const filteredEvents = useMemo(() => {
+    return events.filter((event) => {
+      const matchesEventType = filterEventType === "all" || event.eventParams?.eventType === filterEventType;
+      const matchesLevel = filterLevel === "all" || event.eventParams?.metadata?.level === filterLevel;
 
-  // Auto-refresh every 30 seconds for configured servers
-  useEffect(() => {
-    const configuredServers = serverAlarms.filter(s => s.configured);
-    if (configuredServers.length === 0) return;
+      const matchesSearch =
+        searchQuery === "" ||
+        event.eventParams?.caption?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        event.eventParams?.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        event.eventParams?.resourceName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        getEventTypeLabel(event.eventParams?.eventType || "")
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase());
 
-    const interval = setInterval(() => {
-      fetchAllServerAlarms();
-    }, 30000);
+      return matchesEventType && matchesLevel && matchesSearch;
+    });
+  }, [events, filterEventType, filterLevel, searchQuery]);
 
-    return () => clearInterval(interval);
-  }, [serverAlarms, fetchAllServerAlarms]);
+  // Unique event types
+  const uniqueEventTypes = useMemo(() => {
+    return Array.from(new Set(events.map((e) => e.eventParams?.eventType).filter(Boolean))).sort();
+  }, [events]);
 
-  // Calculate total stats
-  const totalAlarms = serverAlarms.reduce((sum, server) => sum + server.alarms.length, 0);
-  const totalServers = availableSystems.length;
-  const configuredServers = serverAlarms.filter(s => s.configured).length;
-  const serversWithAlarms = serverAlarms.filter(s => s.alarms.length > 0).length;
+  // Stats
+  const stats = useMemo(
+    () => ({
+      total: events.length,
+      errors: events.filter((e) => e.eventParams?.metadata?.level === "error").length,
+      warnings: events.filter((e) => e.eventParams?.metadata?.level === "warning").length,
+      info: events.filter((e) => e.eventParams?.metadata?.level === "info" || !e.eventParams?.metadata?.level).length,
+    }),
+    [events]
+  );
+
+  // Clear all filters
+  const clearFilters = () => {
+    setFilterEventType("all");
+    setFilterLevel("all");
+    setSearchQuery("");
+  };
+
+  const hasActiveFilters = filterEventType !== "all" || filterLevel !== "all" || searchQuery !== "";
 
   return (
-    <div className="p-6">
+    <div className="p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Alarm Console</h1>
-            <p className="text-gray-500 mt-1">Cloud Relay - Per Server Alarm Monitoring</p>
-          </div>
-          <div className="flex gap-2">
-            {configuredServers > 0 && (
-              <button
-                onClick={fetchAllServerAlarms}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 transition-colors"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Refresh All ({configuredServers})
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Servers</p>
-                <p className="text-2xl font-bold text-gray-900">{totalServers}</p>
-              </div>
-              <Server className="w-8 h-8 text-blue-500" />
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Servers with Alarms</p>
-                <p className="text-2xl font-bold text-orange-600">{serversWithAlarms}</p>
-              </div>
-              <AlertTriangle className="w-8 h-8 text-orange-500" />
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Alarms</p>
-                <p className="text-2xl font-bold text-red-600">{totalAlarms}</p>
-              </div>
-              <Bell className="w-8 h-8 text-red-500" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Server Alarms List */}
-      <div className="space-y-4">
-        {serverAlarms.map((server) => (
-          <div key={server.serverId} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            {/* Server Header */}
-            <div
-              className="p-4 bg-gray-50 border-b border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => toggleServerExpansion(server.serverId)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Server className="w-5 h-5 text-gray-600" />
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{server.serverName}</h3>
-                    <p className="text-xs text-gray-500 font-mono">{server.serverId}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  {server.loading && (
-                    <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
-                  )}
-                  {server.error && (
-                    <span className="text-sm text-red-600">Error: {server.error}</span>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      server.alarms.length > 0 
-                        ? 'bg-red-100 text-red-700' 
-                        : 'bg-green-100 text-green-700'
-                    }`}>
-                      {server.alarms.length} alarm{server.alarms.length !== 1 ? 's' : ''}
-                    </span>
-                    {expandedServers.has(server.serverId) ? (
-                      <ChevronUp className="w-5 h-5 text-gray-400" />
-                    ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-400" />
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Expanded Content */}
-            {expandedServers.has(server.serverId) && (
-              <div className="p-4">
-                {/* Credential Configuration Form (if not configured) */}
-                {!server.configured && (
-                  <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <h4 className="font-medium text-gray-900 mb-3">Configure Server Credentials</h4>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Username
-                        </label>
-                        <input
-                          type="text"
-                          id={`username-${server.serverId}`}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Enter username"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Password
-                        </label>
-                        <input
-                          type="password"
-                          id={`password-${server.serverId}`}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Enter password"
-                        />
-                      </div>
-                      <button
-                        onClick={() => {
-                          const usernameInput = document.getElementById(`username-${server.serverId}`) as HTMLInputElement;
-                          const passwordInput = document.getElementById(`password-${server.serverId}`) as HTMLInputElement;
-                          if (usernameInput && passwordInput) {
-                            const username = usernameInput.value.trim();
-                            const password = passwordInput.value.trim();
-                            console.log(`🔐 Configure button clicked for ${server.serverName}`);
-                            console.log(`📝 Username: ${username}`);
-                            console.log(`📝 Password: ${password ? '***' : '(empty)'}`);
-                            if (username && password) {
-                              handleConfigureServer(server.serverId, username, password);
-                            } else {
-                              alert('Please enter both username and password');
-                            }
-                          }
-                        }}
-                        className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors"
-                      >
-                        Configure & Fetch Alarms
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-{/* API Endpoint and Last Updated */}
-                    <div className="mb-4 space-y-2">
-                      <div className="p-3 bg-gray-50 rounded-lg">
-                        <p className="text-xs text-gray-500 mb-1">API Endpoint:</p>
-                        <p className="text-sm font-mono text-gray-700">
-                          https://{server.serverId}.relay.vmsproxy.com/rest/v3/system/metrics/alarms
-                        </p>
-                      </div>
-                      {server.lastUpdated && (
-                        <div className="p-3 bg-green-50 rounded-lg">
-                          <p className="text-xs text-green-600 mb-1">Last Updated:</p>
-                          <p className="text-sm font-mono text-green-800">{server.lastUpdated}</p>
-                        </div>
-                      )}
-                </div>
-
-                {/* Alarms List */}
-                {server.alarms.length > 0 ? (
-                  <div className="space-y-2 mb-4">
-                    <h4 className="font-medium text-gray-700 mb-2">Alarms:</h4>
-                    {server.alarms.map((alarm, idx) => {
-                      const level = alarm.level || alarm.metadata?.level || 'info';
-                      const text = alarm.text || alarm.description || alarm.caption || 'No description';
-                      const alarmType = alarm.alarmType || 'Unknown';
-                      
-                      return (
-                        <div key={idx} className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <AlertTriangle className="w-4 h-4 text-red-600" />
-                                <span className="font-medium text-red-900">
-                                  {alarmType}
-                                </span>
-                              </div>
-                              <p className="text-sm text-red-700 ml-6">{text}</p>
-                              {alarm.source && (
-                                <p className="text-xs text-gray-500 ml-6 mt-1">Source: {alarm.source}</p>
-                              )}
-                            </div>
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              level === 'error' || level === 'critical'
-                                ? 'bg-red-200 text-red-800'
-                                : level === 'warning'
-                                ? 'bg-yellow-200 text-yellow-800'
-                                : 'bg-blue-200 text-blue-800'
-                            }`}>
-                              {level.toUpperCase()}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="p-6 text-center text-gray-500 mb-4">
-                    <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                    <p className="text-sm">No alarms for this server</p>
-                  </div>
-                )}
-
-                {/* Raw Response */}
-                {server.rawResponse && (
-                  <details className="mt-4">
-                    <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
-                      View Raw API Response
-                    </summary>
-                    <pre className="mt-2 p-3 bg-gray-900 text-green-400 rounded-lg overflow-x-auto text-xs">
-                      {JSON.stringify(server.rawResponse, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Empty State */}
-      {serverAlarms.length === 0 && (
-        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
-          <Server className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No Servers Found</h3>
-          <p className="text-gray-500">
-            No cloud systems are available. Please check your configuration.
+      <div className="flex flex-col gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Event Log</h1>
+          <p className="text-sm text-gray-500 mt-1 hidden sm:block">
+            Monitor dan analisis event sistem secara real-time
           </p>
         </div>
-      )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Server Selector */}
+          <Select value={selectedServerId} onValueChange={handleServerChange} disabled={loadingServers || loadingCloud}>
+            <SelectTrigger className="w-full sm:w-[220px]">
+              <Server className="h-4 w-4 mr-2 text-gray-400 shrink-0" />
+              <SelectValue placeholder="Pilih server..." />
+            </SelectTrigger>
+            <SelectContent>
+              {/* Local Servers */}
+              {servers.length > 0 && (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50">Local Servers</div>
+                  {servers.map((server) => (
+                    <SelectItem key={`local-${server.id}`} value={`local:${server.id}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-green-500" />
+                        <span>{server.name || server.id}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </>
+              )}
+
+              {/* Cloud Systems */}
+              {cloudSystems.length > 0 && (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 bg-blue-50 mt-1">
+                    <Cloud className="h-3 w-3 inline mr-1" />
+                    Cloud Systems
+                  </div>
+                  {cloudSystems.map((system) => (
+                    <SelectItem key={`cloud-${system.id}`} value={`cloud:${system.id}`}>
+                      <div className="flex items-center gap-2">
+                        <span className={cn("w-2 h-2 rounded-full", system.isOnline ? "bg-blue-500" : "bg-gray-400")} />
+                        <span>{system.name}</span>
+                        {!system.isOnline && <span className="text-xs text-gray-400">(offline)</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </>
+              )}
+
+              {servers.length === 0 && cloudSystems.length === 0 && (
+                <div className="px-2 py-4 text-sm text-gray-500 text-center">
+                  {loadingServers || loadingCloud ? "Memuat server..." : "Tidak ada server tersedia"}
+                </div>
+              )}
+            </SelectContent>
+          </Select>
+
+          {/* Cloud Server Selector - shown when cloud system is selected */}
+          {selectedServerType === "cloud" && selectedCloudSystemId && (
+            <Select
+              value={selectedCloudServerId}
+              onValueChange={handleCloudServerChange}
+              disabled={loadingCloudServers || cloudServers.length === 0}
+            >
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <Server className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
+                <SelectValue placeholder={loadingCloudServers ? "Memuat server..." : "Pilih server..."} />
+              </SelectTrigger>
+              <SelectContent>
+                {cloudServers.length > 0 ? (
+                  cloudServers.map((server) => (
+                    <SelectItem key={server.id} value={server.id}>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "w-2 h-2 rounded-full",
+                            server.status === "Online" ? "bg-green-500" : "bg-gray-400"
+                          )}
+                        />
+                        <span>{server.name || server.id}</span>
+                      </div>
+                    </SelectItem>
+                  ))
+                ) : (
+                  <div className="px-2 py-4 text-sm text-gray-500 text-center">
+                    {loadingCloudServers ? "Memuat server..." : "Tidak ada server dalam sistem ini"}
+                  </div>
+                )}
+              </SelectContent>
+            </Select>
+          )}
+
+          <div className="flex items-center gap-2 ml-auto">
+            {/* Auto Refresh Toggle */}
+            {/* <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={autoRefresh ? "default" : "outline"}
+                    size="icon"
+                    onClick={() => setAutoRefresh(!autoRefresh)}
+                    className="shrink-0"
+                  >
+                    <RefreshCw className={cn("h-4 w-4", autoRefresh && "animate-spin")} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{autoRefresh ? `Auto-refresh aktif (${refreshInterval}s)` : "Aktifkan auto-refresh"}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider> */}
+
+            {/* Manual Refresh */}
+            <Button
+              onClick={fetchEvents}
+              disabled={
+                loading ||
+                !selectedServerId ||
+                (selectedServerType === "cloud" && (!selectedCloudSystemId || !selectedCloudServerId))
+              }
+              className="gap-2"
+            >
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+        <StatsCard
+          title="Total"
+          value={stats.total}
+          icon={<Bell className="h-5 w-5 opacity-50" />}
+          variant="default"
+          onClick={() => setFilterLevel("all")}
+          active={filterLevel === "all"}
+        />
+        <StatsCard
+          title="Error"
+          value={stats.errors}
+          icon={<XCircle className="h-5 w-5" />}
+          variant="error"
+          onClick={() => setFilterLevel(filterLevel === "error" ? "all" : "error")}
+          active={filterLevel === "error"}
+        />
+        <StatsCard
+          title="Warning"
+          value={stats.warnings}
+          icon={<AlertTriangle className="h-5 w-5" />}
+          variant="warning"
+          onClick={() => setFilterLevel(filterLevel === "warning" ? "all" : "warning")}
+          active={filterLevel === "warning"}
+        />
+        <StatsCard
+          title="Info"
+          value={stats.info}
+          icon={<Info className="h-5 w-5" />}
+          variant="info"
+          onClick={() => setFilterLevel(filterLevel === "info" ? "all" : "info")}
+          active={filterLevel === "info"}
+        />
+      </div>
+
+      {/* Search & Filters */}
+      <Card>
+        <CardContent className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+          {/* Search Bar */}
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Cari event..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 text-sm"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowFilters(!showFilters)}
+                className="gap-2 flex-1 sm:flex-none"
+              >
+                <Filter className="h-4 w-4" />
+                <span>Filter</span>
+                {hasActiveFilters && (
+                  <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                    {[filterEventType !== "all", filterLevel !== "all", searchQuery !== ""].filter(Boolean).length}
+                  </Badge>
+                )}
+              </Button>
+
+              {hasActiveFilters && (
+                <Button variant="ghost" size="icon" onClick={clearFilters} className="shrink-0">
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <>
+              <Separator />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                {/* Event Type Filter */}
+                <div className="space-y-1.5 sm:space-y-2">
+                  <label className="text-xs sm:text-sm font-medium text-gray-700">Event Type</label>
+                  <Select value={filterEventType} onValueChange={setFilterEventType}>
+                    <SelectTrigger className="text-sm">
+                      <SelectValue placeholder="All Events" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Events</SelectItem>
+                      {uniqueEventTypes.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {getEventTypeLabel(type)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Level Filter */}
+                <div className="space-y-1.5 sm:space-y-2">
+                  <label className="text-xs sm:text-sm font-medium text-gray-700">Level</label>
+                  <Select value={filterLevel} onValueChange={setFilterLevel}>
+                    <SelectTrigger className="text-sm">
+                      <SelectValue placeholder="All Levels" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Levels</SelectItem>
+                      <SelectItem value="error">
+                        <span className="flex items-center gap-2">
+                          <XCircle className="h-4 w-4 text-red-500" />
+                          Error
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="warning">
+                        <span className="flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-500" />
+                          Warning
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="info">
+                        <span className="flex items-center gap-2">
+                          <Info className="h-4 w-4 text-blue-500" />
+                          Info
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Auto Refresh Interval */}
+                <div className="space-y-1.5 sm:space-y-2">
+                  <label className="text-xs sm:text-sm font-medium text-gray-700">Auto Refresh</label>
+                  <Select
+                    value={autoRefresh ? refreshInterval.toString() : "off"}
+                    onValueChange={(val) => {
+                      if (val === "off") {
+                        setAutoRefresh(false);
+                      } else {
+                        setAutoRefresh(true);
+                        setRefreshInterval(parseInt(val));
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="off">Off</SelectItem>
+                      <SelectItem value="10">Every 10s</SelectItem>
+                      <SelectItem value="30">Every 30s</SelectItem>
+                      <SelectItem value="60">Every 1 min</SelectItem>
+                      <SelectItem value="300">Every 5 min</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Results Info */}
+      <div className="flex items-center justify-between text-xs sm:text-sm text-gray-500">
+        <span>
+          Menampilkan {filteredEvents.length} dari {events.length} events
+          {hasActiveFilters && " (filtered)"}
+        </span>
+        {autoRefresh && (
+          <span className="flex items-center gap-1 text-green-600">
+            <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+            <span className="hidden sm:inline">Live update aktif</span>
+          </span>
+        )}
+      </div>
+
+      {/* Events List */}
+      <div className="space-y-2 sm:space-y-3">
+        {/* Loading State */}
+        {(loading || loadingCloudServers) && events.length === 0 && (
+          <>
+            <EventSkeleton />
+            <EventSkeleton />
+            <EventSkeleton />
+          </>
+        )}
+
+        {/* Auth Required State - for cloud systems */}
+        {!loading && !loadingCloudServers && requiresAuth && selectedServerType === "cloud" && (
+          <Card className="border-blue-200 bg-blue-50">
+            <CardContent className="flex flex-col items-center justify-center p-6 sm:p-8 text-center">
+              <Cloud className="h-10 w-10 sm:h-12 sm:w-12 mb-4 text-blue-500" />
+              <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Login Diperlukan</h3>
+              <p className="text-sm text-gray-600 mb-4 max-w-md">
+                Cloud system <strong>{getCurrentCloudSystemName()}</strong> memerlukan autentikasi. Silakan login untuk
+                melihat event logs.
+              </p>
+              <Button onClick={openLoginDialog} className="gap-2">
+                <LogIn className="h-4 w-4" />
+                Login ke Cloud System
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Error State - General */}
+        {error && !loading && !requiresAuth && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="flex items-center justify-center p-6 sm:p-8 text-red-600">
+              <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 mr-2 shrink-0" />
+              <span className="text-sm sm:text-base">{error}</span>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Empty State */}
+        {!loading && !loadingCloudServers && !error && !requiresAuth && filteredEvents.length === 0 && (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center p-8 sm:p-12 text-gray-500">
+              <Bell className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-30" />
+              <h3 className="text-base sm:text-lg font-medium mb-1">Tidak ada event ditemukan</h3>
+              <p className="text-xs sm:text-sm text-center max-w-md">
+                {hasActiveFilters
+                  ? "Coba ubah filter atau kata kunci pencarian"
+                  : "Event akan muncul saat sistem mendeteksi aktivitas"}
+              </p>
+              {hasActiveFilters && (
+                <Button variant="outline" onClick={clearFilters} className="mt-4">
+                  Clear Filters
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Events */}
+        {!loading &&
+          !error &&
+          filteredEvents.length > 0 &&
+          filteredEvents.map((event, index) => (
+            <EventCard
+              key={index}
+              event={event}
+              index={index}
+              isExpanded={expandedEvents.has(index)}
+              onToggle={() => toggleEventExpansion(index)}
+              getResourceName={getResourceName}
+            />
+          ))}
+      </div>
+
+      {/* Cloud Login Dialog */}
+      <CloudLoginDialog
+        open={showLoginDialog}
+        onOpenChange={setShowLoginDialog}
+        systemId={loginSystemId}
+        systemName={loginSystemName}
+        onLoginSuccess={() => {
+          // Refresh cloud servers and events after successful login
+          if (selectedCloudSystemId) {
+            fetchCloudServers(selectedCloudSystemId);
+          }
+        }}
+      />
     </div>
   );
 }
