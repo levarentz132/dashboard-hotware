@@ -46,7 +46,6 @@ export default function ServerOptions() {
       }
 
       const data = await response.json()
-      console.log('Servers API Response:', data)
       
       setServers(Array.isArray(data) ? data : [])
     } catch (err) {

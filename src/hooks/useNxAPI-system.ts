@@ -51,7 +51,7 @@ export function useSystemInfo(cloudId?: string) {
         return 0;
       });
 
-        // Cloud systems loaded
+      // Cloud systems loaded
       setAvailableSystems(systems);
       return systems;
     } catch (err) {
@@ -63,7 +63,6 @@ export function useSystemInfo(cloudId?: string) {
   // Fetch system info from cloud relay
   const fetchSystemInfoFromCloud = useCallback(async (cloudSystemId: string) => {
     try {
-      console.log("[useSystemInfo] Fetching from cloud relay:", cloudSystemId);
       const cloudUrl = `https://${cloudSystemId}.relay.vmsproxy.com/rest/v3/system/info`;
 
       const response = await fetch(cloudUrl, {
@@ -80,7 +79,6 @@ export function useSystemInfo(cloudId?: string) {
       }
 
       const info = await response.json();
-      console.log("[useSystemInfo] Cloud relay system info:", info);
       return info as NxSystemInfo;
     } catch (err) {
       console.error("[useSystemInfo] Cloud relay error:", err);
@@ -124,7 +122,6 @@ export function useSystemInfo(cloudId?: string) {
 
       // Fallback to local API
       const connectionTest = await nxAPI.testConnection();
-      console.log("[useSystemInfo] Local connection test result:", connectionTest);
 
       if (!connectionTest) {
         setSystemInfo(null);
@@ -134,7 +131,6 @@ export function useSystemInfo(cloudId?: string) {
       }
 
       const info = await nxAPI.getSystemInfo();
-      console.log("[useSystemInfo] Local system info result:", info);
 
       if (info) {
         setSystemInfo(info);
@@ -157,10 +153,8 @@ export function useSystemInfo(cloudId?: string) {
 
   const testConnection = useCallback(async () => {
     try {
-      console.log("[useSystemInfo] Manual connection test triggered");
       setLoading(true);
       const isConnected = await nxAPI.testConnection();
-      console.log("[useSystemInfo] Manual connection test result:", isConnected);
 
       setConnected(isConnected);
       if (isConnected) {

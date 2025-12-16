@@ -79,7 +79,6 @@ export default function StorageManagement() {
 
         // Try to fetch comprehensive storage data from API
         const storageData = await nxAPI.getAllStorageData();
-        console.log("[StorageManagement] Raw storage data:", storageData);
 
         if (storageData && storageData.servers && storageData.servers.length > 0) {
           // Process real storage data from Nx Witness API
@@ -88,12 +87,8 @@ export default function StorageManagement() {
           let usedSpaceBytes = 0;
 
           storageData.servers.forEach((server: any) => {
-            console.log("[StorageManagement] Processing server:", server.serverId, "storages:", server.storages);
-
             if (Array.isArray(server.storages)) {
               server.storages.forEach((storage: any) => {
-                console.log("[StorageManagement] Storage item:", storage);
-
                 const spaceLimitBytes = storage.spaceLimitB || 0;
                 const isOnline = storage.status === "Online";
                 const isBackup = storage.isBackup || false;
@@ -127,9 +122,6 @@ export default function StorageManagement() {
               });
             }
           });
-
-          console.log("[StorageManagement] Processed devices:", devices);
-          console.log("[StorageManagement] Total capacity bytes:", totalCapacityBytes);
 
           if (devices.length > 0) {
             setStorageDevices(devices);

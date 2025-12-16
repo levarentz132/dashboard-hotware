@@ -342,9 +342,7 @@ export default function CameraInventory() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        if (errorData.requiresAuth) {
-          console.log(`[CloudCameras] Auth required for ${system.name} - skipping (you're not the owner)`);
-        }
+    
         return [];
       }
 
@@ -1002,8 +1000,6 @@ export default function CameraInventory() {
         },
       };
 
-      console.log("[CameraInventory] Creating camera with payload:", payload);
-
       const result = await nxAPI.addCamera(payload);
 
       if (result) {
@@ -1098,8 +1094,6 @@ export default function CameraInventory() {
           password: editForm.credentialsPassword,
         },
       };
-
-      console.log("[CameraInventory] Updating camera with payload:", payload);
 
       const result = await nxAPI.updateCamera(selectedCamera.id, payload);
 

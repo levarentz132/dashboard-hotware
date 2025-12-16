@@ -42,8 +42,6 @@ export default function StorageWidget() {
           });
         }
       } catch (err) {
-        // Use dummy data on error
-        console.log("Storage API not available, using dummy data");
         setStorageData({
           totalCapacity: "50 TB",
           usedSpace: "39.2 TB",

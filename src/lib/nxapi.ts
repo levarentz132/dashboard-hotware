@@ -269,11 +269,6 @@ class NxWitnessAPI {
         this.apiRequest<IDeviceType[]>(API_ENDPOINTS.deviceTypes),
         this.apiRequest<IServer[]>(API_ENDPOINTS.servers),
       ]);
-
-      console.log("Device Types:", deviceTypes);
-      console.log("Servers:", servers);
-      console.log("Payload:", payload);
-
       // Validasi typeId (optional field)
       if (payload.typeId) {
         const deviceType = deviceTypes.find((type) => type.id === payload.typeId);
@@ -282,7 +277,6 @@ class NxWitnessAPI {
             `Device type not found: ${payload.typeId}. Available types: ${deviceTypes.map((t) => t.name).join(", ")}`
           );
         }
-        console.log("Selected Device Type:", deviceType.name);
       }
 
       // Validasi serverId (required field)
@@ -292,7 +286,6 @@ class NxWitnessAPI {
           `Server not found: ${payload.serverId}. Available servers: ${servers.map((s) => s.name).join(", ")}`
         );
       }
-      console.log("Selected Server:", server.name);
 
       const body = {
         physicalId: payload.physicalId,
@@ -329,7 +322,6 @@ class NxWitnessAPI {
         body: JSON.stringify(body),
       });
 
-      console.log("[createCamera] Camera created successfully:", response);
       return response;
     } catch (error) {
       console.error("[createCamera] Failed to create camera:", error);
@@ -360,7 +352,6 @@ class NxWitnessAPI {
             `Device type not found: ${payload.typeId}. Available types: ${deviceTypes.map((t) => t.name).join(", ")}`
           );
         }
-        console.log("Selected Device Type:", deviceType.name);
       }
 
       // Validasi serverId jika ada
@@ -371,7 +362,6 @@ class NxWitnessAPI {
             `Server not found: ${payload.serverId}. Available servers: ${servers.map((s) => s.name).join(", ")}`
           );
         }
-        console.log("Selected Server:", server.name);
       }
 
       const body: any = {};
@@ -414,12 +404,10 @@ class NxWitnessAPI {
           },
           body: JSON.stringify(body),
         });
-
-        console.log("[updateCamera] Camera updated successfully with PATCH:", response);
         return response;
       } catch (patchError) {
         // Fallback to PUT if PATCH fails
-        console.log("[updateCamera] PATCH failed, trying PUT...");
+        console.log("[updateCamera] PATCH failed, trying PUT...", patchError);
         const response = await this.apiRequest<ICamera>(endpoint, {
           method: "PUT",
           headers: {
@@ -428,7 +416,6 @@ class NxWitnessAPI {
           body: JSON.stringify(body),
         });
 
-        console.log("[updateCamera] Camera updated successfully with PUT:", response);
         return response;
       }
     } catch (error) {
@@ -441,13 +428,11 @@ class NxWitnessAPI {
   async deleteCamera(id: string): Promise<boolean> {
     try {
       const endpoint = API_ENDPOINTS.deleteDevice(id);
-      console.log("[deleteCamera] Deleting camera:", id);
 
       await this.apiRequest<void>(endpoint, {
         method: "DELETE",
       });
 
-      console.log("[deleteCamera] Camera deleted successfully");
       return true;
     } catch (error) {
       console.error("[deleteCamera] Failed to delete camera:", error);
@@ -467,9 +452,7 @@ class NxWitnessAPI {
   async getAlarms(limit: number = 20): Promise<NxEvent[]> {
     try {
       const endpoint = (API_ENDPOINTS as any).metricsAlarms || "/system/metrics/alarms";
-      console.log("[getAlarms] Fetching metrics alarms from:", endpoint);
       const data = await this.apiRequest<any>(endpoint);
-      console.log("[getAlarms] Raw metrics alarms response:", data);
 
       if (!data) return [];
 
@@ -543,10 +526,7 @@ class NxWitnessAPI {
       if (queryString) {
         endpoint += `?${queryString}`;
       }
-
-      console.log("[getMetricsAlarms] Fetching from:", endpoint);
       const data = await this.apiRequest<NxMetricsAlarmsResponse>(endpoint);
-      console.log("[getMetricsAlarms] Response:", data);
 
       return data;
     } catch (error) {
@@ -603,18 +583,13 @@ class NxWitnessAPI {
   // Server methods (REST v3)
   async getServers(): Promise<any> {
     try {
-      console.log("[getServers] Starting server request...");
       const servers = await this.apiRequest<any>("/servers");
-      console.log("[getServers] Raw servers API response:", servers); // Debug log
-      console.log("[getServers] Response type:", typeof servers, "isArray:", Array.isArray(servers));
 
       // Return the servers directly as they come from the API (should be an array)
       if (Array.isArray(servers)) {
-        console.log("[getServers] Returning array with", servers.length, "servers");
         return servers;
       } else if (servers && typeof servers === "object" && servers.servers) {
         // Handle wrapped response if API format changes
-        console.log("[getServers] Found wrapped servers, returning", servers.servers.length, "servers");
         return servers.servers;
       } else {
         console.warn("[getServers] Unexpected servers response format:", servers);
@@ -662,9 +637,7 @@ class NxWitnessAPI {
   async getStorages(serverId: string = "this"): Promise<any> {
     try {
       const endpoint = API_ENDPOINTS.storages.replace("{serverId}", serverId);
-      console.log("[getStorages] Fetching from endpoint:", endpoint);
       const storages = await this.apiRequest<any>(endpoint);
-      console.log("[getStorages] Received storages:", storages);
       return storages === null ? [] : storages;
     } catch (error) {
       console.error("[getStorages] Storages endpoint error:", error);
@@ -687,7 +660,6 @@ class NxWitnessAPI {
   ): Promise<any> {
     try {
       const endpoint = API_ENDPOINTS.createStorage(serverId);
-      console.log("[createStorage] Creating storage on server:", serverId, "with data:", storageData);
 
       const body = {
         name: storageData.name,
@@ -708,7 +680,6 @@ class NxWitnessAPI {
         body: JSON.stringify(body),
       });
 
-      console.log("[createStorage] Storage created:", response);
       return response;
     } catch (error) {
       console.error("[createStorage] Failed to create storage:", error);
@@ -720,10 +691,8 @@ class NxWitnessAPI {
   async getStorageById(serverId: string, storageId: string): Promise<any> {
     try {
       const endpoint = API_ENDPOINTS.storageById(serverId, storageId);
-      console.log("[getStorageById] Fetching storage:", storageId, "from server:", serverId);
 
       const response = await this.apiRequest<any>(endpoint);
-      console.log("[getStorageById] Storage details:", response);
 
       return response;
     } catch (error) {
@@ -749,7 +718,6 @@ class NxWitnessAPI {
   ): Promise<any> {
     try {
       const endpoint = API_ENDPOINTS.updateStorage(serverId, storageId);
-      console.log("[updateStorage] Updating storage:", storageId, "on server:", serverId, "with data:", updateData);
 
       const response = await this.apiRequest<any>(endpoint, {
         method: "PATCH",
@@ -759,7 +727,6 @@ class NxWitnessAPI {
         body: JSON.stringify(updateData),
       });
 
-      console.log("[updateStorage] Storage updated:", response);
       return response;
     } catch (error) {
       console.error("[updateStorage] Failed to update storage:", error);
@@ -771,13 +738,11 @@ class NxWitnessAPI {
   async deleteStorage(serverId: string, storageId: string): Promise<boolean> {
     try {
       const endpoint = API_ENDPOINTS.deleteStorage(serverId, storageId);
-      console.log("[deleteStorage] Deleting storage:", storageId, "from server:", serverId);
 
       const response = await this.apiRequest<any>(endpoint, {
         method: "DELETE",
       });
 
-      console.log("[deleteStorage] Storage deleted:", response);
       return true;
     } catch (error) {
       console.error("[deleteStorage] Failed to delete storage:", error);
@@ -800,9 +765,7 @@ class NxWitnessAPI {
   // Get all storage data across all servers
   async getAllStorageData(): Promise<any> {
     try {
-      console.log("[getAllStorageData] Starting to fetch storage data");
       const servers = await this.getServers();
-      console.log("[getAllStorageData] Servers:", servers);
 
       const storageData: {
         servers: Array<{
@@ -822,11 +785,8 @@ class NxWitnessAPI {
 
       // Fetch storages for each server
       if (Array.isArray(servers) && servers.length > 0) {
-        console.log("[getAllStorageData] Found", servers.length, "servers");
         for (const server of servers) {
-          console.log("[getAllStorageData] Fetching storages for server:", server.id, server.name);
           const storages = await this.getStorages(server.id);
-          console.log("[getAllStorageData] Storages for server", server.id, ":", storages);
           if (Array.isArray(storages) && storages.length > 0) {
             storageData.servers.push({
               serverId: server.id,
@@ -837,9 +797,7 @@ class NxWitnessAPI {
         }
       } else {
         // If no servers found, try 'this' server
-        console.log('[getAllStorageData] No servers array, trying "this" server');
         const storages = await this.getStorages("this");
-        console.log('[getAllStorageData] Storages for "this" server:', storages);
         if (Array.isArray(storages) && storages.length > 0) {
           storageData.servers.push({
             serverId: "this",
@@ -849,7 +807,6 @@ class NxWitnessAPI {
         }
       }
 
-      console.log("[getAllStorageData] Final storage data:", storageData);
       return storageData;
     } catch (error) {
       console.error("[getAllStorageData] Error fetching storage data:", error);
@@ -879,7 +836,6 @@ class NxWitnessAPI {
 
       if (sessionsResponse.ok) {
         const sessions = await sessionsResponse.json();
-        console.log("[nxAPI] Current sessions:", sessions);
 
         // Get the current session token (usually the first/only one)
         let token = null;
@@ -898,7 +854,6 @@ class NxWitnessAPI {
           });
 
           if (deleteResponse.ok || deleteResponse.status === 204) {
-            console.log("[nxAPI] Logout successful - session deleted");
             this.authToken = null;
             return true;
           } else {
@@ -915,7 +870,6 @@ class NxWitnessAPI {
       });
 
       if (fallbackResponse.ok || fallbackResponse.status === 204) {
-        console.log("[nxAPI] Logout successful via current session");
         this.authToken = null;
         // Clear auth cookie
         if (typeof document !== "undefined") {
@@ -980,15 +934,8 @@ export const nxAPI = new NxWitnessAPI();
 
 // Auto-login if credentials are provided
 if (typeof window !== "undefined" && API_CONFIG.username && API_CONFIG.password) {
-  console.log("[nxAPI] Auto-login credentials detected:", {
-    username: API_CONFIG.username,
-    hasPassword: !!API_CONFIG.password,
-    baseURL: API_CONFIG.baseURL,
-  });
-
   // Delay auto-login to allow component initialization
   setTimeout(async () => {
-    console.log("[nxAPI] Starting auto-login...");
     try {
       const success = await nxAPI.login(API_CONFIG.username, API_CONFIG.password);
       console.log("[nxAPI] Auto-login result:", success);

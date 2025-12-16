@@ -13,7 +13,6 @@ export function useServers() {
         setLoading(true);
         setError(null);
         const data = await nxAPI.getServers();
-        console.log("Server data received:", data); // Debug log
 
         // The API returns servers directly as an array, not wrapped in an object
         if (Array.isArray(data) && data.length > 0) {

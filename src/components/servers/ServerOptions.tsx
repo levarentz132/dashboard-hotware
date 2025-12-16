@@ -51,7 +51,6 @@ export default function ServerOptions() {
       }
 
       const data = await response.json();
-      console.log("Servers API Response:", data);
 
       // API returns { systems: [...] } not a direct array
       const systemsList = data.systems || data;
