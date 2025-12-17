@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     // Also store the token in a system-specific cookie
     response.cookies.set(`nx-cloud-${systemId}`, loginData.token, {
       path: "/",
-      maxAge: 60 * 60 * 24, // 24 hours
+      maxAge: 60 * 60 * 24 * 3, // 3 days
       httpOnly: false,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

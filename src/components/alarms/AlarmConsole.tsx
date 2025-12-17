@@ -28,6 +28,7 @@ import {
   Cpu,
   Cloud,
   LogIn,
+  LogOut,
 } from "lucide-react";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useCameras } from "@/hooks/useNxAPI-camera";
@@ -653,6 +654,8 @@ export default function AlarmConsole() {
   const [loginSystemName, setLoginSystemName] = useState("");
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
+  const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
+  const [loggingOut, setLoggingOut] = useState(false);
 
   // Filter state
   const [filterEventType, setFilterEventType] = useState<string>("all");
@@ -668,6 +671,10 @@ export default function AlarmConsole() {
   // Auto-refresh
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
+
+  // Pagination state
+  const [displayCount, setDisplayCount] = useState(20); // Show 20 events initially
+  const LOAD_MORE_COUNT = 20; // Load 20 more each time
 
   // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
@@ -753,6 +760,7 @@ export default function AlarmConsole() {
         console.log(`[Cloud Auto-Login] Success for ${systemName}`);
         // Mark as attempted (successfully)
         setAutoLoginAttempted((prev) => new Set(prev).add(systemId));
+        setIsLoggedIn((prev) => new Set(prev).add(systemId));
         return true;
       } catch (err) {
         console.error(`[Cloud Auto-Login] Error for ${systemName}:`, err);
@@ -936,6 +944,43 @@ export default function AlarmConsole() {
     const system = cloudSystems.find((s) => s.id === selectedCloudSystemId);
     return system?.name || selectedCloudSystemId;
   }, [cloudSystems, selectedCloudSystemId]);
+
+  // Logout function for cloud systems
+  const handleCloudLogout = useCallback(async () => {
+    if (!selectedCloudSystemId) return;
+
+    setLoggingOut(true);
+    try {
+      const response = await fetch(`/api/cloud/login?systemId=${encodeURIComponent(selectedCloudSystemId)}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        // Remove from logged in set
+        setIsLoggedIn((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(selectedCloudSystemId);
+          return newSet;
+        });
+        // Remove from auto-login attempted so it can retry if needed
+        setAutoLoginAttempted((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(selectedCloudSystemId);
+          return newSet;
+        });
+        // Clear servers and events
+        setCloudServers([]);
+        setSelectedCloudServerId("");
+        setEvents([]);
+        setRequiresAuth(true);
+        console.log(`[Cloud Logout] Successfully logged out from ${getCurrentCloudSystemName()}`);
+      }
+    } catch (err) {
+      console.error("[Cloud Logout] Error:", err);
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [selectedCloudSystemId, getCurrentCloudSystemName]);
 
   // Open login dialog for current cloud system
   const openLoginDialog = useCallback(() => {
@@ -1190,12 +1235,44 @@ export default function AlarmConsole() {
     searchQuery !== "",
   ].filter(Boolean).length;
 
+  // Displayed events (paginated)
+  const displayedEvents = useMemo(() => {
+    return filteredEvents.slice(0, displayCount);
+  }, [filteredEvents, displayCount]);
+
+  const hasMoreEvents = displayCount < filteredEvents.length;
+  const remainingCount = filteredEvents.length - displayCount;
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setDisplayCount(20);
+  }, [
+    filterEventType,
+    filterLevel,
+    filterActionType,
+    filterResource,
+    filterSourceServer,
+    filterDateFrom,
+    filterDateTo,
+    searchQuery,
+  ]);
+
+  // Reset pagination when server changes
+  useEffect(() => {
+    setDisplayCount(20);
+  }, [selectedServerId, selectedCloudServerId]);
+
+  // Load more function
+  const loadMore = useCallback(() => {
+    setDisplayCount((prev) => Math.min(prev + LOAD_MORE_COUNT, filteredEvents.length));
+  }, [filteredEvents.length]);
+
   return (
     <div className="p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex flex-col gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Event Log</h1>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Alarm Console</h1>
           <p className="text-sm text-gray-500 mt-1 hidden sm:block">
             Monitor dan analisis event sistem secara real-time
           </p>
@@ -1284,6 +1361,20 @@ export default function AlarmConsole() {
                 )}
               </SelectContent>
             </Select>
+          )}
+
+          {/* Cloud Logout Button */}
+          {selectedServerType === "cloud" && selectedCloudSystemId && isLoggedIn.has(selectedCloudSystemId) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground hover:text-red-500 gap-1"
+              onClick={handleCloudLogout}
+              disabled={loggingOut}
+            >
+              {loggingOut ? <RefreshCw className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
+              <span className="hidden sm:inline">Logout</span>
+            </Button>
           )}
 
           <div className="flex items-center gap-2 ml-auto">
@@ -1732,7 +1823,8 @@ export default function AlarmConsole() {
       {/* Results Info */}
       <div className="flex items-center justify-between text-xs sm:text-sm text-gray-500">
         <span>
-          Menampilkan {filteredEvents.length} dari {events.length} events
+          Menampilkan {displayedEvents.length} dari {filteredEvents.length} events
+          {filteredEvents.length !== events.length && ` (${events.length} total)`}
           {hasActiveFilters && " (filtered)"}
         </span>
         {autoRefresh && (
@@ -1805,8 +1897,8 @@ export default function AlarmConsole() {
         {/* Events */}
         {!loading &&
           !error &&
-          filteredEvents.length > 0 &&
-          filteredEvents.map((event, index) => (
+          displayedEvents.length > 0 &&
+          displayedEvents.map((event, index) => (
             <EventCard
               key={index}
               event={event}
@@ -1816,6 +1908,31 @@ export default function AlarmConsole() {
               getResourceName={getResourceName}
             />
           ))}
+
+        {/* Load More Button */}
+        {!loading && !error && hasMoreEvents && (
+          <div className="flex flex-col items-center gap-2 pt-4">
+            <Button variant="outline" onClick={loadMore} className="w-full sm:w-auto gap-2">
+              <ChevronDown className="h-4 w-4" />
+              Muat {Math.min(LOAD_MORE_COUNT, remainingCount)} event lagi
+            </Button>
+            <span className="text-xs text-gray-400">{remainingCount} event tersisa</span>
+          </div>
+        )}
+
+        {/* Show All Button - when many events remaining */}
+        {!loading && !error && hasMoreEvents && remainingCount > LOAD_MORE_COUNT && (
+          <div className="flex justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDisplayCount(filteredEvents.length)}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              Atau tampilkan semua {filteredEvents.length} events
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Cloud Login Dialog */}
@@ -1825,6 +1942,8 @@ export default function AlarmConsole() {
         systemId={loginSystemId}
         systemName={loginSystemName}
         onLoginSuccess={() => {
+          // Mark as logged in
+          setIsLoggedIn((prev) => new Set(prev).add(loginSystemId));
           // Refresh cloud servers and events after successful login
           if (selectedCloudSystemId) {
             fetchCloudServers(selectedCloudSystemId);
