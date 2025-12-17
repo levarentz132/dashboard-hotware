@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 interface Camera {
   id: string;
   name: string;
+  systemId?: string; // For cloud cameras
 }
 
 interface ActiveCamera extends Camera {
@@ -38,9 +39,21 @@ function DropZone({
     }
   }, [camera?.id]);
 
-  // Hardcode API URL atau gunakan window untuk environment variables
-  const API_BASE_URL = "https://localhost:7001";
-  const streamUrl = camera ? `${API_BASE_URL}/media/${camera.id}.mp4` : "";
+  // Build stream URL - use cloud relay if systemId exists, otherwise local
+  const getStreamUrl = () => {
+    if (!camera) return "";
+
+    // Cloud camera - use relay proxy
+    if (camera.systemId) {
+      return `https://${camera.systemId}.relay.vmsproxy.com/media/${camera.id}.mp4`;
+    }
+
+    // Local camera - use localhost
+    const API_BASE_URL = "https://localhost:7001";
+    return `${API_BASE_URL}/media/${camera.id}.mp4`;
+  };
+
+  const streamUrl = getStreamUrl();
 
   // Mouse drag handlers
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
