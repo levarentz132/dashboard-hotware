@@ -235,15 +235,23 @@ export default function AppSidebar() {
         }
 
         const devices = await response.json();
-        // Filter only cameras (typeId contains 'camera')
-        const cameraDevices: CloudDevice[] = (Array.isArray(devices) ? devices : [])
-          .filter((d: CloudDevice) => !d.typeId || d.typeId.toLowerCase().includes("camera"))
-          .map((d: CloudDevice) => ({
-            ...d,
-            systemId,
-            systemName,
-          }));
+        console.log("[Cloud Devices] Raw response:", devices);
 
+        // Get all devices first, then we can filter later
+        const allDevices = Array.isArray(devices) ? devices : [];
+
+        // Map all devices - we'll show all for now and filter later if needed
+        const cameraDevices: CloudDevice[] = allDevices.map((d: CloudDevice) => ({
+          id: d.id,
+          name: d.name || "Unknown Device",
+          status: d.status || "Unknown",
+          typeId: d.typeId,
+          physicalId: d.physicalId,
+          systemId,
+          systemName,
+        }));
+
+        console.log("[Cloud Devices] Total devices:", cameraDevices.length, cameraDevices);
         setCloudDevices(cameraDevices);
         // Mark as logged in since we successfully fetched devices
         setIsLoggedIn((prev) => new Set(prev).add(systemId));
