@@ -1,6 +1,19 @@
 "use client";
 
-import { Camera, Home, Activity, AlertTriangle, BarChart3, Settings, Users, Database, Server, X } from "lucide-react";
+import {
+  Camera,
+  Home,
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Settings,
+  Users,
+  Database,
+  Server,
+  X,
+  Dog,
+} from "lucide-react";
+import { id } from "zod/v4/locales";
 
 interface SidebarProps {
   activeSection: string;
@@ -15,6 +28,7 @@ const navigationItems = [
   { id: "servers", label: "Server Options", icon: Server },
   { id: "health", label: "System Health", icon: Activity },
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle },
+  { id: "audits", label: "Audit Logs", icon: Dog },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "debug", label: "Connection Debug", icon: Settings },
   { id: "storage", label: "Storage", icon: Database },

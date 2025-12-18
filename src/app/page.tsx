@@ -12,6 +12,7 @@ import Analytics from "@/components/analytics/Analytics";
 import NotificationSystem from "@/components/ui/NotificationSystem";
 import ConnectionTest from "@/components/debug/ConnectionTest";
 import StorageManagement from "@/components/storage/StorageManagement";
+import AuditLog from "@/components/audits/AuditLog";
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState("dashboard");
@@ -29,6 +30,8 @@ export default function Home() {
         return <SystemHealth />;
       case "alarms":
         return <AlarmConsole />;
+      case "audits":
+        return <AuditLog />;
       case "analytics":
         return <Analytics />;
       case "storage":
