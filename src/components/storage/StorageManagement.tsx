@@ -1,843 +1,1117 @@
 "use client";
 
-import { Database, HardDrive, TrendingUp, AlertCircle, Server, Trash2, Settings, Download, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
-import { nxAPI } from "@/lib/nxapi";
+import { useState, useEffect, useCallback } from "react";
+import {
+  RefreshCw,
+  AlertCircle,
+  HardDrive,
+  Cloud,
+  ChevronDown,
+  Database,
+  Server,
+  LogIn,
+  Eye,
+  EyeOff,
+  CheckCircle,
+  XCircle,
+  Wifi,
+  WifiOff,
+  Archive,
+  Plus,
+  Pencil,
+  Trash2,
+} from "lucide-react";
+import { Button } from "../ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Progress } from "../ui/progress";
+import { Badge } from "../ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+import { Label } from "../ui/label";
+import { Input } from "../ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { CLOUD_CONFIG } from "@/lib/config";
 
-interface StorageDevice {
+interface StorageStatusInfo {
+  url: string;
+  storageId: string;
+  totalSpace: string;
+  freeSpace: string;
+  reservedSpace: string;
+  isExternal: boolean;
+  isWritable: boolean;
+  isUsedForWriting: boolean;
+  isBackup: boolean;
+  isOnline: boolean;
+  storageType: string;
+  runtimeFlags: string;
+  persistentFlags: string;
+  serverId: string;
+  name: string;
+}
+
+interface Storage {
   id: string;
   serverId: string;
   name: string;
   path: string;
-  type: "local" | "network" | "cloud";
-  spaceLimitB: number;
-  totalSpace: string;
-  usedSpace: string;
-  freeSpace: string;
-  usagePercentage: number;
-  isUsedForWriting: boolean;
-  isBackup: boolean;
-  status: "healthy" | "warning" | "critical";
-  rawStatus: string;
-  parameters?: Record<string, any>;
+  type?: string;
+  spaceLimitB?: number;
+  isUsedForWriting?: boolean;
+  isBackup?: boolean;
+  status?: string;
+  statusInfo?: StorageStatusInfo | null;
 }
 
-// Helper function to format bytes to human-readable format
-const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
+interface CloudSystem {
+  id: string;
+  name: string;
+  stateOfHealth: string;
+  accessRole: string;
+}
+
+interface StorageFormData {
+  name: string;
+  path: string;
+  type: string;
+  spaceLimitB: number;
+  isUsedForWriting: boolean;
+  isBackup: boolean;
+}
+
+const defaultFormData: StorageFormData = {
+  name: "",
+  path: "",
+  type: "local",
+  spaceLimitB: 10737418240, // 10 GB default
+  isUsedForWriting: true,
+  isBackup: false,
 };
 
+const STORAGE_TYPES = [
+  { value: "local", label: "Local Storage" },
+  { value: "network", label: "Network (NAS - Manual)" },
+  { value: "smb", label: "SMB (NAS - Auto)" },
+];
+
 export default function StorageManagement() {
-  const [loading, setLoading] = useState(true);
-  const [storageDevices, setStorageDevices] = useState<StorageDevice[]>([]);
+  // Cloud systems state
+  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
+  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(null);
+  const [loadingSystems, setLoadingSystems] = useState(false);
+
+  // Storage state
+  const [storages, setStorages] = useState<Storage[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Auth state
+  const [requiresAuth, setRequiresAuth] = useState(false);
+  const [showLoginForm, setShowLoginForm] = useState(false);
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // CRUD modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedStorage, setSelectedStorage] = useState<StorageDevice | null>(null);
-  const [servers, setServers] = useState<any[]>([]);
-  const [createForm, setCreateForm] = useState({
-    serverId: "",
-    name: "",
-    path: "",
-    type: "local",
-    spaceLimitB: 0,
-    isUsedForWriting: true,
-    isBackup: false,
-  });
-  const [editForm, setEditForm] = useState({
-    name: "",
-    path: "",
-    type: "local",
-    spaceLimitB: 0,
-    isUsedForWriting: true,
-    isBackup: false,
-    status: "Offline",
-  });
-  const [totalStorage, setTotalStorage] = useState({
-    total: "0 Bytes",
-    used: "0 Bytes",
-    free: "0 Bytes",
-    usagePercentage: 0,
-  });
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [selectedStorage, setSelectedStorage] = useState<Storage | null>(null);
+  const [formData, setFormData] = useState<StorageFormData>(defaultFormData);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchStorageData = async () => {
-      try {
-        setLoading(true);
-
-        // Fetch servers for the create form
-        const serverList = await nxAPI.getServers();
-        if (serverList && Array.isArray(serverList)) {
-          setServers(serverList);
-          if (serverList.length > 0 && !createForm.serverId) {
-            setCreateForm((prev) => ({ ...prev, serverId: serverList[0].id }));
-          }
-        }
-
-        // Try to fetch comprehensive storage data from API
-        const storageData = await nxAPI.getAllStorageData();
-
-        if (storageData && storageData.servers && storageData.servers.length > 0) {
-          // Process real storage data from Nx Witness API
-          const devices: StorageDevice[] = [];
-          let totalCapacityBytes = 0;
-          let usedSpaceBytes = 0;
-
-          storageData.servers.forEach((server: any) => {
-            if (Array.isArray(server.storages)) {
-              server.storages.forEach((storage: any) => {
-                const spaceLimitBytes = storage.spaceLimitB || 0;
-                const isOnline = storage.status === "Online";
-                const isBackup = storage.isBackup || false;
-                const isUsedForWriting = storage.isUsedForWriting || false;
-
-                // Add to total capacity
-                totalCapacityBytes += spaceLimitBytes;
-
-                // Extract storage status from parameters if available
-                const statusFlags = storage.parameters?.persistentStorageStatusFlags || "";
-                const hasDBReady = statusFlags.includes("dbReady");
-                const isSystemStorage = statusFlags.includes("system");
-
-                devices.push({
-                  id: storage.id,
-                  serverId: storage.serverId || server.serverId,
-                  name: `${storage.name}${isSystemStorage ? " (System)" : ""}${isBackup ? " (Backup)" : ""}`,
-                  path: storage.path || "Unknown path",
-                  type: storage.type === "local" ? "local" : storage.type === "network" ? "network" : "cloud",
-                  spaceLimitB: spaceLimitBytes,
-                  totalSpace: formatBytes(spaceLimitBytes),
-                  usedSpace: isUsedForWriting ? "In Use" : "Not Used",
-                  freeSpace: formatBytes(spaceLimitBytes),
-                  usagePercentage: 0,
-                  isUsedForWriting: isUsedForWriting,
-                  isBackup: isBackup,
-                  status: isOnline && hasDBReady ? "healthy" : isOnline ? "warning" : "critical",
-                  rawStatus: storage.status,
-                  parameters: storage.parameters || {},
-                });
-              });
-            }
-          });
-
-          if (devices.length > 0) {
-            setStorageDevices(devices);
-            setTotalStorage({
-              total: formatBytes(totalCapacityBytes),
-              used: "N/A",
-              free: formatBytes(totalCapacityBytes),
-              usagePercentage: 0,
-            });
-          }
-        } else {
-          console.log("[StorageManagement] No storage data available");
-        }
-      } catch (error) {
-        console.error("Failed to fetch storage data:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStorageData();
-  }, []);
-
-  const handleEditStorage = (device: StorageDevice) => {
-    setSelectedStorage(device);
-    setEditForm({
-      name: device.name,
-      path: device.path,
-      type: device.type,
-      spaceLimitB: device.spaceLimitB,
-      isUsedForWriting: device.isUsedForWriting,
-      isBackup: device.isBackup,
-      status: device.rawStatus,
-    });
-    setShowEditModal(true);
-  };
-
-  const handleUpdateStorage = async () => {
+  // Fetch cloud systems
+  const fetchCloudSystems = useCallback(async () => {
+    setLoadingSystems(true);
     try {
-      if (!selectedStorage) return;
-
-      const result = await nxAPI.updateStorage(selectedStorage.serverId, selectedStorage.id, {
-        name: editForm.name,
-        path: editForm.path,
-        type: editForm.type,
-        spaceLimitB: editForm.spaceLimitB,
-        isUsedForWriting: editForm.isUsedForWriting,
-        isBackup: editForm.isBackup,
-        status: editForm.status,
+      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
       });
 
-      if (result) {
-        alert("Storage updated successfully!");
-        setShowEditModal(false);
-        setSelectedStorage(null);
-        // Refresh storage list
-        window.location.reload();
-      }
-    } catch (error) {
-      console.error("Failed to update storage:", error);
-      alert("Failed to update storage. Please check the console for details.");
-    }
-  };
-
-  const handleDeleteStorage = async (device: StorageDevice) => {
-    const confirmDelete = confirm(
-      `Are you sure you want to delete storage "${device.name}"?\n\nPath: ${device.path}\nThis action cannot be undone.`
-    );
-
-    if (!confirmDelete) return;
-
-    try {
-      await nxAPI.deleteStorage(device.serverId, device.id);
-      alert("Storage deleted successfully!");
-      // Refresh storage list
-      window.location.reload();
-    } catch (error) {
-      console.error("Failed to delete storage:", error);
-      alert("Failed to delete storage. Please check the console for details.");
-    }
-  };
-
-  const handleCreateStorage = async () => {
-    try {
-      if (!createForm.serverId || !createForm.name || !createForm.path) {
-        alert("Please fill in all required fields");
+      if (!response.ok) {
+        setError("Failed to fetch cloud systems");
         return;
       }
 
-      const result = await nxAPI.createStorage(createForm.serverId, {
-        name: createForm.name,
-        path: createForm.path,
-        type: createForm.type,
-        spaceLimitB: createForm.spaceLimitB,
-        isUsedForWriting: createForm.isUsedForWriting,
-        isBackup: createForm.isBackup,
+      const data = await response.json();
+      const systems: CloudSystem[] = data.systems || [];
+
+      // Sort: owner first, then online systems
+      systems.sort((a, b) => {
+        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
+        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
+        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
+        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
+        return 0;
       });
 
-      if (result) {
-        alert("Storage created successfully!");
-        setShowCreateModal(false);
-        // Reset form
-        setCreateForm({
-          serverId: servers.length > 0 ? servers[0].id : "",
-          name: "",
-          path: "",
-          type: "local",
-          spaceLimitB: 0,
-          isUsedForWriting: true,
-          isBackup: false,
-        });
-        // Refresh storage list
-        window.location.reload();
+      setCloudSystems(systems);
+
+      // Auto-select first online system
+      const firstOnline = systems.find((s) => s.stateOfHealth === "online");
+      if (firstOnline) {
+        setSelectedSystem(firstOnline);
       }
-    } catch (error) {
-      console.error("Failed to create storage:", error);
-      alert("Failed to create storage. Please check the console for details.");
+    } catch (err) {
+      console.error("Error fetching cloud systems:", err);
+      setError("Failed to connect to cloud");
+    } finally {
+      setLoadingSystems(false);
+    }
+  }, []);
+
+  // Auto-login function
+  const attemptAutoLogin = useCallback(async (systemId: string) => {
+    if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
+      return false;
+    }
+
+    try {
+      const response = await fetch("/api/cloud/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemId,
+          username: CLOUD_CONFIG.username,
+          password: CLOUD_CONFIG.password,
+        }),
+      });
+
+      if (response.ok) {
+        setRequiresAuth(false);
+        return true;
+      }
+    } catch (err) {
+      console.error("Auto-login failed:", err);
+    }
+    return false;
+  }, []);
+
+  // Manual login
+  const handleLogin = async () => {
+    if (!selectedSystem || !loginForm.username || !loginForm.password) {
+      setLoginError("Username and password are required");
+      return;
+    }
+
+    setLoggingIn(true);
+    setLoginError(null);
+
+    try {
+      const response = await fetch("/api/cloud/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemId: selectedSystem.id,
+          username: loginForm.username,
+          password: loginForm.password,
+        }),
+      });
+
+      if (response.ok) {
+        setRequiresAuth(false);
+        setShowLoginForm(false);
+        setLoginForm({ username: "", password: "" });
+        // Refresh storages
+        fetchStorages(selectedSystem);
+      } else {
+        const data = await response.json();
+        setLoginError(data.error || "Login failed");
+      }
+    } catch {
+      setLoginError("Connection error");
+    } finally {
+      setLoggingIn(false);
     }
   };
 
-  const getStatusColor = (status: string) => {
+  // Fetch storages
+  const fetchStorages = useCallback(
+    async (system: CloudSystem) => {
+      if (!system || system.stateOfHealth !== "online") return;
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`);
+
+        if (response.status === 401) {
+          setRequiresAuth(true);
+          // Try auto-login
+          const autoLoginSuccess = await attemptAutoLogin(system.id);
+          if (autoLoginSuccess) {
+            // Retry fetch
+            const retryResponse = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`);
+            if (retryResponse.ok) {
+              const data = await retryResponse.json();
+              setStorages(Array.isArray(data) ? data : []);
+              setRequiresAuth(false);
+            }
+          }
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch storages");
+        }
+
+        const data = await response.json();
+        setStorages(Array.isArray(data) ? data : []);
+        setRequiresAuth(false);
+      } catch (err) {
+        console.error("Error fetching storages:", err);
+        setError("Failed to fetch storages");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [attemptAutoLogin]
+  );
+
+  // Initial load
+  useEffect(() => {
+    fetchCloudSystems();
+  }, [fetchCloudSystems]);
+
+  // Fetch storages when system changes
+  useEffect(() => {
+    if (selectedSystem) {
+      fetchStorages(selectedSystem);
+    }
+  }, [selectedSystem, fetchStorages]);
+
+  // Format bytes to human readable
+  const formatBytes = (bytes: string | number): string => {
+    const numBytes = typeof bytes === "string" ? parseInt(bytes) : bytes;
+    if (isNaN(numBytes) || numBytes === 0) return "0 B";
+
+    const sizes = ["B", "KB", "MB", "GB", "TB", "PB"];
+    const i = Math.floor(Math.log(numBytes) / Math.log(1024));
+    return `${(numBytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+  };
+
+  // Calculate usage percentage
+  const getUsagePercentage = (storage: Storage): number => {
+    if (!storage.statusInfo) return 0;
+    const total = parseInt(storage.statusInfo.totalSpace);
+    const free = parseInt(storage.statusInfo.freeSpace);
+    if (isNaN(total) || isNaN(free) || total === 0) return 0;
+    return Math.round(((total - free) / total) * 100);
+  };
+
+  // Get status color
+  const getStatusColor = (status?: string): string => {
     switch (status) {
-      case "healthy":
-        return "bg-green-100 text-green-800 border-green-200";
-      case "warning":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      case "critical":
-        return "bg-red-100 text-red-800 border-red-200";
+      case "Online":
+      case "Recording":
+        return "bg-green-100 text-green-800";
+      case "Offline":
+        return "bg-red-100 text-red-800";
+      case "Unauthorized":
+        return "bg-yellow-100 text-yellow-800";
       default:
-        return "bg-gray-100 text-gray-800 border-gray-200";
+        return "bg-gray-100 text-gray-800";
     }
   };
 
-  const getUsageColor = (percentage: number) => {
-    if (percentage >= 90) return "bg-red-500";
-    if (percentage >= 75) return "bg-yellow-500";
-    return "bg-green-500";
-  };
-
-  const getTypeIcon = (type: string) => {
+  // Get storage type icon
+  const getStorageTypeIcon = (type?: string) => {
     switch (type) {
       case "local":
         return <HardDrive className="w-5 h-5" />;
       case "network":
+      case "smb":
         return <Server className="w-5 h-5" />;
-      case "cloud":
-        return <Database className="w-5 h-5" />;
       default:
-        return <HardDrive className="w-5 h-5" />;
+        return <Database className="w-5 h-5" />;
     }
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900">Storage Management</h1>
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-center h-48">
-            <div className="text-gray-500">Loading storage information...</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Calculate totals
+  const totalStorage = storages.reduce((acc, s) => {
+    if (s.statusInfo) {
+      return acc + parseInt(s.statusInfo.totalSpace || "0");
+    }
+    return acc;
+  }, 0);
+
+  const totalUsed = storages.reduce((acc, s) => {
+    if (s.statusInfo) {
+      const total = parseInt(s.statusInfo.totalSpace || "0");
+      const free = parseInt(s.statusInfo.freeSpace || "0");
+      return acc + (total - free);
+    }
+    return acc;
+  }, 0);
+
+  const totalFree = storages.reduce((acc, s) => {
+    if (s.statusInfo) {
+      return acc + parseInt(s.statusInfo.freeSpace || "0");
+    }
+    return acc;
+  }, 0);
+
+  const onlineStorages = storages.filter((s) => s.status === "Online" || s.statusInfo?.isOnline).length;
+
+  // Get server ID from storages (assuming all storages belong to the same server)
+  const getServerId = (): string => {
+    if (storages.length > 0 && storages[0].serverId) {
+      return storages[0].serverId;
+    }
+    return "this"; // Default to "this" which represents the current server
+  };
+
+  // Open create modal
+  const handleOpenCreate = () => {
+    setFormData(defaultFormData);
+    setSaveError(null);
+    setShowCreateModal(true);
+  };
+
+  // Open edit modal
+  const handleOpenEdit = (storage: Storage) => {
+    setSelectedStorage(storage);
+    setFormData({
+      name: storage.name,
+      path: storage.path,
+      type: storage.type || "local",
+      spaceLimitB: storage.spaceLimitB || 10737418240,
+      isUsedForWriting: storage.isUsedForWriting ?? true,
+      isBackup: storage.isBackup ?? false,
+    });
+    setSaveError(null);
+    setShowEditModal(true);
+  };
+
+  // Open delete dialog
+  const handleOpenDelete = (storage: Storage) => {
+    setSelectedStorage(storage);
+    setShowDeleteDialog(true);
+  };
+
+  // Create storage
+  const handleCreate = async () => {
+    if (!selectedSystem || !formData.name || !formData.path) {
+      setSaveError("Name and path are required");
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      const serverId = getServerId();
+      const response = await fetch(
+        `/api/cloud/storages?systemId=${encodeURIComponent(selectedSystem.id)}&serverId=${encodeURIComponent(
+          serverId
+        )}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: formData.name,
+            path: formData.path,
+            type: formData.type,
+            spaceLimitB: formData.spaceLimitB,
+            isUsedForWriting: formData.isUsedForWriting,
+            isBackup: formData.isBackup,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to create storage");
+      }
+
+      setShowCreateModal(false);
+      fetchStorages(selectedSystem);
+    } catch (err) {
+      console.error("Error creating storage:", err);
+      setSaveError(err instanceof Error ? err.message : "Failed to create storage");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Update storage
+  const handleUpdate = async () => {
+    if (!selectedSystem || !selectedStorage || !formData.name || !formData.path) {
+      setSaveError("Name and path are required");
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      const response = await fetch(
+        `/api/cloud/storages/${selectedStorage.id}?systemId=${encodeURIComponent(
+          selectedSystem.id
+        )}&serverId=${encodeURIComponent(selectedStorage.serverId)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: selectedStorage.id,
+            serverId: selectedStorage.serverId,
+            name: formData.name,
+            path: formData.path,
+            type: formData.type,
+            spaceLimitB: formData.spaceLimitB,
+            isUsedForWriting: formData.isUsedForWriting,
+            isBackup: formData.isBackup,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to update storage");
+      }
+
+      setShowEditModal(false);
+      setSelectedStorage(null);
+      fetchStorages(selectedSystem);
+    } catch (err) {
+      console.error("Error updating storage:", err);
+      setSaveError(err instanceof Error ? err.message : "Failed to update storage");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Delete storage
+  const handleDelete = async () => {
+    if (!selectedSystem || !selectedStorage) return;
+
+    setSaving(true);
+
+    try {
+      const response = await fetch(
+        `/api/cloud/storages/${selectedStorage.id}?systemId=${encodeURIComponent(
+          selectedSystem.id
+        )}&serverId=${encodeURIComponent(selectedStorage.serverId)}`,
+        { method: "DELETE" }
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to delete storage");
+      }
+
+      setShowDeleteDialog(false);
+      setSelectedStorage(null);
+      fetchStorages(selectedSystem);
+    } catch (err) {
+      console.error("Error deleting storage:", err);
+      setError(err instanceof Error ? err.message : "Failed to delete storage");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Parse GB to bytes
+  const parseGBToBytes = (gb: string): number => {
+    const num = parseFloat(gb);
+    if (isNaN(num)) return 10737418240;
+    return Math.round(num * 1024 * 1024 * 1024);
+  };
+
+  // Format bytes to GB for display
+  const formatBytesToGB = (bytes: number): string => {
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2);
+  };
 
   return (
     <div className="space-y-4 md:space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Storage Management</h1>
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Storage Management</h1>
+          <p className="text-sm text-gray-500 mt-1">Monitor and manage cloud system storages</p>
+        </div>
+
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center space-x-2 text-sm md:text-base"
+          {/* Add Storage Button */}
+          {!requiresAuth && selectedSystem && (
+            <Button onClick={handleOpenCreate} className="gap-2">
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Add Storage</span>
+            </Button>
+          )}
+
+          {/* System Selector */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="flex items-center gap-2">
+                <Cloud className="w-4 h-4" />
+                <span className="truncate max-w-[150px]">{selectedSystem?.name || "Select System"}</span>
+                <ChevronDown className="w-4 h-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64" align="end">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700">Select Cloud System</p>
+                {loadingSystems ? (
+                  <div className="flex items-center justify-center py-4">
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  </div>
+                ) : cloudSystems.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-2">No systems found</p>
+                ) : (
+                  <div className="max-h-60 overflow-y-auto space-y-1">
+                    {cloudSystems.map((system) => (
+                      <button
+                        key={system.id}
+                        onClick={() => setSelectedSystem(system)}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                          selectedSystem?.id === system.id
+                            ? "bg-blue-100 text-blue-800"
+                            : "hover:bg-gray-100 text-gray-700"
+                        }`}
+                        disabled={system.stateOfHealth !== "online"}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="truncate">{system.name}</span>
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
+                            }`}
+                          />
+                        </div>
+                        {system.accessRole === "owner" && <span className="text-xs text-purple-600">Owner</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Refresh Button */}
+          <Button
+            variant="outline"
+            onClick={() => selectedSystem && fetchStorages(selectedSystem)}
+            disabled={loading || !selectedSystem}
           >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Storage</span>
-            <span className="sm:hidden">Add</span>
-          </button>
-          <button className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2 text-sm md:text-base">
-            <Settings className="w-4 h-4" />
-            <span className="hidden sm:inline">Configure</span>
-          </button>
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
         </div>
       </div>
 
-      {/* Create Storage Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 md:p-4">
-          <div className="bg-white rounded-lg p-4 md:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">Create New Storage</h2>
-
-            <div className="space-y-3 md:space-y-4">
+      {/* Auth Required */}
+      {requiresAuth && !showLoginForm && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-600" />
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Server</label>
-                <select
-                  value={createForm.serverId}
-                  onChange={(e) => setCreateForm({ ...createForm, serverId: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                <p className="font-medium text-yellow-800">Authentication Required</p>
+                <p className="text-sm text-yellow-600">Please login to view storages for {selectedSystem?.name}</p>
+              </div>
+            </div>
+            <Button onClick={() => setShowLoginForm(true)}>
+              <LogIn className="w-4 h-4 mr-2" />
+              Login
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Login Form */}
+      {showLoginForm && (
+        <div className="bg-white border rounded-lg p-4">
+          <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
+          <div className="space-y-3 max-w-md">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+              <input
+                type="text"
+                value={loginForm.username}
+                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                placeholder="admin"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
                 >
-                  {servers.map((server) => (
-                    <option key={server.id} value={server.id}>
-                      {server.name || server.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                <input
-                  type="text"
-                  value={createForm.name}
-                  onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Storage 1"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Path *</label>
-                <input
-                  type="text"
-                  value={createForm.path}
-                  onChange={(e) => setCreateForm({ ...createForm, path: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="D:\HD Witness Media"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                <select
-                  value={createForm.type}
-                  onChange={(e) => setCreateForm({ ...createForm, type: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="local">Local</option>
-                  <option value="network">Network</option>
-                  <option value="cloud">Cloud</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Space Limit (Bytes)</label>
-                <input
-                  type="number"
-                  value={createForm.spaceLimitB}
-                  onChange={(e) => setCreateForm({ ...createForm, spaceLimitB: parseInt(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="0 (unlimited)"
-                />
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={createForm.isUsedForWriting}
-                    onChange={(e) => setCreateForm({ ...createForm, isUsedForWriting: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Use for writing</span>
-                </label>
-
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={createForm.isBackup}
-                    onChange={(e) => setCreateForm({ ...createForm, isBackup: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Backup storage</span>
-                </label>
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
-            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4 md:mt-6">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="w-full sm:w-auto px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm"
-              >
+            {loginError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</p>}
+
+            <div className="flex gap-2">
+              <Button onClick={handleLogin} disabled={loggingIn}>
+                {loggingIn ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Logging in...
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4 mr-2" />
+                    Login
+                  </>
+                )}
+              </Button>
+              <Button variant="outline" onClick={() => setShowLoginForm(false)}>
                 Cancel
-              </button>
-              <button
-                onClick={handleCreateStorage}
-                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-              >
-                Create Storage
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Edit Storage Modal */}
-      {showEditModal && selectedStorage && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 md:p-4">
-          <div className="bg-white rounded-lg p-4 md:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">Edit Storage</h2>
-
-            <div className="space-y-3 md:space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Storage ID</label>
-                <input
-                  type="text"
-                  value={selectedStorage.id}
-                  disabled
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 font-mono text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                <input
-                  type="text"
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Path *</label>
-                <input
-                  type="text"
-                  value={editForm.path}
-                  onChange={(e) => setEditForm({ ...editForm, path: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                <select
-                  value={editForm.type}
-                  onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="local">Local</option>
-                  <option value="network">Network</option>
-                  <option value="cloud">Cloud</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Space Limit (Bytes)</label>
-                <input
-                  type="number"
-                  value={editForm.spaceLimitB}
-                  onChange={(e) => setEditForm({ ...editForm, spaceLimitB: parseInt(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select
-                  value={editForm.status}
-                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="Online">Online</option>
-                  <option value="Offline">Offline</option>
-                </select>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editForm.isUsedForWriting}
-                    onChange={(e) => setEditForm({ ...editForm, isUsedForWriting: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Use for writing</span>
-                </label>
-
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editForm.isBackup}
-                    onChange={(e) => setEditForm({ ...editForm, isBackup: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Backup storage</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4 md:mt-6">
-              <button
-                onClick={() => {
-                  setShowEditModal(false);
-                  setSelectedStorage(null);
-                }}
-                className="w-full sm:w-auto px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleUpdateStorage}
-                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-              >
-                Update Storage
-              </button>
-            </div>
-          </div>
+      {/* Stats Overview - only show when authenticated */}
+      {!requiresAuth && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription className="text-xs">Total Storages</CardDescription>
+              <CardTitle className="text-2xl">{storages.length}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription className="text-xs">Online</CardDescription>
+              <CardTitle className="text-2xl text-green-600">
+                {onlineStorages}/{storages.length}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription className="text-xs">Total Capacity</CardDescription>
+              <CardTitle className="text-2xl">{formatBytes(totalStorage)}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription className="text-xs">Used / Free</CardDescription>
+              <CardTitle className="text-lg">
+                <span className="text-orange-600">{formatBytes(totalUsed)}</span>
+                <span className="text-gray-400 mx-1">/</span>
+                <span className="text-green-600">{formatBytes(totalFree)}</span>
+              </CardTitle>
+            </CardHeader>
+          </Card>
         </div>
       )}
 
-      {/* Overall Storage Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
-        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-1 md:mb-2">
-            <span className="text-xs md:text-sm text-gray-600">Total Capacity</span>
-            <Database className="w-4 h-4 md:w-5 md:h-5 text-gray-400" />
-          </div>
-          <div className="text-lg md:text-2xl font-bold text-gray-900">{totalStorage.total}</div>
-          <div className="text-xs text-gray-500 mt-1 hidden sm:block">Across all devices</div>
-        </div>
-
-        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-1 md:mb-2">
-            <span className="text-xs md:text-sm text-gray-600">Used Space</span>
-            <HardDrive className="w-4 h-4 md:w-5 md:h-5 text-blue-400" />
-          </div>
-          <div className="text-lg md:text-2xl font-bold text-gray-900">{totalStorage.used}</div>
-          <div className="text-xs text-gray-500 mt-1 hidden sm:block">{totalStorage.usagePercentage}% utilized</div>
-        </div>
-
-        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-1 md:mb-2">
-            <span className="text-xs md:text-sm text-gray-600">Free Space</span>
-            <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-green-400" />
-          </div>
-          <div className="text-lg md:text-2xl font-bold text-gray-900">{totalStorage.free}</div>
-          <div className="text-xs text-gray-500 mt-1 hidden sm:block">Available for recordings</div>
-        </div>
-
-        <div className="bg-white rounded-lg p-3 md:p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-1 md:mb-2">
-            <span className="text-xs md:text-sm text-gray-600">Storage Devices</span>
-            <Server className="w-4 h-4 md:w-5 md:h-5 text-purple-400" />
-          </div>
-          <div className="text-lg md:text-2xl font-bold text-gray-900">{storageDevices.length}</div>
-          <div className="text-xs text-gray-500 mt-1 hidden sm:block">Active devices</div>
-        </div>
-      </div>
-
-      {/* Overall Usage Visualization */}
-      <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
-        <h2 className="text-base md:text-lg font-semibold text-gray-900 mb-4">Overall Storage Usage</h2>
-        <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
-          <div className="relative w-32 h-32 md:w-40 md:h-40 flex-shrink-0">
-            <svg className="w-32 h-32 md:w-40 md:h-40 transform -rotate-90" viewBox="0 0 100 100">
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                stroke="currentColor"
-                strokeWidth="8"
-                fill="transparent"
-                className="text-gray-200"
-              />
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                stroke="currentColor"
-                strokeWidth="8"
-                fill="transparent"
-                strokeDasharray={`${totalStorage.usagePercentage * 2.827}, 283`}
-                className={getUsageColor(totalStorage.usagePercentage)}
-                strokeLinecap="round"
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center flex-col">
-              <div className="text-2xl md:text-3xl font-bold text-gray-900">{totalStorage.usagePercentage}%</div>
-              <div className="text-xs md:text-sm text-gray-600">Used</div>
-            </div>
-          </div>
-
-          <div className="flex-1 w-full space-y-3 md:space-y-4">
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">Total Capacity</span>
-                <span className="font-medium text-gray-900">{totalStorage.total}</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-blue-600 h-2 rounded-full" style={{ width: "100%" }}></div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">Used Space</span>
-                <span className="font-medium text-gray-900">{totalStorage.used}</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className={`h-2 rounded-full ${
-                    totalStorage.usagePercentage >= 90
-                      ? "bg-red-500"
-                      : totalStorage.usagePercentage >= 75
-                      ? "bg-yellow-500"
-                      : "bg-green-500"
-                  }`}
-                  style={{ width: `${totalStorage.usagePercentage}%` }}
-                ></div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">Free Space</span>
-                <span className="font-medium text-gray-900">{totalStorage.free}</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-green-500 h-2 rounded-full"
-                  style={{ width: `${100 - totalStorage.usagePercentage}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Storage Devices List */}
-      <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
-        <div className="flex items-center justify-between mb-4 md:mb-6">
-          <h2 className="text-base md:text-lg font-semibold text-gray-900">Storage Devices</h2>
-          <button className="px-2 md:px-3 py-1.5 text-xs md:text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center space-x-1">
-            <Download className="w-3 h-3 md:w-4 md:h-4" />
-            <span className="hidden sm:inline">Export Report</span>
-            <span className="sm:hidden">Export</span>
-          </button>
-        </div>
-
+      {/* Storage List - only show when authenticated */}
+      {!requiresAuth && (
         <div className="space-y-4">
-          {storageDevices.length > 0 ? (
-            storageDevices.map((device) => (
-              <div
-                key={device.id}
-                className="border border-gray-200 rounded-lg p-3 md:p-5 hover:shadow-md transition-shadow"
-              >
-                <div className="flex items-start justify-between mb-3 md:mb-4">
-                  <div className="flex items-start space-x-3 md:space-x-4 min-w-0 flex-1">
-                    <div
-                      className={`p-2 md:p-3 rounded-lg flex-shrink-0 ${
-                        device.status === "healthy"
-                          ? "bg-green-50"
-                          : device.status === "warning"
-                          ? "bg-yellow-50"
-                          : "bg-red-50"
-                      }`}
-                    >
-                      {getTypeIcon(device.type)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-semibold text-gray-900 text-sm md:text-base truncate">{device.name}</h3>
-                      <p className="text-xs md:text-sm text-gray-600 mt-1 truncate">{device.path}</p>
-                      <div className="flex items-center flex-wrap gap-2 mt-2">
-                        <span
-                          className={`px-2 py-0.5 md:py-1 rounded-full text-xs font-medium border ${getStatusColor(
-                            device.status
-                          )}`}
-                        >
-                          {device.status}
-                        </span>
-                        <span className="text-xs text-gray-500">{device.type}</span>
-                      </div>
-                      {/* <div className="mt-2">
-                        <p className="text-xs text-gray-500">Storage ID: <span className="font-mono text-gray-700">{device.id}</span></p>
-                      </div> */}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-1">
-                    <button
-                      onClick={() => handleEditStorage(device)}
-                      className="p-1.5 md:p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                      title="Edit storage"
-                    >
-                      <Settings className="w-4 h-4 md:w-5 md:h-5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteStorage(device)}
-                      className="p-1.5 md:p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                      title="Delete storage"
-                    >
-                      <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 md:gap-4 mb-3">
-                  <div>
-                    <span className="text-xs text-gray-600">Total</span>
-                    <div className="text-xs md:text-sm font-medium text-gray-900">{device.totalSpace}</div>
-                  </div>
-                  <div>
-                    <span className="text-xs text-gray-600">Used</span>
-                    <div className="text-xs md:text-sm font-medium text-gray-900">{device.usedSpace}</div>
-                  </div>
-                  <div>
-                    <span className="text-xs text-gray-600">Free</span>
-                    <div className="text-xs md:text-sm font-medium text-gray-900">{device.freeSpace}</div>
-                  </div>
-                </div>
-
-                {/* Additional Storage Details */}
-                <div className="bg-gray-50 rounded-lg p-2 md:p-3 mb-3">
-                  <h4 className="text-xs font-semibold text-gray-700 mb-2">Storage Details</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 md:gap-y-2 text-xs">
-                    {/* <div>
-                      <span className="text-gray-600">Server ID:</span>
-                      <p className="font-mono text-gray-900 break-all">{device.serverId}</p>
-                    </div> */}
-                    <div>
-                      <span className="text-gray-600">Space Limit:</span>
-                      <p className="text-gray-900">{device.spaceLimitB.toLocaleString()} bytes</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">API Status:</span>
-                      <p className="text-gray-900">{device.rawStatus}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Used for Writing:</span>
-                      <p className="text-gray-900">{device.isUsedForWriting ? "✓ Yes" : "✗ No"}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Backup Storage:</span>
-                      <p className="text-gray-900">{device.isBackup ? "✓ Yes" : "✗ No"}</p>
-                    </div>
-                    {/* {device.parameters && Object.keys(device.parameters).length > 0 && (
-                      <div className="col-span-2">
-                        <span className="text-gray-600">Parameters:</span>
-                        <pre className="text-gray-900 mt-1 bg-white p-2 rounded border border-gray-200 overflow-x-auto">
-                          {JSON.stringify(device.parameters, null, 2)}
-                        </pre>
-                      </div>
-                    )} */}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs text-gray-600">
-                    <span>Usage</span>
-                    <span>{device.usagePercentage}%</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full ${getUsageColor(device.usagePercentage)}`}
-                      style={{ width: `${device.usagePercentage}%` }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            ))
+          {loading ? (
+            <div className="flex items-center justify-center p-8 bg-white rounded-lg border">
+              <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+              <span className="text-gray-600">Loading storages...</span>
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-red-600">
+              <AlertCircle className="w-6 h-6 mr-2" />
+              <span>{error}</span>
+            </div>
+          ) : !selectedSystem ? (
+            <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
+              <Cloud className="w-6 h-6 mr-2" />
+              <span>Select a cloud system to view storages</span>
+            </div>
+          ) : storages.length === 0 ? (
+            <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
+              <Database className="w-6 h-6 mr-2" />
+              <span>No storages found</span>
+            </div>
           ) : (
-            <div className="text-center py-12">
-              <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">No storage devices found</p>
-              <p className="text-sm text-gray-500 mt-1">Check your Nx Witness server connection</p>
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
+              {storages.map((storage, index) => {
+                const usagePercent = getUsagePercentage(storage);
+                const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
+                // Make last item span full width if odd count
+                const isLastAndOdd = storages.length % 2 !== 0 && index === storages.length - 1;
+
+                return (
+                  <Card
+                    key={storage.id}
+                    className={`${!isOnline ? "opacity-60" : ""} ${isLastAndOdd ? "sm:col-span-2" : ""}`}
+                  >
+                    <CardHeader className="pb-2 sm:pb-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                          <div
+                            className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${
+                              isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                            }`}
+                          >
+                            {getStorageTypeIcon(storage.type)}
+                          </div>
+                          <div className="min-w-0">
+                            <CardTitle className="text-sm sm:text-base truncate">{storage.name}</CardTitle>
+                            <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
+                              {storage.path}
+                            </CardDescription>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
+                          {isOnline ? <Wifi className="w-3 h-3 mr-1" /> : <WifiOff className="w-3 h-3 mr-1" />}
+                          <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2 sm:space-y-3 pt-0">
+                      {/* Usage Bar */}
+                      {storage.statusInfo && (
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
+                            <span>
+                              Used:{" "}
+                              {formatBytes(
+                                parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace)
+                              )}
+                            </span>
+                            <span>{usagePercent}%</span>
+                          </div>
+                          <Progress
+                            value={usagePercent}
+                            className={`h-1.5 sm:h-2 ${
+                              usagePercent > 90
+                                ? "[&>div]:bg-red-500"
+                                : usagePercent > 70
+                                ? "[&>div]:bg-yellow-500"
+                                : "[&>div]:bg-green-500"
+                            }`}
+                          />
+                          <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
+                            <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
+                            <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Storage Info */}
+                      <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                        <Badge variant="secondary" className="text-[10px] sm:text-xs">
+                          {storage.type || "Unknown"}
+                        </Badge>
+
+                        {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
+                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-green-50 text-green-700">
+                            <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                            Writing
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-gray-50 text-gray-600">
+                            <XCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                            Read-only
+                          </Badge>
+                        )}
+
+                        {(storage.isBackup || storage.statusInfo?.isBackup) && (
+                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700">
+                            <Archive className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                            Backup
+                          </Badge>
+                        )}
+
+                        {storage.statusInfo?.isExternal && (
+                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700">
+                            External
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Space Limit */}
+                      {storage.spaceLimitB && storage.spaceLimitB > 0 && (
+                        <div className="text-[10px] sm:text-xs text-gray-500">
+                          Reserved: {formatBytes(storage.spaceLimitB)}
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2 pt-2 border-t">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-8 text-xs"
+                          onClick={() => handleOpenEdit(storage)}
+                        >
+                          <Pencil className="w-3 h-3 mr-1" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => handleOpenDelete(storage)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </div>
-      </div>
+      )}
 
-      {/* Storage Settings */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-        <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
-          <h2 className="text-base md:text-lg font-semibold text-gray-900 mb-3 md:mb-4">Retention Settings</h2>
-          <div className="space-y-3 md:space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Default Retention Period</span>
-              <span className="text-xs md:text-sm font-medium text-gray-900">30 days</span>
+      {/* Create Storage Modal */}
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add New Storage</DialogTitle>
+            <DialogDescription>Create a new storage location for {selectedSystem?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Storage Name *</Label>
+              <Input
+                id="name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="e.g., Main Storage"
+              />
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Archive Retention</span>
-              <span className="text-xs md:text-sm font-medium text-gray-900">90 days</span>
+            <div className="space-y-2">
+              <Label htmlFor="path">Path *</Label>
+              <Input
+                id="path"
+                value={formData.path}
+                onChange={(e) => setFormData({ ...formData, path: e.target.value })}
+                placeholder="e.g., /mnt/storage or C:\Storage"
+              />
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Motion-based Recording</span>
-              <span className="text-xs md:text-sm font-medium text-green-600">Enabled</span>
+            <div className="space-y-2">
+              <Label htmlFor="type">Storage Type</Label>
+              <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STORAGE_TYPES.map((type) => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Auto-cleanup</span>
-              <span className="text-xs md:text-sm font-medium text-green-600">Active</span>
+            <div className="space-y-2">
+              <Label htmlFor="spaceLimit">Reserved Space (GB)</Label>
+              <Input
+                id="spaceLimit"
+                type="number"
+                value={formatBytesToGB(formData.spaceLimitB)}
+                onChange={(e) => setFormData({ ...formData, spaceLimitB: parseGBToBytes(e.target.value) })}
+                placeholder="10"
+                min="0"
+              />
+              <p className="text-xs text-gray-500">Recommended: 10 GB for local, 100 GB for NAS</p>
             </div>
-          </div>
-        </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isUsedForWriting}
+                  onChange={(e) => setFormData({ ...formData, isUsedForWriting: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <span className="text-sm">Allow Writing</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isBackup}
+                  onChange={(e) => setFormData({ ...formData, isBackup: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <span className="text-sm">Use as Backup</span>
+              </label>
+            </div>
 
-        <div className="bg-white rounded-lg p-4 md:p-6 shadow-sm border border-gray-100">
-          <h2 className="text-base md:text-lg font-semibold text-gray-900 mb-3 md:mb-4">Compression & Quality</h2>
-          <div className="space-y-3 md:space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Compression Ratio</span>
-              <span className="text-xs md:text-sm font-medium text-gray-900">4:1</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Recording Quality</span>
-              <span className="text-xs md:text-sm font-medium text-gray-900">High</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Stream Quality</span>
-              <span className="text-xs md:text-sm font-medium text-gray-900">1080p</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs md:text-sm text-gray-600">Dual Stream</span>
-              <span className="text-xs md:text-sm font-medium text-green-600">Enabled</span>
-            </div>
+            {saveError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{saveError}</p>}
           </div>
-        </div>
-      </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreate} disabled={saving}>
+              {saving ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Storage
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Storage Modal */}
+      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Storage</DialogTitle>
+            <DialogDescription>Update storage settings for {selectedStorage?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Storage Name *</Label>
+              <Input
+                id="edit-name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="e.g., Main Storage"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-path">Path *</Label>
+              <Input
+                id="edit-path"
+                value={formData.path}
+                onChange={(e) => setFormData({ ...formData, path: e.target.value })}
+                placeholder="e.g., /mnt/storage or C:\Storage"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-type">Storage Type</Label>
+              <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STORAGE_TYPES.map((type) => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-spaceLimit">Reserved Space (GB)</Label>
+              <Input
+                id="edit-spaceLimit"
+                type="number"
+                value={formatBytesToGB(formData.spaceLimitB)}
+                onChange={(e) => setFormData({ ...formData, spaceLimitB: parseGBToBytes(e.target.value) })}
+                placeholder="10"
+                min="0"
+              />
+              <p className="text-xs text-gray-500">Recommended: 10 GB for local, 100 GB for NAS</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isUsedForWriting}
+                  onChange={(e) => setFormData({ ...formData, isUsedForWriting: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <span className="text-sm">Allow Writing</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.isBackup}
+                  onChange={(e) => setFormData({ ...formData, isBackup: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <span className="text-sm">Use as Backup</span>
+              </label>
+            </div>
+
+            {saveError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{saveError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdate} disabled={saving}>
+              {saving ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Storage</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{selectedStorage?.name}</strong>?
+              <br />
+              <span className="text-red-600">This action cannot be undone.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700" disabled={saving}>
+              {saving ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

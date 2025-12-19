@@ -342,7 +342,7 @@ export default function CameraInventory() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-    
+
         return [];
       }
 
@@ -2133,6 +2133,25 @@ export default function CameraInventory() {
                                   {system.accessRole}
                                 </span>
                               )}
+                              {/* Kamera Online/Offline Count */}
+                              {(() => {
+                                const onlineCount = system.cameras.filter(
+                                  (cam) => cam.status?.toLowerCase() === "online"
+                                ).length;
+                                const offlineCount = system.cameras.filter(
+                                  (cam) => cam.status?.toLowerCase() === "offline"
+                                ).length;
+                                return (
+                                  <span className="ml-2 text-xs">
+                                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full mr-1">
+                                      Online: {onlineCount}
+                                    </span>
+                                    <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full">
+                                      Offline: {offlineCount}
+                                    </span>
+                                  </span>
+                                );
+                              })()}
                               {loggedIn && (
                                 <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">
                                   Logged In
