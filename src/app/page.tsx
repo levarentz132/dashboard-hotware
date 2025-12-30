@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
-import DashboardOverview from "@/components/dashboard/DashboardOverview";
+import DraggableDashboard from "@/components/dashboard/DraggableDashboard";
 import CameraInventory from "@/components/cameras/CameraInventory";
 import ServerOptions from "@/components/servers/ServerOptions";
 import SystemHealth from "@/components/monitoring/SystemHealth";
@@ -21,7 +21,7 @@ export default function Home() {
   const renderContent = () => {
     switch (activeSection) {
       case "dashboard":
-        return <DashboardOverview />;
+        return <DraggableDashboard />;
       case "cameras":
         return <CameraInventory />;
       case "servers":
