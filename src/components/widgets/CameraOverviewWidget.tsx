@@ -67,18 +67,18 @@ export default function CameraOverviewWidget() {
 
   if (loading) {
     return (
-      <div className="h-full flex flex-col p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <Skeleton className="h-8 w-8 rounded-lg" />
-          <Skeleton className="h-5 w-32" />
+      <div className="h-full flex flex-col p-2 sm:p-4">
+        <div className="flex items-center gap-2 mb-2 sm:mb-4">
+          <Skeleton className="h-6 w-6 sm:h-8 sm:w-8 rounded-lg" />
+          <Skeleton className="h-4 sm:h-5 w-24 sm:w-32" />
         </div>
-        <div className="space-y-3 flex-1">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-4 w-full" />
-          <div className="grid grid-cols-3 gap-2">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
+        <div className="space-y-2 sm:space-y-3 flex-1">
+          <Skeleton className="h-12 sm:h-16 w-full" />
+          <Skeleton className="h-3 sm:h-4 w-full" />
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+            <Skeleton className="h-12 sm:h-16 w-full" />
+            <Skeleton className="h-12 sm:h-16 w-full" />
+            <Skeleton className="h-12 sm:h-16 w-full" />
           </div>
         </div>
       </div>
@@ -104,95 +104,95 @@ export default function CameraOverviewWidget() {
   ].filter((card) => card.count > 0);
 
   return (
-    <div className="h-full flex flex-col p-4">
+    <div className="h-full flex flex-col p-2 sm:p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <Camera className="w-5 h-5 text-primary" />
+      <div className="flex items-center justify-between mb-2 sm:mb-3 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 sm:p-2 bg-primary/10 rounded-lg shrink-0">
+            <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
           </div>
-          <div>
-            <h3 className="font-semibold text-foreground">Camera Overview</h3>
-            <p className="text-xs text-muted-foreground">{totalCameras} total cameras</p>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-foreground text-sm sm:text-base truncate">Camera Overview</h3>
+            <p className="text-[10px] sm:text-xs text-muted-foreground">{totalCameras} cameras</p>
           </div>
         </div>
-        <Link href="/monitoring-cctv">
-          <Badge variant="outline" className="cursor-pointer hover:bg-accent">
+        <Link href="/monitoring-cctv" className="shrink-0">
+          <Badge variant="outline" className="cursor-pointer hover:bg-accent text-[10px] sm:text-xs">
             View All
           </Badge>
         </Link>
       </div>
 
       <Tabs defaultValue="summary" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="grid w-full grid-cols-3 mb-3">
-          <TabsTrigger value="summary" className="text-xs">
+        <TabsList className="grid w-full grid-cols-3 mb-2 sm:mb-3 h-8 sm:h-9">
+          <TabsTrigger value="summary" className="text-[10px] sm:text-xs px-1 sm:px-3">
             Summary
           </TabsTrigger>
-          <TabsTrigger value="status" className="text-xs">
+          <TabsTrigger value="status" className="text-[10px] sm:text-xs px-1 sm:px-3">
             Status
           </TabsTrigger>
-          <TabsTrigger value="list" className="text-xs">
+          <TabsTrigger value="list" className="text-[10px] sm:text-xs px-1 sm:px-3">
             List
           </TabsTrigger>
         </TabsList>
 
         {/* Summary Tab */}
-        <TabsContent value="summary" className="flex-1 mt-0 space-y-4">
+        <TabsContent value="summary" className="flex-1 mt-0 space-y-2 sm:space-y-4 overflow-auto">
           {/* Total count */}
-          <div className="text-center py-2">
-            <div className="text-4xl font-bold text-foreground">{totalCameras}</div>
-            <div className="text-sm text-muted-foreground">Total Kamera</div>
+          <div className="text-center py-1 sm:py-2">
+            <div className="text-2xl sm:text-4xl font-bold text-foreground">{totalCameras}</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">Total Kamera</div>
           </div>
 
           {/* Online percentage */}
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
+          <div className="space-y-1 sm:space-y-2">
+            <div className="flex justify-between text-xs sm:text-sm">
               <span className="text-muted-foreground">Online Rate</span>
               <span className="font-medium text-green-600">{onlinePercentage.toFixed(1)}%</span>
             </div>
-            <Progress value={onlinePercentage} className="h-2" />
+            <Progress value={onlinePercentage} className="h-1.5 sm:h-2" />
           </div>
 
           {/* Quick status */}
-          <div className="grid grid-cols-3 gap-2">
-            <div className="text-center p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-100 dark:border-green-900">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <Wifi className="w-4 h-4 text-green-600" />
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+            <div className="text-center p-1.5 sm:p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-100 dark:border-green-900">
+              <div className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1">
+                <Wifi className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
               </div>
-              <div className="text-xl font-bold text-green-700 dark:text-green-400">{onlineCameras}</div>
-              <div className="text-xs text-green-600">Online</div>
+              <div className="text-base sm:text-xl font-bold text-green-700 dark:text-green-400">{onlineCameras}</div>
+              <div className="text-[10px] sm:text-xs text-green-600">Online</div>
             </div>
 
-            <div className="text-center p-3 bg-red-50 dark:bg-red-950/30 rounded-lg border border-red-100 dark:border-red-900">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <WifiOff className="w-4 h-4 text-red-600" />
+            <div className="text-center p-1.5 sm:p-3 bg-red-50 dark:bg-red-950/30 rounded-lg border border-red-100 dark:border-red-900">
+              <div className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1">
+                <WifiOff className="w-3 h-3 sm:w-4 sm:h-4 text-red-600" />
               </div>
-              <div className="text-xl font-bold text-red-700 dark:text-red-400">{offlineCameras}</div>
-              <div className="text-xs text-red-600">Offline</div>
+              <div className="text-base sm:text-xl font-bold text-red-700 dark:text-red-400">{offlineCameras}</div>
+              <div className="text-[10px] sm:text-xs text-red-600">Offline</div>
             </div>
 
-            <div className="text-center p-3 bg-muted rounded-lg border">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <Activity className="w-4 h-4 text-muted-foreground" />
+            <div className="text-center p-1.5 sm:p-3 bg-muted rounded-lg border">
+              <div className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1">
+                <Activity className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
               </div>
-              <div className="text-xl font-bold text-foreground">{otherCameras}</div>
-              <div className="text-xs text-muted-foreground">Lainnya</div>
+              <div className="text-base sm:text-xl font-bold text-foreground">{otherCameras}</div>
+              <div className="text-[10px] sm:text-xs text-muted-foreground">Lainnya</div>
             </div>
           </div>
         </TabsContent>
 
         {/* Status Tab */}
-        <TabsContent value="status" className="flex-1 mt-0">
-          <div className="grid grid-cols-2 gap-2">
+        <TabsContent value="status" className="flex-1 mt-0 overflow-auto">
+          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
             {statusCards.map((card) => (
               <div
                 key={card.label}
-                className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
               >
-                <div className={`w-3 h-3 rounded-full ${card.color}`} />
+                <div className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${card.color}`} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-lg font-bold text-foreground">{card.count}</div>
-                  <div className="text-xs text-muted-foreground truncate">{card.label}</div>
+                  <div className="text-sm sm:text-lg font-bold text-foreground">{card.count}</div>
+                  <div className="text-[10px] sm:text-xs text-muted-foreground truncate">{card.label}</div>
                 </div>
               </div>
             ))}
@@ -201,40 +201,51 @@ export default function CameraOverviewWidget() {
 
         {/* List Tab */}
         <TabsContent value="list" className="flex-1 mt-0 min-h-0">
-          <ScrollArea className="h-full pr-2">
-            <div className="space-y-2">
+          <ScrollArea className="h-full pr-1 sm:pr-2">
+            <div className="space-y-1.5 sm:space-y-2">
               {sortedCameras.slice(0, 10).map((camera) => {
                 const isOffline = camera.status?.toLowerCase() === "offline";
                 return (
                   <Link href="/monitoring-cctv" key={camera.id}>
                     <div
-                      className={`flex items-center justify-between p-2 rounded-lg border transition-colors cursor-pointer ${
+                      className={`flex items-center justify-between p-1.5 sm:p-2 rounded-lg border transition-colors cursor-pointer ${
                         isOffline ? "border-destructive/50 bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent"
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <div className={`p-1.5 rounded-md ${isOffline ? "bg-destructive/10" : "bg-muted"}`}>
-                          <Camera className={`w-4 h-4 ${isOffline ? "text-destructive" : "text-muted-foreground"}`} />
+                      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+                        <div
+                          className={`p-1 sm:p-1.5 rounded-md shrink-0 ${isOffline ? "bg-destructive/10" : "bg-muted"}`}
+                        >
+                          <Camera
+                            className={`w-3 h-3 sm:w-4 sm:h-4 ${
+                              isOffline ? "text-destructive" : "text-muted-foreground"
+                            }`}
+                          />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate text-foreground">
+                          <p className="text-xs sm:text-sm font-medium truncate text-foreground">
                             {camera.name || `Camera ${camera.id}`}
                           </p>
-                          {isOffline && <p className="text-xs text-destructive">Requires attention</p>}
+                          {isOffline && <p className="text-[10px] sm:text-xs text-destructive">Requires attention</p>}
                         </div>
                       </div>
-                      <Badge variant={getStatusVariant(camera.status || "unknown")} className="ml-2 shrink-0">
-                        {getStatusIcon(camera.status || "unknown")}
-                        <span className="ml-1 text-xs">{camera.status || "Unknown"}</span>
+                      <Badge
+                        variant={getStatusVariant(camera.status || "unknown")}
+                        className="ml-1 sm:ml-2 shrink-0 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5"
+                      >
+                        <span className="hidden sm:inline-flex">{getStatusIcon(camera.status || "unknown")}</span>
+                        <span className="sm:ml-1">{camera.status || "Unknown"}</span>
                       </Badge>
                     </div>
                   </Link>
                 );
               })}
               {cameras.length > 10 && (
-                <div className="text-center py-2">
+                <div className="text-center py-1.5 sm:py-2">
                   <Link href="/monitoring-cctv">
-                    <span className="text-xs text-primary hover:underline">+{cameras.length - 10} more cameras</span>
+                    <span className="text-[10px] sm:text-xs text-primary hover:underline">
+                      +{cameras.length - 10} more cameras
+                    </span>
                   </Link>
                 </div>
               )}
