@@ -1,46 +1,25 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-// @ts-expect-error - react-grid-layout types have compatibility issues
 import GridLayout from "react-grid-layout";
-import { 
-  GripVertical, 
-  X, 
-  Plus, 
-  Save, 
-  RotateCcw,
-  Settings,
-  LayoutGrid
-} from "lucide-react";
+import { GripVertical, X, Plus, Save, RotateCcw, Settings, LayoutGrid } from "lucide-react";
 import "react-grid-layout/css/styles.css";
 
 // shadcn/UI components
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 // Widget imports
-import RecentAlarmsWidget from "@/components/widgets/RecentAlarmsWidget";
-import CameraStatusGrid from "@/components/widgets/CameraStatusGrid";
+import CameraOverviewWidget from "@/components/widgets/CameraOverviewWidget";
 import ConnectionStatusWidget from "@/components/widgets/ConnectionStatusWidget";
-
 import SystemStatusWidget from "@/components/widgets/SystemStatusWidget";
 import APIStatusWidget from "@/components/widgets/APIStatusWidget";
-import TotalCameraWidget from "@/components/widgets/TotalCameraWidget";
-import CameraStatusWidget from "@/components/widgets/CameraStatusWidget";
+import StorageSummaryWidget from "@/components/widgets/StorageSummaryWidget";
+import AlarmConsoleWidget from "@/components/widgets/AlarmConsoleWidget";
+import AuditLogWidget from "@/components/widgets/AuditLogWidget";
 
 // Define LayoutItem type for react-grid-layout
 interface LayoutItem {
@@ -60,37 +39,13 @@ interface LayoutItem {
 
 // Widget registry - tambahkan widget baru di sini
 export const widgetRegistry = {
-  totalCamera: {
-    id: "totalCamera",
-    name: "Total Camera",
-    description: "Jumlah total kamera dan status online",
-    component: TotalCameraWidget,
-    defaultSize: { w: 3, h: 4 },
-    minSize: { w: 2, h: 3 },
-  },
-  cameraStatusWidget: {
-    id: "cameraStatusWidget",
-    name: "Camera Status",
-    description: "Status kamera berdasarkan kategori",
-    component: CameraStatusWidget,
-    defaultSize: { w: 3, h: 4 },
-    minSize: { w: 2, h: 3 },
-  },
-  recentAlarms: {
-    id: "recentAlarms",
-    name: "Recent Alarms",
-    description: "Menampilkan alarm terbaru dari sistem",
-    component: RecentAlarmsWidget,
-    defaultSize: { w: 4, h: 4 },
-    minSize: { w: 3, h: 3 },
-  },
-  cameraStatus: {
-    id: "cameraStatus",
-    name: "Camera Status Grid",
-    description: "Grid status semua kamera",
-    component: CameraStatusGrid,
-    defaultSize: { w: 6, h: 5 },
-    minSize: { w: 4, h: 3 },
+  cameraOverview: {
+    id: "cameraOverview",
+    name: "Camera Overview",
+    description: "Overview lengkap semua kamera dengan summary, status, dan list",
+    component: CameraOverviewWidget,
+    defaultSize: { w: 4, h: 5 },
+    minSize: { w: 1, h: 2 },
   },
   connectionStatus: {
     id: "connectionStatus",
@@ -103,10 +58,10 @@ export const widgetRegistry = {
   storage: {
     id: "storage",
     name: "Storage Widget",
-    description: "Informasi penggunaan storage",
-    component: "",
-    defaultSize: { w: 3, h: 3 },
-    minSize: { w: 2, h: 2 },
+    description: "Informasi penggunaan storage (total, used, free, online)",
+    component: StorageSummaryWidget,
+    defaultSize: { w: 3, h: 5 },
+    minSize: { w: 1, h: 1 },
   },
   systemStatus: {
     id: "systemStatus",
@@ -122,7 +77,23 @@ export const widgetRegistry = {
     description: "Status API dan endpoint",
     component: APIStatusWidget,
     defaultSize: { w: 3, h: 3 },
-    minSize: { w: 2, h: 2 },
+    minSize: { w: 0, h: 0 },
+  },
+  alarmConsole: {
+    id: "alarmConsole",
+    name: "Alarm Console",
+    description: "Daftar alarm dan event terbaru",
+    component: AlarmConsoleWidget,
+    defaultSize: { w: 4, h: 5 },
+    minSize: { w: 3, h: 4 },
+  },
+  auditLog: {
+    id: "auditLog",
+    name: "Audit Log",
+    description: "Log aktivitas user dari cloud system",
+    component: AuditLogWidget,
+    defaultSize: { w: 4, h: 5 },
+    minSize: { w: 3, h: 4 },
   },
 };
 
@@ -178,7 +149,7 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
         setContainerWidth(container.offsetWidth);
       }
     };
-    
+
     updateWidth();
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
@@ -265,16 +236,13 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                 </Badge>
               )}
             </div>
-            
+
             <div className="flex items-center gap-2">
               {isEditing && (
                 <>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        onClick={() => setShowAddWidget(true)}
-                        className="gap-2"
-                      >
+                      <Button onClick={() => setShowAddWidget(true)} className="gap-2">
                         <Plus className="w-4 h-4" />
                         Add Widget
                       </Button>
@@ -286,11 +254,7 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        onClick={resetLayout}
-                        className="gap-2"
-                      >
+                      <Button variant="outline" onClick={resetLayout} className="gap-2">
                         <RotateCcw className="w-4 h-4" />
                         Reset
                       </Button>
@@ -320,7 +284,7 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                   </Tooltip>
                 </>
               )}
-              
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -372,13 +336,11 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
               return (
                 <div
                   key={widget.i}
-                  className={`rounded-xl overflow-hidden transition-all duration-200 ${
-                    isEditing
-                      ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg"
-                      : "shadow-sm"
+                  className={`rounded-xl overflow-hidden transition-all duration-200 bg-white border ${
+                    isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
                   }`}
                 >
-                  <Card className="h-full border-0 relative group">
+                  <div className="h-full relative group flex flex-col">
                     {/* Delete Button - Only visible in edit mode */}
                     {isEditing && (
                       <Tooltip>
@@ -403,27 +365,23 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
 
                     {/* Widget Header - only show in edit mode */}
                     {isEditing && (
-                      <CardHeader className="drag-handle flex flex-row items-center justify-between space-y-0 px-3 py-2 bg-gray-50 border-b cursor-move">
+                      <div className="drag-handle flex flex-row items-center justify-between px-3 py-2 bg-gray-50 border-b cursor-move shrink-0">
                         <div className="flex items-center gap-2">
                           <GripVertical className="w-4 h-4 text-gray-400" />
-                          <CardTitle className="text-sm font-medium text-gray-600">
-                            {widgetName}
-                          </CardTitle>
+                          <span className="text-sm font-medium text-gray-600">{widgetName}</span>
                         </div>
-                      </CardHeader>
+                      </div>
                     )}
 
                     {/* Widget Content */}
-                    <CardContent className={`h-full overflow-auto p-0`}>
+                    <div className="flex-1 overflow-auto">
                       {WidgetComponent ? (
                         <WidgetComponent />
                       ) : (
-                        <div className="flex items-center justify-center h-full text-gray-400">
-                          Widget not found
-                        </div>
+                        <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
                       )}
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -438,11 +396,9 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                 <Plus className="w-5 h-5 text-blue-600" />
                 Add Widget
               </DialogTitle>
-              <DialogDescription>
-                Pilih widget yang ingin ditambahkan ke dashboard Anda.
-              </DialogDescription>
+              <DialogDescription>Pilih widget yang ingin ditambahkan ke dashboard Anda.</DialogDescription>
             </DialogHeader>
-            
+
             <div className="grid grid-cols-2 gap-3 pt-4 max-h-[400px] overflow-auto">
               {Object.entries(widgetRegistry).map(([key, widget]) => (
                 <Card
@@ -454,12 +410,8 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                     <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                       <LayoutGrid className="w-6 h-6 text-blue-600" />
                     </div>
-                    <span className="text-sm font-medium text-gray-900 text-center">
-                      {widget.name}
-                    </span>
-                    <span className="text-xs text-gray-500 text-center">
-                      {widget.description}
-                    </span>
+                    <span className="text-sm font-medium text-gray-900 text-center">{widget.name}</span>
+                    <span className="text-xs text-gray-500 text-center">{widget.description}</span>
                   </CardContent>
                 </Card>
               ))}
