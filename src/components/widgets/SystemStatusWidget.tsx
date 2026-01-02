@@ -54,47 +54,40 @@ export default function SystemStatusWidget() {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">System Status</h3>
-        <div className="flex items-center justify-center h-32">
-          <div className="text-gray-500">Loading system status...</div>
+      <div className="h-full flex flex-col p-3">
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">System Status</h3>
+        <div className="flex items-center justify-center flex-1">
+          <div className="text-gray-500 text-sm">Loading system status...</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg p-4 sm:p-6 shadow-sm border border-gray-100 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3 sm:mb-4">
-        <h3 className="text-base sm:text-lg font-semibold text-gray-900">System Status</h3>
-        {error && <AlertCircle className="w-5 h-5 text-red-500" />}
+    <div className="h-full flex flex-col p-3">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-900">System Status</h3>
+        {error && <AlertCircle className="w-4 h-4 text-red-500" />}
       </div>
 
-      <div className="space-y-3 sm:space-y-4 flex-1">
+      <div className="space-y-2.5 flex-1">
         {systemStats.map((stat, index) => {
           const Icon = stat.icon;
           return (
             <div key={index} className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className={`p-2 rounded-lg ${getStatusColor(stat.status)}`}>
-                  <Icon className="w-4 h-4" />
+              <div className="flex items-center space-x-2">
+                <div className={`p-1.5 rounded-lg ${getStatusColor(stat.status)}`}>
+                  <Icon className="w-3.5 h-3.5" />
                 </div>
                 <div>
-                  <div className="text-sm font-medium text-gray-900">{stat.label}</div>
-                  <div className="text-sm text-gray-500">{stat.value}</div>
+                  <div className="text-xs font-medium text-gray-900">{stat.label}</div>
+                  <div className="text-[10px] text-gray-500">{stat.value}</div>
                 </div>
               </div>
-              <div className={`w-3 h-3 rounded-full ${getStatusDot(stat.status)}`}></div>
+              <div className={`w-2.5 h-2.5 rounded-full ${getStatusDot(stat.status)}`}></div>
             </div>
           );
         })}
-      </div>
-
-      <div className="mt-6 pt-4 border-t border-gray-100">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-600">Last updated:</span>
-          <span className="text-gray-900 font-medium">2 minutes ago</span>
-        </div>
       </div>
     </div>
   );
