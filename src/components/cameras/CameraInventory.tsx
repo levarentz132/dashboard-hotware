@@ -152,6 +152,7 @@ export default function CameraInventory() {
   const [camerasBySystem, setCamerasBySystem] = useState<CamerasBySystem[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(false);
   const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
+  const [selectedCloudSystemId, setSelectedCloudSystemId] = useState<string>("");
 
   // System login state
   const [systemCredentials, setSystemCredentials] = useState<SystemCredentials>({});
@@ -389,12 +390,18 @@ export default function CameraInventory() {
     setExpandedSystems(new Set(systems.map((s) => s.id)));
     setLoadingCloud(false);
 
+    // Auto-select first online system
+    const firstOnlineSystem = systems.find((s) => s.stateOfHealth === "online");
+    if (firstOnlineSystem && !selectedCloudSystemId) {
+      setSelectedCloudSystemId(firstOnlineSystem.id);
+    }
+
     // Fetch locations for all cameras
     const allCameraNames = camerasData.flatMap((s) => s.cameras.map((c) => c.name));
     if (allCameraNames.length > 0) {
       fetchCameraLocations(allCameraNames);
     }
-  }, [fetchCloudSystems, fetchCloudCameras, fetchCameraLocations]);
+  }, [fetchCloudSystems, fetchCloudCameras, fetchCameraLocations, selectedCloudSystemId]);
 
   // Toggle system expansion
   const toggleSystemExpansion = (systemId: string) => {
@@ -1798,6 +1805,32 @@ export default function CameraInventory() {
         </div>
       </div>
 
+      {/* Cloud System Selector */}
+      {viewMode === "cloud" && cloudSystems.length > 0 && (
+        <div className="px-3 md:px-6 py-2 bg-gray-50 border-b flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Server className="w-4 h-4 text-gray-500" />
+            <span className="text-sm font-medium text-gray-600">System:</span>
+          </div>
+          <select
+            value={selectedCloudSystemId}
+            onChange={(e) => setSelectedCloudSystemId(e.target.value)}
+            className="px-3 py-1.5 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[200px]"
+          >
+            {cloudSystems.map((system) => {
+              const systemData = camerasBySystem.find((s) => s.systemId === system.id);
+              const cameraCount = systemData?.cameras.length || 0;
+              const isOnline = system.stateOfHealth === "online";
+              return (
+                <option key={system.id} value={system.id} disabled={!isOnline}>
+                  {system.name} ({cameraCount} cameras) {!isOnline ? "- Offline" : ""}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
+
       {/* Search and Filters */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         <div className="flex-1 relative">
@@ -2051,319 +2084,163 @@ export default function CameraInventory() {
                 <span>No cloud systems found</span>
               </div>
             ) : (
-              <div className="space-y-4">
-                {camerasBySystem.map((system) => {
-                  const isExpanded = expandedSystems.has(system.systemId);
-                  const isOnline = system.stateOfHealth === "online";
-                  const loggedIn = isLoggedIn(system.systemId);
-                  const filteredSystemCameras = system.cameras.filter((cam) => {
-                    // Search filter
-                    const matchesSearch =
-                      !searchTerm ||
-                      cam.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      cam.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      cam.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      cam.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      searchInLocation(cam.name, searchTerm);
-
-                    // Status filter
-                    const matchesStatus =
-                      filterStatus === "all" || cam.status?.toLowerCase() === filterStatus.toLowerCase();
-
-                    // Vendor filter
-                    const matchesVendor =
-                      filterVendor === "all" || cam.vendor?.toLowerCase() === filterVendor.toLowerCase();
-
-                    // Province filter
-                    const matchesProvince =
-                      filterProvince === "all" || cameraLocations[cam.name]?.province_name === filterProvince;
-
-                    // District filter
-                    const matchesDistrict =
-                      filterDistrict === "all" || cameraLocations[cam.name]?.district_name === filterDistrict;
-
-                    // Village filter
-                    const matchesVillage =
-                      filterVillage === "all" || cameraLocations[cam.name]?.village_name === filterVillage;
-
-                    return (
-                      matchesSearch &&
-                      matchesStatus &&
-                      matchesVendor &&
-                      matchesProvince &&
-                      matchesDistrict &&
-                      matchesVillage
-                    );
-                  });
-
+              (() => {
+                // Get selected system data
+                const selectedSystem = camerasBySystem.find((s) => s.systemId === selectedCloudSystemId);
+                if (!selectedSystem) {
                   return (
-                    <div
-                      key={system.systemId}
-                      className={`border rounded-lg overflow-hidden ${
-                        isOnline ? "border-green-200" : "border-gray-200"
-                      }`}
-                    >
-                      {/* System Header */}
-                      <div
-                        className={`flex items-center justify-between p-4 ${isOnline ? "bg-green-50" : "bg-gray-50"}`}
-                      >
-                        <div
-                          className="flex items-center space-x-3 cursor-pointer flex-1"
-                          onClick={() => toggleSystemExpansion(system.systemId)}
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="w-5 h-5 text-gray-500" />
-                          ) : (
-                            <ChevronRight className="w-5 h-5 text-gray-500" />
-                          )}
-                          <Server className={`w-5 h-5 ${isOnline ? "text-green-600" : "text-gray-400"}`} />
-                          <div>
-                            <h3 className="font-semibold text-gray-900">{system.systemName}</h3>
-                            <p className="text-xs text-gray-500">
-                              {system.cameras.length} camera{system.cameras.length !== 1 ? "s" : ""} •{" "}
-                              <span className={isOnline ? "text-green-600" : "text-red-500"}>
-                                {isOnline ? "Online" : "Offline"}
-                              </span>
-                              {system.accessRole === "owner" ? (
-                                <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs">
-                                  Owner
-                                </span>
-                              ) : (
-                                <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">
-                                  {system.accessRole}
-                                </span>
-                              )}
-                              {/* Kamera Online/Offline Count */}
-                              {(() => {
-                                const onlineCount = system.cameras.filter(
-                                  (cam) => cam.status?.toLowerCase() === "online"
-                                ).length;
-                                const offlineCount = system.cameras.filter(
-                                  (cam) => cam.status?.toLowerCase() === "offline"
-                                ).length;
-                                return (
-                                  <span className="ml-2 text-xs">
-                                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full mr-1">
-                                      Online: {onlineCount}
-                                    </span>
-                                    <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full">
-                                      Offline: {offlineCount}
-                                    </span>
-                                  </span>
-                                );
-                              })()}
-                              {loggedIn && (
-                                <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">
-                                  Logged In
-                                </span>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm text-gray-500 mr-2">{filteredSystemCameras.length} shown</span>
-
-                          {/* Login/Logout Button - Only show if NOT owner and no cameras loaded */}
-                          {isOnline && system.accessRole !== "owner" && system.cameras.length === 0 && !loggedIn && (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-blue-600 hover:bg-blue-50"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <LogIn className="w-4 h-4 mr-1" />
-                                  Login
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-80" align="end">
-                                <div className="space-y-4">
-                                  <div className="flex items-center justify-between">
-                                    <h4 className="font-semibold text-gray-900">Login to {system.systemName}</h4>
-                                  </div>
-
-                                  <div className="space-y-3">
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                                      <input
-                                        type="text"
-                                        value={loginForm.username}
-                                        onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                                        placeholder="admin"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                      <div className="relative">
-                                        <input
-                                          type={showPassword ? "text" : "password"}
-                                          value={loginForm.password}
-                                          onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
-                                          placeholder="••••••••"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => setShowPassword(!showPassword)}
-                                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                                        >
-                                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {loginError && loggingIn === system.systemId && (
-                                      <div className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</div>
-                                    )}
-
-                                    <Button
-                                      className="w-full"
-                                      onClick={() => handleSystemLogin(system.systemId, system.systemName)}
-                                      disabled={loggingIn === system.systemId}
-                                    >
-                                      {loggingIn === system.systemId ? (
-                                        <>
-                                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                          Logging in...
-                                        </>
-                                      ) : (
-                                        <>
-                                          <LogIn className="w-4 h-4 mr-2" />
-                                          Login
-                                        </>
-                                      )}
-                                    </Button>
-                                  </div>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Cameras List */}
-                      {isExpanded && (
-                        <div className="border-t">
-                          {!isOnline ? (
-                            <div className="p-4 text-center text-gray-500 text-sm">
-                              System is offline. Cannot fetch cameras.
-                            </div>
-                          ) : system.cameras.length === 0 && system.accessRole !== "owner" ? (
-                            <div className="p-4 text-center text-yellow-600 text-sm bg-yellow-50">
-                              <AlertCircle className="w-4 h-4 inline mr-2" />
-                              You don&apos;t have owner access to this system. Login to NX Cloud with the owner account
-                              to view cameras.
-                            </div>
-                          ) : filteredSystemCameras.length === 0 ? (
-                            <div className="p-4 text-center text-gray-500 text-sm">
-                              {system.cameras.length === 0
-                                ? "No cameras in this system"
-                                : "No cameras match your search"}
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
-                              {filteredSystemCameras.map((camera) => (
-                                <div
-                                  key={`${system.systemId}-${camera.id}`}
-                                  className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px]"
-                                >
-                                  {/* Header */}
-                                  <div className="flex items-start justify-between mb-2">
-                                    <div className="flex items-center space-x-2 min-w-0 flex-1">
-                                      <Camera className="w-4 h-4 text-gray-600 flex-shrink-0" />
-                                      <span className="font-medium text-gray-900 text-sm truncate" title={camera.name}>
-                                        {camera.name}
-                                      </span>
-                                    </div>
-                                    {camera.status?.toLowerCase() === "online" ? (
-                                      <Wifi className="w-4 h-4 text-green-600 flex-shrink-0" />
-                                    ) : (
-                                      <WifiOff className="w-4 h-4 text-red-600 flex-shrink-0" />
-                                    )}
-                                  </div>
-
-                                  {/* Camera Info */}
-                                  <div className="space-y-0.5 text-xs text-gray-600">
-                                    {camera.model && <div className="truncate">Model: {camera.model}</div>}
-                                    {camera.vendor && <div className="truncate">Vendor: {camera.vendor}</div>}
-                                    {camera.mac && <div className="truncate">MAC: {camera.mac}</div>}
-                                  </div>
-
-                                  {/* Location Details - flex-grow to push status to bottom */}
-                                  <div className="flex-grow mt-2 pt-2 border-t border-gray-100">
-                                    <div className="flex items-start gap-1">
-                                      <MapPin className="w-3 h-3 text-blue-500 flex-shrink-0 mt-0.5" />
-                                      <div className="text-xs text-gray-500 line-clamp-4">
-                                        {cameraLocations[camera.name] ? (
-                                          <div className="space-y-0.5">
-                                            {cameraLocations[camera.name]?.detail_address && (
-                                              <div className="font-medium text-gray-700">
-                                                {cameraLocations[camera.name]?.detail_address}
-                                              </div>
-                                            )}
-                                            {cameraLocations[camera.name]?.village_name && (
-                                              <div>Kel. {cameraLocations[camera.name]?.village_name}</div>
-                                            )}
-                                            {cameraLocations[camera.name]?.district_name && (
-                                              <div>Kec. {cameraLocations[camera.name]?.district_name}</div>
-                                            )}
-                                            {cameraLocations[camera.name]?.regency_name && (
-                                              <div>{cameraLocations[camera.name]?.regency_name}</div>
-                                            )}
-                                            {cameraLocations[camera.name]?.province_name && (
-                                              <div className="text-gray-400">
-                                                {cameraLocations[camera.name]?.province_name}
-                                              </div>
-                                            )}
-                                            {!cameraLocations[camera.name]?.village_name &&
-                                              !cameraLocations[camera.name]?.district_name &&
-                                              !cameraLocations[camera.name]?.regency_name &&
-                                              !cameraLocations[camera.name]?.province_name &&
-                                              !cameraLocations[camera.name]?.detail_address && (
-                                                <span className="text-gray-400 italic">Lokasi belum diatur</span>
-                                              )}
-                                          </div>
-                                        ) : (
-                                          <span className="text-gray-400 italic">Lokasi belum diatur</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Status Badge - always at bottom */}
-                                  <div className="flex items-center justify-between mt-auto pt-2 border-t">
-                                    <div className="group relative">
-                                      <span
-                                        className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-help ${getStatusBadgeStyle(
-                                          camera.status || ""
-                                        )}`}
-                                      >
-                                        {camera.status || "Unknown"}
-                                      </span>
-                                      {/* Tooltip */}
-                                      <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-10">
-                                        <div className="bg-gray-900 text-white text-xs rounded-lg py-2 px-3 max-w-xs shadow-lg">
-                                          <div className="font-semibold mb-1">{camera.status || "Unknown"}</div>
-                                          <div className="text-gray-300">
-                                            {getStatusDescription(camera.status || "")}
-                                          </div>
-                                        </div>
-                                        <div className="absolute top-full left-4 w-2 h-2 bg-gray-900 transform rotate-45 -mt-1"></div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                    <div className="flex items-center justify-center p-8 text-gray-500">
+                      <Cloud className="w-6 h-6 mr-2" />
+                      <span>Select a system to view cameras</span>
                     </div>
                   );
-                })}
-              </div>
+                }
+
+                const isOnline = selectedSystem.stateOfHealth === "online";
+                const filteredSystemCameras = selectedSystem.cameras.filter((cam) => {
+                  const matchesSearch =
+                    !searchTerm ||
+                    cam.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    cam.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    cam.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    cam.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    searchInLocation(cam.name, searchTerm);
+
+                  const matchesStatus =
+                    filterStatus === "all" || cam.status?.toLowerCase() === filterStatus.toLowerCase();
+                  const matchesVendor =
+                    filterVendor === "all" || cam.vendor?.toLowerCase() === filterVendor.toLowerCase();
+                  const matchesProvince =
+                    filterProvince === "all" || cameraLocations[cam.name]?.province_name === filterProvince;
+                  const matchesDistrict =
+                    filterDistrict === "all" || cameraLocations[cam.name]?.district_name === filterDistrict;
+                  const matchesVillage =
+                    filterVillage === "all" || cameraLocations[cam.name]?.village_name === filterVillage;
+
+                  return (
+                    matchesSearch &&
+                    matchesStatus &&
+                    matchesVendor &&
+                    matchesProvince &&
+                    matchesDistrict &&
+                    matchesVillage
+                  );
+                });
+
+                if (!isOnline) {
+                  return (
+                    <div className="p-8 text-center text-gray-500">
+                      <WifiOff className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                      <p>System is offline. Cannot fetch cameras.</p>
+                    </div>
+                  );
+                }
+
+                if (filteredSystemCameras.length === 0) {
+                  return (
+                    <div className="p-8 text-center text-gray-500">
+                      <Camera className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                      <p>
+                        {selectedSystem.cameras.length === 0
+                          ? "No cameras in this system"
+                          : "No cameras match your search"}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {filteredSystemCameras.map((camera) => (
+                      <div
+                        key={`${selectedSystem.systemId}-${camera.id}`}
+                        className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px]"
+                      >
+                        {/* Header */}
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center space-x-2 min-w-0 flex-1">
+                            <Camera className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                            <span className="font-medium text-gray-900 text-sm truncate" title={camera.name}>
+                              {camera.name}
+                            </span>
+                          </div>
+                          {camera.status?.toLowerCase() === "online" ? (
+                            <Wifi className="w-4 h-4 text-green-600 flex-shrink-0" />
+                          ) : (
+                            <WifiOff className="w-4 h-4 text-red-600 flex-shrink-0" />
+                          )}
+                        </div>
+
+                        {/* Camera Info */}
+                        <div className="space-y-0.5 text-xs text-gray-600">
+                          {camera.model && <div className="truncate">Model: {camera.model}</div>}
+                          {camera.vendor && <div className="truncate">Vendor: {camera.vendor}</div>}
+                          {camera.mac && <div className="truncate">MAC: {camera.mac}</div>}
+                        </div>
+
+                        {/* Location Details */}
+                        <div className="flex-grow mt-2 pt-2 border-t border-gray-100">
+                          <div className="flex items-start gap-1">
+                            <MapPin className="w-3 h-3 text-blue-500 flex-shrink-0 mt-0.5" />
+                            <div className="text-xs text-gray-500 line-clamp-4">
+                              {cameraLocations[camera.name] ? (
+                                <div className="space-y-0.5">
+                                  {cameraLocations[camera.name]?.detail_address && (
+                                    <div className="font-medium text-gray-700">
+                                      {cameraLocations[camera.name]?.detail_address}
+                                    </div>
+                                  )}
+                                  {cameraLocations[camera.name]?.village_name && (
+                                    <div>Kel. {cameraLocations[camera.name]?.village_name}</div>
+                                  )}
+                                  {cameraLocations[camera.name]?.district_name && (
+                                    <div>Kec. {cameraLocations[camera.name]?.district_name}</div>
+                                  )}
+                                  {cameraLocations[camera.name]?.regency_name && (
+                                    <div>{cameraLocations[camera.name]?.regency_name}</div>
+                                  )}
+                                  {cameraLocations[camera.name]?.province_name && (
+                                    <div className="text-gray-400">{cameraLocations[camera.name]?.province_name}</div>
+                                  )}
+                                  {!cameraLocations[camera.name]?.village_name &&
+                                    !cameraLocations[camera.name]?.district_name &&
+                                    !cameraLocations[camera.name]?.regency_name &&
+                                    !cameraLocations[camera.name]?.province_name &&
+                                    !cameraLocations[camera.name]?.detail_address && (
+                                      <span className="text-gray-400 italic">Lokasi belum diatur</span>
+                                    )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 italic">Lokasi belum diatur</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Status Badge */}
+                        <div className="flex items-center justify-between mt-auto pt-2 border-t">
+                          <div className="group relative">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-help ${getStatusBadgeStyle(
+                                camera.status || ""
+                              )}`}
+                            >
+                              {camera.status || "Unknown"}
+                            </span>
+                            <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-10">
+                              <div className="bg-gray-900 text-white text-xs rounded-lg py-2 px-3 max-w-xs shadow-lg">
+                                <div className="font-semibold mb-1">{camera.status || "Unknown"}</div>
+                                <div className="text-gray-300">{getStatusDescription(camera.status || "")}</div>
+                              </div>
+                              <div className="absolute top-full left-4 w-2 h-2 bg-gray-900 transform rotate-45 -mt-1"></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()
             )}
           </div>
         )}
