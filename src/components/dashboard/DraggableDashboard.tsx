@@ -225,26 +225,29 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
     <TooltipProvider>
       <div className="min-h-screen bg-gray-50/50">
         {/* Toolbar */}
-        <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-4 py-3 shadow-sm">
-          <div className="flex items-center justify-between max-w-full">
-            <div className="flex items-center gap-3">
-              <LayoutGrid className="w-6 h-6 text-blue-600" />
-              <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
+        <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-2 sm:px-4 py-2 sm:py-3 shadow-sm">
+          <div className="flex items-center justify-between max-w-full gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 shrink-0" />
+              <h1 className="text-base sm:text-xl font-semibold text-gray-900 truncate">Dashboard</h1>
               {isEditing && (
-                <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                <Badge
+                  variant="secondary"
+                  className="bg-blue-100 text-blue-700 text-[10px] sm:text-xs hidden sm:inline-flex"
+                >
                   Edit Mode
                 </Badge>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {isEditing && (
                 <>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button onClick={() => setShowAddWidget(true)} className="gap-2">
+                      <Button onClick={() => setShowAddWidget(true)} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3">
                         <Plus className="w-4 h-4" />
-                        Add Widget
+                        <span className="hidden sm:inline">Add Widget</span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -254,9 +257,9 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" onClick={resetLayout} className="gap-2">
+                      <Button variant="outline" onClick={resetLayout} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3">
                         <RotateCcw className="w-4 h-4" />
-                        Reset
+                        <span className="hidden sm:inline">Reset</span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -268,14 +271,15 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                     <TooltipTrigger asChild>
                       <Button
                         variant="default"
+                        size="sm"
                         onClick={() => {
                           saveLayout();
                           setIsEditing(false);
                         }}
-                        className="gap-2 bg-green-600 hover:bg-green-700"
+                        className="gap-1 sm:gap-2 px-2 sm:px-3 bg-green-600 hover:bg-green-700"
                       >
                         <Save className="w-4 h-4" />
-                        Save Layout
+                        <span className="hidden sm:inline">Save</span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -289,11 +293,12 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                 <TooltipTrigger asChild>
                   <Button
                     variant={isEditing ? "destructive" : "outline"}
+                    size="sm"
                     onClick={() => setIsEditing(!isEditing)}
-                    className="gap-2"
+                    className="gap-1 sm:gap-2 px-2 sm:px-3"
                   >
                     <Settings className="w-4 h-4" />
-                    {isEditing ? "Cancel" : "Customize"}
+                    <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -306,15 +311,15 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
 
         {/* Edit Mode Indicator */}
         {isEditing && (
-          <div className="bg-blue-50 border-b border-blue-200 px-4 py-2">
-            <p className="text-sm text-blue-700 text-center">
-              <strong>Edit Mode:</strong> Drag widget untuk memindahkan • Drag sudut untuk resize • Klik × untuk hapus
+          <div className="bg-blue-50 border-b border-blue-200 px-2 sm:px-4 py-1.5 sm:py-2">
+            <p className="text-[10px] sm:text-sm text-blue-700 text-center">
+              <strong className="hidden sm:inline">Edit Mode:</strong> Drag widget • Resize • Klik × hapus
             </p>
           </div>
         )}
 
         {/* Dashboard Grid */}
-        <div id="dashboard-container" className="p-4">
+        <div id="dashboard-container" className="p-2 sm:p-4">
           <GridLayout
             className="layout"
             layout={layout}
@@ -390,28 +395,32 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
 
         {/* Add Widget Dialog */}
         <Dialog open={showAddWidget} onOpenChange={setShowAddWidget}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-[90vw] sm:max-w-lg">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Plus className="w-5 h-5 text-blue-600" />
+              <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                 Add Widget
               </DialogTitle>
-              <DialogDescription>Pilih widget yang ingin ditambahkan ke dashboard Anda.</DialogDescription>
+              <DialogDescription className="text-xs sm:text-sm">
+                Pilih widget yang ingin ditambahkan ke dashboard Anda.
+              </DialogDescription>
             </DialogHeader>
 
-            <div className="grid grid-cols-2 gap-3 pt-4 max-h-[400px] overflow-auto">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 pt-2 sm:pt-4 max-h-[60vh] sm:max-h-[400px] overflow-auto">
               {Object.entries(widgetRegistry).map(([key, widget]) => (
                 <Card
                   key={key}
                   className="cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all duration-200 hover:shadow-md"
                   onClick={() => addWidget(key as WidgetType)}
                 >
-                  <CardContent className="flex flex-col items-center gap-2 p-4">
-                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                      <LayoutGrid className="w-6 h-6 text-blue-600" />
+                  <CardContent className="flex flex-col items-center gap-1.5 sm:gap-2 p-2 sm:p-4">
+                    <div className="w-8 h-8 sm:w-12 sm:h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <LayoutGrid className="w-4 h-4 sm:w-6 sm:h-6 text-blue-600" />
                     </div>
-                    <span className="text-sm font-medium text-gray-900 text-center">{widget.name}</span>
-                    <span className="text-xs text-gray-500 text-center">{widget.description}</span>
+                    <span className="text-xs sm:text-sm font-medium text-gray-900 text-center">{widget.name}</span>
+                    <span className="text-[10px] sm:text-xs text-gray-500 text-center line-clamp-2">
+                      {widget.description}
+                    </span>
                   </CardContent>
                 </Card>
               ))}
