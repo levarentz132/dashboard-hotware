@@ -353,11 +353,15 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                           <Button
                             variant="ghost"
                             size="icon"
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
                             onClick={(e) => {
                               e.stopPropagation();
+                              e.preventDefault();
                               removeWidget(widget.i);
                             }}
-                            className="absolute top-2 right-2 z-10 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
+                            className="absolute top-2 right-2 z-50 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
                           >
                             <X className="w-4 h-4" />
                           </Button>
