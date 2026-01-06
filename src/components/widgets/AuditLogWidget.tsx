@@ -272,7 +272,7 @@ export default function AuditLogWidget() {
     return (
       <div className="flex items-center justify-center h-full p-4">
         <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
-        <span className="ml-2 text-sm text-muted-foreground">Loading audit logs...</span>
+        <span className="ml-2 text-sm text-muted-foreground">Loading user logs...</span>
       </div>
     );
   }
@@ -295,7 +295,7 @@ export default function AuditLogWidget() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-indigo-600" />
-          <span className="font-medium text-sm">Audit Log</span>
+          <span className="font-medium text-sm">User Log</span>
         </div>
         <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-7 w-7 p-0">
           <RefreshCw className="w-4 h-4" />
@@ -321,7 +321,7 @@ export default function AuditLogWidget() {
       {/* Audit Log List */}
       <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
         {auditLogs.length === 0 ? (
-          <div className="text-center text-xs text-muted-foreground py-4">No audit logs</div>
+          <div className="text-center text-xs text-muted-foreground py-4">No user logs</div>
         ) : (
           auditLogs.slice(0, 6).map((log, index) => {
             const eventInfo = getEventInfo(log.eventType);

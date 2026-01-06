@@ -28,7 +28,7 @@ const navigationItems = [
   { id: "servers", label: "Server Options", icon: Server },
   { id: "health", label: "System Health", icon: Activity },
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle },
-  { id: "audits", label: "Audit Logs", icon: Dog },
+  { id: "audits", label: "User Logs", icon: Users },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "debug", label: "Connection Debug", icon: Settings },
   { id: "storage", label: "Storage", icon: Database },

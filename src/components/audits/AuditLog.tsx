@@ -11,7 +11,7 @@ import {
   ChevronDown,
   Calendar,
   Activity,
-  Monitor,
+  Camera,
   Settings,
   Shield,
   LogIn,
@@ -348,7 +348,7 @@ export default function AuditLog() {
       case "login":
         return <LogIn className="w-4 h-4" />;
       case "camera":
-        return <Monitor className="w-4 h-4" />;
+        return <Camera className="w-4 h-4" />;
       case "server":
         return <Server className="w-4 h-4" />;
       case "user":
@@ -398,7 +398,7 @@ export default function AuditLog() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Audit Log</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Log</h1>
           <p className="text-sm text-gray-500 mt-1">User activity history from cloud systems</p>
         </div>
 

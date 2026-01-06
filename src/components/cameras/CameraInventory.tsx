@@ -898,15 +898,24 @@ export default function CameraInventory() {
     return matchesSearch && matchesStatus && matchesVendor && matchesProvince && matchesDistrict && matchesVillage;
   });
 
-  // Calculate stats
-  const totalCameras = displayCameras.length;
-  const onlineCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "online").length;
-  const offlineCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "offline").length;
-  const recordingCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "recording").length;
-  const unauthorizedCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "unauthorized").length;
-  const notDefinedCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "notdefined").length;
-  const incompatibleCameras = displayCameras.filter((c) => c.status?.toLowerCase() === "incompatible").length;
-  const mismatchedCertCameras = displayCameras.filter(
+  // Calculate stats based on view mode
+  // In cloud mode, use selected system's cameras; otherwise use local cameras
+  const statsSourceCameras = (() => {
+    if (viewMode === "cloud" && selectedCloudSystemId) {
+      const selectedSystem = camerasBySystem.find((s) => s.systemId === selectedCloudSystemId);
+      return selectedSystem?.cameras || [];
+    }
+    return displayCameras;
+  })();
+
+  const totalCameras = statsSourceCameras.length;
+  const onlineCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "online").length;
+  const offlineCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "offline").length;
+  const recordingCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "recording").length;
+  const unauthorizedCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "unauthorized").length;
+  const notDefinedCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "notdefined").length;
+  const incompatibleCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "incompatible").length;
+  const mismatchedCertCameras = statsSourceCameras.filter(
     (c) => c.status?.toLowerCase() === "mismatchedcertificate"
   ).length;
 
