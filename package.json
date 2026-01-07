@@ -49,6 +49,7 @@
     "react-dom": "^18",
     "react-grid-layout": "^2.2.0",
     "react-hook-form": "^7.67.0",
+    "react-icons": "^5.5.0",
     "react-router-dom": "^6.18.0",
     "recharts": "^2.8.0",
     "socket.io-client": "^4.7.2",
