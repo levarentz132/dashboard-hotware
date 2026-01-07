@@ -12,8 +12,9 @@ import {
   Server,
   X,
   Dog,
+  LayoutDashboard,
 } from "lucide-react";
-import { id } from "zod/v4/locales";
+import { useRouter } from "next/navigation";
 
 interface SidebarProps {
   activeSection: string;
@@ -22,8 +23,15 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
-const navigationItems = [
-  { id: "dashboard", label: "Dashboard", icon: Home },
+interface NavItem {
+  id: string;
+  label: string;
+  icon: typeof Camera;
+  href?: string;
+}
+
+const navigationItems: NavItem[] = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard-full-view" },
   { id: "cameras", label: "Camera Inventory", icon: Camera },
   { id: "servers", label: "Server Options", icon: Server },
   { id: "health", label: "System Health", icon: Activity },
@@ -37,8 +45,20 @@ const navigationItems = [
 ];
 
 export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose }: SidebarProps) {
-  const handleNavClick = (sectionId: string) => {
-    onSectionChange(sectionId);
+  const router = useRouter();
+
+  const handleNavClick = (item: NavItem) => {
+    // If item has href, navigate to that page
+    if (item.href) {
+      router.push(item.href);
+      if (onClose) {
+        onClose();
+      }
+      return;
+    }
+
+    // Otherwise, use section change
+    onSectionChange(item.id);
     // Close sidebar on mobile after selection
     if (onClose) {
       onClose();
@@ -81,7 +101,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
             return (
               <button
                 key={item.id}
-                onClick={() => handleNavClick(item.id)}
+                onClick={() => handleNavClick(item)}
                 className={`w-full flex items-center px-4 sm:px-6 py-2.5 sm:py-3 text-left transition-colors text-sm sm:text-base ${
                   activeSection === item.id
                     ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"

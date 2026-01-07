@@ -1,7 +1,20 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Camera, LogOut, Wifi, WifiOff, Cloud, Server, ChevronDown, RefreshCw, LogIn } from "lucide-react";
+import {
+  Camera,
+  LogOut,
+  Wifi,
+  WifiOff,
+  Cloud,
+  Server,
+  ChevronDown,
+  RefreshCw,
+  LogIn,
+  LayoutDashboard,
+  Home,
+} from "lucide-react";
+import Link from "next/link";
 import {
   Sidebar,
   SidebarContent,
@@ -314,6 +327,31 @@ export default function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
+        {/* Navigation Menu */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="Home">
+                  <Link href="/">
+                    <Home className="size-4" />
+                    <span>Home</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="Dashboard">
+                  <Link href="/dashboard-full-view">
+                    <LayoutDashboard className="size-4" />
+                    <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
         <SidebarGroup>
           <SidebarGroupLabel className="flex items-center justify-between">
             <span>Camera Source</span>
