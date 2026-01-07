@@ -13,15 +13,18 @@ import NotificationSystem from "@/components/ui/NotificationSystem";
 import ConnectionTest from "@/components/debug/ConnectionTest";
 import StorageManagement from "@/components/storage/StorageManagement";
 import AuditLog from "@/components/audits/AuditLog";
+import UserManagement from "@/components/users/UserManagement";
+import Link from "next/link";
+import { ArrowRight, Camera, Eye, Shield } from "lucide-react";
 
 export default function Home() {
-  const [activeSection, setActiveSection] = useState("dashboard");
+  const [activeSection, setActiveSection] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const renderContent = () => {
     switch (activeSection) {
       case "dashboard":
-        return <DraggableDashboard />;
+        return <Link href="/dashboard-full-view" />;
       case "cameras":
         return <CameraInventory />;
       case "servers":
@@ -39,9 +42,47 @@ export default function Home() {
       case "debug":
         return <ConnectionTest />;
       case "users":
-        return <ConnectionTest />;
+        return <UserManagement />;
       default:
-        return <h1 className="font-bold text-2xl">Tahap pegembangan</h1>;
+        return (
+          <div className="min-h-screen bg-white flex items-center justify-center p-4 sm:p-6 md:p-8">
+            <div className="max-w-5xl w-full text-center">
+              {/* Welcome Text */}
+              <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-gray-800 mb-3 sm:mb-4">
+                Selamat Datang
+              </h1>
+              <p className="text-lg sm:text-xl md:text-2xl text-gray-600 mb-2 sm:mb-3">di Sistem Monitoring CCTV</p>
+              <p className="text-sm sm:text-base md:text-lg text-gray-500 mb-8 sm:mb-10 md:mb-12 max-w-2xl mx-auto px-4">
+                Pantau dan kelola keamanan dengan mudah melalui dashboard monitoring yang terintegrasi
+              </p>
+
+              {/* CTA Button */}
+              <button className="group bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-xl text-base sm:text-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 inline-flex items-center gap-2 sm:gap-3">
+                Masuk ke Dashboard
+                <ArrowRight className="group-hover:translate-x-1 transition-transform" size={20} />
+              </button>
+
+              {/* Feature Icons */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mt-12 sm:mt-14 md:mt-16 max-w-4xl mx-auto px-4">
+                <div className="bg-gray-50 p-5 sm:p-6 rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all">
+                  <Eye className="text-blue-600 mx-auto mb-3" size={28} />
+                  <h3 className="text-gray-800 font-semibold mb-2 text-base sm:text-lg">Live Monitoring</h3>
+                  <p className="text-gray-600 text-sm">Pantau real-time</p>
+                </div>
+                <div className="bg-gray-50 p-5 sm:p-6 rounded-xl border border-gray-200 hover:border-green-300 hover:shadow-md transition-all">
+                  <Shield className="text-green-600 mx-auto mb-3" size={28} />
+                  <h3 className="text-gray-800 font-semibold mb-2 text-base sm:text-lg">Keamanan Terjamin</h3>
+                  <p className="text-gray-600 text-sm">Sistem terenkripsi</p>
+                </div>
+                <div className="bg-gray-50 p-5 sm:p-6 rounded-xl border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all">
+                  <Camera className="text-purple-600 mx-auto mb-3" size={28} />
+                  <h3 className="text-gray-800 font-semibold mb-2 text-base sm:text-lg">Multi Kamera</h3>
+                  <p className="text-gray-600 text-sm">Akses semua lokasi</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
     }
   };
 
