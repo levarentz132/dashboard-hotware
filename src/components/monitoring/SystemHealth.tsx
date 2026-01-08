@@ -1,9 +1,22 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Activity, Server, Database, AlertTriangle, CheckCircle, XCircle, RefreshCw, Cloud, Globe } from "lucide-react";
+import {
+  Activity,
+  Server,
+  Database,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  RefreshCw,
+  Cloud,
+  Globe,
+  MapPin,
+  ExternalLink,
+} from "lucide-react";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { useCameras } from "@/hooks/useNxAPI-camera";
+import ServerLocationForm from "@/components/servers/ServerLocationForm";
 
 interface CloudSystem {
   id: string;
@@ -22,13 +35,21 @@ interface SystemInfoData {
   [key: string]: unknown;
 }
 
+interface ServerLocationData {
+  server_name: string;
+  latitude: number | null;
+  longitude: number | null;
+}
+
 export default function SystemHealth() {
   const { systemInfo, connected, loading } = useSystemInfo();
   const { cameras } = useCameras();
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
   const [systemDetails, setSystemDetails] = useState<Map<string, SystemInfoData | null>>(new Map());
+  const [serverLocations, setServerLocations] = useState<Map<string, ServerLocationData>>(new Map());
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [editingLocation, setEditingLocation] = useState<string | null>(null);
 
   // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
@@ -99,10 +120,28 @@ export default function SystemHealth() {
     setLoadingDetails(false);
   }, [cloudSystems, fetchSystemDetails]);
 
+  // Fetch server locations from database
+  const fetchServerLocations = useCallback(async () => {
+    try {
+      const response = await fetch("/api/server-location");
+      if (response.ok) {
+        const data = await response.json();
+        const locationsMap = new Map<string, ServerLocationData>();
+        data.locations?.forEach((loc: ServerLocationData) => {
+          locationsMap.set(loc.server_name, loc);
+        });
+        setServerLocations(locationsMap);
+      }
+    } catch (err) {
+      console.error("Error fetching server locations:", err);
+    }
+  }, []);
+
   // Initial fetch
   useEffect(() => {
     fetchCloudSystems();
-  }, [fetchCloudSystems]);
+    fetchServerLocations();
+  }, [fetchCloudSystems, fetchServerLocations]);
 
   // Fetch details when cloud systems are loaded
   useEffect(() => {
@@ -116,7 +155,13 @@ export default function SystemHealth() {
     setRefreshing(true);
     await fetchCloudSystems();
     await fetchAllSystemDetails();
+    await fetchServerLocations();
     setRefreshing(false);
+  };
+
+  // Open Google Maps with coordinates
+  const openInMaps = (lat: number, lng: number) => {
+    window.open(`https://www.google.com/maps?q=${lat},${lng}`, "_blank");
   };
 
   const getStatusBadge = (stateOfHealth: string) => {
@@ -251,6 +296,8 @@ export default function SystemHealth() {
             {cloudSystems.map((system) => {
               const details = systemDetails.get(system.id);
               const isOnline = system.stateOfHealth === "online";
+              const location = serverLocations.get(system.name);
+              const hasLocation = location?.latitude && location?.longitude;
 
               return (
                 <div
@@ -296,6 +343,35 @@ export default function SystemHealth() {
                         {system.ownerAccountEmail || "N/A"}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Server Location */}
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-gray-500" />
+                        <span className="text-sm text-gray-600">Lokasi Server</span>
+                      </div>
+                      <button
+                        onClick={() => setEditingLocation(system.name)}
+                        className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                      >
+                        {hasLocation ? "Edit" : "Set Lokasi"}
+                      </button>
+                    </div>
+                    {hasLocation ? (
+                      <button
+                        onClick={() => openInMaps(location.latitude!, location.longitude!)}
+                        className="mt-2 flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors group"
+                      >
+                        <span className="font-medium">
+                          {location.latitude}, {location.longitude}
+                        </span>
+                        <ExternalLink className="w-3 h-3 opacity-70 group-hover:opacity-100" />
+                      </button>
+                    ) : (
+                      <p className="mt-2 text-sm text-gray-400 italic">Belum ada lokasi</p>
+                    )}
                   </div>
 
                   {/* Connection Status */}
@@ -359,6 +435,15 @@ export default function SystemHealth() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Server Location Form Modal */}
+      {editingLocation && (
+        <ServerLocationForm
+          serverName={editingLocation}
+          onClose={() => setEditingLocation(null)}
+          onSave={fetchServerLocations}
+        />
       )}
     </div>
   );
