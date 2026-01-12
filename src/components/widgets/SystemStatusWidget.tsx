@@ -2,6 +2,7 @@
 
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { Server, Wifi, Database, Cpu, AlertCircle } from "lucide-react";
+import { getStatusColor, getStatusDotColor } from "@/lib/status-utils";
 
 export default function SystemStatusWidget() {
   const { systemInfo, connected, loading, error } = useSystemInfo();
@@ -25,32 +26,6 @@ export default function SystemStatusWidget() {
   };
 
   const systemStats = getSystemStats();
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "healthy":
-        return "text-green-600 bg-green-50";
-      case "warning":
-        return "text-yellow-600 bg-yellow-50";
-      case "critical":
-        return "text-red-600 bg-red-50";
-      default:
-        return "text-gray-600 bg-gray-50";
-    }
-  };
-
-  const getStatusDot = (status: string) => {
-    switch (status) {
-      case "healthy":
-        return "bg-green-500";
-      case "warning":
-        return "bg-yellow-500";
-      case "critical":
-        return "bg-red-500";
-      default:
-        return "bg-gray-500";
-    }
-  };
 
   if (loading) {
     return (
@@ -84,7 +59,7 @@ export default function SystemStatusWidget() {
                   <div className="text-[10px] text-gray-500">{stat.value}</div>
                 </div>
               </div>
-              <div className={`w-2.5 h-2.5 rounded-full ${getStatusDot(stat.status)}`}></div>
+              <div className={`w-2.5 h-2.5 rounded-full ${getStatusDotColor(stat.status)}`}></div>
             </div>
           );
         })}
