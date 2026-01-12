@@ -65,7 +65,13 @@ This is a React-based dashboard management system for Hotware camera surveillanc
 - `common/` - Shared components (StateComponents, StatusComponents, forms)
 - `ui/` - shadcn/UI components
 - `widgets/` - Dashboard widgets
+  - `types.ts` - Shared widget interfaces
+  - `widget-service.ts` - Cloud systems, events, storage, audit API
+  - `index.ts` - Barrel export all widgets
 - `dashboard/` - Dashboard layouts
+  - `types.ts` - Layout, widget interfaces
+  - `dashboard-service.ts` - Layout persistence, import/export
+  - `index.ts` - Barrel export
 - `cameras/` - Camera management
   - `types.ts` - Camera-related interfaces
   - `camera-service.ts` - Cloud systems, cameras, locations API
@@ -78,7 +84,22 @@ This is a React-based dashboard management system for Hotware camera surveillanc
   - `types.ts` - Event/alarm interfaces
   - `alarm-service.ts` - Events, formatting, filtering utilities
   - `index.ts` - Barrel export
+- `audits/` - Audit log
+  - `types.ts` - Audit log interfaces
+  - `audit-service.ts` - Audit API, formatting, filtering
+  - `index.ts` - Barrel export
+- `users/` - User management
+  - `types.ts` - User, group interfaces
+  - `user-service.ts` - User CRUD API, utilities
+  - `index.ts` - Barrel export
 - `servers/` - Server management
+  - `types.ts` - Server interfaces
+  - `server-service.ts` - Server API, utilities
+  - `index.ts` - Barrel export
+- `analytics/` - IoT analytics
+  - `types.ts` - Sensor data interfaces
+  - `analytics-service.ts` - Sensor utilities, formatting
+  - `index.ts` - Barrel export
 - `storage/` - Storage management
   - `types.ts` - Storage-related interfaces
   - `storage-service.ts` - Cloud/local storage CRUD API
@@ -110,6 +131,12 @@ import { fetchCloudSystems, formatCameraLocation } from "@/components/cameras";
 import { fetchCloudEvents, formatTimestamp } from "@/components/alarms";
 import { fetchLocalStorages, getUsagePercentage } from "@/components/storage";
 import { fetchSystemDetails, fetchServerLocations } from "@/components/monitoring";
+import { fetchAuditLogs, getEventInfo } from "@/components/audits";
+import { fetchUsers, getUserTypeBadge } from "@/components/users";
+import { fetchCloudServers, isServerOnline } from "@/components/servers";
+import { getTemperatureStatus, formatTime } from "@/components/analytics";
+import { loadDashboardLayout, saveDashboardLayout } from "@/components/dashboard";
+import { AlarmConsoleWidget, StorageSummaryWidget } from "@/components/widgets";
 ```
 
 <!--
