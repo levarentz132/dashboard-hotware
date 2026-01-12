@@ -502,6 +502,55 @@ class NxWitnessAPI {
     if (modules === null) {
       return { modules: [], success: false }; // Return empty when server unavailable
     }
+    return modules;
+  }
+
+  // Events methods
+  async getEvents(limit: number = 50): Promise<NxEvent[]> {
+    try {
+      const events = await this.apiRequest<NxEvent[]>(`${API_ENDPOINTS.events}?limit=${limit}`);
+      return events || [];
+    } catch (error) {
+      console.error("[getEvents] Error fetching events:", error);
+      return [];
+    }
+  }
+
+  // Alarms methods (from metrics endpoint)
+  async getAlarms(): Promise<NxEvent[]> {
+    try {
+      const alarms = await this.apiRequest<NxMetricsAlarmsResponse>(API_ENDPOINTS.metricsAlarms);
+
+      // Convert metrics alarms to NxEvent format
+      const events: NxEvent[] = [];
+      if (alarms?.servers) {
+        Object.entries(alarms.servers).forEach(([serverId, serverData]) => {
+          const processAlarms = (alarmCategory: Record<string, NxMetricsAlarm[]> | undefined) => {
+            if (alarmCategory) {
+              Object.entries(alarmCategory).forEach(([type, alarmList]) => {
+                alarmList.forEach((alarm, index) => {
+                  events.push({
+                    id: `${serverId}-${type}-${index}`,
+                    timestamp: alarm.timestamp || new Date().toISOString(),
+                    cameraId: alarm.deviceId || "",
+                    type: alarm.level || type,
+                    description: alarm.text || alarm.message || alarm.caption || "Unknown alarm",
+                    metadata: alarm,
+                  });
+                });
+              });
+            }
+          };
+
+          processAlarms(serverData?.info);
+          processAlarms(serverData?.load);
+        });
+      }
+      return events;
+    } catch (error) {
+      console.error("[getAlarms] Error fetching alarms:", error);
+      return [];
+    }
   }
 
   // Storage information - Get storages for a specific server
