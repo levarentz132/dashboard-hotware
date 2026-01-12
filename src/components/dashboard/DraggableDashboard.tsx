@@ -1,8 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import GridLayout from "react-grid-layout";
-import { GripVertical, X, Plus, Save, RotateCcw, Settings, LayoutGrid, Home } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ReactGridLayout as GridLayout, type Layout as LayoutType } from "react-grid-layout/legacy";
+import {
+  GripVertical,
+  X,
+  Plus,
+  Save,
+  RotateCcw,
+  Settings,
+  LayoutGrid,
+  Home,
+  Download,
+  Upload,
+  Database,
+  Loader2,
+  Check,
+} from "lucide-react";
 import "react-grid-layout/css/styles.css";
 import Link from "next/link";
 
@@ -113,33 +127,47 @@ interface DraggableDashboardProps {
   userId?: string; // untuk save layout per user
 }
 
-const STORAGE_KEY = "dashboard-layout";
 const COLS = 12;
 const ROW_HEIGHT = 80;
 
 // Default layout - empty, user can add widgets as needed
 const defaultWidgets: DashboardWidget[] = [];
 
-export default function DraggableDashboard({ userId }: DraggableDashboardProps) {
+export default function DraggableDashboard({ userId = "default" }: DraggableDashboardProps) {
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [showAddWidget, setShowAddWidget] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1200);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load layout from localStorage on mount
+  // Load layout from database on mount
   useEffect(() => {
-    const storageKey = userId ? `${STORAGE_KEY}-${userId}` : STORAGE_KEY;
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
+    const loadLayout = async () => {
+      setIsLoading(true);
       try {
-        const parsed = JSON.parse(saved);
-        setWidgets(parsed);
-      } catch {
+        const response = await fetch(`/api/dashboard-layout?user_id=${encodeURIComponent(userId)}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.layout?.layout_data) {
+            setWidgets(data.layout.layout_data);
+          } else {
+            setWidgets(defaultWidgets);
+          }
+        } else {
+          setWidgets(defaultWidgets);
+        }
+      } catch (error) {
+        console.error("Error loading layout:", error);
         setWidgets(defaultWidgets);
+      } finally {
+        setIsLoading(false);
       }
-    } else {
-      setWidgets(defaultWidgets);
-    }
+    };
+
+    loadLayout();
   }, [userId]);
 
   // Update container width on resize
@@ -156,14 +184,111 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
 
-  // Save layout to localStorage
-  const saveLayout = useCallback(() => {
-    const storageKey = userId ? `${STORAGE_KEY}-${userId}` : STORAGE_KEY;
-    localStorage.setItem(storageKey, JSON.stringify(widgets));
+  // Save layout to database
+  const saveLayout = useCallback(async () => {
+    setIsSaving(true);
+    setSaveStatus("saving");
+    try {
+      const response = await fetch("/api/dashboard-layout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          layout_name: "Default Layout",
+          layout_data: widgets,
+          set_active: true,
+        }),
+      });
+
+      if (response.ok) {
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2000);
+      } else {
+        setSaveStatus("error");
+        setTimeout(() => setSaveStatus("idle"), 3000);
+      }
+    } catch (error) {
+      console.error("Error saving layout:", error);
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } finally {
+      setIsSaving(false);
+    }
   }, [widgets, userId]);
 
+  // Export layout as JSON file
+  const exportLayout = useCallback(() => {
+    const exportData = {
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+      userId,
+      widgets,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `dashboard-layout-${userId}-${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [widgets, userId]);
+
+  // Import layout from JSON file
+  const importLayout = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const importedData = JSON.parse(content);
+
+        // Validate imported data
+        if (importedData.widgets && Array.isArray(importedData.widgets)) {
+          // Validate each widget has required properties
+          const validWidgets = importedData.widgets.filter(
+            (w: DashboardWidget) =>
+              w.i &&
+              w.type &&
+              widgetRegistry[w.type] !== undefined &&
+              typeof w.x === "number" &&
+              typeof w.y === "number" &&
+              typeof w.w === "number" &&
+              typeof w.h === "number"
+          );
+
+          if (validWidgets.length > 0) {
+            setWidgets(validWidgets);
+            alert(`Berhasil import ${validWidgets.length} widget!`);
+          } else {
+            alert("File tidak berisi widget yang valid.");
+          }
+        } else {
+          alert("Format file tidak valid. Pastikan file adalah export dari dashboard ini.");
+        }
+      } catch (error) {
+        console.error("Error importing layout:", error);
+        alert("Gagal membaca file. Pastikan file adalah JSON yang valid.");
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
   // Handle layout change from drag/resize
-  const onLayoutChange = (newLayout: LayoutItem[]) => {
+  const onLayoutChange = (newLayout: readonly LayoutItem[]) => {
     setWidgets((prev) =>
       prev.map((widget) => {
         const layoutItem = newLayout.find((l) => l.i === widget.i);
@@ -286,22 +411,68 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
                       <Button
                         variant="default"
                         size="sm"
-                        onClick={() => {
-                          saveLayout();
+                        disabled={isSaving}
+                        onClick={async () => {
+                          await saveLayout();
                           setIsEditing(false);
                         }}
                         className="gap-1 sm:gap-2 px-2 sm:px-3 bg-green-600 hover:bg-green-700"
                       >
-                        <Save className="w-4 h-4" />
-                        <span className="hidden sm:inline">Save</span>
+                        {saveStatus === "saving" ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : saveStatus === "saved" ? (
+                          <Check className="w-4 h-4" />
+                        ) : (
+                          <Database className="w-4 h-4" />
+                        )}
+                        <span className="hidden sm:inline">
+                          {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : "Save to DB"}
+                        </span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Simpan perubahan layout</p>
+                      <p>Simpan layout ke database</p>
                     </TooltipContent>
                   </Tooltip>
                 </>
               )}
+
+              {/* Export/Import - always visible */}
+              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="sm" onClick={exportLayout} className="gap-1 sm:gap-2 px-2 sm:px-3">
+                    <Download className="w-4 h-4" />
+                    <span className="hidden sm:inline">Export</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Export layout sebagai file JSON</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="gap-1 sm:gap-2 px-2 sm:px-3"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span className="hidden sm:inline">Import</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Import layout dari file JSON</p>
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Hidden file input for import */}
+              <input ref={fileInputRef} type="file" accept=".json" onChange={importLayout} className="hidden" />
+
+              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -332,84 +503,96 @@ export default function DraggableDashboard({ userId }: DraggableDashboardProps) 
           </div>
         )}
 
+        {/* Loading State */}
+        {isLoading && (
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
+              <p className="text-gray-600">Loading dashboard layout...</p>
+            </div>
+          </div>
+        )}
+
         {/* Dashboard Grid */}
-        <div id="dashboard-container" className="p-2 sm:p-4">
-          <GridLayout
-            className="layout"
-            layout={layout}
-            cols={COLS}
-            rowHeight={ROW_HEIGHT}
-            width={containerWidth - 32}
-            onLayoutChange={onLayoutChange}
-            isDraggable={isEditing}
-            isResizable={isEditing}
-            draggableHandle=".drag-handle"
-            margin={[16, 16]}
-            containerPadding={[0, 0]}
-            useCSSTransforms={true}
-          >
-            {widgets.map((widget) => {
-              const WidgetComponent = widgetRegistry[widget.type]?.component;
-              const widgetName = widgetRegistry[widget.type]?.name || "Widget";
+        {!isLoading && (
+          <div id="dashboard-container" className="p-2 sm:p-4">
+            <GridLayout
+              className="layout"
+              layout={layout}
+              cols={COLS}
+              rowHeight={ROW_HEIGHT}
+              width={containerWidth - 32}
+              onLayoutChange={onLayoutChange}
+              isDraggable={isEditing}
+              isResizable={isEditing}
+              draggableHandle=".drag-handle"
+              margin={[16, 16]}
+              containerPadding={[0, 0]}
+              useCSSTransforms={true}
+            >
+              {widgets.map((widget) => {
+                const WidgetComponent = widgetRegistry[widget.type]?.component;
+                const widgetName = widgetRegistry[widget.type]?.name || "Widget";
 
-              return (
-                <div
-                  key={widget.i}
-                  className={`rounded-xl overflow-hidden transition-all duration-200 bg-white border ${
-                    isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
-                  }`}
-                >
-                  <div className="h-full relative group flex flex-col">
-                    {/* Delete Button - Only visible in edit mode */}
-                    {isEditing && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              removeWidget(widget.i);
-                            }}
-                            className="absolute top-2 right-2 z-50 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Hapus widget</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
-
-                    {/* Widget Header - only show in edit mode */}
-                    {isEditing && (
-                      <div className="drag-handle flex flex-row items-center justify-between px-3 py-2 bg-gray-50 border-b cursor-move shrink-0">
-                        <div className="flex items-center gap-2">
-                          <GripVertical className="w-4 h-4 text-gray-400" />
-                          <span className="text-sm font-medium text-gray-600">{widgetName}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Widget Content */}
-                    <div className="flex-1 overflow-auto">
-                      {WidgetComponent ? (
-                        <WidgetComponent />
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
+                return (
+                  <div
+                    key={widget.i}
+                    className={`rounded-xl overflow-hidden transition-all duration-200 bg-white border ${
+                      isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
+                    }`}
+                  >
+                    <div className="h-full relative group flex flex-col">
+                      {/* Delete Button - Only visible in edit mode */}
+                      {isEditing && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                removeWidget(widget.i);
+                              }}
+                              className="absolute top-2 right-2 z-50 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Hapus widget</p>
+                          </TooltipContent>
+                        </Tooltip>
                       )}
+
+                      {/* Widget Header - only show in edit mode */}
+                      {isEditing && (
+                        <div className="drag-handle flex flex-row items-center justify-between px-3 py-2 bg-gray-50 border-b cursor-move shrink-0">
+                          <div className="flex items-center gap-2">
+                            <GripVertical className="w-4 h-4 text-gray-400" />
+                            <span className="text-sm font-medium text-gray-600">{widgetName}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Widget Content */}
+                      <div className="flex-1 overflow-auto">
+                        {WidgetComponent ? (
+                          <WidgetComponent />
+                        ) : (
+                          <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </GridLayout>
-        </div>
+                );
+              })}
+            </GridLayout>
+          </div>
+        )}
 
         {/* Add Widget Dialog */}
         <Dialog open={showAddWidget} onOpenChange={setShowAddWidget}>
