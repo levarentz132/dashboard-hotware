@@ -108,7 +108,7 @@ class NxWitnessAPI {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout for login
+      const timeoutId = setTimeout(() => controller.abort(new Error("Login timeout after 8 seconds")), 8000);
 
       // Nx Witness REST API v3 login format
       const loginBody = {
@@ -158,7 +158,7 @@ class NxWitnessAPI {
   private async isApiAvailable(): Promise<boolean> {
     try {
       const controller = new AbortController();
-      setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      setTimeout(() => controller.abort(new Error("API availability check timeout")), 5000);
 
       // Test system info endpoint through proxy
       const response = await fetch(`${this.baseURL}/system/info`, {
@@ -196,7 +196,7 @@ class NxWitnessAPI {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout after 10 seconds")), 10000);
 
       const response = await fetch(url, {
         ...config,
