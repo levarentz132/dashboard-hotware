@@ -16,17 +16,9 @@ import {
 } from "lucide-react";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { useCameras } from "@/hooks/useNxAPI-camera";
+import { useCloudSystems, fetchFromCloudRelay, type CloudSystem } from "@/hooks/use-async-data";
+import { getOnlineOfflineBadgeClass, getRoleBadgeClass } from "@/lib/status-utils";
 import ServerLocationForm from "@/components/servers/ServerLocationForm";
-
-interface CloudSystem {
-  id: string;
-  name: string;
-  stateOfHealth: string;
-  accessRole: string;
-  version?: string;
-  ownerFullName?: string;
-  ownerAccountEmail?: string;
-}
 
 interface SystemInfoData {
   name?: string;
@@ -44,62 +36,16 @@ interface ServerLocationData {
 export default function SystemHealth() {
   const { systemInfo, connected, loading } = useSystemInfo();
   const { cameras } = useCameras();
-  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
+  const { data: cloudSystems, refetch: refetchCloudSystems } = useCloudSystems();
   const [systemDetails, setSystemDetails] = useState<Map<string, SystemInfoData | null>>(new Map());
   const [serverLocations, setServerLocations] = useState<Map<string, ServerLocationData>>(new Map());
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [editingLocation, setEditingLocation] = useState<string | null>(null);
 
-  // Fetch cloud systems
-  const fetchCloudSystems = useCallback(async () => {
-    try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) return;
-
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
-
-      // Sort: owner first, then online systems
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-        return 0;
-      });
-
-      setCloudSystems(systems);
-    } catch (err) {
-      console.error("Error fetching cloud systems:", err);
-    }
-  }, []);
-
   // Fetch system info from cloud relay for a specific system
   const fetchSystemDetails = useCallback(async (cloudId: string): Promise<SystemInfoData | null> => {
-    try {
-      const response = await fetch(`https://${cloudId}.relay.vmsproxy.com/rest/v3/system/info`, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) return null;
-      return await response.json();
-    } catch {
-      return null;
-    }
+    return fetchFromCloudRelay<SystemInfoData>(cloudId, "/rest/v3/system/info");
   }, []);
 
   // Fetch details for all online systems
@@ -137,11 +83,10 @@ export default function SystemHealth() {
     }
   }, []);
 
-  // Initial fetch
+  // Initial fetch for server locations
   useEffect(() => {
-    fetchCloudSystems();
     fetchServerLocations();
-  }, [fetchCloudSystems, fetchServerLocations]);
+  }, [fetchServerLocations]);
 
   // Fetch details when cloud systems are loaded
   useEffect(() => {
@@ -153,7 +98,7 @@ export default function SystemHealth() {
   // Refresh handler
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchCloudSystems();
+    await refetchCloudSystems();
     await fetchAllSystemDetails();
     await fetchServerLocations();
     setRefreshing(false);
@@ -167,27 +112,14 @@ export default function SystemHealth() {
   const getStatusBadge = (stateOfHealth: string) => {
     const isOnline = stateOfHealth === "online";
     return (
-      <span
-        className={`px-2 py-1 rounded-full text-xs font-medium ${
-          isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-        }`}
-      >
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getOnlineOfflineBadgeClass(isOnline)}`}>
         {isOnline ? "Online" : "Offline"}
       </span>
     );
   };
 
   const getRoleBadge = (role: string) => {
-    const isOwner = role === "owner";
-    return (
-      <span
-        className={`px-2 py-1 rounded-full text-xs font-medium ${
-          isOwner ? "bg-purple-100 text-purple-800" : "bg-blue-100 text-blue-800"
-        }`}
-      >
-        {role}
-      </span>
-    );
+    return <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeClass(role)}`}>{role}</span>;
   };
 
   const onlineCameras = cameras?.filter((c) => c.status?.toLowerCase() === "online").length || 0;
