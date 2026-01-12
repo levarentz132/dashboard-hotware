@@ -1,9 +1,11 @@
 # Hotware Dashboard - Copilot Instructions
 
 ## Project Overview
+
 This is a React-based dashboard management system for Hotware camera surveillance with comprehensive security monitoring, analytics, and IoT integration capabilities.
 
 ## Project Checklist Status
+
 - [x] Copilot instructions file created
 - [x] Project requirements clarified - React dashboard for Hotware
 - [x] Project scaffolded - Next.js with TypeScript and Tailwind CSS
@@ -11,8 +13,10 @@ This is a React-based dashboard management system for Hotware camera surveillanc
 - [x] Dependencies compiled successfully
 - [x] Development tasks created and running
 - [x] Documentation completed
+- [x] Code refactored with Clean Code principles (SoC, DRY)
 
 ## Key Components
+
 - Dashboard Overview with real-time widgets
 - Camera Inventory management system
 - System Health monitoring
@@ -20,12 +24,93 @@ This is a React-based dashboard management system for Hotware camera surveillanc
 - Analytics and Business Intelligence
 - IoT sensor integration placeholders
 
+## Architecture & Code Organization
+
+### Types (`src/types/`)
+
+- `index.ts` - Central export for all types
+- `Device.d.ts` - Camera and device interfaces
+- `Server.d.ts` - Server interfaces
+- `Media.d.ts` - Media/stream interfaces
+- `Cloud.d.ts` - Cloud API types (CloudSystem, CloudDevice, etc.)
+- `Common.d.ts` - Shared types (ApiResponse, LoadingState, StatusType)
+
+### Constants (`src/constants/`)
+
+- `index.ts` - Central export for constants
+- `app-constants.ts` - Application-wide constants (timeouts, intervals, messages)
+- `camera-constant.ts` - Camera-specific constants
+
+### Hooks (`src/hooks/`)
+
+- `index.ts` - Central export for hooks
+- `use-async-data.ts` - Generic async data fetching hook factory
+- `useNxAPI.ts` - Events and alarms hooks
+- `useNxAPI-camera.ts` - Camera-related hooks
+- `useNxAPI-server.ts` - Server-related hooks
+- `useNxAPI-system.ts` - System info hooks
+
+### Library/Services (`src/lib/`)
+
+- `index.ts` - Central export for services
+- `cloud-api.ts` - Cloud API utilities (fetch, auth, error handling)
+- `status-utils.ts` - Status colors, badges, formatters
+- `nxapi.ts` - NX Witness API client class
+- `config.ts` - API configuration
+- `db.ts` - Database connection pool
+- `utils.ts` - General utilities (cn)
+
+### Components (`src/components/`)
+
+- `common/` - Shared components (StateComponents, StatusComponents, forms)
+- `ui/` - shadcn/UI components
+- `widgets/` - Dashboard widgets
+- `dashboard/` - Dashboard layouts
+- `cameras/` - Camera management
+  - `types.ts` - Camera-related interfaces
+  - `camera-service.ts` - Cloud systems, cameras, locations API
+  - `camera-utils.ts` - Status, location formatting utilities
+  - `index.ts` - Barrel export
+- `monitoring/` - System health
+  - `monitoring-service.ts` - System details, server locations API
+  - `index.ts` - Barrel export
+- `alarms/` - Alarm console
+  - `types.ts` - Event/alarm interfaces
+  - `alarm-service.ts` - Events, formatting, filtering utilities
+  - `index.ts` - Barrel export
+- `servers/` - Server management
+- `storage/` - Storage management
+  - `types.ts` - Storage-related interfaces
+  - `storage-service.ts` - Cloud/local storage CRUD API
+  - `storage-utils.ts` - Formatting, calculation utilities
+  - `index.ts` - Barrel export
+
 ## Development Guidelines
+
 - Use TypeScript for type safety
 - Follow React best practices with hooks
 - Implement responsive design with Tailwind CSS
 - Maintain component modularity
 - Add proper error handling and loading states
+- Import from index files when possible (`@/hooks`, `@/types`, `@/constants`)
+- Use shared components from `@/components/common`
+- Use status utilities from `@/lib/status-utils`
+
+## Import Patterns
+
+```typescript
+// Prefer barrel imports from central modules
+import { useCameras, useServers } from "@/hooks";
+import { StatusBadge, LoadingState } from "@/components/common";
+import { API_TIMEOUTS, REFRESH_INTERVALS } from "@/constants";
+import { getStatusColor, formatBytes } from "@/lib";
+
+// Import from component-level barrel exports
+import { fetchCloudSystems, formatCameraLocation } from "@/components/cameras";
+import { fetchCloudEvents, formatTimestamp } from "@/components/alarms";
+import { fetchLocalStorages, getUsagePercentage } from "@/components/storage";
+import { fetchSystemDetails, fetchServerLocations } from "@/components/monitoring";
+```
 
 <!--
 ## Execution Guidelines
@@ -75,6 +160,7 @@ TASK COMPLETION RULES:
 
 Before starting a new task in the above plan, update progress in the plan.
 -->
+
 - Work through each checklist item systematically.
 - Keep communication concise and focused.
 - Follow development best practices.
