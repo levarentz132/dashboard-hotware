@@ -1,0 +1,195 @@
+/**
+ * Dashboard service - handles dashboard layout persistence
+ */
+
+import type { DashboardWidget, DashboardLayout, ExportedLayout } from "./types";
+
+// ============================================
+// Layout Persistence API
+// ============================================
+
+/**
+ * Load dashboard layout from database
+ */
+export async function loadDashboardLayout(userId: string): Promise<{ widgets: DashboardWidget[]; error?: string }> {
+  try {
+    const response = await fetch(`/api/dashboard-layout?user_id=${encodeURIComponent(userId)}`);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.layout?.layout_data) {
+        return { widgets: data.layout.layout_data };
+      }
+    }
+
+    return { widgets: [] };
+  } catch (error) {
+    console.error("Error loading layout:", error);
+    return { widgets: [], error: "Failed to load layout" };
+  }
+}
+
+/**
+ * Save dashboard layout to database
+ */
+export async function saveDashboardLayout(
+  userId: string,
+  widgets: DashboardWidget[],
+  layoutName: string = "Default Layout"
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch("/api/dashboard-layout", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        layout_name: layoutName,
+        layout_data: widgets,
+        set_active: true,
+      }),
+    });
+
+    if (response.ok) {
+      return { success: true };
+    }
+
+    return { success: false, error: "Failed to save layout" };
+  } catch (error) {
+    console.error("Error saving layout:", error);
+    return { success: false, error: "Failed to save layout" };
+  }
+}
+
+// ============================================
+// Layout Import/Export
+// ============================================
+
+/**
+ * Export layout as JSON file
+ */
+export function exportLayout(userId: string, widgets: DashboardWidget[]): void {
+  const exportData: ExportedLayout = {
+    version: "1.0",
+    exportedAt: new Date().toISOString(),
+    userId,
+    widgets,
+  };
+
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `dashboard-layout-${userId}-${new Date().toISOString().split("T")[0]}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Parse imported layout file
+ */
+export function parseImportedLayout(
+  content: string,
+  validWidgetTypes: string[]
+): { widgets: DashboardWidget[]; error?: string } {
+  try {
+    const importedData = JSON.parse(content);
+
+    if (!importedData.widgets || !Array.isArray(importedData.widgets)) {
+      return { widgets: [], error: "Invalid format: missing widgets array" };
+    }
+
+    // Validate each widget
+    const validWidgets = importedData.widgets.filter(
+      (w: DashboardWidget) =>
+        w.i &&
+        w.type &&
+        validWidgetTypes.includes(w.type) &&
+        typeof w.x === "number" &&
+        typeof w.y === "number" &&
+        typeof w.w === "number" &&
+        typeof w.h === "number"
+    );
+
+    if (validWidgets.length === 0) {
+      return { widgets: [], error: "No valid widgets found" };
+    }
+
+    return { widgets: validWidgets };
+  } catch (error) {
+    console.error("Error parsing layout:", error);
+    return { widgets: [], error: "Invalid JSON format" };
+  }
+}
+
+// ============================================
+// Layout Utilities
+// ============================================
+
+/**
+ * Generate unique widget ID
+ */
+export function generateWidgetId(): string {
+  return `widget-${Date.now()}`;
+}
+
+/**
+ * Convert widgets to react-grid-layout format
+ */
+export function widgetsToLayout(
+  widgets: DashboardWidget[],
+  widgetRegistry: Record<string, { minSize: { w: number; h: number } }>,
+  isEditing: boolean
+): Array<{
+  i: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  minW: number;
+  minH: number;
+  isDraggable: boolean;
+  isResizable: boolean;
+}> {
+  return widgets.map((widget) => {
+    const config = widgetRegistry[widget.type];
+    return {
+      i: widget.i,
+      x: widget.x,
+      y: widget.y,
+      w: widget.w,
+      h: widget.h,
+      minW: config?.minSize.w || 2,
+      minH: config?.minSize.h || 2,
+      isDraggable: isEditing,
+      isResizable: isEditing,
+    };
+  });
+}
+
+/**
+ * Update widget positions from layout change
+ */
+export function updateWidgetPositions(
+  widgets: DashboardWidget[],
+  newLayout: ReadonlyArray<{ i: string; x: number; y: number; w: number; h: number }>
+): DashboardWidget[] {
+  return widgets.map((widget) => {
+    const layoutItem = newLayout.find((l) => l.i === widget.i);
+    if (layoutItem) {
+      return {
+        ...widget,
+        x: layoutItem.x,
+        y: layoutItem.y,
+        w: layoutItem.w,
+        h: layoutItem.h,
+      };
+    }
+    return widget;
+  });
+}
