@@ -1997,31 +1997,31 @@ export default function CameraInventory() {
           <div className="text-lg md:text-xl font-bold text-gray-900">{totalCameras}</div>
           <div className="text-xs text-gray-600">Total</div>
         </div>
-        <div className="bg-white p-2 md:p-3 rounded-lg border border-green-200 bg-green-50">
+        <div className="p-2 md:p-3 rounded-lg border border-green-200 bg-green-50">
           <div className="text-lg md:text-xl font-bold text-green-600">{onlineCameras}</div>
           <div className="text-xs text-gray-600">Online</div>
         </div>
-        <div className="bg-white p-2 md:p-3 rounded-lg border border-red-200 bg-red-50">
+        <div className="p-2 md:p-3 rounded-lg border border-red-200 bg-red-50">
           <div className="text-lg md:text-xl font-bold text-red-600">{offlineCameras}</div>
           <div className="text-xs text-gray-600">Offline</div>
         </div>
-        <div className="bg-white p-2 md:p-3 rounded-lg border border-blue-200 bg-blue-50">
+        <div className="p-2 md:p-3 rounded-lg border border-blue-200 bg-blue-50">
           <div className="text-lg md:text-xl font-bold text-blue-600">{recordingCameras}</div>
           <div className="text-xs text-gray-600">Recording</div>
         </div>
-        <div className="bg-white p-2 md:p-3 rounded-lg border border-yellow-200 bg-yellow-50">
+        <div className="p-2 md:p-3 rounded-lg border border-yellow-200 bg-yellow-50">
           <div className="text-lg md:text-xl font-bold text-yellow-600">{unauthorizedCameras}</div>
           <div className="text-xs text-gray-600">Unauthorized</div>
         </div>
-        <div className="bg-white p-2 md:p-3 rounded-lg border border-gray-200 bg-gray-50">
+        <div className="p-2 md:p-3 rounded-lg border border-gray-200 bg-gray-50">
           <div className="text-lg md:text-xl font-bold text-gray-500">{notDefinedCameras}</div>
           <div className="text-xs text-gray-600">NotDefined</div>
         </div>
-        <div className="bg-white p-2 md:p-3 rounded-lg border border-orange-200 bg-orange-50">
+        <div className="p-2 md:p-3 rounded-lg border border-orange-200 bg-orange-50">
           <div className="text-lg md:text-xl font-bold text-orange-600">{incompatibleCameras}</div>
           <div className="text-xs text-gray-600">Incompatible</div>
         </div>
-        <div className="bg-white p-2 md:p-3 rounded-lg border border-purple-200 bg-purple-50">
+        <div className="p-2 md:p-3 rounded-lg border border-purple-200 bg-purple-50">
           <div className="text-lg md:text-xl font-bold text-purple-600">{mismatchedCertCameras}</div>
           <div className="text-xs text-gray-600 truncate" title="Mismatched Certificate">
             Mismatched Cert
