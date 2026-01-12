@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { getStatusVariant, sortByStatus } from "@/lib/status-utils";
 import Link from "next/link";
 
 export default function CameraOverviewWidget() {
@@ -26,32 +27,8 @@ export default function CameraOverviewWidget() {
 
   const onlinePercentage = totalCameras > 0 ? (onlineCameras / totalCameras) * 100 : 0;
 
-  // Sort cameras: offline first, then warning, then online
-  const sortedCameras = [...cameras].sort((a, b) => {
-    const statusOrder: Record<string, number> = {
-      offline: 0,
-      unauthorized: 1,
-      notdefined: 2,
-      incompatible: 3,
-      online: 4,
-      recording: 5,
-    };
-    const statusA = a.status?.toLowerCase() || "unknown";
-    const statusB = b.status?.toLowerCase() || "unknown";
-    return (statusOrder[statusA] ?? 3) - (statusOrder[statusB] ?? 3);
-  });
-
-  const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
-    switch (status?.toLowerCase()) {
-      case "online":
-      case "recording":
-        return "default";
-      case "offline":
-        return "destructive";
-      default:
-        return "secondary";
-    }
-  };
+  // Sort cameras using shared utility
+  const sortedCameras = sortByStatus(cameras);
 
   const getStatusIcon = (status: string) => {
     switch (status?.toLowerCase()) {
