@@ -13,6 +13,9 @@ import {
   LogIn,
   LayoutDashboard,
   Home,
+  User,
+  Settings,
+  Shield,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -41,6 +44,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
+import { Badge } from "../ui/badge";
 import { useRouter } from "next/navigation";
 import LogoImage from "@/images/image.png";
 import { useCameras } from "@/hooks/useNxAPI-camera";
@@ -48,6 +52,7 @@ import { CLOUD_CONFIG } from "@/lib/config";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { CloudLoginDialog } from "../alarms/CloudLoginDialog";
+import { useAuth } from "@/hooks/use-auth";
 
 interface CloudSystem {
   id: string;
@@ -65,6 +70,101 @@ interface CloudDevice {
   physicalId?: string;
   systemId?: string;
   systemName?: string;
+}
+
+const roleLabels: Record<string, string> = {
+  admin: "Administrator",
+  operator: "Operator",
+  viewer: "Viewer",
+};
+
+const roleColors: Record<string, string> = {
+  admin: "bg-red-500/20 text-red-400 border-red-500/30",
+  operator: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  viewer: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+};
+
+function UserDropdownMenu({ isMobile }: { isMobile: boolean }) {
+  const { user, logout, isLoading } = useAuth();
+  const router = useRouter();
+
+  if (!user) {
+    return (
+      <SidebarMenuButton size="lg" onClick={() => router.push("/login")}>
+        <Avatar className="h-8 w-8 rounded-lg">
+          <AvatarFallback className="rounded-lg">?</AvatarFallback>
+        </Avatar>
+        <div className="leading-tight">
+          <h4 className="truncate font-medium">Login</h4>
+        </div>
+      </SidebarMenuButton>
+    );
+  }
+
+  const initials = user.username
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuButton
+          size="lg"
+          className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+        >
+          <Avatar className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600">
+            <AvatarFallback className="rounded-lg bg-transparent text-white text-sm">{initials}</AvatarFallback>
+          </Avatar>
+          <div className="leading-tight">
+            <h4 className="truncate font-medium">{user.username}</h4>
+            <span className="text-xs text-muted-foreground">{roleLabels[user.role]}</span>
+          </div>
+          <ChevronDown className="ml-auto size-4" />
+        </SidebarMenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        className="min-w-56 rounded-lg"
+        side={isMobile ? "bottom" : "right"}
+        align="end"
+        sideOffset={4}
+      >
+        <DropdownMenuLabel className="p-0 font-normal">
+          <div className="flex items-center gap-2 px-1 py-1.5">
+            <Avatar className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600">
+              <AvatarFallback className="rounded-lg bg-transparent text-white text-sm">{initials}</AvatarFallback>
+            </Avatar>
+            <div className="leading-tight">
+              <h4 className="truncate font-medium">{user.username}</h4>
+              <span className="text-xs text-muted-foreground">{user.email}</span>
+            </div>
+          </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem className="cursor-pointer">
+            <User className="mr-2 h-4 w-4" />
+            Profil
+          </DropdownMenuItem>
+          <DropdownMenuItem className="cursor-pointer">
+            <Settings className="mr-2 h-4 w-4" />
+            Pengaturan
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => logout()}
+          disabled={isLoading}
+          className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-500/10"
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          Keluar
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export default function AppSidebar() {
@@ -518,48 +618,7 @@ export default function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton
-                  size="lg"
-                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                >
-                  <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarImage src="" alt="" />
-                    <AvatarFallback className="rounded-lg">A</AvatarFallback>
-                  </Avatar>
-                  <div className="leading-tight">
-                    <h4 className="truncate font-medium">Admin</h4>
-                  </div>
-                  <ChevronDown className="ml-auto size-4" />
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className="min-w-56 rounded-lg"
-                side={isMobile ? "bottom" : "right"}
-                align="end"
-                sideOffset={4}
-              >
-                <DropdownMenuLabel className="p-0 font-normal">
-                  <div className="flex items-center gap-2 px-1 py-1.5">
-                    <Avatar className="h-8 w-8 rounded-lg">
-                      <AvatarImage src="" alt="" />
-                      <AvatarFallback className="rounded-lg">A</AvatarFallback>
-                    </Avatar>
-                    <div className="leading-tight">
-                      <h4 className="truncate font-medium">Admin</h4>
-                    </div>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => router.push("/")} className="cursor-pointer">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Home
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <UserDropdownMenu isMobile={isMobile} />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
