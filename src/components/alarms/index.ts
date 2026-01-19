@@ -3,7 +3,7 @@
  */
 
 // Types
-export type { CloudSystem, CloudServer, ServerOption, EventLog, EventParams } from "./types";
+export type { CloudSystem, CloudServer, ServerOption, EventLog } from "./types";
 
 // Service functions
 export {
@@ -21,4 +21,4 @@ export {
 
 // Components
 export { default as AlarmConsole } from "./AlarmConsole";
-export { default as CloudLoginDialog } from "./CloudLoginDialog";
+export { CloudLoginDialog } from "./CloudLoginDialog";
