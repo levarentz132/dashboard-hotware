@@ -105,6 +105,26 @@ This is a React-based dashboard management system for Hotware camera surveillanc
   - `storage-service.ts` - Cloud/local storage CRUD API
   - `storage-utils.ts` - Formatting, calculation utilities
   - `index.ts` - Barrel export
+- `auth/` - Authentication components
+  - `UserMenu.tsx` - User dropdown menu with logout
+  - `index.ts` - Barrel export
+
+### Authentication (`src/lib/auth/`)
+
+- `types.ts` - User, JWT, AuthResponse interfaces
+- `constants.ts` - JWT config, cookie config, routes, messages
+- `auth-service.ts` - Password hashing (bcrypt), JWT (jose), user CRUD
+- `index.ts` - Barrel export
+
+### Contexts (`src/contexts/`)
+
+- `auth-context.tsx` - AuthProvider, useAuth hook, login/logout/register handlers
+
+### Middleware (`src/middleware.ts`)
+
+- Route protection with JWT verification
+- Public routes bypass (login, register)
+- Cookie-based session management
 
 ## Development Guidelines
 
@@ -137,6 +157,12 @@ import { fetchCloudServers, isServerOnline } from "@/components/servers";
 import { getTemperatureStatus, formatTime } from "@/components/analytics";
 import { loadDashboardLayout, saveDashboardLayout } from "@/components/dashboard";
 import { AlarmConsoleWidget, StorageSummaryWidget } from "@/components/widgets";
+
+// Authentication imports
+import { useAuth, AuthProvider } from "@/contexts/auth-context";
+import { useRequireAuth } from "@/hooks/use-require-auth";
+import { hashPassword, verifyToken, loginUser } from "@/lib/auth";
+import { UserMenu } from "@/components/auth";
 ```
 
 <!--
