@@ -132,22 +132,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setState((prev) => ({ ...prev, isLoading: true }));
 
     try {
-      await fetch(AUTH_ROUTES.API_LOGOUT, {
+      const response = await fetch(AUTH_ROUTES.API_LOGOUT, {
         method: "POST",
         credentials: "include",
       });
-    } catch (error) {
-      console.error("Logout error:", error);
-    } finally {
+
+      // Wait for response to ensure cookies are cleared
+      await response.json();
+
       setState({
         user: null,
         isAuthenticated: false,
         isLoading: false,
         error: null,
       });
-      router.push(AUTH_ROUTES.LOGIN);
+
+      // Hard redirect to login page
+      window.location.replace(AUTH_ROUTES.LOGIN);
+    } catch (error) {
+      console.error("Logout error:", error);
+      setState((prev) => ({ ...prev, isLoading: false }));
+      // Still try to redirect even if there's an error
+      window.location.replace(AUTH_ROUTES.LOGIN);
     }
-  }, [router]);
+  }, []);
 
   // Register handler
   const register = useCallback(

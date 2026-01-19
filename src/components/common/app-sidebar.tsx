@@ -154,13 +154,11 @@ function UserDropdownMenu({ isMobile }: { isMobile: boolean }) {
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => logout()}
-          disabled={isLoading}
-          className="cursor-pointer text-red-500 focus:text-red-500 focus:bg-red-500/10"
-        >
-          <LogOut className="mr-2 h-4 w-4" />
-          Keluar
+        <DropdownMenuItem asChild>
+          <a href="/api/auth/logout" className="cursor-pointer text-red-500 focus:text-red-500">
+            <LogOut className="mr-2 h-4 w-4" />
+            Keluar
+          </a>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

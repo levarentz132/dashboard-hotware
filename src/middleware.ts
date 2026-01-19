@@ -12,29 +12,25 @@ const JWT_SECRET = process.env.JWT_SECRET || "your-super-secret-key-change-in-pr
 const publicRoutes = ["/login", "/register"];
 
 // API routes that don't require authentication
-const publicApiRoutes = ["/api/auth/login", "/api/auth/register"];
+const publicApiRoutes = ["/api/auth/login", "/api/auth/register", "/api/auth/logout"];
 
-// Static assets and Next.js internals to skip
-const skipPaths = ["/_next", "/favicon.ico", "/images", "/api/auth"];
+// Static assets and Next.js internals to skip (NOT /api/auth - we need to protect /api/auth/session)
+const skipPaths = ["/_next", "/favicon.ico", "/images"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  console.log("[Middleware] Path:", pathname);
+
   // Skip middleware for static assets and Next.js internals
   if (skipPaths.some((path) => pathname.startsWith(path))) {
+    console.log("[Middleware] Skipping static path");
     return NextResponse.next();
   }
 
   // Allow public routes without auth
   if (publicRoutes.includes(pathname)) {
-    // If user is already authenticated, redirect to dashboard
-    const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
-    if (token) {
-      const isValid = await verifyToken(token);
-      if (isValid) {
-        return NextResponse.redirect(new URL("/", request.url));
-      }
-    }
+    console.log("[Middleware] Public route, allowing access");
     return NextResponse.next();
   }
 
@@ -45,10 +41,12 @@ export async function middleware(request: NextRequest) {
 
   // Check for auth token
   const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  console.log("[Middleware] Token exists:", !!token);
 
   if (!token) {
     // No token, redirect to login for page requests
     if (!pathname.startsWith("/api/")) {
+      console.log("[Middleware] No token, redirecting to login");
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
@@ -97,12 +95,12 @@ async function verifyToken(token: string): Promise<boolean> {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for:
+     * Match all request paths except for the ones starting with:
+     * - api/auth (auth API routes - handled separately)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public folder
      */
-    "/((?!_next/static|_next/image|favicon.ico|public/).*)",
+    "/((?!api/auth|_next/static|_next/image|favicon.ico).*)",
   ],
 };
