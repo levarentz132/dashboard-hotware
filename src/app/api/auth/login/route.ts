@@ -1,10 +1,12 @@
 // Login API Route
-// POST /api/auth/login - Authenticate user with credentials
+// POST /api/auth/login - Authenticate user with external license API
 
 import { NextRequest, NextResponse } from "next/server";
-import { loginUser } from "@/lib/auth";
+import { signJWT } from "@/lib/auth";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "@/lib/auth/constants";
+import { callExternalAuthAPI, mapLicenseToRole } from "@/lib/auth/external-api";
 import { z } from "zod";
+import type { UserPublic } from "@/lib/auth/types";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username harus diisi"),
@@ -30,45 +32,104 @@ export async function POST(request: NextRequest) {
 
     const { username, password } = validation.data;
 
-    // Attempt login
-    const result = await loginUser({ username, password });
+    // Call external API for authentication
+    const externalData = await callExternalAuthAPI({
+      username,
+      password,
+    });
 
-    if (!result.success) {
-      return NextResponse.json({ success: false, message: result.message }, { status: 401 });
+    // Check if login was successful
+    if (!externalData.success) {
+      // Handle specific error codes
+      const status = externalData.error_code === "LICENSE_EXPIRED" ? 403 : 401;
+      
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: externalData.message || "Username atau password salah",
+          error_code: externalData.error_code
+        },
+        { status }
+      );
     }
 
-    // Create response with tokens
+    // Check if user data exists
+    if (!externalData.user) {
+      return NextResponse.json(
+        { success: false, message: "Data pengguna tidak ditemukan" },
+        { status: 401 }
+      );
+    }
+
+    const userData = externalData.user;
+
+    // Map license status to role, or use role from API if provided
+    const role = userData.role === "admin" || userData.role === "operator" || userData.role === "viewer" 
+      ? userData.role 
+      : mapLicenseToRole(userData.license_status);
+    
+    // Check license expiration
+    const isActive = userData.is_active && 
+                     userData.license_status !== "expired" && 
+                     (userData.days_remaining === null || userData.days_remaining > 0);
+
+    // Transform external user data to our UserPublic format
+    const user: UserPublic = {
+      id: userData.id,
+      username: userData.username,
+      email: userData.email,
+      role,
+      is_active: isActive,
+      created_at: new Date(),
+      last_login: userData.last_login ? new Date(userData.last_login) : new Date(),
+    };
+
+    // Check if license is expired or inactive
+    if (!isActive) {
+      const message = userData.license_status === "expired"
+        ? `Lisensi Anda telah habis. Status: ${userData.license_status_display}`
+        : userData.days_remaining !== null && userData.days_remaining <= 0
+        ? `Lisensi Anda telah habis (${userData.license_status_display})`
+        : "Akun Anda tidak aktif";
+        
+      return NextResponse.json(
+        { success: false, message },
+        { status: 403 }
+      );
+    }
+
+    // Generate JWT token for our application
+    const accessToken = await signJWT({
+      sub: user.id.toString(),
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + AUTH_CONFIG.JWT_EXPIRES_IN,
+    });
+
+    // Create response with user data
     const response = NextResponse.json({
       success: true,
-      message: result.message,
-      user: result.user,
+      message: "Login berhasil",
+      user,
     });
 
     // Set HTTP-only cookie for access token
-    if (result.tokens) {
-      response.cookies.set(AUTH_CONFIG.COOKIE_NAME, result.tokens.accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
-        path: "/",
-      });
-
-      // Set refresh token cookie
-      if (result.tokens.refreshToken) {
-        response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, result.tokens.refreshToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
-          path: "/",
-        });
-      }
-    }
+    response.cookies.set(AUTH_CONFIG.COOKIE_NAME, accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
+      path: "/",
+    });
 
     return response;
   } catch (error) {
     console.error("Login API error:", error);
-    return NextResponse.json({ success: false, message: AUTH_MESSAGES.SERVER_ERROR }, { status: 500 });
+    return NextResponse.json(
+      { success: false, message: "Terjadi kesalahan pada server" },
+      { status: 500 }
+    );
   }
 }

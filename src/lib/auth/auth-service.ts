@@ -77,6 +77,24 @@ export async function generateAccessToken(user: UserPublic): Promise<string> {
 }
 
 /**
+ * Sign JWT with custom payload
+ */
+export async function signJWT(payload: JWTPayload): Promise<string> {
+  const token = await new SignJWT({
+    sub: payload.sub,
+    username: payload.username,
+    email: payload.email,
+    role: payload.role,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt(payload.iat)
+    .setExpirationTime(payload.exp)
+    .sign(secretKey);
+
+  return token;
+}
+
+/**
  * Generate JWT refresh token
  */
 export async function generateRefreshToken(userId: number): Promise<string> {

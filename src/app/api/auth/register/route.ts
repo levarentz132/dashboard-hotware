@@ -1,10 +1,12 @@
 // Register API Route
-// POST /api/auth/register - Create new user account
+// POST /api/auth/register - Create new user account via external API
 
 import { NextRequest, NextResponse } from "next/server";
-import { registerUser } from "@/lib/auth";
+import { signJWT } from "@/lib/auth";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "@/lib/auth/constants";
+import { callExternalAuthAPI } from "@/lib/auth/external-api";
 import { z } from "zod";
+import type { UserPublic } from "@/lib/auth/types";
 
 const registerSchema = z.object({
   username: z
@@ -36,44 +38,15 @@ export async function POST(request: NextRequest) {
 
     const { username, email, password, role } = validation.data;
 
-    // Attempt registration
-    const result = await registerUser({ username, email, password, role });
-
-    if (!result.success) {
-      return NextResponse.json({ success: false, message: result.message }, { status: 400 });
-    }
-
-    // Create response with tokens
-    const response = NextResponse.json(
-      {
-        success: true,
-        message: result.message,
-        user: result.user,
+    // Registration is not supported via external API
+    // Users must be created through the license management system
+    return NextResponse.json(
+      { 
+        success: false, 
+        message: "Registrasi tidak tersedia. Silakan hubungi administrator untuk mendapatkan akses." 
       },
-      { status: 201 }
+      { status: 403 }
     );
-
-    // Set HTTP-only cookie for access token
-    if (result.tokens) {
-      response.cookies.set(AUTH_CONFIG.COOKIE_NAME, result.tokens.accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
-        path: "/",
-      });
-
-      // Set refresh token cookie
-      if (result.tokens.refreshToken) {
-        response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, result.tokens.refreshToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
-          path: "/",
-        });
-      }
-    }
 
     return response;
   } catch (error) {

@@ -137,10 +137,7 @@ export default function LoginPage() {
             </Button>
 
             <p className="text-sm text-slate-400 text-center">
-              Belum punya akun?{" "}
-              <Link href="/register" className="text-blue-400 hover:text-blue-300 font-medium">
-                Daftar sekarang
-              </Link>
+              Hubungi administrator untuk mendapatkan akses
             </p>
           </CardFooter>
         </form>

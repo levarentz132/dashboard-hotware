@@ -4,7 +4,12 @@ A comprehensive React-based camera surveillance dashboard management system with
 
 ## 🚀 Features
 
-### 🔒 Security & System Health
+### 🔒 Security & Authentication
+- **External API Authentication** – Integrated with external license API for user authentication
+- **Role-Based Access Control** – Support for admin, operator, and viewer roles
+- **JWT Session Management** – Secure token-based authentication with HTTP-only cookies
+
+### 📹 Camera Management & Monitoring
 - **Camera Inventory Report** – Complete list of cameras with type, location, and details
 - **Camera Health Check Report** – Monitor online/offline status and errors
 - **Disabled Devices Report** – Identify inactive or disconnected devices
@@ -57,6 +62,11 @@ A comprehensive React-based camera surveillance dashboard management system with
    cp .env.example .env.local
    # Edit .env.local with your configuration
    ```
+   
+   **Required environment variables:**
+   - `EXTERNAL_AUTH_API_URL` - External authentication API endpoint (default: http://localhost/license-ht/api.php)
+   - `JWT_SECRET` - Secret key for JWT token generation
+   - Other NX Witness and Cloud configuration (see .env.example)
 
 4. **Start the development server**
    ```bash
@@ -204,13 +214,25 @@ NEXT_PUBLIC_BRAND_NAME=Hotware
 NEXT_PUBLIC_BRAND_LOGO=/images/hotware-logo.png
 ```
 
-## 🔐 Security Considerations
+## 🔐 Authentication & Security
 
-- Implement authentication middleware
-- Secure API endpoints
-- HTTPS in production
+This application uses **external API authentication** for enhanced security and centralized user management.
+
+### Authentication Features:
+- **External API Integration** - Delegates authentication to `http://localhost/license-ht/api.php`
+- **JWT Token Management** - Secure session handling with HTTP-only cookies
+- **Role-Based Access** - Support for admin, operator, and viewer roles
+- **Protected Routes** - Middleware-based route protection
+- **Session Validation** - Automatic session checking and renewal
+
+For detailed authentication setup and API requirements, see [EXTERNAL_AUTH.md](./EXTERNAL_AUTH.md)
+
+### Security Best Practices:
+- HTTPS enforced in production
+- HTTP-only cookies prevent XSS attacks
 - Input validation and sanitization
 - Role-based access control
+- Secure password handling (delegated to external API)
 
 ## 🤝 Contributing
 

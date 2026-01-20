@@ -20,7 +20,9 @@ const skipPaths = ["/_next", "/favicon.ico", "/images"];
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  console.log("[Middleware] ===================");
   console.log("[Middleware] Path:", pathname);
+  console.log("[Middleware] URL:", request.url);
 
   // Skip middleware for static assets and Next.js internals
   if (skipPaths.some((path) => pathname.startsWith(path))) {
@@ -36,6 +38,7 @@ export async function middleware(request: NextRequest) {
 
   // Allow public API routes without auth
   if (publicApiRoutes.some((route) => pathname.startsWith(route))) {
+    console.log("[Middleware] Public API route, allowing access");
     return NextResponse.next();
   }
 
@@ -46,13 +49,16 @@ export async function middleware(request: NextRequest) {
   if (!token) {
     // No token, redirect to login for page requests
     if (!pathname.startsWith("/api/")) {
-      console.log("[Middleware] No token, redirecting to login");
+      console.log("[Middleware] No token, redirecting to login from:", pathname);
       const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("callbackUrl", pathname);
+      if (pathname !== "/") {
+        loginUrl.searchParams.set("callbackUrl", pathname);
+      }
       return NextResponse.redirect(loginUrl);
     }
 
     // Return 401 for API requests
+    console.log("[Middleware] No token, returning 401 for API");
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
@@ -95,12 +101,10 @@ async function verifyToken(token: string): Promise<boolean> {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - api/auth (auth API routes - handled separately)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
+     * Match all request paths except static files
      */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\..*).)*",
+    "/",
+    "/api/:path*",
   ],
 };
