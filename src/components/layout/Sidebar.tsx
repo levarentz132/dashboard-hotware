@@ -41,7 +41,7 @@ const navigationItems: NavItem[] = [
   { id: "debug", label: "Connection Debug", icon: Settings },
   { id: "storage", label: "Storage", icon: Database },
   { id: "users", label: "User Management", icon: Users },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
 
 export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose }: SidebarProps) {
