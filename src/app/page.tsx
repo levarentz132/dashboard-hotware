@@ -14,6 +14,7 @@ import ConnectionTest from "@/components/debug/ConnectionTest";
 import StorageManagement from "@/components/storage/StorageManagement";
 import AuditLog from "@/components/audits/AuditLog";
 import UserManagement from "@/components/users/UserManagement";
+import { LicenseGuard } from "@/components/auth/LicenseGuard";
 import Link from "next/link";
 import { ArrowRight, Camera, Eye, Shield } from "lucide-react";
 
@@ -96,7 +97,9 @@ export default function Home() {
       />
       <div className="flex-1 flex flex-col overflow-hidden w-full lg:w-auto">
         <TopBar onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-4 md:p-6">{renderContent()}</main>
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-4 md:p-6">
+          <LicenseGuard>{renderContent()}</LicenseGuard>
+        </main>
       </div>
       <NotificationSystem />
     </div>
