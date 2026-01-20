@@ -300,7 +300,7 @@ export default function AppSidebar() {
         return false;
       }
     },
-    [autoLoginAttempted]
+    [autoLoginAttempted],
   );
 
   // Fetch cloud devices
@@ -319,7 +319,7 @@ export default function AppSidebar() {
           {
             method: "GET",
             credentials: "include",
-          }
+          },
         );
 
         if (!response.ok) {
@@ -374,7 +374,7 @@ export default function AppSidebar() {
         setLoadingDevices(false);
       }
     },
-    [cloudSystems, attemptAutoLogin]
+    [cloudSystems, attemptAutoLogin],
   );
 
   // Fetch cloud systems on mount
@@ -443,6 +443,14 @@ export default function AppSidebar() {
                   <Link href="/dashboard-full-view">
                     <LayoutDashboard className="size-4" />
                     <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="Settings">
+                  <Link href="/settings">
+                    <Settings className="size-4" />
+                    <span>Settings</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -567,7 +575,7 @@ export default function AppSidebar() {
                             systemId: camera.systemId,
                             systemName: camera.systemName,
                             isCloud: selectedSource !== "local",
-                          })
+                          }),
                         );
                         e.currentTarget.style.opacity = "0.5";
                       }}
