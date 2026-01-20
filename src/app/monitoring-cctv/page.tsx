@@ -2,6 +2,7 @@
 
 import { useState, useEffect, DragEvent, useRef } from "react";
 import { X } from "lucide-react";
+import { LicenseGuard } from "@/components/auth/LicenseGuard";
 
 // Types
 interface Camera {
@@ -244,41 +245,45 @@ export default function MonitoringPage() {
   };
 
   return (
-    <div className="w-full h-full">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">CCTV Monitoring</h1>
+    <LicenseGuard>
+      <div className="w-full h-full">
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="text-2xl font-bold">CCTV Monitoring</h1>
 
-        {/* Grid Layout Selector */}
-        <div className="flex gap-2">
-          {[2, 4, 6, 9].map((num) => (
-            <button
-              key={num}
-              onClick={() => setGridLayout(num as typeof gridLayout)}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                gridLayout === num ? "bg-blue-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
-            >
-              {num === 2 ? "2×1" : num === 4 ? "2×2" : num === 6 ? "3×2" : "3×3"}
-            </button>
+          {/* Grid Layout Selector */}
+          <div className="flex gap-2">
+            {[2, 4, 6, 9].map((num) => (
+              <button
+                key={num}
+                onClick={() => setGridLayout(num as typeof gridLayout)}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  gridLayout === num
+                    ? "bg-blue-600 text-white shadow-md"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                {num === 2 ? "2×1" : num === 4 ? "2×2" : num === 6 ? "3×2" : "3×3"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Video Grid - FULL WIDTH */}
+        <div className={`grid ${gridCols[gridLayout]} gap-4`}>
+          {Array.from({ length: gridLayout }).map((_, index) => (
+            <DropZone
+              key={index}
+              position={index}
+              camera={getCameraAtPosition(index)}
+              onDrop={handleDrop}
+              onRemove={() => {
+                const camera = getCameraAtPosition(index);
+                if (camera) handleRemoveCamera(camera.id);
+              }}
+            />
           ))}
         </div>
       </div>
-
-      {/* Video Grid - FULL WIDTH */}
-      <div className={`grid ${gridCols[gridLayout]} gap-4`}>
-        {Array.from({ length: gridLayout }).map((_, index) => (
-          <DropZone
-            key={index}
-            position={index}
-            camera={getCameraAtPosition(index)}
-            onDrop={handleDrop}
-            onRemove={() => {
-              const camera = getCameraAtPosition(index);
-              if (camera) handleRemoveCamera(camera.id);
-            }}
-          />
-        ))}
-      </div>
-    </div>
+    </LicenseGuard>
   );
 }
