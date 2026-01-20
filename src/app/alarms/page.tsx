@@ -1,5 +1,12 @@
+"use client";
+
 import AlarmConsole from "@/components/alarms/AlarmConsole";
+import { LicenseGuard } from "@/components/auth/LicenseGuard";
 
 export default function AlarmsPage() {
-  return <AlarmConsole />;
+  return (
+    <LicenseGuard>
+      <AlarmConsole />
+    </LicenseGuard>
+  );
 }
