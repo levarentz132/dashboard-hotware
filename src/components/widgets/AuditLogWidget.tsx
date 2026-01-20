@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 interface CloudSystem {
   id: string;
@@ -121,7 +121,11 @@ export default function AuditLogWidget() {
       const response = await fetch("https://meta.nxvms.com/cdb/systems", {
         method: "GET",
         credentials: "include",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
+        },
       });
 
       if (!response.ok) {
@@ -188,13 +192,13 @@ export default function AuditLogWidget() {
 
         const response = await fetch(
           `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(
-            fromDateFormatted
+            fromDateFormatted,
           )}`,
           {
             method: "GET",
             credentials: "include",
             headers: { Accept: "application/json" },
-          }
+          },
         );
 
         if (response.status === 401 && !retry) {
@@ -222,7 +226,7 @@ export default function AuditLogWidget() {
         setError("Failed to fetch audit logs");
       }
     },
-    [attemptAutoLogin]
+    [attemptAutoLogin],
   );
 
   // Load data when system is selected
@@ -235,7 +239,7 @@ export default function AuditLogWidget() {
       await fetchAuditLogs(system);
       setLoading(false);
     },
-    [fetchAuditLogs]
+    [fetchAuditLogs],
   );
 
   useEffect(() => {
@@ -253,8 +257,8 @@ export default function AuditLogWidget() {
     const loginCount = auditLogs.filter((l) => l.eventType === "AR_Login").length;
     const changeCount = auditLogs.filter((l) =>
       ["AR_CameraUpdate", "AR_ServerUpdate", "AR_UserUpdate", "AR_SettingsChange", "AR_StorageUpdate"].includes(
-        l.eventType
-      )
+        l.eventType,
+      ),
     ).length;
     const securityCount = auditLogs.filter((l) => l.eventType === "AR_MitmAttack").length;
     return { login: loginCount, changes: changeCount, security: securityCount, total: auditLogs.length };
@@ -332,7 +336,7 @@ export default function AuditLogWidget() {
                 key={`${log.createdTimeSec}-${index}`}
                 className={cn(
                   "flex items-start gap-2 p-2 rounded-lg border text-xs",
-                  "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700"
+                  "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700",
                 )}
               >
                 <div className="shrink-0 mt-0.5">{getEventIcon(eventInfo.icon, "h-4 w-4 text-gray-500")}</div>

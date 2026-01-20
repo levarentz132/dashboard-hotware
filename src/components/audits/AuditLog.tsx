@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 interface AuthSession {
   id: string;
@@ -119,6 +119,7 @@ export default function AuditLog() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 
@@ -253,7 +254,7 @@ export default function AuditLog() {
         const fromDateFormatted = new Date(fromDate).toISOString();
 
         const response = await fetch(
-          `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted)}`
+          `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted)}`,
         );
 
         if (response.status === 401) {
@@ -264,8 +265,8 @@ export default function AuditLog() {
             // Retry fetch
             const retryResponse = await fetch(
               `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(
-                fromDateFormatted
-              )}`
+                fromDateFormatted,
+              )}`,
             );
             if (retryResponse.ok) {
               const data = await retryResponse.json();
@@ -293,7 +294,7 @@ export default function AuditLog() {
         setLoading(false);
       }
     },
-    [fromDate, attemptAutoLogin]
+    [fromDate, attemptAutoLogin],
   );
 
   // Initial load

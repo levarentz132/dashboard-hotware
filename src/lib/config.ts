@@ -62,7 +62,31 @@ export const CLOUD_CONFIG = {
   username: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME || "farel.it12@gmail.com",
   password: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD || "farrel354313",
   // Enable auto-login when credentials are configured
-  autoLoginEnabled: !!(process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME && process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD),
+  autoLoginEnabled: true,
+  // Base URL for NX Cloud API
+  baseURL: "https://meta.nxvms.com",
 };
+
+// Generate Basic Auth header for NX Cloud API
+export function getCloudAuthHeader(): string {
+  const credentials = `${CLOUD_CONFIG.username}:${CLOUD_CONFIG.password}`;
+  const base64Credentials =
+    typeof window !== "undefined" ? btoa(credentials) : Buffer.from(credentials).toString("base64");
+  return `Basic ${base64Credentials}`;
+}
+
+// Helper to make authenticated fetch to NX Cloud
+export async function fetchCloudAPI(endpoint: string, options: RequestInit = {}): Promise<Response> {
+  const url = `${CLOUD_CONFIG.baseURL}${endpoint}`;
+
+  return fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: getCloudAuthHeader(),
+      ...options.headers,
+    },
+  });
+}
 
 export default API_CONFIG;

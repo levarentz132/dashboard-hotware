@@ -42,50 +42,73 @@ interface StoredLicenseData {
   isValid: boolean;
 }
 
-// Validate license key against the license API
-async function validateLicenseKeyFromAPI(licenseKey: string): Promise<LicenseFromAPI | null> {
+// Activate license via license server API
+async function activateLicenseFromAPI(
+  licenseKey: string,
+): Promise<{ success: boolean; license?: LicenseFromAPI; message?: string }> {
   try {
-    // Fetch all licenses from the API
-    const response = await fetch(`${LICENSE_API_URL}/api/licenses`, {
-      method: "GET",
+    const apiUrl = `${LICENSE_API_URL}/api/licenses/validate?action=activate`;
+    console.log("[License] Activating via:", apiUrl);
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
+      body: JSON.stringify({ licenseKey }),
+      cache: "no-store",
     });
 
-    if (!response.ok) {
-      console.error("Failed to fetch licenses from API:", response.status);
-      return null;
-    }
+    console.log("[License] Response status:", response.status);
 
     const data = await response.json();
-    const licenses: LicenseFromAPI[] = data.data?.licenses || [];
+    console.log("[License] Response data:", JSON.stringify(data).substring(0, 500));
 
-    // Find the license with matching key
-    const license = licenses.find((lic) => lic.licenseKey.toUpperCase() === licenseKey.toUpperCase());
-
-    if (!license) {
-      return null;
+    if (!response.ok || !data.success) {
+      return {
+        success: false,
+        message: data.message || "Failed to activate license",
+      };
     }
 
-    // Check if license is active and not expired
-    if (license.status !== "active") {
-      return null;
-    }
-
-    if (new Date(license.expiresAt) < new Date()) {
-      return null;
-    }
-
-    // Check if max activations reached
-    if (license.currentActivations >= license.maxActivations) {
-      return null;
-    }
-
-    return license;
+    return {
+      success: true,
+      license: data.data?.license || data.license,
+    };
   } catch (error) {
-    console.error("Error validating license from API:", error);
-    return null;
+    console.error("Error activating license from API:", error);
+    return { success: false, message: "Failed to connect to license server" };
+  }
+}
+
+// Deactivate license via license server API
+async function deactivateLicenseFromAPI(licenseKey: string): Promise<{ success: boolean; message?: string }> {
+  try {
+    const apiUrl = `${LICENSE_API_URL}/api/licenses/validate?action=deactivate`;
+    console.log("[License] Deactivating via:", apiUrl);
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ licenseKey }),
+      cache: "no-store",
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      return {
+        success: false,
+        message: data.message || "Failed to deactivate license",
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error deactivating license from API:", error);
+    return { success: false, message: "Failed to connect to license server" };
   }
 }
 
@@ -149,18 +172,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, message: "License key is required" }, { status: 400 });
       }
 
-      // Validate the license key against the API
-      const licenseFromAPI = await validateLicenseKeyFromAPI(licenseKey);
+      // Activate license via license server API
+      const result = await activateLicenseFromAPI(licenseKey);
 
-      if (!licenseFromAPI) {
+      if (!result.success || !result.license) {
         return NextResponse.json(
           {
             success: false,
-            message: "Invalid license key, expired, or max activations reached.",
+            message: result.message || "Invalid license key, expired, or max activations reached.",
           },
           { status: 400 },
         );
       }
+
+      const licenseFromAPI = result.license;
 
       // Store license data
       const storedLicense: StoredLicenseData = {
@@ -172,7 +197,7 @@ export async function POST(request: NextRequest) {
         status: licenseFromAPI.status,
         type: licenseFromAPI.type,
         maxActivations: licenseFromAPI.maxActivations,
-        currentActivations: licenseFromAPI.currentActivations + 1,
+        currentActivations: licenseFromAPI.currentActivations,
         expiresAt: licenseFromAPI.expiresAt,
         activatedAt: new Date().toISOString(),
         isValid: true,
@@ -202,6 +227,16 @@ export async function POST(request: NextRequest) {
 
   if (action === "deactivate") {
     try {
+      // Get current license from cookie to get the license key
+      const cookieStore = await cookies();
+      const licenseData = cookieStore.get(LICENSE_COOKIE_NAME)?.value;
+
+      if (licenseData) {
+        const license: StoredLicenseData = JSON.parse(licenseData);
+        // Deactivate on license server
+        await deactivateLicenseFromAPI(license.licenseKey);
+      }
+
       const response = NextResponse.json({
         success: true,
         message: "License deactivated successfully",

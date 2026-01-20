@@ -2,7 +2,7 @@
  * Widget service - shared utilities for dashboard widgets
  */
 
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 import type { CloudSystem, EventLog, Storage, AuditLogEntry } from "./types";
 
 // ============================================
@@ -17,7 +17,11 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
     const response = await fetch("https://meta.nxvms.com/cdb/systems", {
       method: "GET",
       credentials: "include",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: getCloudAuthHeader(),
+      },
     });
 
     if (!response.ok) return [];
@@ -82,7 +86,7 @@ export async function attemptAutoLogin(systemId: string): Promise<boolean> {
  */
 export async function fetchServers(
   systemId: string,
-  autoLogin: boolean = true
+  autoLogin: boolean = true,
 ): Promise<{ serverId: string | null; requiresAuth: boolean }> {
   try {
     const response = await fetch(`/api/cloud/servers?systemId=${encodeURIComponent(systemId)}`, {
@@ -147,7 +151,7 @@ export async function fetchEvents(systemId: string, systemName: string, serverId
  */
 export async function fetchStorages(
   systemId: string,
-  autoLogin: boolean = true
+  autoLogin: boolean = true,
 ): Promise<{ storages: Storage[]; requiresAuth: boolean }> {
   try {
     const response = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(systemId)}`);
@@ -179,7 +183,7 @@ export async function fetchStorages(
 export async function fetchAuditLogs(
   systemId: string,
   daysBack: number = 7,
-  autoLogin: boolean = true
+  autoLogin: boolean = true,
 ): Promise<{ logs: AuditLogEntry[]; requiresAuth: boolean }> {
   try {
     const fromDate = new Date();
@@ -192,7 +196,7 @@ export async function fetchAuditLogs(
         method: "GET",
         credentials: "include",
         headers: { Accept: "application/json" },
-      }
+      },
     );
 
     if (response.status === 401 && autoLogin) {

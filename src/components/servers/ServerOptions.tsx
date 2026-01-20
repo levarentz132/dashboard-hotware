@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Server, Cpu, HardDrive, Network, RefreshCw, AlertTriangle } from "lucide-react";
+import { getCloudAuthHeader } from "@/lib/config";
 
 interface ServerInfo {
   id: string;
@@ -43,6 +44,7 @@ export default function ServerOptions() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 

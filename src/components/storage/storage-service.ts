@@ -2,7 +2,7 @@
  * Storage service - handles all storage-related API calls
  */
 
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 import type { CloudSystem, Storage, StorageFormData, StorageStatusInfo } from "./types";
 
 // ============================================
@@ -20,6 +20,7 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        Authorization: getCloudAuthHeader(),
       },
     });
 
@@ -80,7 +81,7 @@ export async function attemptAutoLogin(systemId: string): Promise<boolean> {
 export async function loginToCloudSystem(
   systemId: string,
   username: string,
-  password: string
+  password: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const response = await fetch("/api/cloud/login", {
@@ -155,7 +156,7 @@ export async function fetchCloudStorages(system: CloudSystem, autoLogin: boolean
 export async function createCloudStorage(
   systemId: string,
   serverId: string,
-  formData: StorageFormData
+  formData: StorageFormData,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const response = await fetch(
@@ -171,7 +172,7 @@ export async function createCloudStorage(
           isUsedForWriting: formData.isUsedForWriting,
           isBackup: formData.isBackup,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -193,12 +194,12 @@ export async function updateCloudStorage(
   systemId: string,
   storageId: string,
   serverId: string,
-  formData: StorageFormData
+  formData: StorageFormData,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const response = await fetch(
       `/api/cloud/storages/${storageId}?systemId=${encodeURIComponent(systemId)}&serverId=${encodeURIComponent(
-        serverId
+        serverId,
       )}`,
       {
         method: "PUT",
@@ -213,7 +214,7 @@ export async function updateCloudStorage(
           isUsedForWriting: formData.isUsedForWriting,
           isBackup: formData.isBackup,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -234,14 +235,14 @@ export async function updateCloudStorage(
 export async function deleteCloudStorage(
   systemId: string,
   storageId: string,
-  serverId: string
+  serverId: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const response = await fetch(
       `/api/cloud/storages/${storageId}?systemId=${encodeURIComponent(systemId)}&serverId=${encodeURIComponent(
-        serverId
+        serverId,
       )}`,
-      { method: "DELETE" }
+      { method: "DELETE" },
     );
 
     if (!response.ok) {

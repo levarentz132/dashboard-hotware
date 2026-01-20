@@ -48,7 +48,7 @@ import { Badge } from "../ui/badge";
 import { useRouter } from "next/navigation";
 import LogoImage from "@/images/image.png";
 import { useCameras } from "@/hooks/useNxAPI-camera";
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { CloudLoginDialog } from "../alarms/CloudLoginDialog";
@@ -229,6 +229,7 @@ export default function AppSidebar() {
         credentials: "include",
         headers: {
           Accept: "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 

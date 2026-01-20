@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { getCloudAuthHeader } from "@/lib/config";
 
 /**
  * State interface for async data fetching hooks
@@ -41,7 +42,7 @@ export interface UseAsyncDataOptions {
 export function useAsyncData<T>(
   fetchFn: () => Promise<T>,
   initialData: T,
-  options: UseAsyncDataOptions = {}
+  options: UseAsyncDataOptions = {},
 ): UseAsyncDataReturn<T> {
   const { refreshInterval = 0, fetchOnMount = true, deps = [] } = options;
 
@@ -135,6 +136,7 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
+      Authorization: getCloudAuthHeader(),
     },
   });
 

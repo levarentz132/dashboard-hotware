@@ -2,7 +2,7 @@
  * Audit service - handles all audit-related API calls
  */
 
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 import type { CloudSystem, CloudDevice, AuditLogEntry, EventTypeInfo } from "./types";
 import { EVENT_TYPE_INFO } from "./types";
 
@@ -21,6 +21,7 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        Authorization: getCloudAuthHeader(),
       },
     });
 
@@ -102,7 +103,7 @@ export async function attemptAutoLogin(systemId: string): Promise<boolean> {
 export async function loginToCloudSystem(
   systemId: string,
   username: string,
-  password: string
+  password: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const response = await fetch("/api/cloud/login", {
@@ -138,7 +139,7 @@ export interface FetchAuditLogsResult {
 export async function fetchAuditLogs(
   system: CloudSystem,
   fromDate: string,
-  autoLogin: boolean = true
+  autoLogin: boolean = true,
 ): Promise<FetchAuditLogsResult> {
   if (!system || system.stateOfHealth !== "online") {
     return { logs: [], requiresAuth: false };
@@ -147,7 +148,7 @@ export async function fetchAuditLogs(
   try {
     const fromDateFormatted = new Date(fromDate).toISOString();
     const response = await fetch(
-      `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted)}`
+      `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted)}`,
     );
 
     if (response.status === 401) {
@@ -156,8 +157,8 @@ export async function fetchAuditLogs(
         if (autoLoginSuccess) {
           const retryResponse = await fetch(
             `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(
-              fromDateFormatted
-            )}`
+              fromDateFormatted,
+            )}`,
           );
           if (retryResponse.ok) {
             const data = await retryResponse.json();
@@ -246,7 +247,7 @@ export function filterAuditLogs(
     searchTerm?: string;
     eventType?: string;
     user?: string;
-  }
+  },
 ): AuditLogEntry[] {
   return logs.filter((log) => {
     // Search filter

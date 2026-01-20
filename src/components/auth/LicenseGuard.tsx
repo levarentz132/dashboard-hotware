@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Lock, Key, Loader2, ShieldX, ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { ReactNode } from "react";
+import { ReactNode, useState, useEffect } from "react";
 
 interface LicenseGuardProps {
   children: ReactNode;
@@ -13,6 +13,31 @@ interface LicenseGuardProps {
 }
 
 export function LicenseGuard({ children, fallback }: LicenseGuardProps) {
+  // Track if we're mounted (client-side)
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Don't render anything during SSR - will render on client
+  if (!isMounted) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-4" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Now we're mounted, safe to use context
+  return <LicenseGuardContent fallback={fallback}>{children}</LicenseGuardContent>;
+}
+
+// Inner component that uses the context
+function LicenseGuardContent({ children, fallback }: LicenseGuardProps) {
   const { isLicensed, isLoading } = useLicense();
 
   if (isLoading) {

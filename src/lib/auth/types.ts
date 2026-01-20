@@ -25,6 +25,17 @@ export interface UserPublic {
   last_login?: Date;
 }
 
+// Payload for creating JWT tokens (exp can be string like "24h")
+export interface JWTCreatePayload {
+  sub: string; // user id
+  username: string;
+  email: string;
+  role: UserRole;
+  iat: number;
+  exp: number | string; // number (Unix timestamp) or string duration (e.g., "24h")
+}
+
+// Verified JWT payload (exp is always Unix timestamp number)
 export interface JWTPayload {
   sub: string; // user id
   username: string;

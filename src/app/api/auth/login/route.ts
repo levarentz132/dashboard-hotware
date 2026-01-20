@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
           message: AUTH_MESSAGES.VALIDATION_ERROR,
           errors: validation.error.flatten().fieldErrors,
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -42,36 +42,35 @@ export async function POST(request: NextRequest) {
     if (!externalData.success) {
       // Handle specific error codes
       const status = externalData.error_code === "LICENSE_EXPIRED" ? 403 : 401;
-      
+
       return NextResponse.json(
-        { 
-          success: false, 
+        {
+          success: false,
           message: externalData.message || "Username atau password salah",
-          error_code: externalData.error_code
+          error_code: externalData.error_code,
         },
-        { status }
+        { status },
       );
     }
 
     // Check if user data exists
     if (!externalData.user) {
-      return NextResponse.json(
-        { success: false, message: "Data pengguna tidak ditemukan" },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, message: "Data pengguna tidak ditemukan" }, { status: 401 });
     }
 
     const userData = externalData.user;
 
     // Map license status to role, or use role from API if provided
-    const role = userData.role === "admin" || userData.role === "operator" || userData.role === "viewer" 
-      ? userData.role 
-      : mapLicenseToRole(userData.license_status);
-    
+    const role =
+      userData.role === "admin" || userData.role === "operator" || userData.role === "viewer"
+        ? userData.role
+        : mapLicenseToRole(userData.license_status);
+
     // Check license expiration
-    const isActive = userData.is_active && 
-                     userData.license_status !== "expired" && 
-                     (userData.days_remaining === null || userData.days_remaining > 0);
+    const isActive =
+      userData.is_active &&
+      userData.license_status !== "expired" &&
+      (userData.days_remaining === null || userData.days_remaining > 0);
 
     // Transform external user data to our UserPublic format
     const user: UserPublic = {
@@ -86,16 +85,14 @@ export async function POST(request: NextRequest) {
 
     // Check if license is expired or inactive
     if (!isActive) {
-      const message = userData.license_status === "expired"
-        ? `Lisensi Anda telah habis. Status: ${userData.license_status_display}`
-        : userData.days_remaining !== null && userData.days_remaining <= 0
-        ? `Lisensi Anda telah habis (${userData.license_status_display})`
-        : "Akun Anda tidak aktif";
-        
-      return NextResponse.json(
-        { success: false, message },
-        { status: 403 }
-      );
+      const message =
+        userData.license_status === "expired"
+          ? `Lisensi Anda telah habis. Status: ${userData.license_status_display}`
+          : userData.days_remaining !== null && userData.days_remaining <= 0
+            ? `Lisensi Anda telah habis (${userData.license_status_display})`
+            : "Akun Anda tidak aktif";
+
+      return NextResponse.json({ success: false, message }, { status: 403 });
     }
 
     // Generate JWT token for our application
@@ -105,7 +102,7 @@ export async function POST(request: NextRequest) {
       email: user.email,
       role: user.role,
       iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + AUTH_CONFIG.JWT_EXPIRES_IN,
+      exp: AUTH_CONFIG.JWT_EXPIRES_IN, // "24h" string format for jose library
     });
 
     // Create response with user data
@@ -127,9 +124,6 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("Login API error:", error);
-    return NextResponse.json(
-      { success: false, message: "Terjadi kesalahan pada server" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, message: "Terjadi kesalahan pada server" }, { status: 500 });
   }
 }

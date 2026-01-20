@@ -2,6 +2,7 @@
  * Camera service - handles all camera-related API calls
  */
 
+import { getCloudAuthHeader } from "@/lib/config";
 import type { CloudSystem, CloudCamera, CameraLocationData, Province, Regency, District, Village } from "./types";
 
 // ============================================
@@ -19,6 +20,7 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        Authorization: getCloudAuthHeader(),
       },
     });
 
@@ -58,7 +60,7 @@ export async function fetchCloudCameras(system: CloudSystem): Promise<CloudCamer
         headers: {
           Accept: "application/json",
         },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -189,7 +191,7 @@ export async function saveCameraLocation(
     village_id?: string;
     village_name?: string;
     detail_address?: string;
-  }
+  },
 ): Promise<boolean> {
   try {
     const response = await fetch("/api/camera-location", {

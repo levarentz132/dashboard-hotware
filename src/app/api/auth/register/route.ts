@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
           message: AUTH_MESSAGES.VALIDATION_ERROR,
           errors: validation.error.flatten().fieldErrors,
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -41,14 +41,12 @@ export async function POST(request: NextRequest) {
     // Registration is not supported via external API
     // Users must be created through the license management system
     return NextResponse.json(
-      { 
-        success: false, 
-        message: "Registrasi tidak tersedia. Silakan hubungi administrator untuk mendapatkan akses." 
+      {
+        success: false,
+        message: "Registrasi tidak tersedia. Silakan hubungi administrator untuk mendapatkan akses.",
       },
-      { status: 403 }
+      { status: 403 },
     );
-
-    return response;
   } catch (error) {
     console.error("Register API error:", error);
     return NextResponse.json({ success: false, message: AUTH_MESSAGES.SERVER_ERROR }, { status: 500 });

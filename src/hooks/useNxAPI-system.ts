@@ -2,6 +2,7 @@
 
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
 import { useCallback, useEffect, useState } from "react";
+import { getCloudAuthHeader } from "@/lib/config";
 
 // Interface for cloud system
 interface CloudSystem {
@@ -31,6 +32,7 @@ export function useSystemInfo(cloudId?: string) {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 
@@ -184,7 +186,7 @@ export function useSystemInfo(cloudId?: string) {
         setError(null);
       }
     },
-    [fetchSystemInfoFromCloud]
+    [fetchSystemInfoFromCloud],
   );
 
   useEffect(() => {

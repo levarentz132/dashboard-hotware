@@ -5,7 +5,16 @@ import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify, type JWTPayload as JoseJWTPayload } from "jose";
 import { db } from "@/lib/db";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "./constants";
-import type { User, UserPublic, JWTPayload, AuthResponse, LoginCredentials, RegisterData, AuthTokens } from "./types";
+import type {
+  User,
+  UserPublic,
+  JWTPayload,
+  JWTCreatePayload,
+  AuthResponse,
+  LoginCredentials,
+  RegisterData,
+  AuthTokens,
+} from "./types";
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
 
 // ============================================================================
@@ -77,9 +86,9 @@ export async function generateAccessToken(user: UserPublic): Promise<string> {
 }
 
 /**
- * Sign JWT with custom payload
+ * Sign JWT with custom payload (for token creation with string expiration)
  */
-export async function signJWT(payload: JWTPayload): Promise<string> {
+export async function signJWT(payload: JWTCreatePayload): Promise<string> {
   const token = await new SignJWT({
     sub: payload.sub,
     username: payload.username,
@@ -192,7 +201,7 @@ export async function createUser(data: RegisterData): Promise<UserPublic> {
   const [result] = await db.execute<ResultSetHeader>(
     `INSERT INTO users (username, email, password_hash, role, is_active, created_at, updated_at) 
      VALUES (?, ?, ?, ?, true, NOW(), NOW())`,
-    [data.username, data.email, passwordHash, data.role || "viewer"]
+    [data.username, data.email, passwordHash, data.role || "viewer"],
   );
 
   const user = await findUserById(result.insertId);
@@ -213,11 +222,11 @@ export async function updateLastLogin(userId: number): Promise<void> {
  */
 export async function userExists(
   username: string,
-  email: string
+  email: string,
 ): Promise<{ exists: boolean; field?: "username" | "email" }> {
   const [rows] = await db.execute<RowDataPacket[]>(
     "SELECT username, email FROM users WHERE username = ? OR email = ?",
-    [username, email]
+    [username, email],
   );
 
   if (rows.length === 0) return { exists: false };
@@ -330,7 +339,7 @@ export async function registerUser(data: RegisterData): Promise<AuthResponse> {
  * Validate session from token
  */
 export async function validateSession(
-  token: string
+  token: string,
 ): Promise<{ valid: boolean; user?: UserPublic; newToken?: string }> {
   const payload = await verifyToken(token);
 
@@ -359,7 +368,7 @@ export async function validateSession(
  * Refresh access token using refresh token
  */
 export async function refreshAccessToken(
-  refreshToken: string
+  refreshToken: string,
 ): Promise<{ success: boolean; accessToken?: string; message?: string }> {
   const payload = await verifyToken(refreshToken);
 

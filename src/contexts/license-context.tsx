@@ -74,3 +74,8 @@ export function useLicense() {
   }
   return context;
 }
+
+// Optional hook that returns null if context is not available (for SSR safety)
+export function useLicenseContext() {
+  return useContext(LicenseContext);
+}

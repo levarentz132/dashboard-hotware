@@ -42,7 +42,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 import { CloudLoginDialog } from "./CloudLoginDialog";
 
 // ============================================
@@ -302,7 +302,7 @@ function StatsCard({ title, value, icon, variant, onClick, active }: StatsCardPr
         active && variant === "error" && "ring-red-500",
         active && variant === "warning" && "ring-amber-500",
         active && variant === "info" && "ring-blue-500",
-        active && variant === "default" && "ring-gray-500"
+        active && variant === "default" && "ring-gray-500",
       )}
     >
       <div className="flex items-center justify-between w-full mb-1 sm:mb-2">
@@ -345,7 +345,7 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
         className={cn(
           "border rounded-xl overflow-hidden transition-all duration-200 shadow-sm hover:shadow-md",
           levelConfig.borderClass,
-          isExpanded && levelConfig.bgClass
+          isExpanded && levelConfig.bgClass,
         )}
       >
         <CollapsibleTrigger asChild>
@@ -368,7 +368,7 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
                     variant={levelConfig.variant}
                     className={cn(
                       "text-[10px] sm:text-xs px-1.5 sm:px-2",
-                      level === "warning" && "bg-amber-100 text-amber-700 border-amber-300"
+                      level === "warning" && "bg-amber-100 text-amber-700 border-amber-300",
                     )}
                   >
                     {levelConfig.label}
@@ -686,6 +686,7 @@ export default function AlarmConsole() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 
@@ -768,7 +769,7 @@ export default function AlarmConsole() {
         return false;
       }
     },
-    [autoLoginAttempted]
+    [autoLoginAttempted],
   );
 
   // Fetch cloud systems on mount
@@ -824,7 +825,7 @@ export default function AlarmConsole() {
       if (!resourceId) return null;
       return resourceNameMap.get(resourceId) || null;
     },
-    [resourceNameMap]
+    [resourceNameMap],
   );
 
   // Set default server
@@ -902,7 +903,7 @@ export default function AlarmConsole() {
         setLoadingCloudServers(false);
       }
     },
-    [cloudSystems, attemptAutoLogin]
+    [cloudSystems, attemptAutoLogin],
   );
 
   // Handle server selection change
@@ -1200,7 +1201,7 @@ export default function AlarmConsole() {
       warnings: events.filter((e) => e.eventParams?.metadata?.level === "warning").length,
       info: events.filter((e) => e.eventParams?.metadata?.level === "info" || !e.eventParams?.metadata?.level).length,
     }),
-    [events]
+    [events],
   );
 
   // Clear all filters
@@ -1347,7 +1348,7 @@ export default function AlarmConsole() {
                         <span
                           className={cn(
                             "w-2 h-2 rounded-full",
-                            server.status === "Online" ? "bg-green-500" : "bg-gray-400"
+                            server.status === "Online" ? "bg-green-500" : "bg-gray-400",
                           )}
                         />
                         <span>{server.name || server.id}</span>

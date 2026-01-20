@@ -2,6 +2,7 @@
  * Server service - handles all server-related API calls
  */
 
+import { getCloudAuthHeader } from "@/lib/config";
 import type { ServerInfo } from "./types";
 
 // ============================================
@@ -19,6 +20,7 @@ export async function fetchCloudServers(): Promise<{ servers: ServerInfo[]; erro
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        Authorization: getCloudAuthHeader(),
       },
     });
 

@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 interface CloudSystem {
   id: string;
@@ -133,7 +133,11 @@ export default function AlarmConsoleWidget() {
       const response = await fetch("https://meta.nxvms.com/cdb/systems", {
         method: "GET",
         credentials: "include",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
+        },
       });
 
       if (!response.ok) {
@@ -217,7 +221,7 @@ export default function AlarmConsoleWidget() {
         return null;
       }
     },
-    [attemptAutoLogin]
+    [attemptAutoLogin],
   );
 
   // Fetch events
@@ -263,7 +267,7 @@ export default function AlarmConsoleWidget() {
         setError("Failed to fetch alarms");
       }
     },
-    [attemptAutoLogin]
+    [attemptAutoLogin],
   );
 
   // Load data when system is selected
@@ -286,7 +290,7 @@ export default function AlarmConsoleWidget() {
       await fetchEvents(system.id, srvId);
       setLoading(false);
     },
-    [fetchServers, fetchEvents]
+    [fetchServers, fetchEvents],
   );
 
   useEffect(() => {
@@ -304,7 +308,7 @@ export default function AlarmConsoleWidget() {
     const errorCount = events.filter((e) => e.eventParams?.metadata?.level === "error").length;
     const warningCount = events.filter((e) => e.eventParams?.metadata?.level === "warning").length;
     const infoCount = events.filter(
-      (e) => e.eventParams?.metadata?.level !== "error" && e.eventParams?.metadata?.level !== "warning"
+      (e) => e.eventParams?.metadata?.level !== "error" && e.eventParams?.metadata?.level !== "warning",
     ).length;
     return { error: errorCount, warning: warningCount, info: infoCount, total: events.length };
   }, [events]);
@@ -387,7 +391,7 @@ export default function AlarmConsoleWidget() {
                 className={cn(
                   "flex items-start gap-2 p-2 rounded-lg border text-xs",
                   levelConfig.bgClass,
-                  levelConfig.borderClass
+                  levelConfig.borderClass,
                 )}
               >
                 <div className="shrink-0 mt-0.5">{levelConfig.icon}</div>

@@ -28,6 +28,7 @@ import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { nxAPI } from "@/lib/nxapi";
+import { getCloudAuthHeader } from "@/lib/config";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
@@ -287,7 +288,7 @@ export default function CameraInventory() {
         console.error("Failed to fetch camera locations:", err);
       }
     },
-    [cameraLocations]
+    [cameraLocations],
   );
 
   // Fetch cloud systems
@@ -299,6 +300,7 @@ export default function CameraInventory() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 
@@ -338,7 +340,7 @@ export default function CameraInventory() {
           headers: {
             Accept: "application/json",
           },
-        }
+        },
       );
 
       if (!response.ok) {
@@ -382,7 +384,7 @@ export default function CameraInventory() {
           cameras,
           expanded: true,
         };
-      })
+      }),
     );
 
     setCamerasBySystem(camerasData);
@@ -841,8 +843,8 @@ export default function CameraInventory() {
     new Set(
       Object.values(cameraLocations)
         .map((loc) => loc?.province_name)
-        .filter(Boolean)
-    )
+        .filter(Boolean),
+    ),
   ).sort() as string[];
 
   // Get unique districts (kecamatan) - filtered by selected province
@@ -851,8 +853,8 @@ export default function CameraInventory() {
       Object.values(cameraLocations)
         .filter((loc) => filterProvince === "all" || loc?.province_name === filterProvince)
         .map((loc) => loc?.district_name)
-        .filter(Boolean)
-    )
+        .filter(Boolean),
+    ),
   ).sort() as string[];
 
   // Get unique villages (kelurahan) - filtered by selected district
@@ -862,11 +864,11 @@ export default function CameraInventory() {
         .filter(
           (loc) =>
             (filterProvince === "all" || loc?.province_name === filterProvince) &&
-            (filterDistrict === "all" || loc?.district_name === filterDistrict)
+            (filterDistrict === "all" || loc?.district_name === filterDistrict),
         )
         .map((loc) => loc?.village_name)
-        .filter(Boolean)
-    )
+        .filter(Boolean),
+    ),
   ).sort() as string[];
 
   const filteredCameras = displayCameras.filter((camera) => {
@@ -915,7 +917,7 @@ export default function CameraInventory() {
   const notDefinedCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "notdefined").length;
   const incompatibleCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "incompatible").length;
   const mismatchedCertCameras = statsSourceCameras.filter(
-    (c) => c.status?.toLowerCase() === "mismatchedcertificate"
+    (c) => c.status?.toLowerCase() === "mismatchedcertificate",
   ).length;
 
   // Handle Edit Camera
@@ -1152,7 +1154,7 @@ export default function CameraInventory() {
   // Handle Delete Camera
   const handleDeleteCamera = async (camera: CameraDevice) => {
     const confirmDelete = confirm(
-      `Are you sure you want to delete camera "${camera.name}"?\n\nThis action cannot be undone.`
+      `Are you sure you want to delete camera "${camera.name}"?\n\nThis action cannot be undone.`,
     );
 
     if (!confirmDelete) return;
@@ -2104,7 +2106,7 @@ export default function CameraInventory() {
 
                   const onlineCount = filteredSystemCameras.filter((c) => c.status?.toLowerCase() === "online").length;
                   const offlineCount = filteredSystemCameras.filter(
-                    (c) => c.status?.toLowerCase() === "offline"
+                    (c) => c.status?.toLowerCase() === "offline",
                   ).length;
 
                   return (
@@ -2247,7 +2249,7 @@ export default function CameraInventory() {
                                     <div className="group relative">
                                       <span
                                         className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-help ${getStatusBadgeStyle(
-                                          camera.status || ""
+                                          camera.status || "",
                                         )}`}
                                       >
                                         {camera.status || "Unknown"}
@@ -2306,7 +2308,7 @@ export default function CameraInventory() {
                 <div className="flex items-center justify-between mt-3 md:mt-4 pt-2 md:pt-3 border-t">
                   <span
                     className={`px-2 py-0.5 md:py-1 rounded-full text-xs font-medium cursor-help ${getStatusBadgeStyle(
-                      camera.status
+                      camera.status,
                     )}`}
                     title={`${camera.status}: ${getStatusDescription(camera.status)}`}
                   >
@@ -2387,7 +2389,7 @@ export default function CameraInventory() {
                           {getStatusIcon(camera.status)}
                           <span
                             className={`px-2 py-1 rounded-full text-xs font-medium cursor-help ${getStatusBadgeStyle(
-                              camera.status
+                              camera.status,
                             )}`}
                             title={`${camera.status}: ${getStatusDescription(camera.status)}`}
                           >
@@ -2439,7 +2441,7 @@ export default function CameraInventory() {
                       {getStatusIcon(camera.status)}
                       <span
                         className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-help ${getStatusBadgeStyle(
-                          camera.status
+                          camera.status,
                         )}`}
                         title={`${camera.status}: ${getStatusDescription(camera.status)}`}
                       >

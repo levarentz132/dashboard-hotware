@@ -2,6 +2,7 @@
  * Alarm service - handles all alarm/event-related API calls and utilities
  */
 
+import { getCloudAuthHeader } from "@/lib/config";
 import type { CloudSystem, EventLog } from "./types";
 
 // ============================================
@@ -19,6 +20,7 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        Authorization: getCloudAuthHeader(),
       },
     });
 
@@ -53,7 +55,7 @@ export async function fetchCloudEvents(
     from?: number;
     to?: number;
     limit?: number;
-  }
+  },
 ): Promise<EventLog[]> {
   try {
     const params = new URLSearchParams({
@@ -255,7 +257,7 @@ export function filterEvents(
     level?: string;
     eventType?: string;
     search?: string;
-  }
+  },
 ): EventLog[] {
   return events.filter((event) => {
     const eventLevel = event.eventParams?.metadata?.level || "info";

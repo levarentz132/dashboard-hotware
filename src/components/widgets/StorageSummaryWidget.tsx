@@ -6,7 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 interface StorageStatusInfo {
   totalSpace: string;
@@ -48,6 +48,7 @@ export default function StorageSummaryWidget() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 
@@ -184,7 +185,7 @@ export default function StorageSummaryWidget() {
         setLoading(false);
       }
     },
-    [attemptAutoLogin]
+    [attemptAutoLogin],
   );
 
   // Initial load

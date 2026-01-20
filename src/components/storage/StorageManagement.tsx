@@ -42,7 +42,7 @@ import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
-import { CLOUD_CONFIG } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 type ViewMode = "local" | "cloud";
 
@@ -154,6 +154,7 @@ export default function StorageManagement() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
         },
       });
 
@@ -295,7 +296,7 @@ export default function StorageManagement() {
         setLoading(false);
       }
     },
-    [attemptAutoLogin]
+    [attemptAutoLogin],
   );
 
   // Fetch local storages from localhost:7001
@@ -363,7 +364,7 @@ export default function StorageManagement() {
       setLocalError(
         err instanceof Error
           ? err.message
-          : "Failed to fetch local storages. Make sure the local server is running on localhost:7001"
+          : "Failed to fetch local storages. Make sure the local server is running on localhost:7001",
       );
     } finally {
       setLoadingLocal(false);
@@ -514,7 +515,7 @@ export default function StorageManagement() {
       const serverId = getServerId();
       const response = await fetch(
         `/api/cloud/storages?systemId=${encodeURIComponent(selectedSystem.id)}&serverId=${encodeURIComponent(
-          serverId
+          serverId,
         )}`,
         {
           method: "POST",
@@ -527,7 +528,7 @@ export default function StorageManagement() {
             isUsedForWriting: formData.isUsedForWriting,
             isBackup: formData.isBackup,
           }),
-        }
+        },
       );
 
       if (!response.ok) {
@@ -558,7 +559,7 @@ export default function StorageManagement() {
     try {
       const response = await fetch(
         `/api/cloud/storages/${selectedStorage.id}?systemId=${encodeURIComponent(
-          selectedSystem.id
+          selectedSystem.id,
         )}&serverId=${encodeURIComponent(selectedStorage.serverId)}`,
         {
           method: "PUT",
@@ -573,7 +574,7 @@ export default function StorageManagement() {
             isUsedForWriting: formData.isUsedForWriting,
             isBackup: formData.isBackup,
           }),
-        }
+        },
       );
 
       if (!response.ok) {
@@ -601,9 +602,9 @@ export default function StorageManagement() {
     try {
       const response = await fetch(
         `/api/cloud/storages/${selectedStorage.id}?systemId=${encodeURIComponent(
-          selectedSystem.id
+          selectedSystem.id,
         )}&serverId=${encodeURIComponent(selectedStorage.serverId)}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
 
       if (!response.ok) {
@@ -918,7 +919,7 @@ export default function StorageManagement() {
                             <span>
                               Used:{" "}
                               {formatBytes(
-                                parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace)
+                                parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
                               )}
                             </span>
                             <span>{usagePercent}%</span>
@@ -929,8 +930,8 @@ export default function StorageManagement() {
                               usagePercent > 90
                                 ? "[&>div]:bg-red-500"
                                 : usagePercent > 70
-                                ? "[&>div]:bg-yellow-500"
-                                : "[&>div]:bg-green-500"
+                                  ? "[&>div]:bg-yellow-500"
+                                  : "[&>div]:bg-green-500"
                             }`}
                           />
                           <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
@@ -1053,7 +1054,7 @@ export default function StorageManagement() {
                               <span>
                                 Used:{" "}
                                 {formatBytes(
-                                  parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace)
+                                  parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
                                 )}
                               </span>
                               <span>{usagePercent}%</span>
@@ -1064,8 +1065,8 @@ export default function StorageManagement() {
                                 usagePercent > 90
                                   ? "[&>div]:bg-red-500"
                                   : usagePercent > 70
-                                  ? "[&>div]:bg-yellow-500"
-                                  : "[&>div]:bg-green-500"
+                                    ? "[&>div]:bg-yellow-500"
+                                    : "[&>div]:bg-green-500"
                               }`}
                             />
                             <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
