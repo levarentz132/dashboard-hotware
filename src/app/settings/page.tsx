@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useLicenseContext } from "@/contexts/license-context";
 import {
   Key,
   Shield,
@@ -40,7 +39,6 @@ interface LicenseInfo {
 }
 
 export default function SettingsPage() {
-  const [isMounted, setIsMounted] = useState(false);
   const [licenseKey, setLicenseKey] = useState("");
   const [isActivating, setIsActivating] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
@@ -48,20 +46,10 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Track client-side mounting
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  // Get license context to refresh after activation (only when mounted)
-  const licenseContext = useLicenseContext();
-
   // Check license status on mount
   useEffect(() => {
-    if (isMounted) {
-      checkLicenseStatus();
-    }
-  }, [isMounted]);
+    checkLicenseStatus();
+  }, []);
 
   // Check current license status
   const checkLicenseStatus = async () => {
@@ -111,10 +99,6 @@ export default function SettingsPage() {
         setSuccess("License activated successfully!");
         setLicenseInfo(data.license);
         setLicenseKey("");
-        // Refresh the global license context
-        if (licenseContext?.checkLicense) {
-          await licenseContext.checkLicense();
-        }
       } else {
         setError(data.message || "Failed to activate license");
       }
@@ -149,10 +133,6 @@ export default function SettingsPage() {
       if (data.success) {
         setSuccess("License deactivated successfully");
         setLicenseInfo(null);
-        // Refresh the global license context
-        if (licenseContext?.checkLicense) {
-          await licenseContext.checkLicense();
-        }
       } else {
         setError(data.message || "Failed to deactivate license");
       }
