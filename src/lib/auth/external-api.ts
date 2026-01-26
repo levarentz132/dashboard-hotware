@@ -2,7 +2,7 @@
 // Handles communication with external license API
 
 export const EXTERNAL_AUTH_API = {
-  URL: process.env.EXTERNAL_AUTH_API_URL || "http://localhost/license-ht/api.php",
+  URL: process.env.EXTERNAL_AUTH_API_URL || "http://license.hotech.co.id/api.php",
   TIMEOUT: 10000, // 10 seconds
 };
 
@@ -74,13 +74,13 @@ export async function callExternalAuthAPI(request: ExternalAuthRequest): Promise
     // Parse JSON response even for non-2xx status codes
     // PHP API returns 401 for authentication failures but includes error details
     const data = await response.json();
-    console.log("[External API] Response:", { 
-      status: response.status, 
-      success: data.success, 
+    console.log("[External API] Response:", {
+      status: response.status,
+      success: data.success,
       message: data.message,
-      error_code: data.error_code 
+      error_code: data.error_code,
     });
-    
+
     return data;
   } catch (error) {
     console.error("[External API] Error:", error);
