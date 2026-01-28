@@ -64,6 +64,24 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("Session API error:", error);
+    
+    // Check if it's a database connection error
+    const isDbError = error && typeof error === 'object' && 'code' in error && 
+      (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND');
+    
+    if (isDbError) {
+      // Database unavailable - don't invalidate session, just return error
+      // The middleware already validated the JWT token, so session is technically valid
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: 'Database temporarily unavailable. Please try again.',
+          dbError: true // Flag to indicate DB error vs auth error
+        }, 
+        { status: 503 } // Service Unavailable
+      );
+    }
+    
     return NextResponse.json({ success: false, message: AUTH_MESSAGES.SERVER_ERROR }, { status: 500 });
   }
 }

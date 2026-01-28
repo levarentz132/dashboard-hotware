@@ -49,7 +49,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
           isLoading: false,
           error: null,
         });
+      } else if (data.dbError || response.status === 503) {
+        // Database error - keep current auth state, don't logout
+        // The JWT token is still valid per middleware
+        console.warn("Database temporarily unavailable, keeping current session");
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: "Database temporarily unavailable",
+        }));
       } else {
+        // Actual auth failure - logout
         setState({
           user: null,
           isAuthenticated: false,
@@ -59,12 +69,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     } catch (error) {
       console.error("Session check error:", error);
-      setState({
-        user: null,
-        isAuthenticated: false,
+      // Network error - keep current state, don't logout
+      setState((prev) => ({
+        ...prev,
         isLoading: false,
-        error: null,
-      });
+        error: "Network error",
+      }));
     }
   }, []);
 

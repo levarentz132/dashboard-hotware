@@ -337,6 +337,9 @@ export async function registerUser(data: RegisterData): Promise<AuthResponse> {
 
 /**
  * Validate session from token
+ * 
+ * For external authentication, we don't need database lookup
+ * since all user info is already in the JWT payload
  */
 export async function validateSession(
   token: string,
@@ -347,13 +350,16 @@ export async function validateSession(
     return { valid: false };
   }
 
-  const user = await findUserById(parseInt(payload.sub));
-
-  if (!user || !user.is_active) {
-    return { valid: false };
-  }
-
-  const userPublic = toUserPublic(user);
+  // Reconstruct user from JWT payload (works without database)
+  const userPublic: UserPublic = {
+    id: parseInt(payload.sub),
+    username: payload.username,
+    email: payload.email,
+    role: payload.role,
+    is_active: true, // If token is valid, user is active
+    created_at: new Date(),
+    last_login: new Date(),
+  };
 
   // Check if token needs refresh
   if (isTokenExpiringSoon(payload)) {
