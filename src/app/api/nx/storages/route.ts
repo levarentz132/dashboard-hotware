@@ -6,8 +6,8 @@ if (typeof process !== "undefined") {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 }
 
-const NX_HOST = process.env.NEXT_PUBLIC_NX_SERVER_HOST || "localhost";
-const NX_PORT = process.env.NEXT_PUBLIC_NX_SERVER_PORT || "7001";
+const NX_HOST = process.env.NEXT_PUBLIC_NX_SERVER_HOST;
+const NX_PORT = process.env.NEXT_PUBLIC_NX_SERVER_PORT;
 const NX_BASE_URL = `https://${NX_HOST}:${NX_PORT}`;
 
 // Create custom agent that ignores SSL errors
@@ -45,8 +45,8 @@ export async function GET(request: NextRequest) {
   try {
     // Get auth from cookies or use default credentials
     const cookies = request.headers.get("cookie") || "";
-    const username = process.env.NEXT_PUBLIC_NX_USERNAME || "admin";
-    const password = process.env.NEXT_PUBLIC_NX_PASSWORD || "";
+    const username = process.env.NEXT_PUBLIC_NX_USERNAME;
+    const password = process.env.NEXT_PUBLIC_NX_PASSWORD;
 
     const authHeaders: Record<string, string> = password
       ? { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` }

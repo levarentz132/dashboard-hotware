@@ -6,7 +6,7 @@ import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
 const AUTH_COOKIE_NAME = "auth_token";
-const JWT_SECRET = process.env.JWT_SECRET || "your-super-secret-key-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Routes that don't require authentication
 const publicRoutes = ["/login", "/register"];

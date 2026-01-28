@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const NX_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://localhost:7001/rest/v3";
+const NX_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
 // Disable SSL verification for localhost development
 const fetchOptions: RequestInit = {

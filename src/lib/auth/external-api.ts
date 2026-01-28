@@ -2,7 +2,7 @@
 // Handles communication with external license API
 
 export const EXTERNAL_AUTH_API = {
-  URL: process.env.EXTERNAL_AUTH_API_URL || "http://license.hotech.co.id/api.php",
+  URL: process.env.EXTERNAL_AUTH_API_URL,
   TIMEOUT: 10000, // 10 seconds
 };
 

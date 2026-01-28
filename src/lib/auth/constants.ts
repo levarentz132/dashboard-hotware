@@ -3,7 +3,7 @@
 
 export const AUTH_CONFIG = {
   // JWT Configuration
-  JWT_SECRET: process.env.JWT_SECRET || "your-super-secret-key-change-in-production",
+  JWT_SECRET: process.env.JWT_SECRET,
   JWT_EXPIRES_IN: "24h",
   JWT_REFRESH_EXPIRES_IN: "7d",
 

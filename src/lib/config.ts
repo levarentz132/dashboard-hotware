@@ -3,12 +3,12 @@ export const API_CONFIG = {
   // Use Next.js API proxy to avoid CORS issues
   baseURL: "/api/nx",
   // Direct server URL for server-side requests
-  serverURL: process.env.NEXT_PUBLIC_API_URL || "https://localhost:7001/rest/v3",
-  wsURL: process.env.NEXT_PUBLIC_WS_URL || "wss://localhost:7001/ws",
-  username: process.env.NEXT_PUBLIC_NX_USERNAME || "admin",
-  password: process.env.NEXT_PUBLIC_NX_PASSWORD || "Farrel123",
-  serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST || "localhost",
-  serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT || "7001",
+  serverURL: process.env.NEXT_PUBLIC_API_URL,
+  wsURL: process.env.NEXT_PUBLIC_WS_URL,
+  username: process.env.NEXT_PUBLIC_NX_USERNAME,
+  password: process.env.NEXT_PUBLIC_NX_PASSWORD,
+  serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST,
+  serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT,
   // Fallback URLs to try (now through proxy)
   fallbackURLs: ["/api/nx"],
 };
@@ -59,8 +59,8 @@ export const API_ENDPOINTS = {
 // NX Cloud Configuration for auto-login
 export const CLOUD_CONFIG = {
   // Cloud credentials for auto-login (set via environment variables for security)
-  username: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME || "farel.it12@gmail.com",
-  password: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD || "farrel354313",
+  username: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME,
+  password: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD,
   // Enable auto-login when credentials are configured
   autoLoginEnabled: true,
   // Base URL for NX Cloud API
