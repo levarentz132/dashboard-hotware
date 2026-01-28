@@ -1,8 +1,7 @@
 "use client";
 
 import { Bell, Search, User, Settings, Menu, LogOut, Loader2 } from "lucide-react";
-import { useState } from "react";
-import { nxAPI } from "@/lib/nxapi";
+import { useAuth } from "@/contexts/auth-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,19 +16,10 @@ interface TopBarProps {
 }
 
 export default function TopBar({ onMenuClick }: TopBarProps) {
-  const [loggingOut, setLoggingOut] = useState(false);
+  const { logout, isLoading } = useAuth();
 
   const handleLogout = async () => {
-    try {
-      setLoggingOut(true);
-      await nxAPI.logout();
-      window.location.href = "/";
-    } catch (error) {
-      console.error("Logout failed:", error);
-      window.location.href = "/";
-    } finally {
-      setLoggingOut(false);
-    }
+    await logout();
   };
 
   return (
@@ -101,11 +91,11 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleLogout}
-                disabled={loggingOut}
+                disabled={isLoading}
                 className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
               >
-                {loggingOut ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
-                {loggingOut ? "Logging out..." : "Logout"}
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                {isLoading ? "Logging out..." : "Logout"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
