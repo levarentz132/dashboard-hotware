@@ -19,7 +19,7 @@ interface TopBarProps {
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Administrator",
-  operator: "User",
+  user: "User",
 };
 
 export default function TopBar({ onMenuClick }: TopBarProps) {
