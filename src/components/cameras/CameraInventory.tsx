@@ -657,6 +657,10 @@ export default function CameraInventory() {
     credentialsPassword: "",
   });
 
+  // Form error states
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+
   // Auto-retry connection when component mounts
   useEffect(() => {
     if (!connected && !loading) {
@@ -1015,8 +1019,18 @@ export default function CameraInventory() {
   // Handle Create Camera
   const handleCreateCamera = async () => {
     try {
-      if (!createForm.name || !createForm.url || !createForm.serverId) {
-        alert("Please fill in required fields: Name, URL, and Server");
+      // Clear previous errors
+      setCreateErrors({});
+      const errors: Record<string, string> = {};
+
+      if (!createForm.name) errors.name = "Camera Name is required";
+      if (!createForm.url) errors.url = "URL is required";
+      if (!createForm.serverId) errors.serverId = "Server is required";
+      if (!createForm.typeId) errors.typeId = "Device Type is required";
+      if (!createForm.physicalId) errors.physicalId = "Physical ID is required";
+
+      if (Object.keys(errors).length > 0) {
+        setCreateErrors(errors);
         return;
       }
 
@@ -1109,8 +1123,18 @@ export default function CameraInventory() {
     try {
       if (!selectedCamera) return;
 
-      if (!editForm.name || !editForm.url || !editForm.serverId) {
-        alert("Please fill in required fields: Name, URL, and Server");
+      // Clear previous errors
+      setEditErrors({});
+      const errors: Record<string, string> = {};
+
+      if (!editForm.name) errors.name = "Camera Name is required";
+      if (!editForm.url) errors.url = "URL is required";
+      if (!editForm.serverId) errors.serverId = "Server is required";
+      if (!editForm.typeId) errors.typeId = "Device Type is required";
+      if (!editForm.physicalId) errors.physicalId = "Physical ID is required";
+
+      if (Object.keys(errors).length > 0) {
+        setEditErrors(errors);
         return;
       }
 
@@ -1219,33 +1243,44 @@ export default function CameraInventory() {
 
           <div className="space-y-3 md:space-y-4 py-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Camera Name *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                Camera Name <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
                 value={createForm.name}
                 onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.name ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
                 placeholder="Camera 1"
               />
+              {createErrors.name && <p className="text-xs text-red-500 mt-1">{createErrors.name}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">URL *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                URL <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
                 value={createForm.url}
                 onChange={(e) => setCreateForm({ ...createForm, url: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.url ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
                 placeholder="rtsp://192.168.1.100:554/stream"
               />
+              {createErrors.url && <p className="text-xs text-red-500 mt-1">{createErrors.url}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Server *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                Server <span className="text-red-500">*</span>
+              </label>
               <select
                 value={createForm.serverId}
                 onChange={(e) => setCreateForm({ ...createForm, serverId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.serverId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
               >
                 <option value="">Select Server</option>
                 {servers.map((server) => (
@@ -1254,14 +1289,18 @@ export default function CameraInventory() {
                   </option>
                 ))}
               </select>
+              {createErrors.serverId && <p className="text-xs text-red-500 mt-1">{createErrors.serverId}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Device Type</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                Device Type <span className="text-red-500">*</span>
+              </label>
               <select
                 value={createForm.typeId}
                 onChange={(e) => setCreateForm({ ...createForm, typeId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.typeId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
               >
                 <option value="">Select Device Type</option>
                 {deviceType.map((type) => (
@@ -1270,17 +1309,22 @@ export default function CameraInventory() {
                   </option>
                 ))}
               </select>
+              {createErrors.typeId && <p className="text-xs text-red-500 mt-1">{createErrors.typeId}</p>}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Physical ID</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                  Physical ID <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={createForm.physicalId}
                   onChange={(e) => setCreateForm({ ...createForm, physicalId: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.physicalId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                    }`}
                 />
+                {createErrors.physicalId && <p className="text-xs text-red-500 mt-1">{createErrors.physicalId}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">MAC Address</label>
@@ -1480,31 +1524,42 @@ export default function CameraInventory() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Camera Name *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                Camera Name <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
                 value={editForm.name}
                 onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.name ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
               />
+              {editErrors.name && <p className="text-xs text-red-500 mt-1">{editErrors.name}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">URL *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                URL <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
                 value={editForm.url}
                 onChange={(e) => setEditForm({ ...editForm, url: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.url ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
               />
+              {editErrors.url && <p className="text-xs text-red-500 mt-1">{editErrors.url}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Server *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                Server <span className="text-red-500">*</span>
+              </label>
               <select
                 value={editForm.serverId}
                 onChange={(e) => setEditForm({ ...editForm, serverId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.serverId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
               >
                 <option value="">Select Server</option>
                 {servers.map((server) => (
@@ -1513,14 +1568,18 @@ export default function CameraInventory() {
                   </option>
                 ))}
               </select>
+              {editErrors.serverId && <p className="text-xs text-red-500 mt-1">{editErrors.serverId}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Device Type</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                Device Type <span className="text-red-500">*</span>
+              </label>
               <select
                 value={editForm.typeId}
                 onChange={(e) => setEditForm({ ...editForm, typeId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.typeId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
               >
                 <option value="">Select Device Type</option>
                 {deviceType.map((type) => (
@@ -1529,17 +1588,22 @@ export default function CameraInventory() {
                   </option>
                 ))}
               </select>
+              {editErrors.typeId && <p className="text-xs text-red-500 mt-1">{editErrors.typeId}</p>}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Physical ID</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                  Physical ID <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={editForm.physicalId}
                   onChange={(e) => setEditForm({ ...editForm, physicalId: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.physicalId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                    }`}
                 />
+                {editErrors.physicalId && <p className="text-xs text-red-500 mt-1">{editErrors.physicalId}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">MAC Address</label>

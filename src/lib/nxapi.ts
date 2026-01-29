@@ -228,7 +228,20 @@ class NxWitnessAPI {
         if (!response.ok) {
           const errorText = await response.text();
           console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
-          throw new Error(`HTTP_${response.status}: ${errorText}`);
+
+          let errorMessage = errorText;
+          try {
+            const errorObj = JSON.parse(errorText);
+            if (errorObj.errorString) {
+              errorMessage = errorObj.errorString;
+            } else if (errorObj.message) {
+              errorMessage = errorObj.message;
+            }
+          } catch (e) {
+            // Not JSON or missing expected fields
+          }
+
+          throw new Error(`HTTP_${response.status}: ${errorMessage}`);
         }
 
         if (response.status === 204 || response.headers.get("content-length") === "0") {
@@ -317,7 +330,8 @@ class NxWitnessAPI {
       }
 
       const body = {
-        physicalId: payload.physicalId,
+        // physicalId must not be empty for NX API
+        physicalId: payload.physicalId || `manual_${Date.now()}`,
         url: payload.url,
         typeId: payload.typeId,
         name: payload.name,
@@ -395,7 +409,9 @@ class NxWitnessAPI {
 
       const body: any = {};
 
-      if (payload.physicalId !== undefined) body.physicalId = payload.physicalId;
+      if (payload.physicalId !== undefined && payload.physicalId !== "") {
+        body.physicalId = payload.physicalId;
+      }
       if (payload.url !== undefined) body.url = payload.url;
       if (payload.typeId !== undefined) body.typeId = payload.typeId;
       if (payload.name !== undefined) body.name = payload.name;

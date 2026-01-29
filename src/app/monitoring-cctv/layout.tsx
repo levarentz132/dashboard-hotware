@@ -16,7 +16,12 @@ export default function MonitoringLayout({ children }: { children: React.ReactNo
             <DarkmodeToggle />
           </div> */}
         </header>
-        <main className="flex flex-1 flex-col items-start gap-4 p-4 pt-0">{children}</main>
+        <main
+          className="flex flex-1 flex-col items-start gap-4 p-4 pt-0"
+          style={{ scrollbarGutter: "stable" }}
+        >
+          {children}
+        </main>
       </SidebarInset>
     </SidebarProvider>
   );
