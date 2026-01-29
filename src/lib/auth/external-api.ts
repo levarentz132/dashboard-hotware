@@ -58,7 +58,9 @@ export async function callExternalAuthAPI(request: ExternalAuthRequest): Promise
     const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_AUTH_API.TIMEOUT);
 
     console.log("[External API] Calling:", EXTERNAL_AUTH_API.URL);
-    console.log("[External API] Request:", { username: request.username });
+    if (!EXTERNAL_AUTH_API.URL) {
+      throw new Error("EXTERNAL_AUTH_API_URL tidak dikonfigurasi");
+    }
 
     const response = await fetch(EXTERNAL_AUTH_API.URL, {
       method: "POST",
