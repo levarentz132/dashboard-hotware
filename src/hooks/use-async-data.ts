@@ -126,10 +126,19 @@ export function sortCloudSystems(systems: CloudSystem[]): CloudSystem[] {
   });
 }
 
+// Global cache for cloud systems to avoid redundant meta-API calls
+let cloudSystemsCache: { data: CloudSystem[]; timestamp: number } | null = null;
+const CLOUD_CACHE_TTL = 300000; // 5 minutes
+
 /**
  * Fetch cloud systems from meta API
  */
 export async function fetchCloudSystems(): Promise<CloudSystem[]> {
+  // Return from cache if valid
+  if (cloudSystemsCache && Date.now() - cloudSystemsCache.timestamp < CLOUD_CACHE_TTL) {
+    return cloudSystemsCache.data;
+  }
+
   const response = await fetch("https://meta.nxvms.com/cdb/systems", {
     method: "GET",
     credentials: "include",
@@ -146,7 +155,12 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
 
   const data = await response.json();
   const systems: CloudSystem[] = data.systems || [];
-  return sortCloudSystems(systems);
+  const sortedSystems = sortCloudSystems(systems);
+
+  // Update cache
+  cloudSystemsCache = { data: sortedSystems, timestamp: Date.now() };
+
+  return sortedSystems;
 }
 
 /**

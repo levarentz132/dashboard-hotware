@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import "react-grid-layout/css/styles.css";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 // shadcn/UI components
 import { Button } from "@/components/ui/button";
@@ -37,14 +40,41 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Widget imports
-import CameraOverviewWidget from "@/components/widgets/CameraOverviewWidget";
-import ConnectionStatusWidget from "@/components/widgets/ConnectionStatusWidget";
-import SystemStatusWidget from "@/components/widgets/SystemStatusWidget";
-import APIStatusWidget from "@/components/widgets/APIStatusWidget";
-import StorageSummaryWidget from "@/components/widgets/StorageSummaryWidget";
-import AlarmConsoleWidget from "@/components/widgets/AlarmConsoleWidget";
-import AuditLogWidget from "@/components/widgets/AuditLogWidget";
+// Widget Loading Placeholder
+const WidgetLoading = () => (
+  <div className="h-full w-full p-4 flex flex-col gap-4">
+    <div className="flex items-center gap-2">
+      <Skeleton className="h-8 w-8 rounded-lg" />
+      <Skeleton className="h-4 w-32" />
+    </div>
+    <div className="flex-1 space-y-2">
+      <Skeleton className="h-full w-full rounded-xl" />
+    </div>
+  </div>
+);
+
+// Dynamic Widget imports
+const CameraOverviewWidget = dynamic(() => import("@/components/widgets/CameraOverviewWidget"), {
+  loading: () => <WidgetLoading />,
+});
+const ConnectionStatusWidget = dynamic(() => import("@/components/widgets/ConnectionStatusWidget"), {
+  loading: () => <WidgetLoading />,
+});
+const SystemStatusWidget = dynamic(() => import("@/components/widgets/SystemStatusWidget"), {
+  loading: () => <WidgetLoading />,
+});
+const APIStatusWidget = dynamic(() => import("@/components/widgets/APIStatusWidget"), {
+  loading: () => <WidgetLoading />,
+});
+const StorageSummaryWidget = dynamic(() => import("@/components/widgets/StorageSummaryWidget"), {
+  loading: () => <WidgetLoading />,
+});
+const AlarmConsoleWidget = dynamic(() => import("@/components/widgets/AlarmConsoleWidget"), {
+  loading: () => <WidgetLoading />,
+});
+const AuditLogWidget = dynamic(() => import("@/components/widgets/AuditLogWidget"), {
+  loading: () => <WidgetLoading />,
+});
 
 // Define LayoutItem type for react-grid-layout
 interface LayoutItem {

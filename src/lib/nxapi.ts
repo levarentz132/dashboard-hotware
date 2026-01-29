@@ -93,6 +93,9 @@ export interface NxSystemInfo {
 class NxWitnessAPI {
   private baseURL: string;
   private authToken: string | null = null;
+  private cache: Map<string, { data: any; timestamp: number }> = new Map();
+  private pendingRequests: Map<string, Promise<any>> = new Map();
+  private readonly CACHE_TTL = 10000; // 10 seconds cache
 
   constructor() {
     this.baseURL = API_CONFIG.baseURL;
@@ -182,55 +185,81 @@ class NxWitnessAPI {
     }
   }
 
-  // Generic API request
-  private async apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`;
-    const config: RequestInit = {
-      credentials: "include", // Always include cookies
-      ...options,
-      headers: {
-        ...this.getHeaders(),
-        ...options.headers,
-      },
-    };
+  // Generic API request with deduplication and caching
+  private async apiRequest<T>(endpoint: string, options: RequestInit & { skipCache?: boolean } = {}): Promise<T> {
+    const cacheKey = `${options.method || "GET"}:${endpoint}`;
+    const { skipCache = false, ...fetchOptions } = options;
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout after 10 seconds")), 10000);
-
-      const response = await fetch(url, {
-        ...config,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
-        throw new Error(`HTTP_${response.status}: ${errorText}`);
+    // 1. Check Cache (only for GET requests)
+    if (!skipCache && (options.method === "GET" || !options.method)) {
+      const cached = this.cache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+        return cached.data;
       }
+    }
 
-      // Handle 204 No Content (common for DELETE operations)
-      if (response.status === 204 || response.headers.get("content-length") === "0") {
-        return undefined as unknown as T;
-      }
+    // 2. Check Pending Requests (Deduplication)
+    if (this.pendingRequests.has(cacheKey)) {
+      return this.pendingRequests.get(cacheKey);
+    }
 
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        const text = await response.text();
-        if (!text || text.trim() === "") {
+    const requestPromise = (async () => {
+      const url = `${this.baseURL}${endpoint}`;
+      const config: RequestInit = {
+        credentials: "include",
+        ...fetchOptions,
+        headers: {
+          ...this.getHeaders(),
+          ...fetchOptions.headers,
+        },
+      };
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout after 10 seconds")), 10000);
+
+        const response = await fetch(url, {
+          ...config,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
+          throw new Error(`HTTP_${response.status}: ${errorText}`);
+        }
+
+        if (response.status === 204 || response.headers.get("content-length") === "0") {
           return undefined as unknown as T;
         }
-        return JSON.parse(text);
-      }
 
-      const textData = await response.text();
-      return textData as unknown as T;
-    } catch (error) {
-      console.error(`[apiRequest] ${endpoint}: Request failed:`, error);
-      throw error;
-    }
+        const contentType = response.headers.get("content-type");
+        let result: T;
+        if (contentType && contentType.includes("application/json")) {
+          const text = await response.text();
+          result = (!text || text.trim() === "") ? (undefined as unknown as T) : JSON.parse(text);
+        } else {
+          result = (await response.text()) as unknown as T;
+        }
+
+        // Save to cache for GET requests
+        if (options.method === "GET" || !options.method) {
+          this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
+        }
+
+        return result;
+      } catch (error) {
+        console.error(`[apiRequest] ${endpoint}: Request failed:`, error);
+        throw error;
+      } finally {
+        this.pendingRequests.delete(cacheKey);
+      }
+    })();
+
+    this.pendingRequests.set(cacheKey, requestPromise);
+    return requestPromise;
   }
 
   // Camera methods
@@ -301,15 +330,15 @@ class NxWitnessAPI {
         group:
           payload.group?.id && payload.group?.name
             ? {
-                id: payload.group.id,
-                name: payload.group.name,
-              }
+              id: payload.group.id,
+              name: payload.group.name,
+            }
             : undefined,
         credentials: payload.credentials
           ? {
-              user: payload.credentials.user || "",
-              password: payload.credentials.password || "",
-            }
+            user: payload.credentials.user || "",
+            password: payload.credentials.password || "",
+          }
           : { user: "", password: "" },
         logicalId: payload.logicalId,
       };
@@ -381,9 +410,9 @@ class NxWitnessAPI {
         body.group =
           payload.group?.id && payload.group?.name
             ? {
-                id: payload.group.id,
-                name: payload.group.name,
-              }
+              id: payload.group.id,
+              name: payload.group.name,
+            }
             : null;
       }
 
@@ -838,7 +867,7 @@ class NxWitnessAPI {
 
       // Try to authenticate
       if (API_CONFIG.username && API_CONFIG.password) {
-        const loginSuccess = await this.login(API_CONFIG.username, API_CONFIG.password);
+        const loginSuccess = await this.login(API_CONFIG.username!, API_CONFIG.password!);
         return loginSuccess;
       }
 
@@ -857,7 +886,7 @@ if (typeof window !== "undefined" && API_CONFIG.username && API_CONFIG.password)
   // Delay auto-login to allow component initialization
   setTimeout(async () => {
     try {
-      const success = await nxAPI.login(API_CONFIG.username, API_CONFIG.password);
+      const success = await nxAPI.login(API_CONFIG.username!, API_CONFIG.password!);
       console.log("[nxAPI] Auto-login result:", success);
     } catch (error) {
       console.error("[nxAPI] Auto-login failed:", error);
