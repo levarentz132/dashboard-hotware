@@ -31,6 +31,7 @@ export interface JWTCreatePayload {
   username: string;
   email: string;
   role: UserRole;
+  type?: "access" | "refresh";
   iat: number;
   exp: number | string; // number (Unix timestamp) or string duration (e.g., "24h")
 }
@@ -41,6 +42,7 @@ export interface JWTPayload {
   username: string;
   email: string;
   role: UserRole;
+  type?: "access" | "refresh";
   iat: number;
   exp: number;
 }
@@ -85,7 +87,6 @@ export interface AuthState {
 export interface AuthContextValue extends AuthState {
   login: (credentials: LoginCredentials) => Promise<AuthResponse>;
   logout: () => Promise<void>;
-  register: (data: RegisterData) => Promise<AuthResponse>;
   refreshSession: () => Promise<void>;
   clearError: () => void;
 }

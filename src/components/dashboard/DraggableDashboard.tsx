@@ -26,6 +26,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Widget imports
 import CameraOverviewWidget from "@/components/widgets/CameraOverviewWidget";
@@ -141,6 +151,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load layout from database on mount
@@ -170,7 +181,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
     loadLayout();
   }, [userId]);
 
-  // Update container width on resize
+  // Update container width on resize or when loading finishes
   useEffect(() => {
     const updateWidth = () => {
       const container = document.getElementById("dashboard-container");
@@ -179,13 +190,22 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
       }
     };
 
+    // Initial check
     updateWidth();
+
+    // Check again after a short delay to ensure DOM is ready
+    const timer = setTimeout(updateWidth, 100);
+
     window.addEventListener("resize", updateWidth);
-    return () => window.removeEventListener("resize", updateWidth);
-  }, []);
+    return () => {
+      window.removeEventListener("resize", updateWidth);
+      clearTimeout(timer);
+    };
+  }, [isLoading]);
 
   // Save layout to database
-  const saveLayout = useCallback(async () => {
+  const saveLayout = useCallback(async (layoutToSave?: DashboardWidget[]) => {
+    const dataToSave = layoutToSave || widgets;
     setIsSaving(true);
     setSaveStatus("saving");
     try {
@@ -197,7 +217,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
         body: JSON.stringify({
           user_id: userId,
           layout_name: "Default Layout",
-          layout_data: widgets,
+          layout_data: dataToSave,
           set_active: true,
         }),
       });
@@ -267,7 +287,9 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
 
           if (validWidgets.length > 0) {
             setWidgets(validWidgets);
-            alert(`Berhasil import ${validWidgets.length} widget!`);
+            // Auto-save to DB after import
+            saveLayout(validWidgets);
+            alert(`Berhasil import ${validWidgets.length} widget dan disimpan ke database!`);
           } else {
             alert("File tidak berisi widget yang valid.");
           }
@@ -396,18 +418,6 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" onClick={resetLayout} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3">
-                        <RotateCcw className="w-4 h-4" />
-                        <span className="hidden sm:inline">Reset</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Kembalikan ke layout default</p>
-                    </TooltipContent>
-                  </Tooltip>
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
                       <Button
                         variant="default"
                         size="sm"
@@ -434,6 +444,18 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                       <p>Simpan layout ke database</p>
                     </TooltipContent>
                   </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="outline" onClick={() => setShowResetConfirm(true)} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3">
+                        <RotateCcw className="w-4 h-4" />
+                        <span className="hidden sm:inline">Reset</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Kembalikan ke layout default</p>
+                    </TooltipContent>
+                  </Tooltip>
                 </>
               )}
 
@@ -443,7 +465,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="outline" size="sm" onClick={exportLayout} className="gap-1 sm:gap-2 px-2 sm:px-3">
-                    <Download className="w-4 h-4" />
+                    <Upload className="w-4 h-4" />
                     <span className="hidden sm:inline">Export</span>
                   </Button>
                 </TooltipTrigger>
@@ -460,7 +482,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                     onClick={() => fileInputRef.current?.click()}
                     className="gap-1 sm:gap-2 px-2 sm:px-3"
                   >
-                    <Upload className="w-4 h-4" />
+                    <Download className="w-4 h-4" />
                     <span className="hidden sm:inline">Import</span>
                   </Button>
                 </TooltipTrigger>
@@ -482,7 +504,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                     onClick={() => setIsEditing(!isEditing)}
                     className="gap-1 sm:gap-2 px-2 sm:px-3"
                   >
-                    <Settings className="w-4 h-4" />
+                    {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
                     <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
                   </Button>
                 </TooltipTrigger>
@@ -537,9 +559,8 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                 return (
                   <div
                     key={widget.i}
-                    className={`rounded-xl overflow-hidden transition-all duration-200 bg-white border ${
-                      isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
-                    }`}
+                    className={`rounded-xl overflow-hidden transition-all duration-200 bg-white border ${isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
+                      }`}
                   >
                     <div className="h-full relative group flex flex-col">
                       {/* Delete Button - Only visible in edit mode */}
@@ -629,6 +650,30 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Reset Confirmation Dialog */}
+      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <AlertDialogContent className="max-w-[400px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <RotateCcw className="w-5 h-5" />
+              Reset Dashboard
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will clear all widgets and return the dashboard to its default empty state. Are you sure?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={resetLayout}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Yes, Reset All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   );
 }

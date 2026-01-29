@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   RefreshCw,
   AlertCircle,
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CloudLoginDialog } from "@/components/alarms/CloudLoginDialog";
 
 interface CloudSystem {
   id: string;
@@ -110,10 +112,36 @@ const getEventIcon = (iconType: string, className = "h-3.5 w-3.5") => {
 };
 
 export default function AuditLogWidget() {
+  const router = useRouter();
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(null);
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const autoLoginBlockedSystemsRef = useRef<Set<string>>(new Set());
+  const [deviceMap, setDeviceMap] = useState<Record<string, string>>({});
+
+  // Fetch devices for name mapping
+  const fetchDevices = useCallback(async (systemId: string) => {
+    try {
+      const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(systemId)}`);
+      if (response.ok) {
+        const devices = await response.json();
+        const map: Record<string, string> = {};
+        devices.forEach((device: any) => {
+          map[device.id] = device.name;
+          map[`{${device.id}}`] = device.name;
+        });
+        setDeviceMap(map);
+      }
+    } catch (err) {
+      console.error("Error fetching devices:", err);
+    }
+  }, []);
+
+  const getResourceName = (resourceId: string): string => {
+    return deviceMap[resourceId] || resourceId;
+  };
 
   // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
@@ -161,6 +189,7 @@ export default function AuditLogWidget() {
 
   // Auto-login
   const attemptAutoLogin = useCallback(async (systemId: string) => {
+    if (autoLoginBlockedSystemsRef.current.has(systemId)) return false;
     if (!CLOUD_CONFIG.username || !CLOUD_CONFIG.password) return false;
 
     try {
@@ -173,6 +202,10 @@ export default function AuditLogWidget() {
           password: CLOUD_CONFIG.password,
         }),
       });
+      // If credentials are invalid, don't keep retrying on subsequent refresh attempts.
+      if (response.status === 401 || response.status === 403) {
+        autoLoginBlockedSystemsRef.current.add(systemId);
+      }
       return response.ok;
     } catch {
       return false;
@@ -202,10 +235,20 @@ export default function AuditLogWidget() {
         );
 
         if (response.status === 401 && !retry) {
-          const success = await attemptAutoLogin(system.id);
-          if (success) {
-            return fetchAuditLogs(system, true);
+          const hasAutoLoginCreds = !!CLOUD_CONFIG.username && !!CLOUD_CONFIG.password;
+          const autoLoginBlocked = autoLoginBlockedSystemsRef.current.has(system.id);
+
+          if (hasAutoLoginCreds && !autoLoginBlocked) {
+            const success = await attemptAutoLogin(system.id);
+            if (success) {
+              return fetchAuditLogs(system, true);
+            }
+            // Mark blocked to avoid repeated loops on retry
+            autoLoginBlockedSystemsRef.current.add(system.id);
+            setError("Cloud login failed. Please login manually.");
+            return;
           }
+
           setError("Login required");
           return;
         }
@@ -236,10 +279,10 @@ export default function AuditLogWidget() {
 
       setLoading(true);
       setError(null);
-      await fetchAuditLogs(system);
+      await Promise.all([fetchAuditLogs(system), fetchDevices(system.id)]);
       setLoading(false);
     },
-    [fetchAuditLogs],
+    [fetchAuditLogs, fetchDevices],
   );
 
   useEffect(() => {
@@ -261,7 +304,14 @@ export default function AuditLogWidget() {
       ),
     ).length;
     const securityCount = auditLogs.filter((l) => l.eventType === "AR_MitmAttack").length;
-    return { login: loginCount, changes: changeCount, security: securityCount, total: auditLogs.length };
+    const userCount = new Set(auditLogs.map((l) => l.authSession?.userName).filter(Boolean)).size;
+    return {
+      login: loginCount,
+      changes: changeCount,
+      security: securityCount,
+      total: auditLogs.length,
+      users: userCount,
+    };
   }, [auditLogs]);
 
   const handleRefresh = () => {
@@ -283,51 +333,91 @@ export default function AuditLogWidget() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-        <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
-        <p className="text-sm text-red-500">{error}</p>
-        <Button variant="outline" size="sm" onClick={handleRefresh} className="mt-2">
-          <RefreshCw className="w-4 h-4 mr-1" /> Retry
-        </Button>
-      </div>
+      <>
+        <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+          <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
+          <p className="text-sm text-red-500">{error}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <RefreshCw className="w-4 h-4 mr-1" /> Retry
+            </Button>
+            {selectedSystem && (
+              <Button size="sm" onClick={() => setShowLoginDialog(true)}>
+                <LogIn className="w-4 h-4 mr-1" /> Login
+              </Button>
+            )}
+          </div>
+        </div>
+        {selectedSystem && (
+          <CloudLoginDialog
+            open={showLoginDialog}
+            onOpenChange={setShowLoginDialog}
+            systemId={selectedSystem.id}
+            systemName={selectedSystem.name}
+            onLoginSuccess={() => {
+              setError(null);
+              autoLoginBlockedSystemsRef.current.delete(selectedSystem.id);
+              handleRefresh();
+            }}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <div className="p-2 space-y-3 h-full flex flex-col">
+    <div className="h-full flex flex-col p-2 sm:p-4 space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <FileText className="w-5 h-5 text-indigo-600" />
-          <span className="font-medium text-sm">User Log</span>
+      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 sm:p-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg shrink-0">
+            <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <div className="min-w-0">
+            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm sm:text-base block truncate">User Activity Log</span>
+          </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-7 w-7 p-0">
-          <RefreshCw className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleRefresh}
+            className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <RefreshCw className={cn("w-4 h-4 text-gray-500", loading && "animate-spin")} />
+          </Button>
+        </div>
       </div>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-green-50 dark:bg-green-950 rounded-lg p-2 text-center">
-          <div className="text-lg font-bold text-green-600">{stats.login}</div>
-          <div className="text-[10px] text-green-500">Logins</div>
+      <div className="grid grid-cols-4 gap-2">
+        <div className="bg-gradient-to-br from-green-50 to-green-100/50 dark:from-green-950/40 dark:to-green-900/20 rounded-xl p-2.5 border border-green-100 dark:border-green-900/30 text-center">
+          <div className="text-xl font-bold text-green-600 dark:text-green-400">{stats.login}</div>
+          <div className="text-[9px] font-medium text-green-600/70 uppercase">Logins</div>
         </div>
-        <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-2 text-center">
-          <div className="text-lg font-bold text-blue-600">{stats.changes}</div>
-          <div className="text-[10px] text-blue-500">Changes</div>
+        <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/40 dark:to-blue-900/20 rounded-xl p-2.5 border border-blue-100 dark:border-blue-900/30 text-center">
+          <div className="text-xl font-bold text-blue-600 dark:text-blue-400">{stats.changes}</div>
+          <div className="text-[9px] font-medium text-blue-600/70 uppercase">Changes</div>
         </div>
-        <div className="bg-red-50 dark:bg-red-950 rounded-lg p-2 text-center">
-          <div className="text-lg font-bold text-red-600">{stats.security}</div>
-          <div className="text-[10px] text-red-500">Security</div>
+        <div className="bg-gradient-to-br from-orange-50 to-orange-100/50 dark:from-orange-950/40 dark:to-orange-900/20 rounded-xl p-2.5 border border-orange-100 dark:border-orange-900/30 text-center">
+          <div className="text-xl font-bold text-orange-600 dark:text-orange-400">{stats.users}</div>
+          <div className="text-[9px] font-medium text-orange-600/70 uppercase">Users</div>
+        </div>
+        <div className="bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/40 dark:to-red-900/20 rounded-xl p-2.5 border border-red-100 dark:border-red-900/30 text-center">
+          <div className="text-xl font-bold text-red-600 dark:text-red-400">{stats.security}</div>
+          <div className="text-[9px] font-medium text-red-600/70 uppercase">Alerts</div>
         </div>
       </div>
 
       {/* Audit Log List */}
-      <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
+      <div className="flex-1 overflow-y-auto space-y-2 min-h-0 custom-scrollbar pr-1">
         {auditLogs.length === 0 ? (
-          <div className="text-center text-xs text-muted-foreground py-4">No user logs</div>
+          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground opacity-50">
+            <Activity className="h-8 w-8 mb-2" />
+            <p className="text-xs">No user logs available</p>
+          </div>
         ) : (
-          auditLogs.slice(0, 6).map((log, index) => {
+          auditLogs.slice(0, 10).map((log, index) => {
             const eventInfo = getEventInfo(log.eventType);
             const timestamp = log.createdTimeSec;
 
@@ -335,45 +425,97 @@ export default function AuditLogWidget() {
               <div
                 key={`${log.createdTimeSec}-${index}`}
                 className={cn(
-                  "flex items-start gap-2 p-2 rounded-lg border text-xs",
-                  "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700",
+                  "group relative flex items-start gap-2 p-2 rounded-lg border transition-all duration-200",
+                  "bg-gray-50/80 dark:bg-gray-800/40 border-gray-200/60 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-blue-900",
+                  "hover:shadow-sm hover:bg-white dark:hover:bg-gray-800",
                 )}
               >
-                <div className="shrink-0 mt-0.5">{getEventIcon(eventInfo.icon, "h-4 w-4 text-gray-500")}</div>
+                <div
+                  className={cn(
+                    "shrink-0 w-7 h-7 rounded-md flex items-center justify-center transition-transform group-hover:scale-105",
+                    eventInfo.color.split(" ")[0].replace("bg-", "bg-opacity-20 bg-"),
+                  )}
+                >
+                  {getEventIcon(eventInfo.icon, cn("h-3.5 w-3.5", eventInfo.color.split(" ")[1]))}
+                </div>
+
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <Badge variant="outline" className={cn("h-5 text-[10px] px-1.5", eventInfo.color)}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                      {log.authSession?.userName || "System"}
+                    </p>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-[10px] text-muted-foreground whitespace-nowrap bg-gray-50 dark:bg-gray-800 px-1.5 py-0.5 rounded-md">
+                            {formatRelativeTime(timestamp)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{new Date(timestamp * 1000).toLocaleString()}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                    <Badge
+                      variant="outline"
+                      className={cn("h-3.5 text-[8px] px-1 font-medium border-opacity-50", eventInfo.color)}
+                    >
                       {eventInfo.label}
                     </Badge>
+                    {log.authSession?.userHost && (
+                      <span className="text-[9px] text-muted-foreground/70 truncate flex items-center gap-1">
+                        <Monitor className="h-2 w-2" />
+                        {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                      </span>
+                    )}
                   </div>
-                  <p className="font-medium truncate text-gray-800 dark:text-gray-200">
-                    {log.authSession?.userName || "System"}
-                  </p>
-                  {log.authSession?.userHost && (
-                    <p className="text-[10px] text-muted-foreground truncate">{log.authSession.userHost}</p>
+
+                  {log.resources && log.resources.length > 0 && (
+                    <div className="bg-white/40 dark:bg-gray-900/40 rounded p-1 mt-0.5 border border-black/5 dark:border-white/5">
+                      <p className="text-[10px] text-gray-600 dark:text-gray-400 line-clamp-1 italic">
+                        {log.resources.map((r) => getResourceName(r)).join(", ")}
+                      </p>
+                    </div>
                   )}
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
-                          <Clock className="h-3 w-3" />
-                          {formatRelativeTime(timestamp)}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{new Date(timestamp * 1000).toLocaleString()}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
                 </div>
               </div>
             );
           })
         )}
-        {auditLogs.length > 6 && (
-          <p className="text-[10px] text-muted-foreground text-center py-1">+{auditLogs.length - 6} more logs</p>
+        {auditLogs.length > 10 && (
+          <div className="pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-[10px] h-8 text-muted-foreground hover:text-blue-600 transition-colors"
+              onClick={() => router.push("/?section=audits")}
+            >
+              View More (+{auditLogs.length - 10})
+            </Button>
+          </div>
         )}
       </div>
+
+      {(() => {
+        const currentSystem = selectedSystem;
+        if (!currentSystem) return null;
+        return (
+          <CloudLoginDialog
+            open={showLoginDialog}
+            onOpenChange={setShowLoginDialog}
+            systemId={currentSystem.id}
+            systemName={currentSystem.name}
+            onLoginSuccess={() => {
+              setError(null);
+              autoLoginBlockedSystemsRef.current.delete(currentSystem.id);
+              handleRefresh();
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

@@ -14,7 +14,6 @@ import {
   LayoutDashboard,
   Home,
   User,
-  Settings,
   Shield,
 } from "lucide-react";
 import Link from "next/link";
@@ -147,10 +146,6 @@ function UserDropdownMenu({ isMobile }: { isMobile: boolean }) {
           <DropdownMenuItem className="cursor-pointer">
             <User className="mr-2 h-4 w-4" />
             Profil
-          </DropdownMenuItem>
-          <DropdownMenuItem className="cursor-pointer">
-            <Settings className="mr-2 h-4 w-4" />
-            Pengaturan
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
@@ -444,14 +439,6 @@ export default function AppSidebar() {
                   <Link href="/dashboard-full-view">
                     <LayoutDashboard className="size-4" />
                     <span>Dashboard</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Settings">
-                  <Link href="/settings">
-                    <Settings className="size-4" />
-                    <span>Settings</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

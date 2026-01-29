@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
@@ -18,12 +19,17 @@ import UserManagement from "@/components/users/UserManagement";
 import Link from "next/link";
 import { ArrowRight, Camera, Eye, Shield } from "lucide-react";
 
-export default function Home() {
-  // Protect this page - redirect to login if not authenticated
-  useRequireAuth();
-  
+function PageContent() {
   const [activeSection, setActiveSection] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const section = searchParams.get("section");
+    if (section) {
+      setActiveSection(section);
+    }
+  }, [searchParams]);
 
   const renderContent = () => {
     switch (activeSection) {
@@ -49,7 +55,7 @@ export default function Home() {
         return <UserManagement />;
       default:
         return (
-          <div className="min-h-screen bg-white flex items-center justify-center p-4 sm:p-6 md:p-8">
+          <div className="h-full bg-white flex items-center justify-center p-4 sm:p-6 md:p-8">
             <div className="max-w-5xl w-full text-center">
               {/* Welcome Text */}
               <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-gray-800 mb-3 sm:mb-4">
@@ -61,10 +67,13 @@ export default function Home() {
               </p>
 
               {/* CTA Button */}
-              <button className="group bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-xl text-base sm:text-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 inline-flex items-center gap-2 sm:gap-3">
+              <Link
+                href="/dashboard-full-view"
+                className="group bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-xl text-base sm:text-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 inline-flex items-center gap-2 sm:gap-3"
+              >
                 Masuk ke Dashboard
                 <ArrowRight className="group-hover:translate-x-1 transition-transform" size={20} />
-              </button>
+              </Link>
 
               {/* Feature Icons */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mt-12 sm:mt-14 md:mt-16 max-w-4xl mx-auto px-4">
@@ -106,5 +115,16 @@ export default function Home() {
       </div>
       <NotificationSystem />
     </div>
+  );
+}
+
+export default function Home() {
+  // Protect this page - redirect to login if not authenticated
+  useRequireAuth();
+
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <PageContent />
+    </Suspense>
   );
 }

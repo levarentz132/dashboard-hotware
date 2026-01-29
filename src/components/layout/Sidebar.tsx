@@ -6,13 +6,13 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
-  Settings,
   Users,
   Database,
   Server,
   X,
   Dog,
   LayoutDashboard,
+  Settings,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -41,7 +41,10 @@ const navigationItems: NavItem[] = [
   { id: "debug", label: "Connection Debug", icon: Settings },
   { id: "storage", label: "Storage", icon: Database },
   { id: "users", label: "User Management", icon: Users },
+<<<<<<< HEAD
   { id: "settings", label: "Settings", icon: Settings },
+=======
+>>>>>>> 7edb709a0def7d16e34298db3adcc2e87e7c3293
 ];
 
 export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose }: SidebarProps) {

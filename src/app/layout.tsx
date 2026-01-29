@@ -8,6 +8,10 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Hotware Dashboard",
   description: "Professional camera management and monitoring dashboard by Hotware",
+  icons: {
+    icon: process.env.NEXT_PUBLIC_BRAND_LOGO,
+    apple: process.env.NEXT_PUBLIC_BRAND_LOGO,
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

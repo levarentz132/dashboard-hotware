@@ -428,19 +428,17 @@ export default function AuditLog() {
                       <button
                         key={system.id}
                         onClick={() => setSelectedSystem(system)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                          selectedSystem?.id === system.id
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
                             ? "bg-blue-100 text-blue-800"
                             : "hover:bg-gray-100 text-gray-700"
-                        }`}
+                          }`}
                         disabled={system.stateOfHealth !== "online"}
                       >
                         <div className="flex items-center justify-between">
                           <span className="truncate">{system.name}</span>
                           <span
-                            className={`w-2 h-2 rounded-full ${
-                              system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
-                            }`}
+                            className={`w-2 h-2 rounded-full ${system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
+                              }`}
                           />
                         </div>
                         {system.accessRole === "owner" && <span className="text-xs text-purple-600">Owner</span>}
@@ -704,17 +702,24 @@ export default function AuditLog() {
                           <td className="px-3 py-2.5 whitespace-nowrap">
                             <div className="flex items-center text-xs lg:text-sm">
                               <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
-                              <span className="font-medium text-gray-900">{log.authSession?.userName || "-"}</span>
+                              <div className="flex flex-col">
+                                <span className="font-medium text-gray-900">{log.authSession?.userName || "-"}</span>
+                                {log.authSession?.userHost && (
+                                  <span className="text-[10px] text-gray-400">
+                                    {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-3 py-2.5">
                             <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
-                              {log.resources?.length > 0
+                              {log.resources && log.resources.length > 0
                                 ? log.resources
-                                    .slice(0, 2)
-                                    .map((r) => getResourceName(r))
-                                    .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
-                                : "-"}
+                                  .slice(0, 2)
+                                  .map((r) => getResourceName(r))
+                                  .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
+                                : ""}
                             </div>
                           </td>
                         </tr>
@@ -744,11 +749,18 @@ export default function AuditLog() {
                           {formatTimestamp(log.createdTimeSec)}
                         </span>
                       </div>
-                      <div className="flex items-center text-sm">
-                        <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
-                        <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "-"}</span>
+                      <div className="flex flex-col text-sm">
+                        <div className="flex items-center">
+                          <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
+                          <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "-"}</span>
+                        </div>
+                        {log.authSession?.userHost && (
+                          <span className="text-[9px] text-gray-400 ml-5">
+                            {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                          </span>
+                        )}
                       </div>
-                      {log.resources?.length > 0 && (
+                      {log.resources && log.resources.length > 0 && (
                         <div className="text-[10px] text-gray-500 truncate">
                           <span className="font-medium">Resources:</span>{" "}
                           {log.resources

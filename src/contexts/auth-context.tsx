@@ -10,7 +10,6 @@ import type {
   AuthState,
   UserPublic,
   LoginCredentials,
-  RegisterData,
   AuthResponse,
 } from "@/lib/auth/types";
 import { AUTH_ROUTES, AUTH_CONFIG } from "@/lib/auth/constants";
@@ -167,51 +166,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  // Register handler
-  const register = useCallback(
-    async (data: RegisterData): Promise<AuthResponse> => {
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-      try {
-        const response = await fetch(AUTH_ROUTES.API_REGISTER, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify(data),
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-          setState({
-            user: result.user,
-            isAuthenticated: true,
-            isLoading: false,
-            error: null,
-          });
-          router.push(AUTH_ROUTES.DASHBOARD);
-        } else {
-          setState((prev) => ({
-            ...prev,
-            isLoading: false,
-            error: result.message,
-          }));
-        }
-
-        return result;
-      } catch (error) {
-        const message = "Terjadi kesalahan saat registrasi";
-        setState((prev) => ({
-          ...prev,
-          isLoading: false,
-          error: message,
-        }));
-        return { success: false, message };
-      }
-    },
-    [router]
-  );
-
   // Refresh session
   const refreshSession = useCallback(async (): Promise<void> => {
     try {
@@ -239,7 +193,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     ...state,
     login,
     logout,
-    register,
     refreshSession,
     clearError,
   };

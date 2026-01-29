@@ -66,6 +66,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Rotate refresh token if provided
+    if (result.refreshToken) {
+      response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+        path: "/",
+      });
+    }
+
     return response;
   } catch (error) {
     console.error("Refresh API error:", error);
