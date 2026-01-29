@@ -50,22 +50,22 @@ interface AuditLogEntry {
 const EVENT_TYPE_INFO: Record<string, { label: string; color: string; icon: string }> = {
   AR_Login: { label: "Login", color: "bg-green-100 text-green-800 border-green-200", icon: "login" },
   AR_Logout: { label: "Logout", color: "bg-gray-100 text-gray-800 border-gray-200", icon: "logout" },
-  AR_CameraInsert: { label: "Camera +", color: "bg-blue-100 text-blue-800 border-blue-200", icon: "camera" },
-  AR_CameraUpdate: { label: "Camera ~", color: "bg-yellow-100 text-yellow-800 border-yellow-200", icon: "camera" },
-  AR_CameraRemove: { label: "Camera -", color: "bg-red-100 text-red-800 border-red-200", icon: "camera" },
-  AR_ServerUpdate: { label: "Server ~", color: "bg-purple-100 text-purple-800 border-purple-200", icon: "server" },
-  AR_UserUpdate: { label: "User ~", color: "bg-indigo-100 text-indigo-800 border-indigo-200", icon: "user" },
-  AR_UserInsert: { label: "User +", color: "bg-teal-100 text-teal-800 border-teal-200", icon: "user" },
-  AR_UserRemove: { label: "User -", color: "bg-orange-100 text-orange-800 border-orange-200", icon: "user" },
+  AR_CameraInsert: { label: "Camera Added", color: "bg-blue-100 text-blue-800 border-blue-200", icon: "camera" },
+  AR_CameraUpdate: { label: "Camera Updated", color: "bg-yellow-100 text-yellow-800 border-yellow-200", icon: "camera" },
+  AR_CameraRemove: { label: "Camera Removed", color: "bg-red-100 text-red-800 border-red-200", icon: "camera" },
+  AR_ServerUpdate: { label: "Server Updated", color: "bg-purple-100 text-purple-800 border-purple-200", icon: "server" },
+  AR_UserUpdate: { label: "User Updated", color: "bg-indigo-100 text-indigo-800 border-indigo-200", icon: "user" },
+  AR_UserInsert: { label: "User Added", color: "bg-teal-100 text-teal-800 border-teal-200", icon: "user" },
+  AR_UserRemove: { label: "User Removed", color: "bg-orange-100 text-orange-800 border-orange-200", icon: "user" },
   AR_SettingsChange: { label: "Settings", color: "bg-cyan-100 text-cyan-800 border-cyan-200", icon: "settings" },
   AR_MitmAttack: { label: "Security!", color: "bg-red-200 text-red-900 border-red-300", icon: "shield" },
   AR_StorageInsert: {
-    label: "Storage +",
+    label: "Storage Added",
     color: "bg-emerald-100 text-emerald-800 border-emerald-200",
     icon: "storage",
   },
-  AR_StorageUpdate: { label: "Storage ~", color: "bg-lime-100 text-lime-800 border-lime-200", icon: "storage" },
-  AR_StorageRemove: { label: "Storage -", color: "bg-rose-100 text-rose-800 border-rose-200", icon: "storage" },
+  AR_StorageUpdate: { label: "Storage Updated", color: "bg-lime-100 text-lime-800 border-lime-200", icon: "storage" },
+  AR_StorageRemove: { label: "Storage Removed", color: "bg-rose-100 text-rose-800 border-rose-200", icon: "storage" },
 };
 
 // Helper functions

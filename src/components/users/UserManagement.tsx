@@ -24,6 +24,7 @@ import {
   Link,
   MoreHorizontal,
 } from "lucide-react";
+import nxAPI from "@/lib/nxapi";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
@@ -152,20 +153,7 @@ function useUsers() {
       setLoading(true);
       setError(null);
 
-      const response = await fetch("/api/nx/users", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch users: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await nxAPI.getUsers();
       setUsers(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch users");
@@ -193,20 +181,7 @@ function useUserGroups() {
       setLoading(true);
       setError(null);
 
-      const response = await fetch("/api/nx/userGroups", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch user groups: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await nxAPI.getUserGroups();
       setGroups(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch user groups");
@@ -433,20 +408,7 @@ export default function UserManagement() {
         }
       }
 
-      const response = await fetch("/api/nx/users", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || `Failed to create user: ${response.status}`);
-      }
+      const data = await nxAPI.createUser(body);
 
       setShowCreateDialog(false);
       resetForm();
@@ -493,20 +455,7 @@ export default function UserManagement() {
         }
       }
 
-      const response = await fetch(`/api/nx/users/${selectedUser.id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || `Failed to update user: ${response.status}`);
-      }
+      await nxAPI.updateUser(selectedUser.id, body);
 
       setShowEditDialog(false);
       setSelectedUser(null);
@@ -527,19 +476,7 @@ export default function UserManagement() {
 
     setIsSubmitting(true);
     try {
-      const response = await fetch(`/api/nx/users/${selectedUser.id}`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || `Failed to delete user: ${response.status}`);
-      }
+      await nxAPI.deleteUser(selectedUser.id);
 
       setShowDeleteDialog(false);
       setSelectedUser(null);

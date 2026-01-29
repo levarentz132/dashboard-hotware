@@ -27,8 +27,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
+import { fetchCloudSystems as getCachedCloudSystems } from "@/hooks/use-async-data";
 import { nxAPI } from "@/lib/nxapi";
-import { getCloudAuthHeader } from "@/lib/config";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import {
@@ -298,33 +298,39 @@ export default function CameraInventory() {
     [cameraLocations],
   );
 
+  // Fetch available systems once
+  useEffect(() => {
+    const getSystems = async () => {
+      try {
+        setLoadingCloud(true);
+        const systems = await getCachedCloudSystems();
+        setCloudSystems(systems);
+
+        // Pre-initialize cameras group
+        const initialGroups: CamerasBySystem[] = systems.map((sys) => ({
+          systemId: sys.id,
+          systemName: sys.name,
+          stateOfHealth: sys.stateOfHealth,
+          accessRole: sys.accessRole,
+          cameras: [],
+          expanded: false,
+        }));
+        setCamerasBySystem(initialGroups);
+      } catch (err) {
+        console.error("Error fetching systems:", err);
+      } finally {
+        setLoadingCloud(false);
+      }
+    };
+
+    getSystems();
+  }, []);
+
   // Fetch cloud systems
+  // Fetch cloud systems (now using cached version)
   const fetchCloudSystems = useCallback(async () => {
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
-        },
-      });
-
-      if (!response.ok) return [];
-
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
-
-      // Sort: owner first, then online systems
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-        return 0;
-      });
-
+      const systems = await getCachedCloudSystems();
       setCloudSystems(systems);
       return systems;
     } catch (err) {

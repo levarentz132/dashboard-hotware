@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { ReactGridLayout as GridLayout, type Layout as LayoutType } from "react-grid-layout/legacy";
 import {
   GripVertical,
@@ -173,6 +173,78 @@ const ROW_HEIGHT = 80;
 // Default layout - empty, user can add widgets as needed
 const defaultWidgets: DashboardWidget[] = [];
 
+// Memoized Widget Component to prevent unnecessary re-renders
+const MemoizedWidget = memo(({
+  widget,
+  isEditing,
+  removeWidget
+}: {
+  widget: DashboardWidget;
+  isEditing: boolean;
+  removeWidget: (id: string) => void;
+}) => {
+  const WidgetComponent = widgetRegistry[widget.type]?.component;
+  const widgetName = widgetRegistry[widget.type]?.name || "Widget";
+
+  return (
+    <div
+      className={cn(
+        "h-full rounded-xl overflow-hidden transition-all duration-200 bg-white border",
+        isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
+      )}
+    >
+      <div className="h-full relative group flex flex-col">
+        {/* Delete Button - Only visible in edit mode */}
+        {isEditing && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  removeWidget(widget.i);
+                }}
+                className="absolute top-2 right-2 z-50 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Hapus widget</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {/* Widget Header - only show in edit mode */}
+        {isEditing && (
+          <div className="drag-handle flex flex-row items-center justify-between px-3 py-2 bg-gray-50 border-b cursor-move shrink-0">
+            <div className="flex items-center gap-2">
+              <GripVertical className="w-4 h-4 text-gray-400" />
+              <span className="text-sm font-medium text-gray-600">{widgetName}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Widget Content */}
+        <div className="flex-1 overflow-auto">
+          {WidgetComponent ? (
+            <WidgetComponent />
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+MemoizedWidget.displayName = "MemoizedWidget";
+
 export default function DraggableDashboard({ userId = "default" }: DraggableDashboardProps) {
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [isEditing, setIsEditing] = useState(false);
@@ -211,25 +283,29 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
     loadLayout();
   }, [userId]);
 
-  // Update container width on resize or when loading finishes
+  // Handle container width for react-grid-layout
   useEffect(() => {
-    const updateWidth = () => {
-      const container = document.getElementById("dashboard-container");
-      if (container) {
-        setContainerWidth(container.offsetWidth);
+    if (isLoading) return;
+
+    const container = document.getElementById("dashboard-container");
+    if (!container) return;
+
+    // Use ResizeObserver for more efficient and reactive width tracking
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect) {
+          setContainerWidth(entry.contentRect.width);
+        }
       }
-    };
+    });
 
-    // Initial check
-    updateWidth();
+    observer.observe(container);
 
-    // Check again after a short delay to ensure DOM is ready
-    const timer = setTimeout(updateWidth, 100);
+    // Initial width set
+    setContainerWidth(container.offsetWidth);
 
-    window.addEventListener("resize", updateWidth);
     return () => {
-      window.removeEventListener("resize", updateWidth);
-      clearTimeout(timer);
+      observer.disconnect();
     };
   }, [isLoading]);
 
@@ -582,65 +658,15 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
               containerPadding={[0, 0]}
               useCSSTransforms={true}
             >
-              {widgets.map((widget) => {
-                const WidgetComponent = widgetRegistry[widget.type]?.component;
-                const widgetName = widgetRegistry[widget.type]?.name || "Widget";
-
-                return (
-                  <div
-                    key={widget.i}
-                    className={`rounded-xl overflow-hidden transition-all duration-200 bg-white border ${isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
-                      }`}
-                  >
-                    <div className="h-full relative group flex flex-col">
-                      {/* Delete Button - Only visible in edit mode */}
-                      {isEditing && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onMouseDown={(e) => {
-                                e.stopPropagation();
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                removeWidget(widget.i);
-                              }}
-                              className="absolute top-2 right-2 z-50 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
-                            >
-                              <X className="w-4 h-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Hapus widget</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-
-                      {/* Widget Header - only show in edit mode */}
-                      {isEditing && (
-                        <div className="drag-handle flex flex-row items-center justify-between px-3 py-2 bg-gray-50 border-b cursor-move shrink-0">
-                          <div className="flex items-center gap-2">
-                            <GripVertical className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm font-medium text-gray-600">{widgetName}</span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Widget Content */}
-                      <div className="flex-1 overflow-auto">
-                        {WidgetComponent ? (
-                          <WidgetComponent />
-                        ) : (
-                          <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {widgets.map((widget) => (
+                <div key={widget.i}>
+                  <MemoizedWidget
+                    widget={widget}
+                    isEditing={isEditing}
+                    removeWidget={removeWidget}
+                  />
+                </div>
+              ))}
             </GridLayout>
           </div>
         )}

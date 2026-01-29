@@ -534,6 +534,43 @@ class NxWitnessAPI {
     return modules;
   }
 
+  // User methods
+  async getUsers(): Promise<any[]> {
+    const users = await this.apiRequest<any[]>("/users");
+    return Array.isArray(users) ? users : [];
+  }
+
+  async getUserById(id: string): Promise<any> {
+    return await this.apiRequest<any>(`/users/${id}`);
+  }
+
+  async createUser(userData: any): Promise<any> {
+    return await this.apiRequest<any>("/users", {
+      method: "POST",
+      body: JSON.stringify(userData),
+    });
+  }
+
+  async updateUser(id: string, userData: any): Promise<any> {
+    return await this.apiRequest<any>(`/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(userData),
+    });
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    await this.apiRequest<any>(`/users/${id}`, {
+      method: "DELETE",
+    });
+    return true;
+  }
+
+  // User Group methods
+  async getUserGroups(): Promise<any[]> {
+    const groups = await this.apiRequest<any[]>("/userGroups");
+    return Array.isArray(groups) ? groups : [];
+  }
+
   // Events methods
   async getEvents(limit: number = 50): Promise<NxEvent[]> {
     try {
@@ -888,6 +925,18 @@ if (typeof window !== "undefined" && API_CONFIG.username && API_CONFIG.password)
     try {
       const success = await nxAPI.login(API_CONFIG.username!, API_CONFIG.password!);
       console.log("[nxAPI] Auto-login result:", success);
+
+      if (success) {
+        // Prefetch critical data to prime the cache
+        console.log("[nxAPI] Prefetching critical data...");
+        // Use Promise.allSetled to not block if one fails
+        await Promise.allSettled([
+          nxAPI.getCameras(),
+          nxAPI.getSystemInfo(),
+          nxAPI.getServers()
+        ]);
+        console.log("[nxAPI] Prefetched cameras, system info, and servers.");
+      }
     } catch (error) {
       console.error("[nxAPI] Auto-login failed:", error);
     }
