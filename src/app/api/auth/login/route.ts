@@ -2,7 +2,7 @@
 // POST /api/auth/login - Authenticate user with external license API
 
 import { NextRequest, NextResponse } from "next/server";
-import { signJWT } from "@/lib/auth";
+import { generateTokens } from "@/lib/auth";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "@/lib/auth/constants";
 import { callExternalAuthAPI, mapLicenseToRole } from "@/lib/auth/external-api";
 import { z } from "zod";
@@ -95,15 +95,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message }, { status: 403 });
     }
 
-    // Generate JWT token for our application
-    const accessToken = await signJWT({
-      sub: user.id.toString(),
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      iat: Math.floor(Date.now() / 1000),
-      exp: AUTH_CONFIG.JWT_EXPIRES_IN, // "24h" string format for jose library
-    });
+    // Generate short-lived access token + long-lived refresh token
+    const { accessToken, refreshToken } = await generateTokens(user);
 
     // Create response with user data
     const response = NextResponse.json({
@@ -112,7 +105,7 @@ export async function POST(request: NextRequest) {
       user,
     });
 
-    // Set HTTP-only cookie for access token
+    // Set HTTP-only cookie for access token (short-lived)
     response.cookies.set(AUTH_CONFIG.COOKIE_NAME, accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -120,6 +113,17 @@ export async function POST(request: NextRequest) {
       maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
       path: "/",
     });
+
+    // Set HTTP-only cookie for refresh token (long-lived)
+    if (refreshToken) {
+      response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+        path: "/",
+      });
+    }
 
     return response;
   } catch (error) {

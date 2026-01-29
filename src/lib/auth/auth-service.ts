@@ -94,6 +94,7 @@ export async function signJWT(payload: JWTCreatePayload): Promise<string> {
     username: payload.username,
     email: payload.email,
     role: payload.role,
+    ...(payload.type ? { type: payload.type } : {}),
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt(payload.iat)
@@ -106,9 +107,12 @@ export async function signJWT(payload: JWTCreatePayload): Promise<string> {
 /**
  * Generate JWT refresh token
  */
-export async function generateRefreshToken(userId: number): Promise<string> {
+export async function generateRefreshToken(user: UserPublic): Promise<string> {
   const token = await new SignJWT({
-    sub: userId.toString(),
+    sub: user.id.toString(),
+    username: user.username,
+    email: user.email,
+    role: user.role,
     type: "refresh",
   })
     .setProtectedHeader({ alg: "HS256" })
@@ -123,7 +127,7 @@ export async function generateRefreshToken(userId: number): Promise<string> {
  * Generate both access and refresh tokens
  */
 export async function generateTokens(user: UserPublic): Promise<AuthTokens> {
-  const [accessToken, refreshToken] = await Promise.all([generateAccessToken(user), generateRefreshToken(user.id)]);
+  const [accessToken, refreshToken] = await Promise.all([generateAccessToken(user), generateRefreshToken(user)]);
 
   return { accessToken, refreshToken };
 }
@@ -361,12 +365,6 @@ export async function validateSession(
     last_login: new Date(),
   };
 
-  // Check if token needs refresh
-  if (isTokenExpiringSoon(payload)) {
-    const newToken = await generateAccessToken(userPublic);
-    return { valid: true, user: userPublic, newToken };
-  }
-
   return { valid: true, user: userPublic };
 }
 
@@ -375,20 +373,37 @@ export async function validateSession(
  */
 export async function refreshAccessToken(
   refreshToken: string,
-): Promise<{ success: boolean; accessToken?: string; message?: string }> {
+): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; message?: string }> {
   const payload = await verifyToken(refreshToken);
 
   if (!payload) {
     return { success: false, message: AUTH_MESSAGES.INVALID_TOKEN };
   }
 
-  const user = await findUserById(parseInt(payload.sub));
-
-  if (!user || !user.is_active) {
-    return { success: false, message: AUTH_MESSAGES.ACCOUNT_INACTIVE };
+  if (payload.type !== "refresh") {
+    return { success: false, message: AUTH_MESSAGES.INVALID_TOKEN };
   }
 
-  const accessToken = await generateAccessToken(toUserPublic(user));
+  // Reconstruct user from refresh token payload to avoid DB dependency
+  const userPublic: UserPublic = {
+    id: parseInt(payload.sub),
+    username: payload.username,
+    email: payload.email,
+    role: payload.role,
+    is_active: true,
+    created_at: new Date(),
+    last_login: new Date(),
+  };
 
-  return { success: true, accessToken };
+  if (!userPublic.id || !userPublic.username || !userPublic.email || !userPublic.role) {
+    return { success: false, message: AUTH_MESSAGES.INVALID_TOKEN };
+  }
+
+  const [accessToken, newRefreshToken] = await Promise.all([
+    generateAccessToken(userPublic),
+    // Rotate refresh token on every refresh
+    generateRefreshToken(userPublic),
+  ]);
+
+  return { success: true, accessToken, refreshToken: newRefreshToken };
 }

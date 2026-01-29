@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Bell, Search, User, Settings, Menu, LogOut, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import {
@@ -10,13 +11,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface TopBarProps {
   onMenuClick?: () => void;
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Administrator",
+  operator: "User",
+};
+
 export default function TopBar({ onMenuClick }: TopBarProps) {
-  const { logout, isLoading } = useAuth();
+  const { user, logout, isLoading } = useAuth();
 
   const handleLogout = async () => {
     await logout();
@@ -59,12 +66,21 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
           </div>
 
           {/* Notifications */}
-          <button className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg relative">
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center text-[10px] sm:text-xs">
-              3
-            </span>
-          </button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg relative">
+                <Bell className="w-5 h-5" />
+                <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center text-[10px] sm:text-xs">
+                  3
+                </span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-0" align="end">
+              <div className="px-4 py-6 text-sm text-gray-500 text-center">
+                Tidak ada notifikasi baru.
+              </div>
+            </PopoverContent>
+          </Popover>
 
           {/* Settings - Hidden on small mobile */}
           <button className="hidden xs:block p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg">
@@ -78,14 +94,20 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
                 <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
                   <User className="w-4 h-4 text-white" />
                 </div>
-                <span className="hidden md:block text-sm font-medium text-gray-700">Admin</span>
+                <span className="hidden md:block text-sm font-medium text-gray-700">
+                  {user?.username ?? "User"}
+                </span>
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel>
                 <div className="flex flex-col">
-                  <span className="font-medium">Admin</span>
-                  <span className="text-xs text-gray-500">Administrator</span>
+                  <span className="font-medium">{user?.username ?? "User"}</span>
+                  <span className="text-xs text-gray-500">
+                    {user?.role
+                      ? ROLE_LABELS[user.role.toLowerCase()] ?? user.role
+                      : "Role not set"}
+                  </span>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />

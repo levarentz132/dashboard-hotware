@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   RefreshCw,
   AlertCircle,
@@ -121,6 +122,7 @@ const getLevelConfig = (level: string) => {
 };
 
 export default function AlarmConsoleWidget() {
+  const router = useRouter();
   const [events, setEvents] = useState<EventLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -255,10 +257,10 @@ export default function AlarmConsoleWidget() {
         const data = await response.json();
         const sortedEvents = Array.isArray(data)
           ? data.sort((a: EventLog, b: EventLog) => {
-              const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
-              const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
-              return timeB - timeA;
-            })
+            const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
+            const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
+            return timeB - timeA;
+          })
           : [];
 
         setEvents(sortedEvents);
@@ -346,16 +348,27 @@ export default function AlarmConsoleWidget() {
   }
 
   return (
-    <div className="p-2 space-y-3 h-full flex flex-col">
+    <div className="h-full flex flex-col p-2 sm:p-4 space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Bell className="w-5 h-5 text-orange-600" />
-          <span className="font-medium text-sm">Alarm Console</span>
+      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 sm:p-2 bg-orange-50 dark:bg-orange-950/30 rounded-lg shrink-0">
+            <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600 dark:text-orange-400" />
+          </div>
+          <div className="min-w-0">
+            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm sm:text-base block truncate">Alarm Console</span>
+          </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-7 w-7 p-0">
-          <RefreshCw className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleRefresh}
+            className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <RefreshCw className={cn("w-4 h-4 text-gray-500", loading && "animate-spin")} />
+          </Button>
+        </div>
       </div>
 
       {/* Stats Row */}
@@ -375,7 +388,7 @@ export default function AlarmConsoleWidget() {
       </div>
 
       {/* Events List */}
-      <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
+      <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0 custom-scrollbar pr-1">
         {events.length === 0 ? (
           <div className="text-center text-xs text-muted-foreground py-4">No alarms</div>
         ) : (
@@ -429,7 +442,16 @@ export default function AlarmConsoleWidget() {
           })
         )}
         {events.length > 5 && (
-          <p className="text-[10px] text-muted-foreground text-center py-1">+{events.length - 5} more alarms</p>
+          <div className="pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-[10px] h-8 text-muted-foreground hover:text-orange-600 transition-colors"
+              onClick={() => router.push("/?section=alarms")}
+            >
+              View More (+{events.length - 5})
+            </Button>
+          </div>
         )}
       </div>
     </div>

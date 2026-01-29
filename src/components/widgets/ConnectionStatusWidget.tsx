@@ -77,18 +77,23 @@ export default function ConnectionStatusWidget({ className = "" }: ConnectionSta
   };
 
   return (
-    <div className={`h-full flex flex-col p-3 ${className}`}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-2">
-          <Network className="w-5 h-5 text-gray-600" />
-          <h3 className="text-sm font-semibold text-gray-800">Nx Witness API</h3>
+    <div className={`h-full flex flex-col p-2 sm:p-4 space-y-3 ${className}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 sm:p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg shrink-0">
+            <Network className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="min-w-0">
+            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm sm:text-base block truncate">Nx Witness API</span>
+          </div>
         </div>
         <button
           onClick={checkConnection}
           disabled={status === "checking"}
-          className="px-2 py-1 text-xs bg-gray-100 border border-gray-200 rounded hover:bg-gray-200 disabled:opacity-50"
+          className="px-2 py-1 text-[10px] sm:text-xs font-medium bg-gray-50 border border-gray-200 rounded hover:bg-gray-100 disabled:opacity-50 text-gray-600 transition-colors"
         >
-          Refresh
+          {status === "checking" ? "Checking..." : "Check Now"}
         </button>
       </div>
 
@@ -96,9 +101,8 @@ export default function ConnectionStatusWidget({ className = "" }: ConnectionSta
         <div className="flex items-center space-x-2">
           {getStatusIcon()}
           <span
-            className={`text-sm font-medium ${
-              status === "connected" ? "text-green-700" : status === "disconnected" ? "text-red-700" : "text-yellow-700"
-            }`}
+            className={`text-sm font-medium ${status === "connected" ? "text-green-700" : status === "disconnected" ? "text-red-700" : "text-yellow-700"
+              }`}
           >
             {getStatusText()}
           </span>

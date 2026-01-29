@@ -313,15 +313,24 @@ export default function StorageSummaryWidget() {
   }
 
   return (
-    <div className="p-2 space-y-3">
-      {/* Header with refresh */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <HardDrive className="w-5 h-5 text-blue-600" />
-          <span className="font-medium text-sm">Storage Overview</span>
+    <div className="h-full flex flex-col p-2 sm:p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 sm:p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg shrink-0">
+            <HardDrive className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="min-w-0">
+            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm sm:text-base block truncate">Storage Overview</span>
+          </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-7 w-7 p-0">
-          <RefreshCw className="w-4 h-4" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleRefresh}
+          className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
+        >
+          <RefreshCw className="w-4 h-4 text-gray-500" />
         </Button>
       </div>
 

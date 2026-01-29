@@ -2,12 +2,25 @@
 // GET /api/auth/session - Validate current session and get user data
 
 import { NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
+import { refreshAccessToken, validateSession } from "@/lib/auth";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "@/lib/auth/constants";
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get(AUTH_CONFIG.COOKIE_NAME)?.value;
+    let token = request.cookies.get(AUTH_CONFIG.COOKIE_NAME)?.value;
+    const refreshToken = request.cookies.get(AUTH_CONFIG.COOKIE_REFRESH_NAME)?.value;
+    let rotatedAccessToken: string | null = null;
+    let rotatedRefreshToken: string | null = null;
+
+    // If no/expired access token, try to refresh using refresh token
+    if (!token && refreshToken) {
+      const refreshed = await refreshAccessToken(refreshToken);
+      if (refreshed.success && refreshed.accessToken) {
+        token = refreshed.accessToken;
+        rotatedAccessToken = refreshed.accessToken;
+        rotatedRefreshToken = refreshed.refreshToken ?? null;
+      }
+    }
 
     if (!token) {
       return NextResponse.json(
@@ -23,6 +36,41 @@ export async function GET(request: NextRequest) {
     const session = await validateSession(token);
 
     if (!session.valid) {
+      // Access token invalid/expired - try refresh once
+      if (refreshToken) {
+        const refreshed = await refreshAccessToken(refreshToken);
+        if (refreshed.success && refreshed.accessToken) {
+          const refreshedSession = await validateSession(refreshed.accessToken);
+          if (refreshedSession.valid) {
+            const response = NextResponse.json({
+              success: true,
+              isAuthenticated: true,
+              user: refreshedSession.user,
+            });
+
+            response.cookies.set(AUTH_CONFIG.COOKIE_NAME, refreshed.accessToken, {
+              httpOnly: true,
+              secure: process.env.NODE_ENV === "production",
+              sameSite: "lax",
+              maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
+              path: "/",
+            });
+
+            if (refreshed.refreshToken) {
+              response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, refreshed.refreshToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "lax",
+                maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+                path: "/",
+              });
+            }
+
+            return response;
+          }
+        }
+      }
+
       const response = NextResponse.json(
         {
           success: false,
@@ -40,6 +88,13 @@ export async function GET(request: NextRequest) {
         maxAge: 0,
         path: "/",
       });
+      response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, "", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 0,
+        path: "/",
+      });
 
       return response;
     }
@@ -50,13 +105,22 @@ export async function GET(request: NextRequest) {
       user: session.user,
     });
 
-    // If token was refreshed, update the cookie
-    if (session.newToken) {
-      response.cookies.set(AUTH_CONFIG.COOKIE_NAME, session.newToken, {
+    // If we rotated tokens earlier in this request, persist them now
+    if (rotatedAccessToken) {
+      response.cookies.set(AUTH_CONFIG.COOKIE_NAME, rotatedAccessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
+        path: "/",
+      });
+    }
+    if (rotatedRefreshToken) {
+      response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, rotatedRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
         path: "/",
       });
     }

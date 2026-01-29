@@ -13,10 +13,18 @@ export default function APIStatusWidget() {
   };
 
   return (
-    <div className="h-full flex flex-col p-3">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-900">API Status</h3>
-        <button onClick={handleTestConnection} disabled={loading} className="p-1 text-gray-500 hover:text-gray-700">
+    <div className="h-full flex flex-col p-2 sm:p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 sm:p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg shrink-0">
+            <Wifi className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="min-w-0">
+            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm sm:text-base block truncate">API Status</span>
+          </div>
+        </div>
+        <button onClick={handleTestConnection} disabled={loading} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
@@ -29,9 +37,8 @@ export default function APIStatusWidget() {
             <span className="text-xs text-gray-700">Nx Witness API</span>
           </div>
           <span
-            className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-              connected ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-            }`}
+            className={`text-[10px] px-1.5 py-0.5 rounded-full ${connected ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+              }`}
           >
             {connected ? "Connected" : "Disconnected"}
           </span>

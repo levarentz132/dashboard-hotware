@@ -4,13 +4,15 @@
 export const AUTH_CONFIG = {
   // JWT Configuration
   JWT_SECRET: process.env.JWT_SECRET,
-  JWT_EXPIRES_IN: "24h",
+  // Short-lived access token; renewed via refresh token
+  JWT_EXPIRES_IN: "15m",
   JWT_REFRESH_EXPIRES_IN: "7d",
 
   // Cookie Configuration
   COOKIE_NAME: "auth_token",
   COOKIE_REFRESH_NAME: "refresh_token",
-  COOKIE_MAX_AGE: 60 * 60 * 24, // 24 hours in seconds
+  // Keep access cookie aligned with access token TTL
+  COOKIE_MAX_AGE: 60 * 15, // 15 minutes in seconds
   COOKIE_REFRESH_MAX_AGE: 60 * 60 * 24 * 7, // 7 days in seconds
 
   // Password Configuration
@@ -23,16 +25,15 @@ export const AUTH_CONFIG = {
 
   // Session Configuration
   SESSION_CHECK_INTERVAL: 60 * 1000, // 1 minute
-  TOKEN_REFRESH_THRESHOLD: 60 * 60, // Refresh if less than 1 hour remaining
+  // Not used for refresh-token based flows; keep small to avoid extending sessions via access token alone
+  TOKEN_REFRESH_THRESHOLD: 60 * 2, // 2 minutes
 } as const;
 
 export const AUTH_ROUTES = {
   LOGIN: "/login",
-  REGISTER: "/register",
   LOGOUT: "/logout",
   DASHBOARD: "/",
   API_LOGIN: "/api/auth/login",
-  API_REGISTER: "/api/auth/register",
   API_LOGOUT: "/api/auth/logout",
   API_SESSION: "/api/auth/session",
   API_REFRESH: "/api/auth/refresh",
@@ -40,9 +41,7 @@ export const AUTH_ROUTES = {
 
 export const PUBLIC_ROUTES = [
   AUTH_ROUTES.LOGIN,
-  AUTH_ROUTES.REGISTER,
   "/api/auth/login",
-  "/api/auth/register",
 ] as const;
 
 export const AUTH_MESSAGES = {

@@ -31,6 +31,13 @@ import { nxAPI } from "@/lib/nxapi";
 import { getCloudAuthHeader } from "@/lib/config";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "../ui/dialog";
 
 interface CloudSystem {
   id: string;
@@ -345,17 +352,32 @@ export default function CameraInventory() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-
+        console.error(`Failed to fetch cameras from ${system.name}:`, errorData);
         return [];
       }
 
       const devices = await response.json();
       const cameraDevices = Array.isArray(devices) ? devices : [];
 
+      // Debug: Log the first device to see what fields are available
+      if (cameraDevices.length > 0) {
+        console.log(`[Camera Inventory] Sample device from ${system.name}:`, cameraDevices[0]);
+        console.log(`[Camera Inventory] Available fields:`, Object.keys(cameraDevices[0]));
+      }
+
       return cameraDevices.map((device: Record<string, unknown>) => ({
         ...device,
         id: device.id as string,
         name: device.name as string,
+        physicalId: device.physicalId as string,
+        url: device.url as string,
+        typeId: device.typeId as string,
+        mac: device.mac as string,
+        serverId: device.serverId as string,
+        vendor: device.vendor as string,
+        model: device.model as string,
+        logicalId: device.logicalId as string,
+        status: device.status as string,
         systemId: system.id,
         systemName: system.name,
       }));
@@ -1007,9 +1029,9 @@ export default function CameraInventory() {
         group:
           createForm.groupId || createForm.groupName
             ? {
-                id: createForm.groupId,
-                name: createForm.groupName,
-              }
+              id: createForm.groupId,
+              name: createForm.groupName,
+            }
             : undefined,
         credentials: {
           user: createForm.credentialsUser || "",
@@ -1102,9 +1124,9 @@ export default function CameraInventory() {
         group:
           editForm.groupId || editForm.groupName
             ? {
-                id: editForm.groupId,
-                name: editForm.groupName,
-              }
+              id: editForm.groupId,
+              name: editForm.groupName,
+            }
             : undefined,
         credentials: {
           user: editForm.credentialsUser,
@@ -1180,14 +1202,16 @@ export default function CameraInventory() {
     }
   };
 
-  // Render Create Modal
+  // Render Create Modal Content (now moved into main render)
   const renderCreateModal = () => {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 md:p-4">
-        <div className="bg-white rounded-lg p-4 md:p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
-          <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">Create New Camera</h2>
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-4 md:p-6 custom-scrollbar">
+          <DialogHeader>
+            <DialogTitle className="text-lg md:text-xl font-semibold text-gray-900">Create New Camera</DialogTitle>
+          </DialogHeader>
 
-          <div className="space-y-3 md:space-y-4">
+          <div className="space-y-3 md:space-y-4 py-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Camera Name *</label>
               <input
@@ -1408,7 +1432,7 @@ export default function CameraInventory() {
             </div>
           </div>
 
-          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4 md:mt-6">
+          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4">
             <Button
               onClick={() => setShowCreateModal(false)}
               disabled={isSubmitting}
@@ -1418,25 +1442,27 @@ export default function CameraInventory() {
               Cancel
             </Button>
             <Button onClick={handleCreateCamera} disabled={isSubmitting} className="w-full sm:w-auto">
-              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin mr-2" />}
               {isSubmitting ? "Creating..." : "Create Camera"}
             </Button>
-          </div>
-        </div>
-      </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     );
   };
 
-  // Render Edit Modal
+  // Render Edit Modal Content (now moved into main render)
   const renderEditModal = () => {
     if (!selectedCamera) return null;
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 md:p-4">
-        <div className="bg-white rounded-lg p-4 md:p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
-          <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">Edit Camera</h2>
+      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+        <DialogContent className="max-w-lg max-h-[95vh] overflow-y-auto p-4 md:p-6 custom-scrollbar">
+          <DialogHeader>
+            <DialogTitle className="text-lg md:text-xl font-semibold text-gray-900">Edit Camera</DialogTitle>
+          </DialogHeader>
 
-          <div className="space-y-3 md:space-y-4">
+          <div className="space-y-3 md:space-y-4 py-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Camera ID</label>
               <input
@@ -1664,7 +1690,7 @@ export default function CameraInventory() {
             </div>
           </div>
 
-          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4 md:mt-6">
+          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4">
             <Button
               onClick={() => {
                 setShowEditModal(false);
@@ -1677,12 +1703,12 @@ export default function CameraInventory() {
               Cancel
             </Button>
             <Button onClick={handleUpdateCamera} disabled={isSubmitting} className="w-full sm:w-auto">
-              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin mr-2" />}
               {isSubmitting ? "Updating..." : "Update Camera"}
             </Button>
-          </div>
-        </div>
-      </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     );
   };
 
@@ -1748,8 +1774,8 @@ export default function CameraInventory() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Modals */}
-      {showCreateModal && renderCreateModal()}
-      {showEditModal && renderEditModal()}
+      {renderCreateModal()}
+      {renderEditModal()}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1830,15 +1856,14 @@ export default function CameraInventory() {
         <Popover open={showFilters} onOpenChange={setShowFilters}>
           <PopoverTrigger asChild>
             <button
-              className={`flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 ${
-                filterStatus !== "all" ||
+              className={`flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 ${filterStatus !== "all" ||
                 filterVendor !== "all" ||
                 filterProvince !== "all" ||
                 filterDistrict !== "all" ||
                 filterVillage !== "all"
-                  ? "border-blue-500 bg-blue-50 text-blue-700"
-                  : ""
-              }`}
+                ? "border-blue-500 bg-blue-50 text-blue-700"
+                : ""
+                }`}
             >
               <Filter className="w-4 h-4" />
               <span>Filters</span>
@@ -1847,18 +1872,18 @@ export default function CameraInventory() {
                 filterProvince !== "all" ||
                 filterDistrict !== "all" ||
                 filterVillage !== "all") && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
-                  {
-                    [
-                      filterStatus !== "all",
-                      filterVendor !== "all",
-                      filterProvince !== "all",
-                      filterDistrict !== "all",
-                      filterVillage !== "all",
-                    ].filter(Boolean).length
-                  }
-                </span>
-              )}
+                  <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
+                    {
+                      [
+                        filterStatus !== "all",
+                        filterVendor !== "all",
+                        filterProvince !== "all",
+                        filterDistrict !== "all",
+                        filterVillage !== "all",
+                      ].filter(Boolean).length
+                    }
+                  </span>
+                )}
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-72" align="end">
@@ -1870,19 +1895,19 @@ export default function CameraInventory() {
                   filterProvince !== "all" ||
                   filterDistrict !== "all" ||
                   filterVillage !== "all") && (
-                  <button
-                    onClick={() => {
-                      setFilterStatus("all");
-                      setFilterVendor("all");
-                      setFilterProvince("all");
-                      setFilterDistrict("all");
-                      setFilterVillage("all");
-                    }}
-                    className="text-xs text-blue-600 hover:text-blue-800"
-                  >
-                    Clear all
-                  </button>
-                )}
+                    <button
+                      onClick={() => {
+                        setFilterStatus("all");
+                        setFilterVendor("all");
+                        setFilterProvince("all");
+                        setFilterDistrict("all");
+                        setFilterVillage("all");
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      Clear all
+                    </button>
+                  )}
               </div>
 
               {/* Status Filter */}
@@ -2128,11 +2153,11 @@ export default function CameraInventory() {
                             <div className="text-xs text-gray-500">
                               {filteredSystemCameras.length} cameras
                               {searchTerm ||
-                              filterStatus !== "all" ||
-                              filterVendor !== "all" ||
-                              filterProvince !== "all" ||
-                              filterDistrict !== "all" ||
-                              filterVillage !== "all"
+                                filterStatus !== "all" ||
+                                filterVendor !== "all" ||
+                                filterProvince !== "all" ||
+                                filterDistrict !== "all" ||
+                                filterVillage !== "all"
                                 ? ` (filtered from ${systemData.cameras.length})`
                                 : ""}
                             </div>
@@ -2148,9 +2173,8 @@ export default function CameraInventory() {
                             </span>
                           </div>
                           <span
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              isOnline ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                            }`}
+                            className={`px-2 py-1 rounded-full text-xs font-medium ${isOnline ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                              }`}
                           >
                             {isOnline ? "Online" : "Offline"}
                           </span>
@@ -2201,6 +2225,12 @@ export default function CameraInventory() {
                                     {camera.model && <div className="truncate">Model: {camera.model}</div>}
                                     {camera.vendor && <div className="truncate">Vendor: {camera.vendor}</div>}
                                     {camera.mac && <div className="truncate">MAC: {camera.mac}</div>}
+                                    {camera.physicalId && <div className="truncate">ID: {camera.physicalId}</div>}
+                                    {camera.typeId && <div className="truncate text-gray-500">Type: {camera.typeId}</div>}
+                                    {camera.url && <div className="truncate text-gray-500" title={camera.url}>URL: {camera.url}</div>}
+                                    {!camera.model && !camera.vendor && !camera.mac && !camera.physicalId && !camera.typeId && !camera.url && (
+                                      <div className="text-gray-400 italic">No technical info available</div>
+                                    )}
                                   </div>
 
                                   {/* Location Details */}
