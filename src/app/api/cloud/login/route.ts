@@ -5,6 +5,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { systemId, username, password } = body;
 
+    // Get client IP
+    const forwardedFor = request.headers.get("x-forwarded-for");
+    const clientIp = forwardedFor ? forwardedFor.split(",")[0] : request.headers.get("x-real-ip") || "0.0.0.0";
+
+    console.log(`[Cloud Login] Attempt from IP: ${clientIp} for user: ${username} in system: ${systemId}`);
+
     if (!systemId || !username || !password) {
       return NextResponse.json({ error: "System ID, username, and password are required" }, { status: 400 });
     }
@@ -17,6 +23,7 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        "X-Forwarded-For": clientIp,
       },
       body: JSON.stringify({
         username,
