@@ -127,7 +127,7 @@ export async function fetchFromCloudApi<T>(
     const response = await fetch(cloudUrl, {
       method: "GET",
       headers,
-      redirect: "manual",
+      redirect: "follow",
     });
 
     // Handle auth errors
