@@ -2,13 +2,16 @@ import nxAPI from "@/lib/nxapi";
 import { useAsyncData } from "./use-async-data";
 
 // Hook for server information
-export function useServers() {
+export function useServers(systemId?: string) {
   const {
     data: servers,
     loading,
     error,
+    refetch,
   } = useAsyncData<any[]>(
     async () => {
+      if (!systemId) return [];
+      nxAPI.setSystemId(systemId);
       const data = await nxAPI.getServers();
 
       // The API returns servers directly as an array, not wrapped in an object
@@ -19,11 +22,11 @@ export function useServers() {
         return data.servers;
       }
 
-      throw new Error("Server connected but no servers found. Check your Nx Witness configuration.");
+      return [];
     },
     [],
-    { fetchOnMount: true }
+    { fetchOnMount: !!systemId, deps: [systemId] }
   );
 
-  return { servers, loading, error };
+  return { servers, loading, error, refetch };
 }

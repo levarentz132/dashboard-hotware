@@ -262,20 +262,21 @@ export async function deleteCloudStorage(
 // ============================================
 
 /**
- * Fetch local storages from localhost:7001
+ * Fetch local storages using the cloud-relay proxy
  */
-export async function fetchLocalStorages(): Promise<{ storages: Storage[]; error?: string }> {
+export async function fetchLocalStorages(systemId: string): Promise<{ storages: Storage[]; error?: string }> {
   try {
-    const response = await fetch("/api/nx/storages");
+    const response = await fetch(`/api/nx/storages?systemId=${encodeURIComponent(systemId)}`);
     const data = await response.json();
 
     if (!response.ok || data.error) {
       console.error("Local storage API error:", data);
       return {
         storages: [],
-        error: data.error || data.details || "Failed to fetch local storages",
+        error: data.error || data.details || "Failed to fetch storages",
       };
     }
+
 
     // Map the response to Storage interface
     const mappedStorages: Storage[] = (Array.isArray(data) ? data : []).map((item: Record<string, unknown>) => {

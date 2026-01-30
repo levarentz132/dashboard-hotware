@@ -299,20 +299,29 @@ export default function StorageManagement() {
     [attemptAutoLogin],
   );
 
-  // Fetch local storages from localhost:7001
+  // Fetch local storages from cloud system
   const fetchLocalStorages = useCallback(async () => {
+    // If we have a selected system, use its ID. Otherwise, try to use the first cloud system.
+    const systemId = selectedSystem?.id || (cloudSystems.length > 0 ? cloudSystems[0].id : null);
+
+    if (!systemId) {
+      console.log("No system ID available for fetching storages");
+      return;
+    }
+
     setLoadingLocal(true);
     setLocalError(null);
 
     try {
-      const response = await fetch("/api/nx/storages");
+      const response = await fetch(`/api/nx/storages?systemId=${encodeURIComponent(systemId)}`);
       const data = await response.json();
 
       // Check for error response
       if (!response.ok || data.error) {
-        console.error("Local storage API error:", data);
-        throw new Error(data.error || data.details || "Failed to fetch local storages");
+        console.error("Storage API error:", data);
+        throw new Error(data.error || data.details || "Failed to fetch storages");
       }
+
 
       console.log("Local storage data received:", data);
 
@@ -689,19 +698,17 @@ export default function StorageManagement() {
                         <button
                           key={system.id}
                           onClick={() => setSelectedSystem(system)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                            selectedSystem?.id === system.id
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
                               ? "bg-blue-100 text-blue-800"
                               : "hover:bg-gray-100 text-gray-700"
-                          }`}
+                            }`}
                           disabled={system.stateOfHealth !== "online"}
                         >
                           <div className="flex items-center justify-between">
                             <span className="truncate">{system.name}</span>
                             <span
-                              className={`w-2 h-2 rounded-full ${
-                                system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
-                              }`}
+                              className={`w-2 h-2 rounded-full ${system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
+                                }`}
                             />
                           </div>
                           {system.accessRole === "owner" && <span className="text-xs text-purple-600">Owner</span>}
@@ -892,9 +899,8 @@ export default function StorageManagement() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                           <div
-                            className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${
-                              isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
-                            }`}
+                            className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                              }`}
                           >
                             {getStorageTypeIcon(storage.type)}
                           </div>
@@ -926,13 +932,12 @@ export default function StorageManagement() {
                           </div>
                           <Progress
                             value={usagePercent}
-                            className={`h-1.5 sm:h-2 ${
-                              usagePercent > 90
+                            className={`h-1.5 sm:h-2 ${usagePercent > 90
                                 ? "[&>div]:bg-red-500"
                                 : usagePercent > 70
                                   ? "[&>div]:bg-yellow-500"
                                   : "[&>div]:bg-green-500"
-                            }`}
+                              }`}
                           />
                           <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
                             <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
@@ -1027,9 +1032,8 @@ export default function StorageManagement() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                             <div
-                              className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${
-                                isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
-                              }`}
+                              className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                                }`}
                             >
                               {getStorageTypeIcon(storage.type)}
                             </div>
@@ -1061,13 +1065,12 @@ export default function StorageManagement() {
                             </div>
                             <Progress
                               value={usagePercent}
-                              className={`h-1.5 sm:h-2 ${
-                                usagePercent > 90
+                              className={`h-1.5 sm:h-2 ${usagePercent > 90
                                   ? "[&>div]:bg-red-500"
                                   : usagePercent > 70
                                     ? "[&>div]:bg-yellow-500"
                                     : "[&>div]:bg-green-500"
-                              }`}
+                                }`}
                             />
                             <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
                               <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>

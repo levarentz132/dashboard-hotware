@@ -121,60 +121,15 @@ const getLevelConfig = (level: string) => {
   }
 };
 
-export default function AlarmConsoleWidget() {
+export default function AlarmConsoleWidget({ systemId }: { systemId?: string }) {
   const router = useRouter();
   const [events, setEvents] = useState<EventLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(null);
   const [serverId, setServerId] = useState<string | null>(null);
 
-  // Fetch cloud systems
-  const fetchCloudSystems = useCallback(async () => {
-    try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
-        },
-      });
-
-      if (!response.ok) {
-        setError("Failed to connect");
-        setLoading(false);
-        return;
-      }
-
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
-
-      // Sort: owner first, then online
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-        return 0;
-      });
-
-      const firstOnline = systems.find((s) => s.stateOfHealth === "online");
-      if (firstOnline) {
-        setSelectedSystem(firstOnline);
-      } else {
-        setError("No system online");
-        setLoading(false);
-      }
-    } catch {
-      setError("Connection failed");
-      setLoading(false);
-    }
-  }, []);
-
   // Auto-login
-  const attemptAutoLogin = useCallback(async (systemId: string) => {
+  const attemptAutoLogin = useCallback(async (targetSystemId: string) => {
     if (!CLOUD_CONFIG.username || !CLOUD_CONFIG.password) return false;
 
     try {
@@ -182,7 +137,7 @@ export default function AlarmConsoleWidget() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemId,
+          systemId: targetSystemId,
           username: CLOUD_CONFIG.username,
           password: CLOUD_CONFIG.password,
         }),
@@ -195,9 +150,9 @@ export default function AlarmConsoleWidget() {
 
   // Fetch servers for a system
   const fetchServers = useCallback(
-    async (systemId: string, retry = false): Promise<string | null> => {
+    async (targetSystemId: string, retry = false): Promise<string | null> => {
       try {
-        const response = await fetch(`/api/cloud/servers?systemId=${encodeURIComponent(systemId)}`, {
+        const response = await fetch(`/api/cloud/servers?systemId=${encodeURIComponent(targetSystemId)}`, {
           method: "GET",
           credentials: "include",
           headers: { Accept: "application/json" },
@@ -205,9 +160,9 @@ export default function AlarmConsoleWidget() {
 
         if (response.status === 401 && !retry) {
           // Try auto-login
-          const success = await attemptAutoLogin(systemId);
+          const success = await attemptAutoLogin(targetSystemId);
           if (success) {
-            return fetchServers(systemId, true);
+            return fetchServers(targetSystemId, true);
           }
           return null;
         }
@@ -228,10 +183,10 @@ export default function AlarmConsoleWidget() {
 
   // Fetch events
   const fetchEvents = useCallback(
-    async (systemId: string, srvId: string, retry = false) => {
+    async (targetSystemId: string, srvId: string, retry = false) => {
       try {
         const params = new URLSearchParams({
-          systemId: systemId,
+          systemId: targetSystemId,
           serverId: srvId,
         });
 
@@ -242,9 +197,9 @@ export default function AlarmConsoleWidget() {
         });
 
         if (response.status === 401 && !retry) {
-          const success = await attemptAutoLogin(systemId);
+          const success = await attemptAutoLogin(targetSystemId);
           if (success) {
-            return fetchEvents(systemId, srvId, true);
+            return fetchEvents(targetSystemId, srvId, true);
           }
           setError("Login required");
           return;
@@ -272,16 +227,14 @@ export default function AlarmConsoleWidget() {
     [attemptAutoLogin],
   );
 
-  // Load data when system is selected
+  // Load data
   const loadData = useCallback(
-    async (system: CloudSystem) => {
-      if (!system || system.stateOfHealth !== "online") return;
-
+    async (targetSystemId: string) => {
       setLoading(true);
       setError(null);
 
       // Get server ID first
-      const srvId = await fetchServers(system.id);
+      const srvId = await fetchServers(targetSystemId);
       if (!srvId) {
         setError("No server found");
         setLoading(false);
@@ -289,21 +242,20 @@ export default function AlarmConsoleWidget() {
       }
 
       setServerId(srvId);
-      await fetchEvents(system.id, srvId);
+      await fetchEvents(targetSystemId, srvId);
       setLoading(false);
     },
     [fetchServers, fetchEvents],
   );
 
   useEffect(() => {
-    fetchCloudSystems();
-  }, [fetchCloudSystems]);
-
-  useEffect(() => {
-    if (selectedSystem) {
-      loadData(selectedSystem);
+    if (systemId) {
+      loadData(systemId);
+    } else {
+      setLoading(false);
+      setEvents([]);
     }
-  }, [selectedSystem, loadData]);
+  }, [systemId, loadData]);
 
   // Stats
   const stats = useMemo(() => {
@@ -316,13 +268,11 @@ export default function AlarmConsoleWidget() {
   }, [events]);
 
   const handleRefresh = () => {
-    if (selectedSystem && serverId) {
+    if (systemId && serverId) {
       setLoading(true);
-      fetchEvents(selectedSystem.id, serverId).finally(() => setLoading(false));
-    } else if (selectedSystem) {
-      loadData(selectedSystem);
-    } else {
-      fetchCloudSystems();
+      fetchEvents(systemId, serverId).finally(() => setLoading(false));
+    } else if (systemId) {
+      loadData(systemId);
     }
   };
 

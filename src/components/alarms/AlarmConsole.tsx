@@ -43,7 +43,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
-import { CloudLoginDialog } from "./CloudLoginDialog";
+import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 
 // ============================================
 // INTERFACE DEFINITIONS
@@ -629,12 +629,11 @@ function EventSkeleton() {
 // ============================================
 
 export default function AlarmConsole() {
-  const { servers, loading: loadingServers } = useServers();
-  const { cameras } = useCameras();
-  const [selectedServerId, setSelectedServerId] = useState<string>("");
-  const [selectedServerType, setSelectedServerType] = useState<"local" | "cloud">("local");
+
   const [selectedCloudSystemId, setSelectedCloudSystemId] = useState<string>("");
   const [selectedCloudServerId, setSelectedCloudServerId] = useState<string>("");
+  const { servers, loading: loadingServers } = useServers(selectedCloudSystemId);
+  const { cameras } = useCameras(selectedCloudSystemId);
   const [events, setEvents] = useState<EventLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -777,33 +776,6 @@ export default function AlarmConsole() {
     fetchCloudSystems();
   }, [fetchCloudSystems]);
 
-  // Combined server options (local + cloud)
-  const serverOptions: ServerOption[] = useMemo(() => {
-    const options: ServerOption[] = [];
-
-    // Add local servers
-    servers.forEach((server) => {
-      options.push({
-        id: server.id,
-        name: server.name || server.id,
-        type: "local",
-      });
-    });
-
-    // Add cloud systems
-    cloudSystems.forEach((system) => {
-      options.push({
-        id: system.id,
-        name: system.name,
-        type: "cloud",
-        status: system.stateOfHealth,
-        accessRole: system.accessRole,
-      });
-    });
-
-    return options;
-  }, [servers, cloudSystems]);
-
   // Resource lookup map
   const resourceNameMap = useMemo(() => {
     const map = new Map<string, { name: string; type: "camera" | "server" }>();
@@ -827,21 +799,6 @@ export default function AlarmConsole() {
     },
     [resourceNameMap],
   );
-
-  // Set default server
-  useEffect(() => {
-    if (serverOptions.length > 0 && !selectedServerId) {
-      // Prefer local server first
-      const localServer = serverOptions.find((s) => s.type === "local");
-      if (localServer) {
-        setSelectedServerId(`local:${localServer.id}`);
-        setSelectedServerType("local");
-      } else if (serverOptions[0]) {
-        setSelectedServerId(`${serverOptions[0].type}:${serverOptions[0].id}`);
-        setSelectedServerType(serverOptions[0].type);
-      }
-    }
-  }, [serverOptions, selectedServerId]);
 
   // Fetch cloud servers when a cloud system is selected
   const fetchCloudServers = useCallback(
@@ -906,25 +863,41 @@ export default function AlarmConsole() {
     [cloudSystems, attemptAutoLogin],
   );
 
-  // Handle server selection change
-  const handleServerChange = (value: string) => {
-    // Value format: "local:serverId" or "cloud:systemId"
-    const [type, ...idParts] = value.split(":");
-    const id = idParts.join(":");
-
-    setSelectedServerId(value);
-    setSelectedServerType(type as "local" | "cloud");
-    setEvents([]); // Clear events when switching servers
-    setError(null);
-
-    if (type === "cloud") {
-      setSelectedCloudSystemId(id);
-      fetchCloudServers(id);
-    } else {
-      setSelectedCloudSystemId("");
-      setCloudServers([]);
-      setSelectedCloudServerId("");
+  // Auto-select first online system if none selected
+  useEffect(() => {
+    if (!selectedCloudSystemId && cloudSystems.length > 0) {
+      const onlineSystem = cloudSystems.find((s) => s.isOnline) || cloudSystems[0];
+      setSelectedCloudSystemId(onlineSystem.id);
+      fetchCloudServers(onlineSystem.id);
     }
+  }, [selectedCloudSystemId, cloudSystems, fetchCloudServers]);
+
+  // Cloud system selector state
+  const serverOptions: ServerOption[] = useMemo(() => {
+    return cloudSystems.map((system) => ({
+      id: system.id,
+      name: system.name,
+      type: "cloud",
+      status: system.stateOfHealth,
+      accessRole: system.accessRole,
+    }));
+  }, [cloudSystems]);
+
+  // Set default system
+  useEffect(() => {
+    if (serverOptions.length > 0 && !selectedCloudSystemId) {
+      const firstSystem = serverOptions[0];
+      setSelectedCloudSystemId(firstSystem.id);
+      fetchCloudServers(firstSystem.id);
+    }
+  }, [serverOptions, selectedCloudSystemId, fetchCloudServers]);
+
+  // Handle system selection change
+  const handleSystemChange = (value: string) => {
+    setSelectedCloudSystemId(value);
+    setEvents([]); // Clear events when switching systems
+    setError(null);
+    fetchCloudServers(value);
   };
 
   // Handle cloud server selection
@@ -934,11 +907,12 @@ export default function AlarmConsole() {
   };
 
   // Extract actual ID from selectedServerId (format: "type:id")
-  const getActualServerId = useCallback(() => {
-    if (!selectedServerId) return "";
-    const [, ...idParts] = selectedServerId.split(":");
-    return idParts.join(":");
-  }, [selectedServerId]);
+  // This function is no longer needed as we only deal with cloud IDs directly.
+  // const getActualServerId = useCallback(() => {
+  //   if (!selectedServerId) return "";
+  //   const [, ...idParts] = selectedServerId.split(":");
+  //   return idParts.join(":");
+  // }, [selectedServerId]);
 
   // Get current cloud system name
   const getCurrentCloudSystemName = useCallback(() => {
@@ -992,40 +966,25 @@ export default function AlarmConsole() {
 
   // Fetch events
   const fetchEvents = useCallback(async () => {
-    if (!selectedServerId) return;
-
-    // For cloud, we need both systemId and serverId
-    if (selectedServerType === "cloud") {
-      if (!selectedCloudSystemId || !selectedCloudServerId) return;
-    }
-
-    const actualId = getActualServerId();
-    if (!actualId && selectedServerType === "local") return;
+    if (!selectedCloudSystemId || !selectedCloudServerId) return;
 
     setLoading(true);
     setError(null);
     setRequiresAuth(false);
 
     try {
-      let response;
-
-      if (selectedServerType === "cloud") {
-        // For cloud systems, use systemId and serverId
-        const params = new URLSearchParams({
-          systemId: selectedCloudSystemId,
-          serverId: selectedCloudServerId,
-        });
-        response = await fetch(`/api/cloud/events?${params.toString()}`, {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        });
-      } else {
-        // For local servers
-        response = await fetch(`/api/nx/servers/${actualId}/events`);
-      }
+      // For cloud systems, use systemId and serverId
+      const params = new URLSearchParams({
+        systemId: selectedCloudSystemId,
+        serverId: selectedCloudServerId,
+      });
+      const response = await fetch(`/api/cloud/events?${params.toString()}`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -1039,10 +998,10 @@ export default function AlarmConsole() {
       const data = await response.json();
       const sortedEvents = Array.isArray(data)
         ? data.sort((a: EventLog, b: EventLog) => {
-            const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
-            const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
-            return timeB - timeA;
-          })
+          const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
+          const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
+          return timeB - timeA;
+        })
         : [];
 
       setRequiresAuth(false);
@@ -1053,29 +1012,24 @@ export default function AlarmConsole() {
     } finally {
       setLoading(false);
     }
-  }, [selectedServerId, selectedServerType, selectedCloudSystemId, selectedCloudServerId, getActualServerId]);
+  }, [selectedCloudSystemId, selectedCloudServerId]);
 
   // Fetch on server change
   useEffect(() => {
-    if (selectedServerType === "local" && selectedServerId) {
-      fetchEvents();
-    } else if (selectedServerType === "cloud" && selectedCloudSystemId && selectedCloudServerId) {
+    if (selectedCloudSystemId && selectedCloudServerId) {
       fetchEvents();
     }
-  }, [selectedServerId, selectedServerType, selectedCloudSystemId, selectedCloudServerId, fetchEvents]);
+  }, [selectedCloudSystemId, selectedCloudServerId, fetchEvents]);
 
   // Auto-refresh
   useEffect(() => {
-    if (!autoRefresh || !selectedServerId) return;
-    if (selectedServerType === "cloud" && (!selectedCloudSystemId || !selectedCloudServerId)) return;
+    if (!autoRefresh || !selectedCloudSystemId || !selectedCloudServerId) return;
 
     const interval = setInterval(fetchEvents, refreshInterval * 1000);
     return () => clearInterval(interval);
   }, [
     autoRefresh,
     refreshInterval,
-    selectedServerId,
-    selectedServerType,
     selectedCloudSystemId,
     selectedCloudServerId,
     fetchEvents,
@@ -1261,7 +1215,7 @@ export default function AlarmConsole() {
   // Reset pagination when server changes
   useEffect(() => {
     setDisplayCount(20);
-  }, [selectedServerId, selectedCloudServerId]);
+  }, [selectedCloudSystemId, selectedCloudServerId]);
 
   // Load more function
   const loadMore = useCallback(() => {
@@ -1281,56 +1235,32 @@ export default function AlarmConsole() {
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Server Selector */}
-          <Select value={selectedServerId} onValueChange={handleServerChange} disabled={loadingServers || loadingCloud}>
+          <Select value={selectedCloudSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
             <SelectTrigger className="w-full sm:w-[220px]">
-              <Server className="h-4 w-4 mr-2 text-gray-400 shrink-0" />
-              <SelectValue placeholder="Pilih server..." />
+              <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
+              <SelectValue placeholder="Pilih system..." />
             </SelectTrigger>
             <SelectContent>
-              {/* Local Servers */}
-              {servers.length > 0 && (
-                <>
-                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50">Local Servers</div>
-                  {servers.map((server) => (
-                    <SelectItem key={`local-${server.id}`} value={`local:${server.id}`}>
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-green-500" />
-                        <span>{server.name || server.id}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </>
-              )}
-
-              {/* Cloud Systems */}
-              {cloudSystems.length > 0 && (
-                <>
-                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 bg-blue-50 mt-1">
-                    <Cloud className="h-3 w-3 inline mr-1" />
-                    Cloud Systems
-                  </div>
-                  {cloudSystems.map((system) => (
-                    <SelectItem key={`cloud-${system.id}`} value={`cloud:${system.id}`}>
-                      <div className="flex items-center gap-2">
-                        <span className={cn("w-2 h-2 rounded-full", system.isOnline ? "bg-blue-500" : "bg-gray-400")} />
-                        <span>{system.name}</span>
-                        {!system.isOnline && <span className="text-xs text-gray-400">(offline)</span>}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </>
-              )}
-
-              {servers.length === 0 && cloudSystems.length === 0 && (
+              {cloudSystems.length > 0 ? (
+                cloudSystems.map((system) => (
+                  <SelectItem key={system.id} value={system.id}>
+                    <div className="flex items-center gap-2">
+                      <span className={cn("w-2 h-2 rounded-full", system.isOnline ? "bg-blue-500" : "bg-gray-400")} />
+                      <span>{system.name}</span>
+                      {!system.isOnline && <span className="text-xs text-gray-400">(offline)</span>}
+                    </div>
+                  </SelectItem>
+                ))
+              ) : (
                 <div className="px-2 py-4 text-sm text-gray-500 text-center">
-                  {loadingServers || loadingCloud ? "Memuat server..." : "Tidak ada server tersedia"}
+                  {loadingCloud ? "Memuat system..." : "Tidak ada cloud system tersedia"}
                 </div>
               )}
             </SelectContent>
           </Select>
 
           {/* Cloud Server Selector - shown when cloud system is selected */}
-          {selectedServerType === "cloud" && selectedCloudSystemId && (
+          {selectedCloudSystemId && (
             <Select
               value={selectedCloudServerId}
               onValueChange={handleCloudServerChange}
@@ -1365,7 +1295,7 @@ export default function AlarmConsole() {
           )}
 
           {/* Cloud Logout Button */}
-          {selectedServerType === "cloud" && selectedCloudSystemId && isLoggedIn.has(selectedCloudSystemId) && (
+          {selectedCloudSystemId && isLoggedIn.has(selectedCloudSystemId) && (
             <Button
               variant="ghost"
               size="sm"
@@ -1403,8 +1333,8 @@ export default function AlarmConsole() {
               onClick={fetchEvents}
               disabled={
                 loading ||
-                !selectedServerId ||
-                (selectedServerType === "cloud" && (!selectedCloudSystemId || !selectedCloudServerId))
+                !selectedCloudSystemId ||
+                !selectedCloudServerId
               }
               className="gap-2"
             >
@@ -1848,7 +1778,7 @@ export default function AlarmConsole() {
         )}
 
         {/* Auth Required State - for cloud systems */}
-        {!loading && !loadingCloudServers && requiresAuth && selectedServerType === "cloud" && (
+        {!loading && !loadingCloudServers && requiresAuth && (
           <Card className="border-blue-200 bg-blue-50">
             <CardContent className="flex flex-col items-center justify-center p-6 sm:p-8 text-center">
               <Cloud className="h-10 w-10 sm:h-12 sm:w-12 mb-4 text-blue-500" />

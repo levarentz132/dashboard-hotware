@@ -76,6 +76,18 @@ const AuditLogWidget = dynamic(() => import("@/components/widgets/AuditLogWidget
   loading: () => <WidgetLoading />,
 });
 
+interface CloudSystem {
+  id: string;
+  name: string;
+  stateOfHealth: string;
+  isOnline: boolean;
+  accessRole: string;
+}
+
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Cloud, RefreshCw } from "lucide-react";
+import { getCloudAuthHeader } from "@/lib/config";
+
 // Define LayoutItem type for react-grid-layout
 interface LayoutItem {
   i: string;
@@ -177,11 +189,13 @@ const defaultWidgets: DashboardWidget[] = [];
 const MemoizedWidget = memo(({
   widget,
   isEditing,
-  removeWidget
+  removeWidget,
+  systemId
 }: {
   widget: DashboardWidget;
   isEditing: boolean;
   removeWidget: (id: string) => void;
+  systemId: string;
 }) => {
   const WidgetComponent = widgetRegistry[widget.type]?.component;
   const widgetName = widgetRegistry[widget.type]?.name || "Widget";
@@ -233,7 +247,7 @@ const MemoizedWidget = memo(({
         {/* Widget Content */}
         <div className="flex-1 overflow-auto">
           {WidgetComponent ? (
-            <WidgetComponent />
+            <WidgetComponent systemId={systemId} />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
           )}
@@ -254,7 +268,54 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  // Cloud systems state
+  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
+  const [selectedSystemId, setSelectedSystemId] = useState<string>("");
+  const [loadingCloud, setLoadingCloud] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch systems
+  const fetchSystems = useCallback(async () => {
+    setLoadingCloud(true);
+    try {
+      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+        headers: {
+          Accept: "application/json",
+          Authorization: getCloudAuthHeader(),
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const systems = (data.systems || []).map((s: any) => ({
+          ...s,
+          isOnline: s.stateOfHealth === "online"
+        }));
+
+        // Sort
+        systems.sort((a: any, b: any) => {
+          if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
+          if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
+          return a.isOnline && !b.isOnline ? -1 : 1;
+        });
+
+        setCloudSystems(systems);
+        if (systems.length > 0 && !selectedSystemId) {
+          const firstOnline = systems.find((s: any) => s.isOnline) || systems[0];
+          setSelectedSystemId(firstOnline.id);
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching systems:", err);
+    } finally {
+      setLoadingCloud(false);
+    }
+  }, [selectedSystemId]);
+
+  useEffect(() => {
+    fetchSystems();
+  }, [fetchSystems]);
 
   // Load layout from database on mount
   useEffect(() => {
@@ -497,10 +558,30 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
               <div className="h-6 w-px bg-gray-200 hidden sm:block" />
               <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 shrink-0" />
               <h1 className="text-base sm:text-xl font-semibold text-gray-900 truncate">Dashboard</h1>
+
+              <div className="flex items-center gap-2 ml-2">
+                <Select value={selectedSystemId} onValueChange={setSelectedSystemId} disabled={loadingCloud}>
+                  <SelectTrigger className="w-[150px] sm:w-[200px] bg-white text-gray-900 border-gray-200 h-9">
+                    <SelectValue placeholder="Pilih system" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cloudSystems.map((sys) => (
+                      <SelectItem key={sys.id} value={sys.id}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${sys.isOnline ? "bg-green-500" : "bg-red-500"}`} />
+                          <span className="truncate">{sys.name}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {loadingCloud && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
+              </div>
+
               {isEditing && (
                 <Badge
                   variant="secondary"
-                  className="bg-blue-100 text-blue-700 text-[10px] sm:text-xs hidden sm:inline-flex"
+                  className="bg-blue-100 text-blue-700 text-[10px] sm:text-xs hidden sm:inline-flex ml-2"
                 >
                   Edit Mode
                 </Badge>
@@ -664,6 +745,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                     widget={widget}
                     isEditing={isEditing}
                     removeWidget={removeWidget}
+                    systemId={selectedSystemId}
                   />
                 </div>
               ))}

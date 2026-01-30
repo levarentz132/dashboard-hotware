@@ -21,20 +21,20 @@ export default function NotificationSystem() {
       try {
         const { nxAPI } = await import('@/lib/nxapi')
         const isConnected = await nxAPI.testConnection()
-        
+
         const newStatus = isConnected ? 'connected' : 'disconnected'
-        
+
         // Only update if status actually changed
         if (connectionStatus !== newStatus) {
           setConnectionStatus(newStatus)
-          
+
           // Show notification on status change (but not on initial load)
           if (connectionStatus !== 'unknown') {
             addNotification({
               type: isConnected ? 'success' : 'warning',
-              title: isConnected ? 'API Connected' : 'API Disconnected', 
-              message: isConnected 
-                ? 'Successfully connected to Nx Witness API with authentication' 
+              title: isConnected ? 'API Connected' : 'API Disconnected',
+              message: isConnected
+                ? 'Successfully connected to Nx Witness API with authentication'
                 : 'Lost connection to Nx Witness API - check server status'
             })
           }
@@ -53,10 +53,10 @@ export default function NotificationSystem() {
 
     // Initial check
     checkConnection()
-    
+
     // Check more frequently if disconnected
     const interval = setInterval(
-      checkConnection, 
+      checkConnection,
       connectionStatus === 'disconnected' ? 15000 : 45000 // 15s if disconnected, 45s if connected
     )
     return () => clearInterval(interval)
@@ -68,9 +68,9 @@ export default function NotificationSystem() {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: Date.now()
     }
-    
+
     setNotifications(prev => [...prev, newNotification])
-    
+
     // Auto-remove after 5 seconds
     setTimeout(() => {
       removeNotification(newNotification.id)
@@ -109,16 +109,6 @@ export default function NotificationSystem() {
 
   return (
     <>
-      {/* Connection Status Bar */}
-      {connectionStatus === 'disconnected' && (
-        <div className="bg-yellow-100 border-b border-yellow-200 px-4 py-2">
-          <div className="flex items-center justify-center space-x-2 text-yellow-800 text-sm">
-            <WifiOff className="w-4 h-4" />
-            <span>Nx Witness API offline - displaying mock data</span>
-          </div>
-        </div>
-      )}
-
       {/* Toast Notifications */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {notifications.map((notification) => (

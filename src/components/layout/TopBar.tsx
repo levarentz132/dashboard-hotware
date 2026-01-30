@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, Search, User, Settings, Menu, LogOut, Loader2 } from "lucide-react";
+import { Bell, User, Settings, Menu, LogOut, Loader2, RefreshCw } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +24,8 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function TopBar({ onMenuClick }: TopBarProps) {
-  const { user, logout, isLoading } = useAuth();
+  const { user, logout, isLoading: isAuthLoading } = useAuth();
+  const { connected, loading: isSystemLoading } = useSystemInfo();
 
   const handleLogout = async () => {
     await logout();
@@ -40,29 +42,18 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Search - Hidden on mobile, visible on tablet+ */}
-        <div className="hidden sm:flex items-center flex-1 max-w-md">
-          <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search cameras, events..."
-              className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-          </div>
-        </div>
-
-        {/* Mobile Search Button */}
-        <button className="sm:hidden p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg">
-          <Search className="w-5 h-5" />
-        </button>
-
         {/* Right Side Actions */}
-        <div className="flex items-center gap-1 sm:gap-3">
+        <div className="flex items-center gap-1 sm:gap-3 ml-auto">
           {/* System Status - Hidden on mobile */}
-          <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 px-2">
-            <div className="w-2 h-2 sm:w-3 sm:h-3 bg-green-500 rounded-full"></div>
-            <span className="hidden lg:inline">System Online</span>
+          <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 px-2 group cursor-help">
+            {isSystemLoading ? (
+              <RefreshCw className="w-3 h-3 animate-spin text-blue-500" />
+            ) : (
+              <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse'}`}></div>
+            )}
+            <span className="hidden lg:inline font-medium">
+              {isSystemLoading ? 'Checking...' : connected ? 'System Online' : 'System Offline'}
+            </span>
           </div>
 
           {/* Notifications */}
@@ -113,11 +104,11 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleLogout}
-                disabled={isLoading}
+                disabled={isAuthLoading}
                 className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
               >
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
-                {isLoading ? "Logging out..." : "Logout"}
+                {isAuthLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                {isAuthLoading ? "Logging out..." : "Logout"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

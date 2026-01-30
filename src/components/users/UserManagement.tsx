@@ -24,7 +24,18 @@ import {
   Link,
   MoreHorizontal,
 } from "lucide-react";
-import nxAPI from "@/lib/nxapi";
+import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
+import {
+  fetchUsers,
+  fetchUserGroups,
+  createUser as serviceCreateUser,
+  updateUser as serviceUpdateUser,
+  deleteUser as serviceDeleteUser,
+  timeUnitToSeconds,
+  secondsToTimeUnit,
+} from "./user-service";
+import { getCloudAuthHeader, CLOUD_CONFIG } from "@/lib/config";
+import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
@@ -78,6 +89,16 @@ export interface NxUserGroup {
   permissions?: string[];
 }
 
+// Cloud System interface
+interface CloudSystem {
+  id: string;
+  name: string;
+  stateOfHealth: string;
+  accessRole: string;
+  version?: string;
+  isOnline?: boolean;
+}
+
 // Time unit type for expires after login
 type TimeUnit = "minutes" | "hours" | "days";
 
@@ -118,93 +139,249 @@ const initialFormData: UserFormData = {
   expiresAfterLoginUnit: "days",
 };
 
-// Helper functions for time conversion
-const timeUnitToSeconds = (value: number, unit: TimeUnit): number => {
-  switch (unit) {
-    case "minutes":
-      return value * 60;
-    case "hours":
-      return value * 3600;
-    case "days":
-      return value * 86400;
-    default:
-      return value;
-  }
-};
-
-const secondsToTimeUnit = (seconds: number): { value: number; unit: TimeUnit } => {
-  if (seconds % 86400 === 0) {
-    return { value: seconds / 86400, unit: "days" };
-  } else if (seconds % 3600 === 0) {
-    return { value: seconds / 3600, unit: "hours" };
-  } else {
-    return { value: Math.floor(seconds / 60), unit: "minutes" };
-  }
-};
+// Helper functions for time conversion (moved to service)
 
 // Custom hook for fetching users
-function useUsers() {
+function useUsers(systemId?: string) {
   const [users, setUsers] = useState<NxUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [requiresAuth, setRequiresAuth] = useState(false);
 
-  const fetchUsers = useCallback(async () => {
+  const fetchUsersData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      setRequiresAuth(false);
 
-      const data = await nxAPI.getUsers();
-      setUsers(Array.isArray(data) ? data : []);
+      if (!systemId) {
+        setUsers([]);
+        setLoading(false);
+        return;
+      }
+
+      const { users: data, error: err, requiresAuth: auth } = await fetchUsers(systemId);
+      if (auth) {
+        setRequiresAuth(true);
+        setUsers([]);
+      } else if (err) {
+        setError(err);
+        setUsers([]);
+      } else {
+        setUsers(data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch users");
       setUsers([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [systemId]);
 
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    fetchUsersData();
+  }, [fetchUsersData]);
 
-  return { users, loading, error, refetch: fetchUsers };
+  return { users, loading, error, requiresAuth, refetch: fetchUsersData };
 }
 
 // Custom hook for fetching user groups
-function useUserGroups() {
+function useUserGroups(systemId?: string) {
   const [groups, setGroups] = useState<NxUserGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchGroups = useCallback(async () => {
+  const fetchGroupsData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const data = await nxAPI.getUserGroups();
-      setGroups(Array.isArray(data) ? data : []);
+      if (!systemId) {
+        setGroups([]);
+        setLoading(false);
+        return;
+      }
+
+      const { groups: data, error: err } = await fetchUserGroups(systemId);
+      if (err) {
+        setError(err);
+        setGroups([]);
+      } else {
+        setGroups(data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch user groups");
       setGroups([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [systemId]);
 
   useEffect(() => {
-    fetchGroups();
-  }, [fetchGroups]);
+    fetchGroupsData();
+  }, [fetchGroupsData]);
 
-  return { groups, loading, error, refetch: fetchGroups };
+  return { groups, loading, error, refetch: fetchGroupsData };
 }
 
 export default function UserManagement() {
-  const { users, loading: usersLoading, error: usersError, refetch: refetchUsers } = useUsers();
-  const { groups, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useUserGroups();
+  const [selectedSystemId, setSelectedSystemId] = useState<string>("");
+  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
+  const [loadingCloud, setLoadingCloud] = useState(false);
+
+  // Cloud login state
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [loginSystemId, setLoginSystemId] = useState("");
+  const [loginSystemName, setLoginSystemName] = useState("");
+
+  const systemId = selectedSystemId;
+
+  const { users, loading: usersLoading, error: usersError, requiresAuth, refetch: refetchUsers } = useUsers(systemId);
+  const { groups, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useUserGroups(systemId);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
+  const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
+
+  // Fetch cloud systems
+  const fetchCloudSystems = useCallback(async () => {
+    setLoadingCloud(true);
+    try {
+      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: getCloudAuthHeader(),
+        },
+      });
+
+      if (!response.ok) {
+        setCloudSystems([]);
+        return;
+      }
+
+      const data = await response.json();
+      const systems: CloudSystem[] = (data.systems || []).map((s: CloudSystem) => ({
+        ...s,
+        isOnline: s.stateOfHealth === "online",
+      }));
+
+      // Sort: owner first, then online systems
+      systems.sort((a, b) => {
+        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
+        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
+        if (a.isOnline && !b.isOnline) return -1;
+        if (!a.isOnline && b.isOnline) return 1;
+        return 0;
+      });
+
+      setCloudSystems(systems);
+    } catch (err) {
+      console.error("Error fetching cloud systems:", err);
+      setCloudSystems([]);
+    } finally {
+      setLoadingCloud(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCloudSystems();
+  }, [fetchCloudSystems]);
+
+  // Auto-select first online system if none selected
+  useEffect(() => {
+    if (!selectedSystemId && cloudSystems.length > 0) {
+      const onlineSystem = cloudSystems.find(s => s.isOnline) || cloudSystems[0];
+      setSelectedSystemId(onlineSystem.id);
+    }
+  }, [selectedSystemId, cloudSystems]);
+
+  // Handle system change
+  const handleSystemChange = (value: string) => {
+    setSelectedSystemId(value);
+  };
+
+  // Auto-login function for cloud systems
+  const attemptAutoLogin = useCallback(
+    async (targetSystemId: string, systemName: string): Promise<boolean> => {
+      // Check if auto-login is enabled and credentials are configured
+      if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
+        console.log("[User Cloud Auto-Login] Disabled or credentials not configured");
+        return false;
+      }
+
+      // Check if we already attempted auto-login for this system
+      if (autoLoginAttempted.has(targetSystemId)) {
+        console.log(`[User Cloud Auto-Login] Already attempted for ${systemName}`);
+        return false;
+      }
+
+      console.log(`[User Cloud Auto-Login] Attempting login to ${systemName}...`);
+
+      try {
+        const response = await fetch("/api/cloud/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            systemId: targetSystemId,
+            username: CLOUD_CONFIG.username,
+            password: CLOUD_CONFIG.password,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          console.error(`[User Cloud Auto-Login] Failed for ${systemName}:`, data.error);
+          setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
+          return false;
+        }
+
+        console.log(`[User Cloud Auto-Login] Success for ${systemName}`);
+        setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
+        setIsLoggedIn((prev) => new Set(prev).add(targetSystemId));
+
+        // After successful login, we need to refetch users and groups
+        await Promise.all([refetchUsers(), refetchGroups()]);
+        return true;
+      } catch (err) {
+        console.error(`[User Cloud Auto-Login] Error for ${systemName}:`, err);
+        setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
+        return false;
+      }
+    },
+    [autoLoginAttempted, refetchUsers, refetchGroups],
+  );
+
+  // Sync requiresAuth with login dialog or auto-login
+  useEffect(() => {
+    const handleAuth = async () => {
+      if (requiresAuth && systemId) {
+        const system = cloudSystems.find(s => s.id === systemId);
+        const systemName = system?.name || systemId;
+
+        // Try auto-login first
+        if (CLOUD_CONFIG.autoLoginEnabled && !autoLoginAttempted.has(systemId)) {
+          console.log(`[UserManagement] Auth required for ${systemName}, attempting auto-login...`);
+          const success = await attemptAutoLogin(systemId, systemName);
+          if (success) return; // Auto-login succeeded, useEffect will re-run after refetch
+        }
+
+        // Auto-login failed or not available, show dialog
+        setLoginSystemId(systemId);
+        setLoginSystemName(systemName);
+        setShowLoginDialog(true);
+      }
+    };
+
+    handleAuth();
+  }, [requiresAuth, systemId, cloudSystems, autoLoginAttempted, attemptAutoLogin]);
 
   // Dialog states
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -254,7 +431,7 @@ export default function UserManagement() {
       case "ldap":
         return <Shield className="h-4 w-4" />;
       case "cloud":
-        return <Cloud className="h-4 w-4" />;
+        return <Users className="h-4 w-4" />;
       default:
         return <User className="h-4 w-4" />;
     }
@@ -263,15 +440,15 @@ export default function UserManagement() {
   // Get user type badge variant
   const getUserTypeBadge = (type: NxUser["type"]) => {
     const config = {
-      local: { label: "Local", className: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300" },
+      local: { label: "Local", className: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 transition-all" },
       temporaryLocal: {
         label: "Temporary",
-        className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
+        className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 transition-all",
       },
-      ldap: { label: "LDAP", className: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300" },
-      cloud: { label: "Cloud", className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300" },
+      ldap: { label: "LDAP", className: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 transition-all" },
+      cloud: { label: "Cloud", className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 transition-all" },
     };
-    return config[type] || { label: type, className: "bg-gray-100 text-gray-800" };
+    return config[type] || { label: type, className: "bg-gray-100 text-gray-800 transition-all" };
   };
 
   // Count users by type
@@ -408,7 +585,10 @@ export default function UserManagement() {
         }
       }
 
-      const data = await nxAPI.createUser(body);
+      const result = await serviceCreateUser(body, systemId);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
 
       setShowCreateDialog(false);
       resetForm();
@@ -455,7 +635,10 @@ export default function UserManagement() {
         }
       }
 
-      await nxAPI.updateUser(selectedUser.id, body);
+      const result = await serviceUpdateUser(selectedUser.id, body, systemId);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
 
       setShowEditDialog(false);
       setSelectedUser(null);
@@ -476,7 +659,10 @@ export default function UserManagement() {
 
     setIsSubmitting(true);
     try {
-      await nxAPI.deleteUser(selectedUser.id);
+      const result = await serviceDeleteUser(selectedUser.id, systemId);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
 
       setShowDeleteDialog(false);
       setSelectedUser(null);
@@ -854,6 +1040,28 @@ export default function UserManagement() {
             <Users className="h-5 w-5 sm:h-6 sm:w-6" />
             User Management
           </h1>
+          <div className="flex items-center gap-2 mt-2">
+            <Select
+              value={selectedSystemId}
+              onValueChange={setSelectedSystemId}
+              disabled={loadingCloud}
+            >
+              <SelectTrigger className="w-[180px] sm:w-[250px] bg-white text-gray-900 border-gray-200 h-9">
+                <SelectValue placeholder="Select system" />
+              </SelectTrigger>
+              <SelectContent>
+                {cloudSystems.map((sys) => (
+                  <SelectItem key={sys.id} value={sys.id}>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${sys.isOnline ? "bg-green-500" : "bg-red-500"}`} />
+                      <span className="truncate">{sys.name}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {loadingCloud && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
+          </div>
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">
             Manage VMS users and their access permissions
           </p>
@@ -888,7 +1096,7 @@ export default function UserManagement() {
         <Card>
           <CardHeader className="p-3 sm:p-4 pb-2">
             <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-              <Server className="h-3 w-3" /> Local
+              <User className="h-3 w-3" /> Basic
             </CardDescription>
             <CardTitle className="text-xl sm:text-2xl text-blue-600">{userStats.local}</CardTitle>
           </CardHeader>
@@ -912,7 +1120,7 @@ export default function UserManagement() {
         <Card className="col-span-2 sm:col-span-1">
           <CardHeader className="p-3 sm:p-4 pb-2">
             <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-              <Cloud className="h-3 w-3" /> Cloud
+              Cloud
             </CardDescription>
             <CardTitle className="text-xl sm:text-2xl text-green-600">{userStats.cloud}</CardTitle>
           </CardHeader>
@@ -920,20 +1128,21 @@ export default function UserManagement() {
       </div>
 
       {/* Search and Filter */}
-      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
-        <div className="relative flex-1">
+      <div className="flex flex-col md:flex-row gap-2 sm:gap-4 items-center">
+        <div className="relative flex-1 w-full">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search by name or email..."
+            placeholder="Search users..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="flex items-center gap-2 w-full sm:w-auto justify-center" size="sm">
+            <Button variant="outline" className="flex items-center gap-2 w-full md:w-auto justify-center" size="sm">
               <Filter className="h-4 w-4" />
               {filterType === "all" ? "All Types" : getUserTypeBadge(filterType as NxUser["type"]).label}
               <ChevronDown className="h-4 w-4" />
@@ -1044,15 +1253,15 @@ export default function UserManagement() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge className={`${typeBadge.className} text-[10px] sm:text-xs`}>{typeBadge.label}</Badge>
+                            <Badge variant="outline" className={`${typeBadge.className} text-[10px] sm:text-xs`}>{typeBadge.label}</Badge>
                           </TableCell>
                           <TableCell className="hidden sm:table-cell">
                             {user.isEnabled !== false ? (
-                              <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs">
+                              <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all">
                                 Enabled
                               </Badge>
                             ) : (
-                              <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs">
+                              <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all">
                                 Disabled
                               </Badge>
                             )}
@@ -1242,6 +1451,15 @@ export default function UserManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Cloud Login Dialog */}
+      <CloudLoginDialog
+        open={showLoginDialog}
+        onOpenChange={setShowLoginDialog}
+        systemId={loginSystemId}
+        systemName={loginSystemName}
+        onLoginSuccess={refetchUsers}
+      />
     </div>
   );
 }

@@ -3,11 +3,7 @@
 import { useState, useEffect } from "react";
 import { Network, AlertCircle, CheckCircle, Clock } from "lucide-react";
 
-interface ConnectionStatusWidgetProps {
-  className?: string;
-}
-
-export default function ConnectionStatusWidget({ className = "" }: ConnectionStatusWidgetProps) {
+export default function ConnectionStatusWidget({ className = "", systemId }: { className?: string; systemId?: string }) {
   const [status, setStatus] = useState<"checking" | "connected" | "disconnected">("checking");
   const [error, setError] = useState<string | null>(null);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
@@ -18,6 +14,9 @@ export default function ConnectionStatusWidget({ className = "" }: ConnectionSta
       setError(null);
 
       const { nxAPI } = await import("@/lib/nxapi");
+      if (systemId) {
+        nxAPI.setSystemId(systemId);
+      }
       const isConnected = await nxAPI.testConnection();
 
       if (isConnected) {
@@ -111,7 +110,7 @@ export default function ConnectionStatusWidget({ className = "" }: ConnectionSta
         {lastChecked && <div className="text-[10px] text-gray-500">Last checked: {lastChecked}</div>}
 
         <div className="text-[10px] text-gray-600 pt-2 border-t border-gray-100">
-          <div className="truncate">Endpoint: https://localhost:7001/rest/v3</div>
+          <div className="truncate">Endpoint: {systemId ? `Cloud Relay (${systemId.substring(0, 8)})` : 'Local API'}</div>
           <div>Status: {status === "connected" ? "Live data active" : "No connection"}</div>
         </div>
 

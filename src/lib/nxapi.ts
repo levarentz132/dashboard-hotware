@@ -92,6 +92,7 @@ export interface NxSystemInfo {
 
 class NxWitnessAPI {
   private baseURL: string;
+  private systemId: string | null = null;
   private authToken: string | null = null;
   private cache: Map<string, { data: any; timestamp: number }> = new Map();
   private pendingRequests: Map<string, Promise<any>> = new Map();
@@ -101,26 +102,26 @@ class NxWitnessAPI {
     this.baseURL = API_CONFIG.baseURL;
   }
 
+  setSystemId(id: string | null) {
+    this.systemId = id;
+    // Clear cache when switching systems
+    this.cache.clear();
+  }
+
+  getSystemId(): string | null {
+    return this.systemId;
+  }
+
   // Authentication - Nx Witness REST API v3
   async login(username: string, password: string): Promise<boolean> {
     try {
-      // Check if server is available first
-      const isAvailable = await this.isApiAvailable();
-      if (!isAvailable) {
-        return false;
-      }
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(new Error("Login timeout after 8 seconds")), 8000);
-
-      // Nx Witness REST API v3 login format
       const loginBody = {
         username: username,
         password: password,
         setCookie: true,
       };
 
-      const response = await fetch(`${this.baseURL}${API_ENDPOINTS.login}`, {
+      const response = await fetch(`${this.baseURL}${API_ENDPOINTS.login}${this.systemId ? `?systemId=${this.systemId}` : ""}`, {
         method: "POST",
         mode: "cors",
         credentials: "include",
@@ -129,15 +130,9 @@ class NxWitnessAPI {
           Accept: "application/json",
         },
         body: JSON.stringify(loginBody),
-        signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
       if (response.ok) {
-        // Nx Witness sets session cookie automatically
-        // No need to handle tokens manually
-        // Login successful
         return true;
       } else {
         console.error("[nxAPI] Login failed:", response.status, response.statusText);
@@ -158,27 +153,27 @@ class NxWitnessAPI {
   }
 
   // Check if Nx Witness API is available
-  private async isApiAvailable(): Promise<boolean> {
+  async testConnection(): Promise<boolean> {
+    if (!this.systemId) {
+      console.warn("[nxAPI] Cannot test connection without a systemId");
+      return false;
+    }
+
     try {
       const controller = new AbortController();
       setTimeout(() => controller.abort(new Error("API availability check timeout")), 5000);
 
-      // Test system info endpoint through proxy
-      const response = await fetch(`${this.baseURL}/system/info`, {
+      const url = new URL(`${window.location.origin}${this.baseURL}/system/info`);
+      url.searchParams.set("systemId", this.systemId);
+
+      const response = await fetch(url.toString(), {
         method: "GET",
         credentials: "include",
         signal: controller.signal,
         headers: this.getHeaders(),
       });
 
-      // Accept any non-server-error response (including 401 Unauthorized which is expected)
-      if (response.status < 500 || response.status === 401 || response.status === 403) {
-        // Server available
-        return true;
-      }
-
-      console.warn("[nxAPI] Server returned error status:", response.status);
-      return false;
+      return response.status < 500 || response.status === 401 || response.status === 403;
     } catch (error) {
       console.error("[nxAPI] Server availability check failed:", error);
       return false;
@@ -187,7 +182,7 @@ class NxWitnessAPI {
 
   // Generic API request with deduplication and caching
   private async apiRequest<T>(endpoint: string, options: RequestInit & { skipCache?: boolean } = {}): Promise<T> {
-    const cacheKey = `${options.method || "GET"}:${endpoint}`;
+    const cacheKey = `${options.method || "GET"}:${endpoint}:${this.systemId}`;
     const { skipCache = false, ...fetchOptions } = options;
 
     // 1. Check Cache (only for GET requests)
@@ -198,13 +193,32 @@ class NxWitnessAPI {
       }
     }
 
-    // 2. Check Pending Requests (Deduplication)
+    // 2. Check for missing systemId (Cloud-only requirement)
+    if (!this.systemId) {
+      console.warn(`[nxAPI] Request to ${endpoint} blocked: System ID is required.`);
+      return Promise.reject(new Error("SYSTEM_ID_REQUIRED"));
+    }
+
+    // 3. Check Pending Requests (Deduplication)
     if (this.pendingRequests.has(cacheKey)) {
       return this.pendingRequests.get(cacheKey);
     }
 
     const requestPromise = (async () => {
-      const url = `${this.baseURL}${endpoint}`;
+      // Build URL with systemId
+      const url = new URL(`${window.location.origin}${this.baseURL}${endpoint}`);
+      if (this.systemId) {
+        url.searchParams.set("systemId", this.systemId);
+      }
+
+      // Merge existing search params from endpoint if any
+      if (endpoint.includes("?")) {
+        const [path, query] = endpoint.split("?");
+        const params = new URLSearchParams(query);
+        params.forEach((value, key) => url.searchParams.set(key, value));
+        url.pathname = `${this.baseURL}${path}`;
+      }
+
       const config: RequestInit = {
         credentials: "include",
         ...fetchOptions,
@@ -215,33 +229,12 @@ class NxWitnessAPI {
       };
 
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(new Error("Request timeout after 10 seconds")), 10000);
-
-        const response = await fetch(url, {
-          ...config,
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
+        const response = await fetch(url.toString(), config);
 
         if (!response.ok) {
           const errorText = await response.text();
           console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
-
-          let errorMessage = errorText;
-          try {
-            const errorObj = JSON.parse(errorText);
-            if (errorObj.errorString) {
-              errorMessage = errorObj.errorString;
-            } else if (errorObj.message) {
-              errorMessage = errorObj.message;
-            }
-          } catch (e) {
-            // Not JSON or missing expected fields
-          }
-
-          throw new Error(`HTTP_${response.status}: ${errorMessage}`);
+          throw new Error(`HTTP_${response.status}: ${errorText}`);
         }
 
         if (response.status === 204 || response.headers.get("content-length") === "0") {
@@ -274,6 +267,7 @@ class NxWitnessAPI {
     this.pendingRequests.set(cacheKey, requestPromise);
     return requestPromise;
   }
+
 
   // Camera methods
   async getCameras(): Promise<NxCamera[]> {
@@ -900,7 +894,7 @@ class NxWitnessAPI {
   }
 
   // Test connection with automatic login
-  async testConnection(): Promise<boolean> {
+  async authenticate(): Promise<boolean> {
     try {
       // Try to get system info (which may work with session cookie)
       try {
@@ -908,28 +902,22 @@ class NxWitnessAPI {
         if (info) {
           return true; // We have a valid session
         }
-      } catch (error) {
+      } catch {
         // Session might be expired, try to login
       }
 
-      // Check if server is available
-      const isAvailable = await this.isApiAvailable();
-      if (!isAvailable) {
-        return false;
-      }
-
-      // Try to authenticate
+      // Try to authenticate with config credentials
       if (API_CONFIG.username && API_CONFIG.password) {
-        const loginSuccess = await this.login(API_CONFIG.username!, API_CONFIG.password!);
-        return loginSuccess;
+        return await this.login(API_CONFIG.username!, API_CONFIG.password!);
       }
 
-      return isAvailable;
+      return false;
     } catch (error) {
       return false;
     }
   }
 }
+
 
 // Create singleton instance
 export const nxAPI = new NxWitnessAPI();

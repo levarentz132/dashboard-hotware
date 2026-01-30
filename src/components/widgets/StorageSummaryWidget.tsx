@@ -27,61 +27,46 @@ interface CloudSystem {
   stateOfHealth: string;
 }
 
-export default function StorageSummaryWidget() {
+export default function StorageSummaryWidget({ systemId }: { systemId?: string }) {
   const [storages, setStorages] = useState<Storage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [showLoginForm, setShowLoginForm] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
 
-  // Fetch cloud systems and auto-select first online (same logic as StorageManagement)
-  const fetchCloudSystems = useCallback(async () => {
-    setLoading(true);
+  // Manual login handler
+  const handleLogin = async () => {
+    if (!systemId || !loginForm.username || !loginForm.password) return;
+
+    setLoggingIn(true);
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
-        },
+      const response = await fetch("/api/cloud/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemId: systemId,
+          username: loginForm.username,
+          password: loginForm.password,
+        }),
       });
 
-      if (!response.ok) {
-        setError("Failed to connect to cloud");
-        return;
-      }
-
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
-
-      // Sort: owner first, then online systems (same as StorageManagement)
-      systems.sort((a, b) => {
-        if ((a as any).accessRole === "owner" && (b as any).accessRole !== "owner") return -1;
-        if ((a as any).accessRole !== "owner" && (b as any).accessRole === "owner") return 1;
-        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-        return 0;
-      });
-
-      const firstOnline = systems.find((s) => s.stateOfHealth === "online");
-      if (firstOnline) {
-        setSelectedSystem(firstOnline);
+      if (response.ok) {
+        setRequiresAuth(false);
+        setShowLoginForm(false);
+        setLoginForm({ username: "", password: "" });
+        fetchStorages(systemId);
       } else {
-        setError("No online system found");
-        setLoading(false);
+        setError("Login failed");
       }
-    } catch (err) {
-      console.error("Error fetching cloud systems:", err);
-      setError("Failed to connect to cloud");
-      setLoading(false);
+    } catch {
+      setError("Login failed");
+    } finally {
+      setLoggingIn(false);
     }
-  }, []);
+  };
 
   // Auto-login function - always try with config credentials
   const attemptAutoLogin = useCallback(async (systemId: string) => {
@@ -107,55 +92,21 @@ export default function StorageSummaryWidget() {
     }
   }, []);
 
-  // Manual login handler
-  const handleLogin = async () => {
-    if (!selectedSystem || !loginForm.username || !loginForm.password) return;
-
-    setLoggingIn(true);
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId: selectedSystem.id,
-          username: loginForm.username,
-          password: loginForm.password,
-        }),
-      });
-
-      if (response.ok) {
-        setRequiresAuth(false);
-        setShowLoginForm(false);
-        setLoginForm({ username: "", password: "" });
-        fetchStorages(selectedSystem);
-      } else {
-        setError("Login failed");
-      }
-    } catch {
-      setError("Login failed");
-    } finally {
-      setLoggingIn(false);
-    }
-  };
-
   // Fetch storages
   const fetchStorages = useCallback(
-    async (system: CloudSystem) => {
-      if (!system || system.stateOfHealth !== "online") return;
-
+    async (targetSystemId: string) => {
       setLoading(true);
       setError(null);
 
       try {
-        // Langsung fetch, session sudah ada di cookie dari login sebelumnya
-        const response = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`);
+        const response = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(targetSystemId)}`);
 
         if (response.status === 401) {
           // Session belum ada, coba auto-login dulu
-          const autoLoginSuccess = await attemptAutoLogin(system.id);
+          const autoLoginSuccess = await attemptAutoLogin(targetSystemId);
           if (autoLoginSuccess) {
             // Retry fetch after successful login
-            const retryResponse = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`);
+            const retryResponse = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(targetSystemId)}`);
             if (retryResponse.ok) {
               const data = await retryResponse.json();
               setStorages(Array.isArray(data) ? data : []);
@@ -188,17 +139,15 @@ export default function StorageSummaryWidget() {
     [attemptAutoLogin],
   );
 
-  // Initial load
-  useEffect(() => {
-    fetchCloudSystems();
-  }, [fetchCloudSystems]);
-
   // Fetch storages when system changes
   useEffect(() => {
-    if (selectedSystem) {
-      fetchStorages(selectedSystem);
+    if (systemId) {
+      fetchStorages(systemId);
+    } else {
+      setLoading(false);
+      setStorages([]);
     }
-  }, [selectedSystem, fetchStorages]);
+  }, [systemId, fetchStorages]);
 
   // Format bytes to human readable
   const formatBytes = (bytes: string | number): string => {
@@ -238,10 +187,8 @@ export default function StorageSummaryWidget() {
   const usagePercentage = totalStorage > 0 ? Math.round((totalUsed / totalStorage) * 100) : 0;
 
   const handleRefresh = () => {
-    if (selectedSystem) {
-      fetchStorages(selectedSystem);
-    } else {
-      fetchCloudSystems();
+    if (systemId) {
+      fetchStorages(systemId);
     }
   };
 

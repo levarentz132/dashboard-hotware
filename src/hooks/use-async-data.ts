@@ -62,7 +62,9 @@ export function useAsyncData<T>(
       setData(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch data";
-      setError(message);
+      if (message !== "SYSTEM_ID_REQUIRED") {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }

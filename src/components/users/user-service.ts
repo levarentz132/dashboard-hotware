@@ -11,9 +11,10 @@ import type { NxUser, NxUserGroup, UserFormData, TimeUnit } from "./types";
 /**
  * Fetch all users from NX API
  */
-export async function fetchUsers(): Promise<{ users: NxUser[]; error?: string }> {
+export async function fetchUsers(systemId?: string): Promise<{ users: NxUser[]; error?: string; requiresAuth?: boolean }> {
   try {
-    const response = await fetch("/api/nx/users", {
+    const url = systemId ? `/api/nx/users?systemId=${encodeURIComponent(systemId)}` : "/api/nx/users";
+    const response = await fetch(url, {
       method: "GET",
       credentials: "include",
       headers: {
@@ -23,6 +24,10 @@ export async function fetchUsers(): Promise<{ users: NxUser[]; error?: string }>
     });
 
     if (!response.ok) {
+      const data = await response.json();
+      if (response.status === 401 || data.requiresAuth) {
+        return { users: [], error: "Authentication required", requiresAuth: true };
+      }
       return {
         users: [],
         error: `Failed to fetch users: ${response.status} ${response.statusText}`,
@@ -42,9 +47,10 @@ export async function fetchUsers(): Promise<{ users: NxUser[]; error?: string }>
 /**
  * Fetch all user groups from NX API
  */
-export async function fetchUserGroups(): Promise<{ groups: NxUserGroup[]; error?: string }> {
+export async function fetchUserGroups(systemId?: string): Promise<{ groups: NxUserGroup[]; error?: string }> {
   try {
-    const response = await fetch("/api/nx/userGroups", {
+    const url = systemId ? `/api/nx/userGroups?systemId=${encodeURIComponent(systemId)}` : "/api/nx/userGroups";
+    const response = await fetch(url, {
       method: "GET",
       credentials: "include",
       headers: {
@@ -73,9 +79,10 @@ export async function fetchUserGroups(): Promise<{ groups: NxUserGroup[]; error?
 /**
  * Create a new user
  */
-export async function createUser(formData: UserFormData): Promise<{ success: boolean; error?: string }> {
+export async function createUser(formData: UserFormData, systemId?: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch("/api/nx/users", {
+    const url = systemId ? `/api/nx/users?systemId=${encodeURIComponent(systemId)}` : "/api/nx/users";
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(formData),
@@ -100,10 +107,14 @@ export async function createUser(formData: UserFormData): Promise<{ success: boo
  */
 export async function updateUser(
   userId: string,
-  formData: Partial<UserFormData>
+  formData: Partial<UserFormData>,
+  systemId?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(`/api/nx/users/${userId}`, {
+    const url = systemId
+      ? `/api/nx/users/${userId}?systemId=${encodeURIComponent(systemId)}`
+      : `/api/nx/users/${userId}`;
+    const response = await fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(formData),
@@ -126,9 +137,12 @@ export async function updateUser(
 /**
  * Delete a user
  */
-export async function deleteUser(userId: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteUser(userId: string, systemId?: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(`/api/nx/users/${userId}`, {
+    const url = systemId
+      ? `/api/nx/users/${userId}?systemId=${encodeURIComponent(systemId)}`
+      : `/api/nx/users/${userId}`;
+    const response = await fetch(url, {
       method: "DELETE",
     });
 

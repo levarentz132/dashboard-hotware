@@ -23,14 +23,15 @@ import {
   EyeOff,
   X,
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { fetchCloudSystems as getCachedCloudSystems } from "@/hooks/use-async-data";
-import { nxAPI } from "@/lib/nxapi";
+import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import {
   Dialog,
   DialogContent,
@@ -45,40 +46,6 @@ interface CloudSystem {
   stateOfHealth: string;
   accessRole: string;
   version?: string;
-}
-
-interface CloudCamera {
-  id: string;
-  name: string;
-  physicalId?: string;
-  url?: string;
-  typeId?: string;
-  mac?: string;
-  serverId?: string;
-  vendor?: string;
-  model?: string;
-  logicalId?: string;
-  status?: string;
-  systemId: string;
-  systemName: string;
-}
-
-interface CamerasBySystem {
-  systemId: string;
-  systemName: string;
-  stateOfHealth: string;
-  accessRole: string;
-  cameras: CloudCamera[];
-  expanded: boolean;
-}
-
-interface SystemCredentials {
-  [systemId: string]: {
-    username: string;
-    password: string;
-    token?: string;
-    loggedIn: boolean;
-  };
 }
 
 interface CameraDevice {
@@ -137,9 +104,17 @@ interface CameraLocationCache {
   } | null;
 }
 
+interface CamerasBySystem {
+  systemId: string;
+  systemName: string;
+  cameras: CameraDevice[];
+  stateOfHealth: string;
+}
+
 export default function CameraInventory() {
   const [viewMode, setViewMode] = useState<"grid" | "list" | "cloud">("cloud");
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedSystemId, setSelectedSystemId] = useState<string>("");
 
   // Filter state
   const [showFilters, setShowFilters] = useState(false);
@@ -149,25 +124,45 @@ export default function CameraInventory() {
   const [filterDistrict, setFilterDistrict] = useState<string>("all");
   const [filterVillage, setFilterVillage] = useState<string>("all");
 
+  const systemId = selectedSystemId;
+
   // API hooks
-  const { cameras, loading, error, refetch } = useCameras();
-  const { connected, testConnection } = useSystemInfo();
-  const { servers } = useServers();
-  const { deviceType } = useDeviceType();
+  const { cameras, loading: loadingCameras, error: camerasError, refetch } = useCameras(systemId);
+  const { connected, testConnection } = useSystemInfo(systemId);
+  const { servers, loading: loadingServers, error: serversError } = useServers(systemId);
+  const { deviceType } = useDeviceType(systemId);
 
-  // Cloud cameras state
+  const loading = loadingCameras || loadingServers;
+  const error = camerasError || serversError;
+
+  // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
-  const [camerasBySystem, setCamerasBySystem] = useState<CamerasBySystem[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(false);
+  const [camerasBySystem, setCamerasBySystem] = useState<CamerasBySystem[]>([]);
   const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
-  const [selectedCloudSystemId, setSelectedCloudSystemId] = useState<string>("");
 
-  // System login state
-  const [systemCredentials, setSystemCredentials] = useState<SystemCredentials>({});
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [showPassword, setShowPassword] = useState(false);
-  const [loggingIn, setLoggingIn] = useState<string | null>(null);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  const isLoadingContent = loading || (viewMode === "cloud" && loadingCloud);
+
+
+  // Set default system
+  useEffect(() => {
+    const getSystems = async () => {
+      try {
+        setLoadingCloud(true);
+        const systems = await getCachedCloudSystems();
+        setCloudSystems(systems);
+        if (systems.length > 0 && !selectedSystemId) {
+          const onlineSystem = systems.find(s => s.stateOfHealth === "online") || systems[0];
+          setSelectedSystemId(onlineSystem.id);
+        }
+      } catch (err) {
+        console.error("Error fetching systems:", err);
+      } finally {
+        setLoadingCloud(false);
+      }
+    };
+    getSystems();
+  }, [selectedSystemId]);
 
   // Location state
   const [provinces, setProvinces] = useState<Province[]>([]);
@@ -298,7 +293,7 @@ export default function CameraInventory() {
     [cameraLocations],
   );
 
-  // Fetch available systems once
+  // Fetch available systems once and set default
   useEffect(() => {
     const getSystems = async () => {
       try {
@@ -306,16 +301,11 @@ export default function CameraInventory() {
         const systems = await getCachedCloudSystems();
         setCloudSystems(systems);
 
-        // Pre-initialize cameras group
-        const initialGroups: CamerasBySystem[] = systems.map((sys) => ({
-          systemId: sys.id,
-          systemName: sys.name,
-          stateOfHealth: sys.stateOfHealth,
-          accessRole: sys.accessRole,
-          cameras: [],
-          expanded: false,
-        }));
-        setCamerasBySystem(initialGroups);
+        // Default to first online system if available
+        if (systems.length > 0 && !selectedSystemId) {
+          const onlineSystem = systems.find(s => s.stateOfHealth === "online") || systems[0];
+          setSelectedSystemId(onlineSystem.id);
+        }
       } catch (err) {
         console.error("Error fetching systems:", err);
       } finally {
@@ -324,29 +314,15 @@ export default function CameraInventory() {
     };
 
     getSystems();
-  }, []);
-
-  // Fetch cloud systems
-  // Fetch cloud systems (now using cached version)
-  const fetchCloudSystems = useCallback(async () => {
-    try {
-      const systems = await getCachedCloudSystems();
-      setCloudSystems(systems);
-      return systems;
-    } catch (err) {
-      console.error("Error fetching cloud systems:", err);
-      return [];
-    }
-  }, []);
+  }, [selectedSystemId]);
 
   // Fetch cameras from a specific cloud system
-  const fetchCloudCameras = useCallback(async (system: CloudSystem): Promise<CloudCamera[]> => {
+  const fetchCloudCameras = useCallback(async (system: CloudSystem): Promise<CameraDevice[]> => {
     if (system.stateOfHealth !== "online") return [];
 
     try {
-      // Use local API proxy to avoid CORS and handle auth
       const response = await fetch(
-        `/api/cloud/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
+        `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
         {
           method: "GET",
           credentials: "include",
@@ -356,34 +332,13 @@ export default function CameraInventory() {
         },
       );
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error(`Failed to fetch cameras from ${system.name}:`, errorData);
-        return [];
-      }
+      if (!response.ok) return [];
 
       const devices = await response.json();
       const cameraDevices = Array.isArray(devices) ? devices : [];
 
-      // Debug: Log the first device to see what fields are available
-      if (cameraDevices.length > 0) {
-        console.log(`[Camera Inventory] Sample device from ${system.name}:`, cameraDevices[0]);
-        console.log(`[Camera Inventory] Available fields:`, Object.keys(cameraDevices[0]));
-      }
-
-      return cameraDevices.map((device: Record<string, unknown>) => ({
+      return cameraDevices.map((device: any) => ({
         ...device,
-        id: device.id as string,
-        name: device.name as string,
-        physicalId: device.physicalId as string,
-        url: device.url as string,
-        typeId: device.typeId as string,
-        mac: device.mac as string,
-        serverId: device.serverId as string,
-        vendor: device.vendor as string,
-        model: device.model as string,
-        logicalId: device.logicalId as string,
-        status: device.status as string,
         systemId: system.id,
         systemName: system.name,
       }));
@@ -393,45 +348,40 @@ export default function CameraInventory() {
     }
   }, []);
 
-  // Fetch all cloud cameras
   const fetchAllCloudCameras = useCallback(async () => {
-    setLoadingCloud(true);
-    const systems = await fetchCloudSystems();
+    try {
+      setLoadingCloud(true);
+      const systems = await getCachedCloudSystems();
+      setCloudSystems(systems);
 
-    // Only fetch from systems where user has owner access (to avoid auth dialogs)
-    // Other systems will show "Requires authentication" message
-    const camerasData: CamerasBySystem[] = await Promise.all(
-      systems.map(async (system) => {
-        // Try to fetch cameras - proxy will handle auth errors gracefully
+      const cloudPromises = systems.map(async (system) => {
         const cameras = await fetchCloudCameras(system);
         return {
           systemId: system.id,
           systemName: system.name,
-          stateOfHealth: system.stateOfHealth,
-          accessRole: system.accessRole,
           cameras,
-          expanded: true,
+          stateOfHealth: system.stateOfHealth,
         };
-      }),
-    );
+      });
 
-    setCamerasBySystem(camerasData);
-    // Expand all systems by default
-    setExpandedSystems(new Set(systems.map((s) => s.id)));
-    setLoadingCloud(false);
+      const results = await Promise.all(cloudPromises);
+      setCamerasBySystem(results);
 
-    // Auto-select first online system
-    const firstOnlineSystem = systems.find((s) => s.stateOfHealth === "online");
-    if (firstOnlineSystem && !selectedCloudSystemId) {
-      setSelectedCloudSystemId(firstOnlineSystem.id);
+      // Auto-expand the first system if nothing is expanded yet
+      if (results.length > 0) {
+        setExpandedSystems((prev) => {
+          if (prev.size === 0) {
+            return new Set([results[0].systemId]);
+          }
+          return prev;
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching all cloud cameras:", err);
+    } finally {
+      setLoadingCloud(false);
     }
-
-    // Fetch locations for all cameras
-    const allCameraNames = camerasData.flatMap((s) => s.cameras.map((c) => c.name));
-    if (allCameraNames.length > 0) {
-      fetchCameraLocations(allCameraNames);
-    }
-  }, [fetchCloudSystems, fetchCloudCameras, fetchCameraLocations, selectedCloudSystemId]);
+  }, [fetchCloudCameras]);
 
   // Toggle system expansion
   const toggleSystemExpansion = (systemId: string) => {
@@ -446,164 +396,14 @@ export default function CameraInventory() {
     });
   };
 
-  // Login to a specific cloud system
-  const handleSystemLogin = async (systemId: string, systemName: string) => {
-    if (!loginForm.username || !loginForm.password) {
-      setLoginError("Username and password are required");
-      return;
-    }
-
-    setLoggingIn(systemId);
-    setLoginError(null);
-
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          systemId,
-          username: loginForm.username,
-          password: loginForm.password,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setLoginError(data.error || "Login failed");
-        return;
-      }
-
-      // Store credentials in state
-      setSystemCredentials((prev) => {
-        const newCreds = {
-          ...prev,
-          [systemId]: {
-            username: loginForm.username,
-            password: loginForm.password,
-            token: data.token,
-            loggedIn: true,
-          },
-        };
-        // Save to localStorage for session persistence
-        try {
-          localStorage.setItem("nxSystemCredentials", JSON.stringify(newCreds));
-        } catch (err) {
-          console.error("Error saving credentials to localStorage:", err);
-        }
-        return newCreds;
-      });
-
-      // Reset form
-      setLoginForm({ username: "", password: "" });
-      setShowPassword(false);
-
-      // Refresh cameras for this system
-      const system = camerasBySystem.find((s) => s.systemId === systemId);
-      if (system) {
-        const cameras = await fetchCloudCameras({
-          id: systemId,
-          name: systemName,
-          stateOfHealth: system.stateOfHealth,
-          accessRole: system.accessRole,
-        });
-
-        setCamerasBySystem((prev) => prev.map((s) => (s.systemId === systemId ? { ...s, cameras } : s)));
-      }
-    } catch (err) {
-      console.error(`Login error for ${systemName}:`, err);
-      setLoginError("Connection error. Please try again.");
-    } finally {
-      setLoggingIn(null);
-    }
-  };
-
-  // Logout from a specific cloud system
-  const handleSystemLogout = async (systemId: string) => {
-    try {
-      await fetch(`/api/cloud/login?systemId=${systemId}`, {
-        method: "DELETE",
-      });
-
-      setSystemCredentials((prev) => {
-        const newCreds = { ...prev };
-        delete newCreds[systemId];
-        // Update localStorage
-        try {
-          if (Object.keys(newCreds).length > 0) {
-            localStorage.setItem("nxSystemCredentials", JSON.stringify(newCreds));
-          } else {
-            localStorage.removeItem("nxSystemCredentials");
-          }
-        } catch (err) {
-          console.error("Error updating localStorage:", err);
-        }
-        return newCreds;
-      });
-
-      // Clear cameras for this system
-      setCamerasBySystem((prev) => prev.map((s) => (s.systemId === systemId ? { ...s, cameras: [] } : s)));
-    } catch (err) {
-      console.error(`Logout error:`, err);
-    }
-  };
-
-  // Check if logged into a system
-  const isLoggedIn = (systemId: string) => {
-    return systemCredentials[systemId]?.loggedIn === true;
-  };
-
-  // Load saved credentials from localStorage on mount
+  // Cloud-only system handling
   useEffect(() => {
-    try {
-      const savedCredentials = localStorage.getItem("nxSystemCredentials");
-      if (savedCredentials) {
-        const parsed = JSON.parse(savedCredentials) as SystemCredentials;
-        setSystemCredentials(parsed);
-      }
-    } catch (err) {
-      console.error("Error loading saved credentials:", err);
+    if (viewMode === "cloud") {
+      fetchAllCloudCameras();
+    } else if (systemId) {
+      refetch();
     }
-  }, []);
-
-  // Auto-fetch cameras when credentials are restored and systems are loaded
-  useEffect(() => {
-    const autoFetchForLoggedInSystems = async () => {
-      const loggedInSystemIds = Object.keys(systemCredentials).filter((id) => systemCredentials[id]?.loggedIn);
-
-      if (loggedInSystemIds.length === 0 || camerasBySystem.length === 0) return;
-
-      // For each logged-in system that has no cameras, try to fetch
-      for (const systemId of loggedInSystemIds) {
-        const systemData = camerasBySystem.find((s) => s.systemId === systemId);
-        if (systemData && systemData.cameras.length === 0 && systemData.stateOfHealth === "online") {
-          try {
-            const cameras = await fetchCloudCameras({
-              id: systemId,
-              name: systemData.systemName,
-              stateOfHealth: systemData.stateOfHealth,
-              accessRole: systemData.accessRole,
-            });
-            if (cameras.length > 0) {
-              setCamerasBySystem((prev) => prev.map((s) => (s.systemId === systemId ? { ...s, cameras } : s)));
-            }
-          } catch (err) {
-            console.error(`Error auto-fetching cameras for ${systemId}:`, err);
-          }
-        }
-      }
-    };
-
-    autoFetchForLoggedInSystems();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemCredentials, camerasBySystem.length, fetchCloudCameras]);
-
-  // Initial cloud fetch
-  useEffect(() => {
-    fetchAllCloudCameras();
-  }, [fetchAllCloudCameras]);
+  }, [systemId, refetch, viewMode, fetchAllCloudCameras]);
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -830,9 +630,14 @@ export default function CameraInventory() {
     }
   };
 
-  const displayCameras = cameras as CameraDevice[];
+  const displayCameras = useMemo(() => {
+    if (viewMode === "cloud") {
+      return camerasBySystem.flatMap((sys) => sys.cameras);
+    }
+    return (cameras as CameraDevice[]) || [];
+  }, [viewMode, camerasBySystem, cameras]);
 
-  // Fetch locations for local cameras when they load
+  // Fetch locations for cameras when they load
   useEffect(() => {
     if (displayCameras.length > 0) {
       const cameraNames = displayCameras.map((c) => c.name);
@@ -932,14 +737,8 @@ export default function CameraInventory() {
     return matchesSearch && matchesStatus && matchesVendor && matchesProvince && matchesDistrict && matchesVillage;
   });
 
-  // Calculate stats based on view mode
-  // In cloud mode, use all cloud cameras; otherwise use local cameras
-  const statsSourceCameras = (() => {
-    if (viewMode === "cloud") {
-      return camerasBySystem.flatMap((s) => s.cameras);
-    }
-    return displayCameras;
-  })();
+  // Calculate stats based on displayCameras
+  const statsSourceCameras = displayCameras;
 
   const totalCameras = statsSourceCameras.length;
   const onlineCameras = statsSourceCameras.filter((c) => c.status?.toLowerCase() === "online").length;
@@ -1782,64 +1581,6 @@ export default function CameraInventory() {
     );
   };
 
-  // Show empty state when no cameras found and not loading
-  if (!loading && displayCameras.length === 0) {
-    return (
-      <div className="space-y-4 md:space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Camera Inventory</h1>
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}></div>
-              <span className="text-xs sm:text-sm text-gray-600">{connected ? "Connected" : "Disconnected"}</span>
-              {error && <AlertCircle className="w-4 h-4 text-red-500" />}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={() => setShowCreateModal(true)}
-              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 text-white rounded-lg"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="sm:inline">Add Camera</span>
-            </Button>
-
-            <Button
-              onClick={() => {
-                refetch();
-                testConnection();
-              }}
-              className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
-              variant="outline"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span className="hidden sm:inline">Refresh</span>
-            </Button>
-          </div>
-        </div>
-
-        {/* Modals */}
-        {showCreateModal && renderCreateModal()}
-
-        {/* Empty State */}
-        <div className="bg-white rounded-lg border p-8 md:p-12 text-center">
-          <Camera className="h-12 w-12 md:h-16 md:w-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-base md:text-lg font-medium text-gray-900 mb-2">No Cameras Found</h3>
-          <p className="text-sm md:text-base text-gray-500 mb-6">
-            {error
-              ? "Unable to connect to Nx Witness server. Please check your server configuration."
-              : "No cameras configured. Click 'Add Camera' to add one."}
-          </p>
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-xs sm:text-sm mb-6">
-              <AlertCircle className="h-4 w-4 inline mr-2" />
-              {error}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -1847,11 +1588,29 @@ export default function CameraInventory() {
       {renderCreateModal()}
       {renderEditModal()}
 
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Camera Inventory</h1>
           <div className="flex items-center space-x-2">
+            <Select
+              value={selectedSystemId}
+              onValueChange={setSelectedSystemId}
+              disabled={loadingCloud}
+            >
+              <SelectTrigger className="w-[200px] h-9">
+                <SelectValue placeholder="Select system" />
+              </SelectTrigger>
+              <SelectContent>
+                {cloudSystems.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    <div className="flex items-center">
+                      <div className={`w-2 h-2 rounded-full mr-2 ${s.stateOfHealth === "online" ? "bg-green-500" : "bg-red-500"}`} />
+                      {s.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <div className={`w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}></div>
             <span className="text-xs sm:text-sm text-gray-600">{connected ? "Connected" : "Disconnected"}</span>
             {error && <AlertCircle className="w-4 h-4 text-red-500" />}
@@ -1869,9 +1628,12 @@ export default function CameraInventory() {
 
           <Button
             onClick={() => {
-              refetch();
+              if (viewMode === "cloud") {
+                fetchAllCloudCameras();
+              } else {
+                refetch();
+              }
               testConnection();
-              fetchAllCloudCameras();
             }}
             disabled={loading || loadingCloud}
             className="flex items-center space-x-2 px-3 py-2 border rounded-lg hover:bg-gray-50"
@@ -1889,7 +1651,7 @@ export default function CameraInventory() {
             <button
               onClick={() => setViewMode("cloud")}
               className={`p-2 rounded ${viewMode === "cloud" ? "bg-blue-100 text-blue-600" : "text-gray-600"}`}
-              title="Cloud Systems View"
+              title="Systems View"
             >
               <Cloud className="w-4 h-4" />
             </button>
@@ -2127,40 +1889,90 @@ export default function CameraInventory() {
       </div>
 
       {/* Camera Grid/List */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        {loading && (
-          <div className="flex items-center justify-center p-8">
-            <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-            <span className="text-gray-600">Loading cameras...</span>
+      <div className="bg-white rounded-lg shadow-sm border min-h-[400px] flex flex-col items-center justify-center">
+        {isLoadingContent ? (
+          <div className="flex flex-col items-center justify-center p-8 space-y-4">
+            <RefreshCw className="w-10 h-10 animate-spin text-blue-600" />
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-gray-900">Loading Data</h3>
+              <p className="text-sm text-gray-500">Connecting to cloud system and fetching resources...</p>
+            </div>
           </div>
-        )}
-
-        {error && !loading && (
-          <div className="flex items-center justify-center p-8 text-red-600">
-            <AlertCircle className="w-6 h-6 mr-2" />
-            <span>Error loading cameras: {error}</span>
+        ) : error && !loading ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center space-y-4">
+            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-2">
+              <AlertCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Connection Error</h3>
+              <p className="text-sm text-gray-500 max-w-md mx-auto">{error}</p>
+            </div>
+            <Button onClick={() => { refetch(); testConnection(); }} variant="outline">
+              <RefreshCw className="w-4 h-4 mr-2" /> Try Again
+            </Button>
           </div>
-        )}
-
-        {!loading && !error && filteredCameras.length === 0 && viewMode !== "cloud" && (
-          <div className="flex items-center justify-center p-8 text-gray-500">
-            <Camera className="w-6 h-6 mr-2" />
-            <span>No cameras found</span>
+        ) : viewMode !== "cloud" && servers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-12 text-center space-y-4">
+            <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-2">
+              <Server className="w-10 h-10 text-gray-400" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">No Server Available</h3>
+              <p className="text-gray-500 max-w-md mx-auto">
+                We couldn't find any servers registered in this system.
+                Please ensure your servers are online and connected to the cloud.
+              </p>
+            </div>
+            <Button onClick={() => refetch()} variant="outline">
+              <RefreshCw className="w-4 h-4 mr-2" /> Check Again
+            </Button>
           </div>
-        )}
+        ) : viewMode !== "cloud" && displayCameras.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-12 text-center space-y-4">
+            <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-2">
+              <Camera className="w-10 h-10 text-gray-400" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">No Camera Detected</h3>
+              <p className="text-gray-500 max-w-md mx-auto">
+                Servers are online, but no cameras were found.
+                You can try to add cameras manually or scan the network.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <Button onClick={() => setShowCreateModal(true)}>
+                <Plus className="w-4 h-4 mr-2" /> Add Camera
+              </Button>
+              <Button onClick={() => refetch()} variant="outline">
+                <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+              </Button>
+            </div>
+          </div>
+        ) : filteredCameras.length === 0 && viewMode !== "cloud" ? (
+          <div className="flex flex-col items-center justify-center p-12 text-center space-y-4">
+            <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-2">
+              <Search className="w-10 h-10 text-gray-400" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">No Matches Found</h3>
+              <p className="text-gray-500 max-w-md mx-auto">
+                We couldn't find any cameras matching "{searchTerm}".
+                Try adjusting your search or filters.
+              </p>
+            </div>
+            <Button onClick={() => { setSearchTerm(""); setFilterStatus("all"); }} variant="outline">
+              Clear All Filters
+            </Button>
+          </div>
+        ) : null}
 
         {/* Cloud View - All Systems with Cameras */}
-        {viewMode === "cloud" && (
-          <div className="p-3 md:p-6">
-            {loadingCloud ? (
-              <div className="flex items-center justify-center p-8">
-                <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-                <span className="text-gray-600">Loading cloud systems...</span>
-              </div>
-            ) : camerasBySystem.length === 0 ? (
+        {viewMode === "cloud" && !isLoadingContent && (
+          <div className="p-3 md:p-6 w-full">
+            {camerasBySystem.length === 0 ? (
               <div className="flex items-center justify-center p-8 text-gray-500">
                 <Cloud className="w-6 h-6 mr-2" />
-                <span>No cloud systems found</span>
+                <span>No systems found</span>
               </div>
             ) : (
               <div className="space-y-4">
@@ -2305,8 +2117,8 @@ export default function CameraInventory() {
 
                                   {/* Location Details */}
                                   <div className="flex-grow mt-2 pt-2 border-t border-gray-100">
-                                    <div className="flex items-start gap-1">
-                                      <MapPin className="w-3 h-3 text-blue-500 flex-shrink-0 mt-0.5" />
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <MapPin className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                                       <div className="text-xs text-gray-500 line-clamp-4">
                                         {cameraLocations[camera.name] ? (
                                           <div className="space-y-0.5">
@@ -2334,11 +2146,15 @@ export default function CameraInventory() {
                                               !cameraLocations[camera.name]?.regency_name &&
                                               !cameraLocations[camera.name]?.province_name &&
                                               !cameraLocations[camera.name]?.detail_address && (
-                                                <span className="text-gray-400 italic">Lokasi belum diatur</span>
+                                                <div className="flex items-center gap-1.5 text-gray-400 italic bg-gray-50 px-2 py-0.5 rounded border border-dashed border-gray-200 w-fit">
+                                                  <span>Lokasi belum diatur</span>
+                                                </div>
                                               )}
                                           </div>
                                         ) : (
-                                          <span className="text-gray-400 italic">Lokasi belum diatur</span>
+                                          <div className="flex items-center gap-1.5 text-gray-400 italic bg-gray-50 px-2 py-0.5 rounded border border-dashed border-gray-200 w-fit">
+                                            <span>Lokasi belum diatur</span>
+                                          </div>
                                         )}
                                       </div>
                                     </div>
@@ -2396,9 +2212,15 @@ export default function CameraInventory() {
                   <div className="flex items-center space-x-1">
                     <MapPin className="w-3 h-3 flex-shrink-0" />
                     <span className="truncate" title={formatCameraLocation(camera.name)}>
-                      {cameraLocations[camera.name]
-                        ? formatCameraLocation(camera.name)
-                        : camera.location || camera.ip || "Lokasi belum diatur"}
+                      {cameraLocations[camera.name] ? (
+                        formatCameraLocation(camera.name)
+                      ) : camera.location || camera.ip ? (
+                        camera.location || camera.ip
+                      ) : (
+                        <span className="inline-flex items-center text-gray-400 italic bg-gray-50 px-1.5 py-0.5 rounded border border-dashed border-gray-200 text-[10px]">
+                          Lokasi belum diatur
+                        </span>
+                      )}
                     </span>
                   </div>
                   <div className="truncate">Model: {camera.model || "Unknown"}</div>
@@ -2476,9 +2298,13 @@ export default function CameraInventory() {
                         className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm text-gray-600"
                         title={formatCameraLocation(camera.name)}
                       >
-                        {cameraLocations[camera.name]
-                          ? formatCameraLocation(camera.name)
-                          : camera.location || "Lokasi belum diatur"}
+                        {cameraLocations[camera.name] ? (
+                          formatCameraLocation(camera.name)
+                        ) : (
+                          <span className="text-gray-400 italic bg-gray-50 px-1.5 py-0.5 rounded border border-dashed border-gray-200 text-[10px]">
+                            Lokasi belum diatur
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{camera.vendor || "-"}</div>
@@ -2531,9 +2357,15 @@ export default function CameraInventory() {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-gray-900 truncate">{camera.name}</div>
                         <div className="text-xs text-gray-500 truncate">
-                          {cameraLocations[camera.name]
-                            ? formatCameraLocation(camera.name)
-                            : camera.location || camera.ip || "Lokasi belum diatur"}
+                          {cameraLocations[camera.name] ? (
+                            formatCameraLocation(camera.name)
+                          ) : camera.location || camera.ip ? (
+                            camera.location || camera.ip
+                          ) : (
+                            <span className="text-gray-400 italic bg-gray-50 px-1.5 py-0.5 rounded border border-dashed border-gray-200 text-[10px]">
+                              Lokasi belum diatur
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

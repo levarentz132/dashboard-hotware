@@ -10,8 +10,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { getStatusVariant, sortByStatus } from "@/lib/status-utils";
 import Link from "next/link";
 
-export default function CameraOverviewWidget() {
-  const { cameras, loading, error } = useCameras();
+export default function CameraOverviewWidget({ systemId }: { systemId?: string }) {
+  const { cameras, loading, error } = useCameras(systemId);
 
   // Count cameras by status
   const totalCameras = cameras.length;
@@ -185,18 +185,16 @@ export default function CameraOverviewWidget() {
                 return (
                   <Link href="/monitoring-cctv" key={camera.id}>
                     <div
-                      className={`flex items-center justify-between p-1.5 sm:p-2 rounded-lg border transition-colors cursor-pointer ${
-                        isOffline ? "border-destructive/50 bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent"
-                      }`}
+                      className={`flex items-center justify-between p-1.5 sm:p-2 rounded-lg border transition-colors cursor-pointer ${isOffline ? "border-destructive/50 bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent"
+                        }`}
                     >
                       <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
                         <div
                           className={`p-1 sm:p-1.5 rounded-md shrink-0 ${isOffline ? "bg-destructive/10" : "bg-muted"}`}
                         >
                           <Camera
-                            className={`w-3 h-3 sm:w-4 sm:h-4 ${
-                              isOffline ? "text-destructive" : "text-muted-foreground"
-                            }`}
+                            className={`w-3 h-3 sm:w-4 sm:h-4 ${isOffline ? "text-destructive" : "text-muted-foreground"
+                              }`}
                           />
                         </div>
                         <div className="min-w-0 flex-1">

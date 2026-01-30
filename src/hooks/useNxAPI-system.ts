@@ -20,12 +20,11 @@ export function useSystemInfo(cloudId?: string) {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [availableSystems, setAvailableSystems] = useState<CloudSystem[]>([]);
-  const [selectedCloudId, setSelectedCloudId] = useState<string | null>(cloudId || null);
+  const [selectedCloudId, setSelectedCloudId] = useState<string | null>(cloudId || nxAPI.getSystemId());
 
   // Fetch available cloud systems
   const fetchCloudSystems = useCallback(async () => {
     try {
-      // Fetching cloud systems
       const response = await fetch("https://meta.nxvms.com/cdb/systems", {
         method: "GET",
         credentials: "include",
@@ -53,7 +52,6 @@ export function useSystemInfo(cloudId?: string) {
         return 0;
       });
 
-      // Cloud systems loaded
       setAvailableSystems(systems);
       return systems;
     } catch (err) {
@@ -62,73 +60,38 @@ export function useSystemInfo(cloudId?: string) {
     }
   }, []);
 
-  // Fetch system info from cloud relay
-  const fetchSystemInfoFromCloud = useCallback(async (cloudSystemId: string) => {
-    try {
-      const cloudUrl = `https://${cloudSystemId}.relay.vmsproxy.com/rest/v3/system/info`;
-
-      const response = await fetch(cloudUrl, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Cloud relay error: ${response.status}`);
-      }
-
-      const info = await response.json();
-      return info as NxSystemInfo;
-    } catch (err) {
-      console.error("[useSystemInfo] Cloud relay error:", err);
-      return null;
-    }
-  }, []);
-
   const fetchSystemInfo = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      // Fetching system info
 
-      // If cloudId is provided, use cloud relay
-      if (selectedCloudId) {
-        const cloudInfo = await fetchSystemInfoFromCloud(selectedCloudId);
-        if (cloudInfo) {
-          setSystemInfo(cloudInfo);
-          setConnected(true);
-          setError(null);
-          return;
-        }
-      }
-
-      // Try to get cloud systems and use the first online one with owner role
-      const systems = await fetchCloudSystems();
-      if (systems.length > 0) {
-        // Find the first online system (prefer owner)
-        const onlineSystem = systems.find((s) => s.stateOfHealth === "online");
-        if (onlineSystem) {
-          setSelectedCloudId(onlineSystem.id);
-          const cloudInfo = await fetchSystemInfoFromCloud(onlineSystem.id);
-          if (cloudInfo) {
-            setSystemInfo(cloudInfo);
-            setConnected(true);
-            setError(null);
-            return;
+      // If we don't have a selected system ID, try to find one
+      if (!selectedCloudId) {
+        const systems = await fetchCloudSystems();
+        if (systems.length > 0) {
+          const onlineSystem = systems.find((s) => s.stateOfHealth === "online");
+          if (onlineSystem) {
+            setSelectedCloudId(onlineSystem.id);
+            nxAPI.setSystemId(onlineSystem.id);
           }
         }
+      } else {
+        // Ensure nxAPI is synchronized
+        nxAPI.setSystemId(selectedCloudId);
       }
 
-      // Fallback to local API
+      if (!nxAPI.getSystemId()) {
+        setLoading(false);
+        return;
+      }
+
+      // Check connection (this now uses cloud relay via proxy if systemId is set)
       const connectionTest = await nxAPI.testConnection();
 
       if (!connectionTest) {
         setSystemInfo(null);
         setConnected(false);
-        setError("Cannot connect to Nx Witness server. Check server status and credentials.");
+        setError("Cannot connect to Nx Witness server. Check cloud relay status.");
         return;
       }
 
@@ -145,13 +108,16 @@ export function useSystemInfo(cloudId?: string) {
       }
     } catch (err) {
       console.error("[useSystemInfo] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to fetch system info");
+      const message = err instanceof Error ? err.message : "Failed to fetch system info";
+      if (message !== "SYSTEM_ID_REQUIRED") {
+        setError(message);
+      }
       setSystemInfo(null);
       setConnected(false);
     } finally {
       setLoading(false);
     }
-  }, [selectedCloudId, fetchCloudSystems, fetchSystemInfoFromCloud]);
+  }, [selectedCloudId, fetchCloudSystems]);
 
   const testConnection = useCallback(async () => {
     try {
@@ -162,7 +128,7 @@ export function useSystemInfo(cloudId?: string) {
       if (isConnected) {
         await fetchSystemInfo();
       } else {
-        setError("Connection test failed - check server and credentials");
+        setError("Connection test failed");
       }
       return isConnected;
     } catch (err) {
@@ -179,22 +145,21 @@ export function useSystemInfo(cloudId?: string) {
   const switchSystem = useCallback(
     async (newCloudId: string) => {
       setSelectedCloudId(newCloudId);
-      const cloudInfo = await fetchSystemInfoFromCloud(newCloudId);
-      if (cloudInfo) {
-        setSystemInfo(cloudInfo);
-        setConnected(true);
-        setError(null);
-      }
+      nxAPI.setSystemId(newCloudId);
+      await fetchSystemInfo();
     },
-    [fetchSystemInfoFromCloud],
+    [fetchSystemInfo],
   );
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchSystemInfo();
-    }, 1000);
+    if (cloudId !== undefined) {
+      setSelectedCloudId(cloudId);
+      nxAPI.setSystemId(cloudId);
+    }
+  }, [cloudId]);
 
-    return () => clearTimeout(timer);
+  useEffect(() => {
+    fetchSystemInfo();
   }, [fetchSystemInfo]);
 
   return {
@@ -209,3 +174,4 @@ export function useSystemInfo(cloudId?: string) {
     switchSystem,
   };
 }
+

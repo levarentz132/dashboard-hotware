@@ -4,8 +4,8 @@ import { useRealTimeUpdates } from "@/hooks/useNxAPI";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { Wifi, WifiOff, Server, Clock, RefreshCw } from "lucide-react";
 
-export default function APIStatusWidget() {
-  const { systemInfo, connected, loading, testConnection } = useSystemInfo();
+export default function APIStatusWidget({ systemId }: { systemId?: string }) {
+  const { systemInfo, connected, loading, testConnection } = useSystemInfo(systemId);
   const { isConnected: realtimeConnected, lastUpdate } = useRealTimeUpdates();
 
   const handleTestConnection = async () => {

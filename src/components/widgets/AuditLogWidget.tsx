@@ -111,20 +111,19 @@ const getEventIcon = (iconType: string, className = "h-3.5 w-3.5") => {
   }
 };
 
-export default function AuditLogWidget() {
+export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   const router = useRouter();
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(null);
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const autoLoginBlockedSystemsRef = useRef<Set<string>>(new Set());
   const [deviceMap, setDeviceMap] = useState<Record<string, string>>({});
 
   // Fetch devices for name mapping
-  const fetchDevices = useCallback(async (systemId: string) => {
+  const fetchDevices = useCallback(async (targetSystemId: string) => {
     try {
-      const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(systemId)}`);
+      const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(targetSystemId)}`);
       if (response.ok) {
         const devices = await response.json();
         const map: Record<string, string> = {};
@@ -143,53 +142,9 @@ export default function AuditLogWidget() {
     return deviceMap[resourceId] || resourceId;
   };
 
-  // Fetch cloud systems
-  const fetchCloudSystems = useCallback(async () => {
-    try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
-        },
-      });
-
-      if (!response.ok) {
-        setError("Failed to connect");
-        setLoading(false);
-        return;
-      }
-
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
-
-      // Sort: owner first, then online
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-        return 0;
-      });
-
-      const firstOnline = systems.find((s) => s.stateOfHealth === "online");
-      if (firstOnline) {
-        setSelectedSystem(firstOnline);
-      } else {
-        setError("No system online");
-        setLoading(false);
-      }
-    } catch {
-      setError("Connection failed");
-      setLoading(false);
-    }
-  }, []);
-
   // Auto-login
-  const attemptAutoLogin = useCallback(async (systemId: string) => {
-    if (autoLoginBlockedSystemsRef.current.has(systemId)) return false;
+  const attemptAutoLogin = useCallback(async (targetSystemId: string) => {
+    if (autoLoginBlockedSystemsRef.current.has(targetSystemId)) return false;
     if (!CLOUD_CONFIG.username || !CLOUD_CONFIG.password) return false;
 
     try {
@@ -197,14 +152,14 @@ export default function AuditLogWidget() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemId,
+          systemId: targetSystemId,
           username: CLOUD_CONFIG.username,
           password: CLOUD_CONFIG.password,
         }),
       });
       // If credentials are invalid, don't keep retrying on subsequent refresh attempts.
       if (response.status === 401 || response.status === 403) {
-        autoLoginBlockedSystemsRef.current.add(systemId);
+        autoLoginBlockedSystemsRef.current.add(targetSystemId);
       }
       return response.ok;
     } catch {
@@ -214,9 +169,7 @@ export default function AuditLogWidget() {
 
   // Fetch audit logs
   const fetchAuditLogs = useCallback(
-    async (system: CloudSystem, retry = false) => {
-      if (!system || system.stateOfHealth !== "online") return;
-
+    async (targetSystemId: string, retry = false) => {
       try {
         // Get logs from last 7 days
         const fromDate = new Date();
@@ -224,7 +177,7 @@ export default function AuditLogWidget() {
         const fromDateFormatted = fromDate.toISOString();
 
         const response = await fetch(
-          `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(
+          `/api/cloud/audit-log?systemId=${encodeURIComponent(targetSystemId)}&from=${encodeURIComponent(
             fromDateFormatted,
           )}`,
           {
@@ -236,15 +189,15 @@ export default function AuditLogWidget() {
 
         if (response.status === 401 && !retry) {
           const hasAutoLoginCreds = !!CLOUD_CONFIG.username && !!CLOUD_CONFIG.password;
-          const autoLoginBlocked = autoLoginBlockedSystemsRef.current.has(system.id);
+          const autoLoginBlocked = autoLoginBlockedSystemsRef.current.has(targetSystemId);
 
           if (hasAutoLoginCreds && !autoLoginBlocked) {
-            const success = await attemptAutoLogin(system.id);
+            const success = await attemptAutoLogin(targetSystemId);
             if (success) {
-              return fetchAuditLogs(system, true);
+              return fetchAuditLogs(targetSystemId, true);
             }
             // Mark blocked to avoid repeated loops on retry
-            autoLoginBlockedSystemsRef.current.add(system.id);
+            autoLoginBlockedSystemsRef.current.add(targetSystemId);
             setError("Cloud login failed. Please login manually.");
             return;
           }
@@ -272,28 +225,25 @@ export default function AuditLogWidget() {
     [attemptAutoLogin],
   );
 
-  // Load data when system is selected
+  // Load data
   const loadData = useCallback(
-    async (system: CloudSystem) => {
-      if (!system || system.stateOfHealth !== "online") return;
-
+    async (targetSystemId: string) => {
       setLoading(true);
       setError(null);
-      await Promise.all([fetchAuditLogs(system), fetchDevices(system.id)]);
+      await Promise.all([fetchAuditLogs(targetSystemId), fetchDevices(targetSystemId)]);
       setLoading(false);
     },
     [fetchAuditLogs, fetchDevices],
   );
 
   useEffect(() => {
-    fetchCloudSystems();
-  }, [fetchCloudSystems]);
-
-  useEffect(() => {
-    if (selectedSystem) {
-      loadData(selectedSystem);
+    if (systemId) {
+      loadData(systemId);
+    } else {
+      setLoading(false);
+      setAuditLogs([]);
     }
-  }, [selectedSystem, loadData]);
+  }, [systemId, loadData]);
 
   // Stats
   const stats = useMemo(() => {
@@ -315,10 +265,8 @@ export default function AuditLogWidget() {
   }, [auditLogs]);
 
   const handleRefresh = () => {
-    if (selectedSystem) {
-      loadData(selectedSystem);
-    } else {
-      fetchCloudSystems();
+    if (systemId) {
+      loadData(systemId);
     }
   };
 
@@ -341,22 +289,22 @@ export default function AuditLogWidget() {
             <Button variant="outline" size="sm" onClick={handleRefresh}>
               <RefreshCw className="w-4 h-4 mr-1" /> Retry
             </Button>
-            {selectedSystem && (
+            {systemId && (
               <Button size="sm" onClick={() => setShowLoginDialog(true)}>
                 <LogIn className="w-4 h-4 mr-1" /> Login
               </Button>
             )}
           </div>
         </div>
-        {selectedSystem && (
+        {systemId && (
           <CloudLoginDialog
             open={showLoginDialog}
             onOpenChange={setShowLoginDialog}
-            systemId={selectedSystem.id}
-            systemName={selectedSystem.name}
+            systemId={systemId}
+            systemName={systemId} // We don't have name here easily, systemId is okay for dialog
             onLoginSuccess={() => {
               setError(null);
-              autoLoginBlockedSystemsRef.current.delete(selectedSystem.id);
+              autoLoginBlockedSystemsRef.current.delete(systemId);
               handleRefresh();
             }}
           />
@@ -499,23 +447,19 @@ export default function AuditLogWidget() {
         )}
       </div>
 
-      {(() => {
-        const currentSystem = selectedSystem;
-        if (!currentSystem) return null;
-        return (
-          <CloudLoginDialog
-            open={showLoginDialog}
-            onOpenChange={setShowLoginDialog}
-            systemId={currentSystem.id}
-            systemName={currentSystem.name}
-            onLoginSuccess={() => {
-              setError(null);
-              autoLoginBlockedSystemsRef.current.delete(currentSystem.id);
-              handleRefresh();
-            }}
-          />
-        );
-      })()}
+      {systemId && (
+        <CloudLoginDialog
+          open={showLoginDialog}
+          onOpenChange={setShowLoginDialog}
+          systemId={systemId}
+          systemName={systemId}
+          onLoginSuccess={() => {
+            setError(null);
+            autoLoginBlockedSystemsRef.current.delete(systemId);
+            handleRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }

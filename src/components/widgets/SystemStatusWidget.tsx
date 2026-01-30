@@ -4,8 +4,8 @@ import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { Server, Wifi, Database, Cpu, AlertCircle } from "lucide-react";
 import { getStatusColor, getStatusDotColor } from "@/lib/status-utils";
 
-export default function SystemStatusWidget() {
-  const { systemInfo, connected, loading, error } = useSystemInfo();
+export default function SystemStatusWidget({ systemId }: { systemId?: string }) {
+  const { systemInfo, connected, loading, error } = useSystemInfo(systemId);
 
   const getSystemStats = () => {
     if (!connected || !systemInfo) {

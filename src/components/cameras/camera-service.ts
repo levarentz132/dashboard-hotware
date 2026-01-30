@@ -53,7 +53,7 @@ export async function fetchCloudCameras(system: CloudSystem): Promise<CloudCamer
 
   try {
     const response = await fetch(
-      `/api/cloud/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
+      `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
       {
         method: "GET",
         credentials: "include",

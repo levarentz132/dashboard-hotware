@@ -160,16 +160,46 @@ export async function postToCloudApi<T>(
   request: NextRequest,
   options: CloudApiOptions & { body: unknown }
 ): Promise<NextResponse<T | CloudApiError>> {
-  const { systemId, systemName, endpoint, body } = options;
+  return requestCloudApi<T>(request, { ...options, method: "POST" });
+}
+
+/**
+ * Generic cloud API PUT handler
+ */
+export async function putToCloudApi<T>(
+  request: NextRequest,
+  options: CloudApiOptions & { body: unknown }
+): Promise<NextResponse<T | CloudApiError>> {
+  return requestCloudApi<T>(request, { ...options, method: "PUT" });
+}
+
+/**
+ * Generic cloud API DELETE handler
+ */
+export async function deleteFromCloudApi<T>(
+  request: NextRequest,
+  options: CloudApiOptions
+): Promise<NextResponse<T | CloudApiError>> {
+  return requestCloudApi<T>(request, { ...options, method: "DELETE" });
+}
+
+/**
+ * Internal generic request handler
+ */
+async function requestCloudApi<T>(
+  request: NextRequest,
+  options: CloudApiOptions & { method: string; body?: unknown }
+): Promise<NextResponse<T | CloudApiError>> {
+  const { systemId, systemName, endpoint, queryParams, method, body } = options;
 
   try {
-    const cloudUrl = buildCloudUrl(systemId, endpoint);
+    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
     const headers = buildCloudHeaders(request, systemId);
 
     const response = await fetch(cloudUrl, {
-      method: "POST",
+      method,
       headers,
-      body: JSON.stringify(body),
+      body: body ? JSON.stringify(body) : undefined,
     });
 
     if (response.status === 401 || response.status === 403) {
@@ -178,17 +208,28 @@ export async function postToCloudApi<T>(
 
     if (!response.ok) {
       return createFetchErrorResponse(
-        `Failed to post to ${systemName || systemId}`,
+        `Failed to ${method} to ${systemName || systemId}`,
         systemId,
         systemName,
         response.status
       );
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
+    // Some DELETE requests might not return JSON
+    if (response.status === 204) {
+      return NextResponse.json({ success: true } as unknown as T);
+    }
+
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      const data = await response.json();
+      return NextResponse.json(data);
+    }
+
+    return NextResponse.json({ success: true } as unknown as T);
   } catch (error) {
-    console.error(`[Cloud API] Error posting ${endpoint} to ${systemName || systemId}:`, error);
+    console.error(`[Cloud API] Error ${method} ${endpoint} to ${systemName || systemId}:`, error);
     return createConnectionErrorResponse(systemId, systemName);
   }
 }
+
