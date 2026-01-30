@@ -71,7 +71,7 @@ export default function LoginPage() {
             {(error || errors.username || errors.password) && (
               <Alert variant="destructive" className="bg-red-500/10 border-red-500/50">
                 <AlertDescription className="text-red-400">
-                  {error || "Username dan password harus diisi"}
+                  {error || "Username atau password salah"}
                 </AlertDescription>
               </Alert>
             )}

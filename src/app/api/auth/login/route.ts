@@ -41,12 +41,13 @@ export async function POST(request: NextRequest) {
     // Check if login was successful
     if (!externalData.success) {
       // Handle specific error codes
+      const isCredentialError = externalData.error_code !== "LICENSE_EXPIRED";
       const status = externalData.error_code === "LICENSE_EXPIRED" ? 403 : 401;
 
       return NextResponse.json(
         {
           success: false,
-          message: externalData.message || "Username atau password salah",
+          message: isCredentialError ? AUTH_MESSAGES.LOGIN_FAILED : (externalData.message || "Lisensi tidak valid"),
           error_code: externalData.error_code,
         },
         { status },
