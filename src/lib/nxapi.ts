@@ -161,7 +161,8 @@ class NxWitnessAPI {
 
     try {
       const controller = new AbortController();
-      setTimeout(() => controller.abort(new Error("API availability check timeout")), 5000);
+      // Increase timeout for Vercel/Production to handle redirects and cold starts
+      setTimeout(() => controller.abort(new Error("API availability check timeout")), 15000);
 
       const url = new URL(`${window.location.origin}${this.baseURL}/system/info`);
       url.searchParams.set("systemId", this.systemId);

@@ -124,11 +124,23 @@ export async function fetchFromCloudApi<T>(
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
     const headers = buildCloudHeaders(request, systemId);
 
-    const response = await fetch(cloudUrl, {
+    let response = await fetch(cloudUrl, {
       method: "GET",
       headers,
-      redirect: "follow",
+      redirect: "manual", // Handle manually to preserve headers
     });
+
+    // Handle temporary redirects (301, 302, 307, 308)
+    if ([301, 302, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      if (location) {
+        console.log(`[Cloud API] Following redirect to: ${location}`);
+        response = await fetch(location, {
+          method: "GET",
+          headers,
+        });
+      }
+    }
 
     // Handle auth errors
     if (response.status === 401 || response.status === 403) {
@@ -196,11 +208,23 @@ async function requestCloudApi<T>(
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
     const headers = buildCloudHeaders(request, systemId);
 
-    const response = await fetch(cloudUrl, {
+    let response = await fetch(cloudUrl, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      redirect: "manual",
     });
+
+    if ([301, 302, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      if (location) {
+        response = await fetch(location, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      }
+    }
 
     if (response.status === 401 || response.status === 403) {
       return createAuthErrorResponse(systemId, systemName);
