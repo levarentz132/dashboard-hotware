@@ -68,9 +68,11 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
             {/* Error Alert */}
-            {error && (
+            {(error || errors.username || errors.password) && (
               <Alert variant="destructive" className="bg-red-500/10 border-red-500/50">
-                <AlertDescription className="text-red-400">{error}</AlertDescription>
+                <AlertDescription className="text-red-400">
+                  {error || "Username dan password harus diisi"}
+                </AlertDescription>
               </Alert>
             )}
 
@@ -83,11 +85,11 @@ export default function LoginPage() {
                 id="username"
                 type="text"
                 placeholder="Masukkan username"
-                className="bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500 focus:border-blue-500 focus:ring-blue-500/20"
+                className={`bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500 focus:border-blue-500 focus:ring-blue-500/20 ${errors.username || errors.password ? "border-red-500/50 focus:border-red-500 focus:ring-red-500/20" : ""
+                  }`}
                 {...register("username")}
                 disabled={isLoading}
               />
-              {errors.username && <p className="text-sm text-red-400">{errors.username.message}</p>}
             </div>
 
             {/* Password Field */}
@@ -100,7 +102,8 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Masukkan password"
-                  className="bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500 focus:border-blue-500 focus:ring-blue-500/20 pr-10"
+                  className={`bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500 focus:border-blue-500 focus:ring-blue-500/20 pr-10 ${errors.username || errors.password ? "border-red-500/50 focus:border-red-500 focus:ring-red-500/20" : ""
+                    }`}
                   {...register("password")}
                   disabled={isLoading}
                 />
@@ -113,7 +116,6 @@ export default function LoginPage() {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              {errors.password && <p className="text-sm text-red-400">{errors.password.message}</p>}
             </div>
           </CardContent>
 

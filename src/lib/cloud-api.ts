@@ -29,19 +29,18 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
   return queryParams?.toString() ? `${baseUrl}?${queryParams.toString()}` : baseUrl;
 }
 
+/**
+ * Build headers for cloud API request
+ * Includes authorization token if available in cookies
+ */
 export function buildCloudHeaders(request: NextRequest, systemId: string): Record<string, string> {
   const systemToken = request.cookies.get(`nx-cloud-${systemId}`)?.value;
   const cookies = request.headers.get("cookie") || "";
-
-  // Extract client IP to forward it
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  const clientIp = forwardedFor ? forwardedFor.split(",")[0] : request.headers.get("x-real-ip") || "0.0.0.0";
 
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
     Cookie: cookies,
-    "X-Forwarded-For": clientIp,
   };
 
   if (systemToken) {
