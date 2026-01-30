@@ -38,6 +38,7 @@ import { getCloudAuthHeader, CLOUD_CONFIG } from "@/lib/config";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
+import { showNotification } from "@/lib/notifications";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
@@ -507,6 +508,21 @@ export default function UserManagement() {
 
   // Open delete dialog
   const handleOpenDelete = (user: NxUser) => {
+    // Check if user is an administrator
+    const isAdmin = user.groupIds?.some(groupId => {
+      const group = groups.find(g => g.id === groupId);
+      return group?.name.toLowerCase().includes("administrator");
+    });
+
+    if (isAdmin) {
+      showNotification({
+        type: "error",
+        title: "Action Denied",
+        message: "This user belongs to an Administrator group and cannot be deleted."
+      });
+      return;
+    }
+
     setSelectedUser(user);
     setShowDeleteDialog(true);
   };

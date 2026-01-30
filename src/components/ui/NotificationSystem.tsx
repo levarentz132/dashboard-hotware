@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { AlertCircle, CheckCircle, X, Wifi, WifiOff } from 'lucide-react'
+import { NOTIFICATION_EVENT_NAME } from '@/lib/notifications'
 
 interface ToastNotification {
   id: string
@@ -14,6 +15,37 @@ interface ToastNotification {
 export default function NotificationSystem() {
   const [notifications, setNotifications] = useState<ToastNotification[]>([])
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown')
+
+  const addNotification = (notification: Omit<ToastNotification, 'id' | 'timestamp'>) => {
+    const newNotification: ToastNotification = {
+      ...notification,
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: Date.now()
+    }
+
+    setNotifications(prev => [...prev, newNotification])
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+      removeNotification(newNotification.id)
+    }, 5000)
+  }
+
+  const removeNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id))
+  }
+
+  // Listen for global notifications
+  useEffect(() => {
+    const handleNotification = (event: any) => {
+      if (event.detail) {
+        addNotification(event.detail)
+      }
+    }
+
+    window.addEventListener(NOTIFICATION_EVENT_NAME, handleNotification)
+    return () => window.removeEventListener(NOTIFICATION_EVENT_NAME, handleNotification)
+  }, [])
 
   // Check connection status periodically
   useEffect(() => {
@@ -62,25 +94,6 @@ export default function NotificationSystem() {
     return () => clearInterval(interval)
   }, [connectionStatus])
 
-  const addNotification = (notification: Omit<ToastNotification, 'id' | 'timestamp'>) => {
-    const newNotification: ToastNotification = {
-      ...notification,
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: Date.now()
-    }
-
-    setNotifications(prev => [...prev, newNotification])
-
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      removeNotification(newNotification.id)
-    }, 5000)
-  }
-
-  const removeNotification = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id))
-  }
-
   const getNotificationIcon = (type: ToastNotification['type']) => {
     switch (type) {
       case 'success':
@@ -110,11 +123,11 @@ export default function NotificationSystem() {
   return (
     <>
       {/* Toast Notifications */}
-      <div className="fixed top-4 right-4 z-50 space-y-2">
+      <div className="fixed top-4 right-4 z-[9999] space-y-2 pointer-events-none">
         {notifications.map((notification) => (
           <div
             key={notification.id}
-            className={`max-w-sm w-full rounded-lg border p-4 shadow-lg transition-all duration-300 ${getNotificationStyle(notification.type)}`}
+            className={`max-w-sm w-full rounded-lg border p-4 shadow-lg transition-all duration-300 pointer-events-auto ${getNotificationStyle(notification.type)}`}
           >
             <div className="flex items-start space-x-3">
               {getNotificationIcon(notification.type)}
