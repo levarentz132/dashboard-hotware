@@ -425,13 +425,13 @@ export default function UserManagement() {
   const getUserTypeIcon = (type: NxUser["type"]) => {
     switch (type) {
       case "local":
-        return <Server className="h-4 w-4" />;
+        return <Users className="h-4 w-4" />;
       case "temporaryLocal":
         return <Clock className="h-4 w-4" />;
       case "ldap":
         return <Shield className="h-4 w-4" />;
       case "cloud":
-        return <Users className="h-4 w-4" />;
+        return <Cloud className="h-4 w-4" />;
       default:
         return <User className="h-4 w-4" />;
     }
@@ -727,7 +727,7 @@ export default function UserManagement() {
             <SelectContent>
               <SelectItem value="local">
                 <div className="flex items-center gap-2">
-                  <Server className="h-4 w-4" />
+                  <Users className="h-4 w-4" />
                   Local
                 </div>
               </SelectItem>
@@ -1040,28 +1040,7 @@ export default function UserManagement() {
             <Users className="h-5 w-5 sm:h-6 sm:w-6" />
             User Management
           </h1>
-          <div className="flex items-center gap-2 mt-2">
-            <Select
-              value={selectedSystemId}
-              onValueChange={setSelectedSystemId}
-              disabled={loadingCloud}
-            >
-              <SelectTrigger className="w-[180px] sm:w-[250px] bg-white text-gray-900 border-gray-200 h-9">
-                <SelectValue placeholder="Select system" />
-              </SelectTrigger>
-              <SelectContent>
-                {cloudSystems.map((sys) => (
-                  <SelectItem key={sys.id} value={sys.id}>
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${sys.isOnline ? "bg-green-500" : "bg-red-500"}`} />
-                      <span className="truncate">{sys.name}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {loadingCloud && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
-          </div>
+
           <p className="text-muted-foreground mt-1 text-sm sm:text-base">
             Manage VMS users and their access permissions
           </p>
@@ -1096,7 +1075,7 @@ export default function UserManagement() {
         <Card>
           <CardHeader className="p-3 sm:p-4 pb-2">
             <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-              <User className="h-3 w-3" /> Basic
+              <Users className="h-3 w-3" /> Local
             </CardDescription>
             <CardTitle className="text-xl sm:text-2xl text-blue-600">{userStats.local}</CardTitle>
           </CardHeader>
@@ -1120,7 +1099,7 @@ export default function UserManagement() {
         <Card className="col-span-2 sm:col-span-1">
           <CardHeader className="p-3 sm:p-4 pb-2">
             <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-              Cloud
+              <Cloud className="h-3 w-3" /> Cloud
             </CardDescription>
             <CardTitle className="text-xl sm:text-2xl text-green-600">{userStats.cloud}</CardTitle>
           </CardHeader>
@@ -1151,7 +1130,7 @@ export default function UserManagement() {
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setFilterType("all")}>All Types</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setFilterType("local")}>
-              <Server className="h-4 w-4 mr-2" /> Local
+              <Users className="h-4 w-4 mr-2" /> Local
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setFilterType("temporaryLocal")}>
               <Clock className="h-4 w-4 mr-2" /> Temporary
