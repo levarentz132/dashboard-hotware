@@ -25,6 +25,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
+import { useAuth } from "@/contexts/auth-context";
 import {
   fetchUsers,
   fetchUserGroups,
@@ -226,6 +227,7 @@ function useUserGroups(systemId?: string) {
 }
 
 export default function UserManagement() {
+  const { user: localUser } = useAuth();
   const [selectedSystemId, setSelectedSystemId] = useState<string>("");
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(false);
@@ -296,7 +298,7 @@ export default function UserManagement() {
   // Auto-select first online system if none selected
   useEffect(() => {
     if (!selectedSystemId && cloudSystems.length > 0) {
-      const onlineSystem = cloudSystems.find(s => s.isOnline) || cloudSystems[0];
+      const onlineSystem = cloudSystems.find((s) => s.isOnline) || cloudSystems[0];
       setSelectedSystemId(onlineSystem.id);
     }
   }, [selectedSystemId, cloudSystems]);
@@ -306,12 +308,21 @@ export default function UserManagement() {
     setSelectedSystemId(value);
   };
 
-  // Auto-login function for cloud systems
+  // Auto-login function for cloud systems using local account credentials
   const attemptAutoLogin = useCallback(
     async (targetSystemId: string, systemName: string): Promise<boolean> => {
-      // Check if auto-login is enabled and credentials are configured
-      if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
-        console.log("[User Cloud Auto-Login] Disabled or credentials not configured");
+      // Check if auto-login is enabled
+      if (!CLOUD_CONFIG.autoLoginEnabled) {
+        console.log("[User Cloud Auto-Login] Disabled");
+        return false;
+      }
+
+      // Use local user credentials if available, otherwise fall back to config
+      const username = localUser?.username || CLOUD_CONFIG.username;
+      const password = CLOUD_CONFIG.password; // Password must come from config (local passwords are hashed)
+
+      if (!username || !password) {
+        console.log("[User Cloud Auto-Login] Credentials not available");
         return false;
       }
 
@@ -321,7 +332,7 @@ export default function UserManagement() {
         return false;
       }
 
-      console.log(`[User Cloud Auto-Login] Attempting login to ${systemName}...`);
+      console.log(`[User Cloud Auto-Login] Attempting login to ${systemName} with user: ${username}...`);
 
       try {
         const response = await fetch("/api/cloud/login", {
@@ -331,8 +342,8 @@ export default function UserManagement() {
           },
           body: JSON.stringify({
             systemId: targetSystemId,
-            username: CLOUD_CONFIG.username,
-            password: CLOUD_CONFIG.password,
+            username: username,
+            password: password,
           }),
         });
 
@@ -344,7 +355,7 @@ export default function UserManagement() {
           return false;
         }
 
-        console.log(`[User Cloud Auto-Login] Success for ${systemName}`);
+        console.log(`[User Cloud Auto-Login] Success for ${systemName} with user: ${username}`);
         setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
         setIsLoggedIn((prev) => new Set(prev).add(targetSystemId));
 
@@ -357,19 +368,19 @@ export default function UserManagement() {
         return false;
       }
     },
-    [autoLoginAttempted, refetchUsers, refetchGroups],
+    [autoLoginAttempted, refetchUsers, refetchGroups, localUser],
   );
 
   // Sync requiresAuth with login dialog or auto-login
   useEffect(() => {
     const handleAuth = async () => {
       if (requiresAuth && systemId) {
-        const system = cloudSystems.find(s => s.id === systemId);
+        const system = cloudSystems.find((s) => s.id === systemId);
         const systemName = system?.name || systemId;
 
-        // Try auto-login first
+        // Try auto-login first using local account credentials
         if (CLOUD_CONFIG.autoLoginEnabled && !autoLoginAttempted.has(systemId)) {
-          console.log(`[UserManagement] Auth required for ${systemName}, attempting auto-login...`);
+          console.log(`[UserManagement] Auth required for ${systemName}, attempting auto-login with local account...`);
           const success = await attemptAutoLogin(systemId, systemName);
           if (success) return; // Auto-login succeeded, useEffect will re-run after refetch
         }
@@ -441,13 +452,22 @@ export default function UserManagement() {
   // Get user type badge variant
   const getUserTypeBadge = (type: NxUser["type"]) => {
     const config = {
-      local: { label: "Local", className: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 transition-all" },
+      local: {
+        label: "Local",
+        className: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 transition-all",
+      },
       temporaryLocal: {
         label: "Temporary",
         className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 transition-all",
       },
-      ldap: { label: "LDAP", className: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 transition-all" },
-      cloud: { label: "Cloud", className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 transition-all" },
+      ldap: {
+        label: "LDAP",
+        className: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 transition-all",
+      },
+      cloud: {
+        label: "Cloud",
+        className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 transition-all",
+      },
     };
     return config[type] || { label: type, className: "bg-gray-100 text-gray-800 transition-all" };
   };
@@ -509,8 +529,8 @@ export default function UserManagement() {
   // Open delete dialog
   const handleOpenDelete = (user: NxUser) => {
     // Check if user is an administrator
-    const isAdmin = user.groupIds?.some(groupId => {
-      const group = groups.find(g => g.id === groupId);
+    const isAdmin = user.groupIds?.some((groupId) => {
+      const group = groups.find((g) => g.id === groupId);
       return group?.name.toLowerCase().includes("administrator");
     });
 
@@ -518,7 +538,7 @@ export default function UserManagement() {
       showNotification({
         type: "error",
         title: "Action Denied",
-        message: "This user belongs to an Administrator group and cannot be deleted."
+        message: "This user belongs to an Administrator group and cannot be deleted.",
       });
       return;
     }
@@ -1248,15 +1268,23 @@ export default function UserManagement() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`${typeBadge.className} text-[10px] sm:text-xs`}>{typeBadge.label}</Badge>
+                            <Badge variant="outline" className={`${typeBadge.className} text-[10px] sm:text-xs`}>
+                              {typeBadge.label}
+                            </Badge>
                           </TableCell>
                           <TableCell className="hidden sm:table-cell">
                             {user.isEnabled !== false ? (
-                              <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all">
+                              <Badge
+                                variant="outline"
+                                className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all"
+                              >
                                 Enabled
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all">
+                              <Badge
+                                variant="outline"
+                                className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all"
+                              >
                                 Disabled
                               </Badge>
                             )}
