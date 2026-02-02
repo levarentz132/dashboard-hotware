@@ -15,6 +15,8 @@ import {
   Radio,
   Zap,
   BarChart3,
+  Power,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -67,8 +69,68 @@ export default function Analytics() {
   const [refreshInterval, setRefreshInterval] = useState(30); // seconds for polling mode
   const [updateCount, setUpdateCount] = useState(0);
 
+  // Power control state (v7)
+  const [powerState, setPowerState] = useState<boolean>(false);
+  const [powerLoading, setPowerLoading] = useState<boolean>(true);
+  const [powerError, setPowerError] = useState<string | null>(null);
+  const [powerLastUpdated, setPowerLastUpdated] = useState<Date | null>(null);
+
+  const BLYNK_TOKEN = "cb9wrnFvTzQFz8DDqGHdftortKgiVd4W";
+  const BLYNK_BASE_URL = "https://sgp1.blynk.cloud/external/api";
+
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Fetch power state from Blynk API
+  const fetchPowerState = useCallback(async () => {
+    try {
+      setPowerLoading(true);
+      setPowerError(null);
+      const response = await fetch(`${BLYNK_BASE_URL}/get?token=${BLYNK_TOKEN}&v7`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch power state");
+      }
+      const data = await response.text();
+      const value = parseInt(data, 10);
+      setPowerState(value === 1);
+      setPowerLastUpdated(new Date());
+    } catch (err) {
+      setPowerError(err instanceof Error ? err.message : "Unknown error");
+      console.error("Error fetching power state:", err);
+    } finally {
+      setPowerLoading(false);
+    }
+  }, []);
+
+  // Update power state via Blynk API
+  const updatePowerState = useCallback(
+    async (newState: boolean) => {
+      try {
+        setPowerLoading(true);
+        setPowerError(null);
+        const value = newState ? 1 : 0;
+        const response = await fetch(`${BLYNK_BASE_URL}/update?token=${BLYNK_TOKEN}&v7=${value}`);
+        if (!response.ok) {
+          throw new Error("Failed to update power state");
+        }
+        setPowerState(newState);
+        setPowerLastUpdated(new Date());
+      } catch (err) {
+        setPowerError(err instanceof Error ? err.message : "Unknown error");
+        console.error("Error updating power state:", err);
+        // Revert to previous state on error
+        await fetchPowerState();
+      } finally {
+        setPowerLoading(false);
+      }
+    },
+    [fetchPowerState],
+  );
+
+  // Fetch initial power state on mount
+  useEffect(() => {
+    fetchPowerState();
+  }, [fetchPowerState]);
 
   // Process incoming sensor data (from SSE or polling)
   const processSensorData = useCallback((data: SSEData) => {
@@ -371,6 +433,52 @@ export default function Analytics() {
         </div>
       )}
 
+      {/* Power Control Card - Simple */}
+      <Card className="overflow-hidden">
+        <CardContent className="py-6">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* Left: Info */}
+            <div className="flex items-center gap-4">
+              <div
+                className={`p-3 rounded-full transition-all duration-300 ${
+                  powerState ? "bg-green-100" : "bg-gray-100"
+                }`}
+              >
+                {powerLoading ? (
+                  <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+                ) : (
+                  <Power className={`w-6 h-6 transition-colors ${powerState ? "text-green-600" : "text-gray-400"}`} />
+                )}
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Kontrol Daya</h3>
+                <p className="text-sm text-gray-500">
+                  {powerLoading ? "Memproses..." : powerState ? "Device Aktif" : "Device Mati"}
+                </p>
+              </div>
+            </div>
+
+            {/* Right: Toggle */}
+            <div className="flex items-center gap-3">
+              {powerError && <span className="text-xs text-red-500 mr-2">{powerError}</span>}
+              <button
+                onClick={() => !powerLoading && updatePowerState(!powerState)}
+                disabled={powerLoading}
+                className={`relative w-14 h-7 rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                  powerState ? "bg-green-500 focus:ring-green-500" : "bg-gray-300 focus:ring-gray-400"
+                } ${powerLoading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              >
+                <span
+                  className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all duration-300 ${
+                    powerState ? "left-7" : "left-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Main Sensor Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         {/* Temperature Card */}
@@ -550,7 +658,7 @@ export default function Analytics() {
             <div className="text-2xl font-bold text-gray-900">
               {history.length > 0 && history.some((h) => h.temperature !== null)
                 ? `${Math.max(
-                    ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number)
+                    ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number),
                   ).toFixed(1)}°`
                 : "-"}
             </div>
@@ -563,7 +671,7 @@ export default function Analytics() {
             <div className="text-2xl font-bold text-gray-900">
               {history.length > 0 && history.some((h) => h.temperature !== null)
                 ? `${Math.min(
-                    ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number)
+                    ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number),
                   ).toFixed(1)}°`
                 : "-"}
             </div>
@@ -785,7 +893,10 @@ export default function Analytics() {
               <strong>Data Source:</strong> Blynk IoT Cloud
             </p>
             <p>
-              <strong>Endpoints:</strong> Temperature (v4), Humidity (v5)
+              <strong>Sensor Endpoints:</strong> Temperature (v4), Humidity (v5)
+            </p>
+            <p>
+              <strong>Control Endpoint:</strong> Power Control (v7)
             </p>
             <p className="text-green-600">
               ✓ Realtime menggunakan SSE untuk data streaming tanpa perlu WebSocket server terpisah
