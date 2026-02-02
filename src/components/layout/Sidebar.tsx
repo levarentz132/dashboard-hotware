@@ -33,7 +33,7 @@ interface NavItem {
 const navigationItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard-full-view" },
   { id: "cameras", label: "Camera Inventory", icon: Camera },
-  { id: "servers", label: "Server Options", icon: Server },
+  // { id: "servers", label: "Server Options", icon: Server },
   { id: "health", label: "System Health", icon: Activity },
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle },
   { id: "audits", label: "User Logs", icon: Users },
