@@ -1000,15 +1000,6 @@ export default function CameraInventory() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => setShowCreateModal(true)}
-            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-3 py-2 rounded-lg"
-            variant="outline"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add</span>
-          </Button>
-
-          <Button
             onClick={() => {
               if (viewMode === "cloud") {
                 fetchAllCloudCameras();
@@ -1478,9 +1469,6 @@ export default function CameraInventory() {
                   <tr>
                     <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Camera
-                    </th>
-                    <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Location
                     </th>
                     <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Type/Model

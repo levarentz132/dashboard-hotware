@@ -72,6 +72,7 @@
     "@types/leaflet": "^1.9.21",
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",
+    "baseline-browser-mapping": "^2.9.19",
     "eslint": "^8",
     "eslint-config-next": "15.0.1",
     "postcss": "^8",
