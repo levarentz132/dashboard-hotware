@@ -13,3 +13,7 @@ export {
   type SystemInfoData,
   type ServerLocationData,
 } from "./monitoring-service";
+
+// Components
+export { default as ServerMap, type ServerMarkerData } from "./ServerMap";
+export { default as SystemHealth } from "./SystemHealth";
