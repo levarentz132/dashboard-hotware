@@ -318,8 +318,9 @@ export default function SystemHealth() {
               return (
                 <div
                   key={system.id}
-                  className={`bg-white rounded-lg border-l-4 shadow-sm p-5 ${isOnline ? "border-l-green-500" : "border-l-red-400"
-                    }`}
+                  className={`bg-white rounded-lg border-l-4 shadow-sm p-5 ${
+                    isOnline ? "border-l-green-500" : "border-l-red-400"
+                  }`}
                 >
                   {/* System Header */}
                   <div className="flex items-start justify-between mb-4">
@@ -464,11 +465,12 @@ export default function SystemHealth() {
       <CloudLoginDialog
         open={showLoginDialog}
         onOpenChange={setShowLoginDialog}
-        systemId={systemInfo?.cloudSystemId || ""}
+        systemId={systemInfo?.cloudId || systemInfo?.localId || ""}
         systemName={systemInfo?.name || ""}
         onLoginSuccess={() => {
-          if (systemInfo?.cloudSystemId) {
-            setIsLoggedIn((prev) => new Set(prev).add(systemInfo.cloudSystemId!));
+          const sysId = systemInfo?.cloudId || systemInfo?.localId;
+          if (sysId) {
+            setIsLoggedIn((prev) => new Set(prev).add(sysId));
           }
           setRequiresAuth(false);
           handleRefresh();
