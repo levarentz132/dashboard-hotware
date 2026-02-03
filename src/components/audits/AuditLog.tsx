@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { performAdminLogin } from "@/lib/auth-utils";
 
 interface AuthSession {
   id: string;
@@ -174,30 +175,15 @@ export default function AuditLog() {
     }
   }, []);
 
-  // Auto-login function
-  const attemptAutoLogin = useCallback(async (systemId: string) => {
-    if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
-      return false;
-    }
+  // Admin login function
+  const attemptAdminLogin = useCallback(async (systemId: string) => {
+    console.log(`[AuditLog] Attempting Admin login to ${systemId}...`);
+    const success = await performAdminLogin(systemId);
 
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId,
-          username: CLOUD_CONFIG.username,
-          password: CLOUD_CONFIG.password,
-        }),
-      });
-
-      if (response.ok) {
-        setIsLoggedIn(true);
-        setRequiresAuth(false);
-        return true;
-      }
-    } catch (err) {
-      console.error("Auto-login failed:", err);
+    if (success) {
+      setIsLoggedIn(true);
+      setRequiresAuth(false);
+      return true;
     }
     return false;
   }, []);
@@ -259,9 +245,9 @@ export default function AuditLog() {
 
         if (response.status === 401) {
           setRequiresAuth(true);
-          // Try auto-login
-          const autoLoginSuccess = await attemptAutoLogin(system.id);
-          if (autoLoginSuccess) {
+          // Try admin login
+          const adminLoginSuccess = await attemptAdminLogin(system.id);
+          if (adminLoginSuccess) {
             // Retry fetch
             const retryResponse = await fetch(
               `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(
@@ -294,7 +280,7 @@ export default function AuditLog() {
         setLoading(false);
       }
     },
-    [fromDate, attemptAutoLogin],
+    [fromDate, attemptAdminLogin],
   );
 
   // Initial load
@@ -429,8 +415,8 @@ export default function AuditLog() {
                         key={system.id}
                         onClick={() => setSelectedSystem(system)}
                         className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
-                            ? "bg-blue-100 text-blue-800"
-                            : "hover:bg-gray-100 text-gray-700"
+                          ? "bg-blue-100 text-blue-800"
+                          : "hover:bg-gray-100 text-gray-700"
                           }`}
                         disabled={system.stateOfHealth !== "online"}
                       >

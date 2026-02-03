@@ -19,6 +19,10 @@ import { useCameras } from "@/hooks/useNxAPI-camera";
 import { useCloudSystems, fetchFromCloudRelay, type CloudSystem } from "@/hooks/use-async-data";
 import { getOnlineOfflineBadgeClass, getRoleBadgeClass } from "@/lib/status-utils";
 import ServerLocationForm from "@/components/servers/ServerLocationForm";
+import { performAdminLogin } from "@/lib/auth-utils";
+import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
+import { Button } from "../ui/button";
+import { Shield, LogIn } from "lucide-react";
 
 interface SystemInfoData {
   name?: string;
@@ -42,10 +46,23 @@ export default function SystemHealth() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [editingLocation, setEditingLocation] = useState<string | null>(null);
+  const [requiresAuth, setRequiresAuth] = useState(false);
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
+  const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
 
-  // Fetch system info from cloud relay for a specific system
+  // Fetch system info from cloud relay via proxy
   const fetchSystemDetails = useCallback(async (cloudId: string): Promise<SystemInfoData | null> => {
-    return fetchFromCloudRelay<SystemInfoData>(cloudId, "/rest/v3/system/info");
+    try {
+      const response = await fetch(`/api/nx/system/info?systemId=${encodeURIComponent(cloudId)}`);
+      if (response.ok) {
+        return await response.json();
+      }
+      return null;
+    } catch (err) {
+      console.error(`Error fetching system details for ${cloudId}:`, err);
+      return null;
+    }
   }, []);
 
   // Fetch details for all online systems
@@ -65,6 +82,26 @@ export default function SystemHealth() {
     setSystemDetails(newDetails);
     setLoadingDetails(false);
   }, [cloudSystems, fetchSystemDetails]);
+
+  // Admin login function
+  const attemptAdminLogin = useCallback(
+    async (targetSystemId: string, systemName: string): Promise<boolean> => {
+      if (autoLoginAttempted.has(targetSystemId)) return false;
+
+      console.log(`[SystemHealth] Attempting Admin login to ${systemName}...`);
+      const success = await performAdminLogin(targetSystemId);
+
+      if (success) {
+        setIsLoggedIn((prev) => new Set(prev).add(targetSystemId));
+        setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
+        return true;
+      } else {
+        setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
+        return false;
+      }
+    },
+    [autoLoginAttempted],
+  );
 
   // Fetch server locations from database
   const fetchServerLocations = useCallback(async () => {
@@ -234,9 +271,8 @@ export default function SystemHealth() {
               return (
                 <div
                   key={system.id}
-                  className={`bg-white rounded-lg border-l-4 shadow-sm p-5 ${
-                    isOnline ? "border-l-green-500" : "border-l-red-400"
-                  }`}
+                  className={`bg-white rounded-lg border-l-4 shadow-sm p-5 ${isOnline ? "border-l-green-500" : "border-l-red-400"
+                    }`}
                 >
                   {/* System Header */}
                   <div className="flex items-start justify-between mb-4">
@@ -377,6 +413,20 @@ export default function SystemHealth() {
           onSave={fetchServerLocations}
         />
       )}
+      {/* Cloud Login Dialog */}
+      <CloudLoginDialog
+        open={showLoginDialog}
+        onOpenChange={setShowLoginDialog}
+        systemId={systemInfo?.cloudSystemId || ""}
+        systemName={systemInfo?.name || ""}
+        onLoginSuccess={() => {
+          if (systemInfo?.cloudSystemId) {
+            setIsLoggedIn((prev) => new Set(prev).add(systemInfo.cloudSystemId!));
+          }
+          setRequiresAuth(false);
+          handleRefresh();
+        }}
+      />
     </div>
   );
 }

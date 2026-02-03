@@ -52,8 +52,13 @@ export default function NotificationSystem() {
     const checkConnection = async () => {
       try {
         const { nxAPI } = await import('@/lib/nxapi')
-        const isConnected = await nxAPI.testConnection()
+        const sid = nxAPI.getSystemId()
+        if (!sid) {
+          setConnectionStatus('unknown')
+          return
+        }
 
+        const isConnected = await nxAPI.testConnection()
         const newStatus = isConnected ? 'connected' : 'disconnected'
 
         // Only update if status actually changed

@@ -16,6 +16,8 @@ import {
   Database,
   Loader2,
   Check,
+  Maximize,
+  Minimize,
 } from "lucide-react";
 import "react-grid-layout/css/styles.css";
 import Link from "next/link";
@@ -268,6 +270,8 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [originalWidgets, setOriginalWidgets] = useState<DashboardWidget[]>([]);
 
   // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
@@ -275,6 +279,31 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
   const [loadingCloud, setLoadingCloud] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Toggle fullscreen
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+      setIsFullscreen(true);
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    }
+  };
+
+  // Sync isFullscreen state with document events (for Esc key)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
   // Fetch systems
   const fetchSystems = useCallback(async () => {
@@ -515,6 +544,29 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
     setWidgets(widgets.filter((w) => w.i !== widgetId));
   };
 
+  // Handle Cancel Edit
+  const handleCancelEdit = () => {
+    setWidgets(originalWidgets);
+    setIsEditing(false);
+    setShowCancelConfirm(false);
+  };
+
+  // Handle Customize/Cancel button click
+  const handleToggleEdit = () => {
+    if (isEditing) {
+      // Check if any changes were made
+      const hasChanges = JSON.stringify(widgets) !== JSON.stringify(originalWidgets);
+      if (hasChanges) {
+        setShowCancelConfirm(true);
+      } else {
+        setIsEditing(false);
+      }
+    } else {
+      setOriginalWidgets([...widgets]);
+      setIsEditing(true);
+    }
+  };
+
   // Reset to default layout
   const resetLayout = () => {
     setWidgets(defaultWidgets);
@@ -538,7 +590,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
 
   return (
     <TooltipProvider>
-      <div className="min-h-screen bg-gray-50/50">
+      <div className="min-h-screen bg-gray-50/50 select-none">
         {/* Toolbar */}
         <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-2 sm:px-4 py-2 sm:py-3 shadow-sm">
           <div className="flex items-center justify-between max-w-full gap-2">
@@ -593,6 +645,37 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                 <>
                   <Tooltip>
                     <TooltipTrigger asChild>
+                      <Button variant="outline" size="sm" onClick={exportLayout} className="gap-1 sm:gap-2 px-2 sm:px-3">
+                        <Upload className="w-4 h-4" />
+                        <span className="hidden sm:inline">Export</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Export layout sebagai file JSON</p>
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="gap-1 sm:gap-2 px-2 sm:px-3"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span className="hidden sm:inline">Import</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Import layout dari file JSON</p>
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <div className="h-6 w-px bg-gray-200 hidden sm:block" />
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button onClick={() => setShowAddWidget(true)} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3">
                         <Plus className="w-4 h-4" />
                         <span className="hidden sm:inline">Add Widget</span>
@@ -643,53 +726,17 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                       <p>Kembalikan ke layout default</p>
                     </TooltipContent>
                   </Tooltip>
+                  <div className="h-6 w-px bg-gray-200 hidden sm:block" />
                 </>
               )}
-
-              {/* Export/Import - always visible */}
-              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="sm" onClick={exportLayout} className="gap-1 sm:gap-2 px-2 sm:px-3">
-                    <Upload className="w-4 h-4" />
-                    <span className="hidden sm:inline">Export</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Export layout sebagai file JSON</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="gap-1 sm:gap-2 px-2 sm:px-3"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span className="hidden sm:inline">Import</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Import layout dari file JSON</p>
-                </TooltipContent>
-              </Tooltip>
-
-              {/* Hidden file input for import */}
-              <input ref={fileInputRef} type="file" accept=".json" onChange={importLayout} className="hidden" />
-
-              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant={isEditing ? "destructive" : "outline"}
                     size="sm"
-                    onClick={() => setIsEditing(!isEditing)}
-                    className="gap-1 sm:gap-2 px-2 sm:px-3"
+                    onClick={handleToggleEdit}
+                    className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
                   >
                     {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
                     <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
@@ -699,6 +746,28 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                   <p>{isEditing ? "Batalkan perubahan" : "Kustomisasi dashboard"}</p>
                 </TooltipContent>
               </Tooltip>
+
+              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleFullscreen}
+                    className="gap-1 sm:gap-2 px-2 sm:px-3"
+                  >
+                    {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                    <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isFullscreen ? "Keluar layar penuh" : "Layar penuh"}</p>
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Hidden file input for import */}
+              <input ref={fileInputRef} type="file" accept=".json" onChange={importLayout} className="hidden" />
             </div>
           </div>
         </div>
@@ -808,6 +877,30 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
               className="bg-red-600 hover:bg-red-700 text-white"
             >
               Yes, Reset All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Discard Changes Confirmation Dialog */}
+      <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <AlertDialogContent className="max-w-[400px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-orange-600">
+              <RotateCcw className="w-5 h-5" />
+              Discard Changes?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes to your layout. Are you sure you want to discard them?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCancelEdit}
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+            >
+              Discard Changes
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

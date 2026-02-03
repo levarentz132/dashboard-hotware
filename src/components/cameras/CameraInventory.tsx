@@ -17,18 +17,21 @@ import {
   ChevronDown,
   ChevronRight,
   Filter,
-  MapPin,
   LogIn,
   Eye,
   EyeOff,
   X,
+  Shield,
 } from "lucide-react";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { fetchCloudSystems as getCachedCloudSystems } from "@/hooks/use-async-data";
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
+import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { performAdminLogin } from "@/lib/auth-utils";
+import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -69,41 +72,6 @@ interface CameraDevice {
   credentials?: { user: string; password: string };
 }
 
-// Location interfaces
-interface Province {
-  id: string;
-  name: string;
-}
-
-interface Regency {
-  id: string;
-  province_id: string;
-  name: string;
-}
-
-interface District {
-  id: string;
-  regency_id: string;
-  name: string;
-}
-
-interface Village {
-  id: string;
-  district_id: string;
-  name: string;
-}
-
-// Camera location cache interface
-interface CameraLocationCache {
-  [cameraName: string]: {
-    province_name?: string;
-    regency_name?: string;
-    district_name?: string;
-    village_name?: string;
-    detail_address?: string;
-  } | null;
-}
-
 interface CamerasBySystem {
   systemId: string;
   systemName: string;
@@ -120,9 +88,6 @@ export default function CameraInventory() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterVendor, setFilterVendor] = useState<string>("all");
-  const [filterProvince, setFilterProvince] = useState<string>("all");
-  const [filterDistrict, setFilterDistrict] = useState<string>("all");
-  const [filterVillage, setFilterVillage] = useState<string>("all");
 
   const systemId = selectedSystemId;
 
@@ -140,20 +105,65 @@ export default function CameraInventory() {
   const [loadingCloud, setLoadingCloud] = useState(false);
   const [camerasBySystem, setCamerasBySystem] = useState<CamerasBySystem[]>([]);
   const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
+  const [requiresAuth, setRequiresAuth] = useState(false);
+  const loginAttemptedRef = useRef<Set<string>>(new Set());
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
 
   const isLoadingContent = loading || (viewMode === "cloud" && loadingCloud);
 
 
-  // Set default system
+  // Admin login function for cloud systems
+  const attemptAdminLogin = useCallback(
+    async (targetSystemId: string, systemName: string): Promise<boolean> => {
+      // Check if we already attempted for this system in this session
+      if (loginAttemptedRef.current.has(targetSystemId)) {
+        return false;
+      }
+
+      console.log(`[CameraInventory] Attempting Admin login to ${systemName}...`);
+      loginAttemptedRef.current.add(targetSystemId);
+
+      const success = await performAdminLogin(targetSystemId);
+
+      if (success) {
+        console.log(`[CameraInventory] Admin login success for ${systemName}`);
+        setIsLoggedIn((prev) => new Set(prev).add(targetSystemId));
+        // Refresh data
+        refetch();
+        return true;
+      } else {
+        return false;
+      }
+    },
+    [refetch],
+  );
+
+  // Set default system and handle auth
   useEffect(() => {
     const getSystems = async () => {
       try {
-        setLoadingCloud(true);
-        const systems = await getCachedCloudSystems();
-        setCloudSystems(systems);
-        if (systems.length > 0 && !selectedSystemId) {
-          const onlineSystem = systems.find(s => s.stateOfHealth === "online") || systems[0];
-          setSelectedSystemId(onlineSystem.id);
+        let currentSystems = cloudSystems;
+        if (currentSystems.length === 0) {
+          setLoadingCloud(true);
+          currentSystems = await getCachedCloudSystems();
+          setCloudSystems(currentSystems);
+        }
+
+        // Use provided systemId or default to first online
+        const targetId = systemId || (currentSystems.length > 0 ? (currentSystems.find(s => s.stateOfHealth === "online") || currentSystems[0]).id : "");
+
+        if (targetId && !selectedSystemId) {
+          setSelectedSystemId(targetId);
+        }
+
+        if (targetId && !isLoggedIn.has(targetId) && !loginAttemptedRef.current.has(targetId)) {
+          const system = currentSystems.find(s => s.id === targetId);
+          const systemName = system?.name || targetId;
+          const success = await attemptAdminLogin(targetId, systemName);
+          if (!success && !isLoggedIn.has(targetId)) {
+            setRequiresAuth(true);
+          }
         }
       } catch (err) {
         console.error("Error fetching systems:", err);
@@ -162,22 +172,7 @@ export default function CameraInventory() {
       }
     };
     getSystems();
-  }, [selectedSystemId]);
-
-  // Location state
-  const [provinces, setProvinces] = useState<Province[]>([]);
-  const [regencies, setRegencies] = useState<Regency[]>([]);
-  const [districts, setDistricts] = useState<District[]>([]);
-  const [villages, setVillages] = useState<Village[]>([]);
-  const [loadingLocations, setLoadingLocations] = useState(false);
-
-  // Edit location state (separate for edit modal)
-  const [editRegencies, setEditRegencies] = useState<Regency[]>([]);
-  const [editDistricts, setEditDistricts] = useState<District[]>([]);
-  const [editVillages, setEditVillages] = useState<Village[]>([]);
-
-  // Camera location cache for cloud cameras
-  const [cameraLocations, setCameraLocations] = useState<CameraLocationCache>({});
+  }, [selectedSystemId, systemId, attemptAdminLogin, isLoggedIn.has(selectedSystemId), cloudSystems.length]);
 
   // Get status description
   const getStatusDescription = (status: string): string => {
@@ -223,98 +218,7 @@ export default function CameraInventory() {
     }
   };
 
-  // Format location display (short version for cards)
-  const formatCameraLocation = (cameraName: string): string => {
-    const location = cameraLocations[cameraName];
-    if (!location) return "Lokasi belum diatur";
 
-    const parts: string[] = [];
-
-    if (location.village_name) parts.push(location.village_name);
-    if (location.district_name) parts.push(location.district_name);
-    if (location.regency_name) parts.push(location.regency_name);
-
-    if (parts.length === 0) return "Lokasi belum diatur";
-
-    return parts.join(", ");
-  };
-
-  // Format location display (full version for tooltip/details)
-  const formatCameraLocationFull = (cameraName: string): string => {
-    const location = cameraLocations[cameraName];
-    if (!location) return "Lokasi belum diatur";
-
-    const lines: string[] = [];
-
-    if (location.detail_address) lines.push(`📍 ${location.detail_address}`);
-    if (location.village_name) lines.push(`🏘️ Kel. ${location.village_name}`);
-    if (location.district_name) lines.push(`🏛️ Kec. ${location.district_name}`);
-    if (location.regency_name) lines.push(`🏙️ ${location.regency_name}`);
-    if (location.province_name) lines.push(`🗺️ ${location.province_name}`);
-
-    if (lines.length === 0) return "Lokasi belum diatur";
-
-    return lines.join("\n");
-  };
-
-  // Fetch camera locations for cloud cameras
-  const fetchCameraLocations = useCallback(
-    async (cameraNames: string[]) => {
-      const uncachedNames = cameraNames.filter((name) => !(name in cameraLocations));
-      if (uncachedNames.length === 0) return;
-
-      try {
-        const locationPromises = uncachedNames.map(async (name) => {
-          try {
-            const response = await fetch(`/api/camera-location?camera_name=${encodeURIComponent(name)}`);
-            if (response.ok) {
-              const data = await response.json();
-              return { name, data };
-            }
-            return { name, data: null };
-          } catch {
-            return { name, data: null };
-          }
-        });
-
-        const results = await Promise.all(locationPromises);
-
-        setCameraLocations((prev) => {
-          const updated = { ...prev };
-          results.forEach(({ name, data }) => {
-            updated[name] = data;
-          });
-          return updated;
-        });
-      } catch (err) {
-        console.error("Failed to fetch camera locations:", err);
-      }
-    },
-    [cameraLocations],
-  );
-
-  // Fetch available systems once and set default
-  useEffect(() => {
-    const getSystems = async () => {
-      try {
-        setLoadingCloud(true);
-        const systems = await getCachedCloudSystems();
-        setCloudSystems(systems);
-
-        // Default to first online system if available
-        if (systems.length > 0 && !selectedSystemId) {
-          const onlineSystem = systems.find(s => s.stateOfHealth === "online") || systems[0];
-          setSelectedSystemId(onlineSystem.id);
-        }
-      } catch (err) {
-        console.error("Error fetching systems:", err);
-      } finally {
-        setLoadingCloud(false);
-      }
-    };
-
-    getSystems();
-  }, [selectedSystemId]);
 
   // Fetch cameras from a specific cloud system
   const fetchCloudCameras = useCallback(async (system: CloudSystem): Promise<CameraDevice[]> => {
@@ -426,12 +330,6 @@ export default function CameraInventory() {
     groupName: "",
     credentialsUser: "",
     credentialsPassword: "",
-    // Location fields
-    provinceId: "",
-    regencyId: "",
-    districtId: "",
-    villageId: "",
-    detailAddress: "",
   });
 
   // Edit form state
@@ -445,12 +343,6 @@ export default function CameraInventory() {
     vendor: "",
     model: "",
     logicalId: "",
-    // Location fields
-    provinceId: "",
-    regencyId: "",
-    districtId: "",
-    villageId: "",
-    detailAddress: "",
     groupId: "",
     groupName: "",
     credentialsUser: "",
@@ -477,159 +369,6 @@ export default function CameraInventory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [servers]);
 
-  // Fetch provinces on mount
-  useEffect(() => {
-    const fetchProvinces = async () => {
-      try {
-        setLoadingLocations(true);
-        const response = await fetch("/api/locations/provinces");
-        if (response.ok) {
-          const data = await response.json();
-          setProvinces(data);
-        }
-      } catch (err) {
-        console.error("Failed to fetch provinces:", err);
-      } finally {
-        setLoadingLocations(false);
-      }
-    };
-    fetchProvinces();
-  }, []);
-
-  // Location change handlers for Create form
-  const handleCreateProvinceChange = async (provinceId: string) => {
-    setCreateForm((prev) => ({
-      ...prev,
-      provinceId,
-      regencyId: "",
-      districtId: "",
-      villageId: "",
-    }));
-    setRegencies([]);
-    setDistricts([]);
-    setVillages([]);
-
-    if (provinceId) {
-      try {
-        const response = await fetch(`/api/locations/regencies?province_id=${provinceId}`);
-        if (response.ok) {
-          setRegencies(await response.json());
-        }
-      } catch (err) {
-        console.error("Failed to fetch regencies:", err);
-      }
-    }
-  };
-
-  const handleCreateRegencyChange = async (regencyId: string) => {
-    setCreateForm((prev) => ({
-      ...prev,
-      regencyId,
-      districtId: "",
-      villageId: "",
-    }));
-    setDistricts([]);
-    setVillages([]);
-
-    if (regencyId) {
-      try {
-        const response = await fetch(`/api/locations/districts?regency_id=${regencyId}`);
-        if (response.ok) {
-          setDistricts(await response.json());
-        }
-      } catch (err) {
-        console.error("Failed to fetch districts:", err);
-      }
-    }
-  };
-
-  const handleCreateDistrictChange = async (districtId: string) => {
-    setCreateForm((prev) => ({
-      ...prev,
-      districtId,
-      villageId: "",
-    }));
-    setVillages([]);
-
-    if (districtId) {
-      try {
-        const response = await fetch(`/api/locations/villages?district_id=${districtId}`);
-        if (response.ok) {
-          setVillages(await response.json());
-        }
-      } catch (err) {
-        console.error("Failed to fetch villages:", err);
-      }
-    }
-  };
-
-  // Location change handlers for Edit form
-  const handleEditProvinceChange = async (provinceId: string) => {
-    setEditForm((prev) => ({
-      ...prev,
-      provinceId,
-      regencyId: "",
-      districtId: "",
-      villageId: "",
-    }));
-    setEditRegencies([]);
-    setEditDistricts([]);
-    setEditVillages([]);
-
-    if (provinceId) {
-      try {
-        const response = await fetch(`/api/locations/regencies?province_id=${provinceId}`);
-        if (response.ok) {
-          setEditRegencies(await response.json());
-        }
-      } catch (err) {
-        console.error("Failed to fetch regencies:", err);
-      }
-    }
-  };
-
-  const handleEditRegencyChange = async (regencyId: string) => {
-    setEditForm((prev) => ({
-      ...prev,
-      regencyId,
-      districtId: "",
-      villageId: "",
-    }));
-    setEditDistricts([]);
-    setEditVillages([]);
-
-    if (regencyId) {
-      try {
-        const response = await fetch(`/api/locations/districts?regency_id=${regencyId}`);
-        if (response.ok) {
-          setEditDistricts(await response.json());
-        }
-      } catch (err) {
-        console.error("Failed to fetch districts:", err);
-      }
-    }
-  };
-
-  const handleEditDistrictChange = async (districtId: string) => {
-    setEditForm((prev) => ({
-      ...prev,
-      districtId,
-      villageId: "",
-    }));
-    setEditVillages([]);
-
-    if (districtId) {
-      try {
-        const response = await fetch(`/api/locations/villages?district_id=${districtId}`);
-        if (response.ok) {
-          setEditVillages(await response.json());
-        }
-      } catch (err) {
-        console.error("Failed to fetch villages:", err);
-      }
-    }
-  };
-
   const displayCameras = useMemo(() => {
     if (viewMode === "cloud") {
       return camerasBySystem.flatMap((sys) => sys.cameras);
@@ -637,76 +376,8 @@ export default function CameraInventory() {
     return (cameras as CameraDevice[]) || [];
   }, [viewMode, camerasBySystem, cameras]);
 
-  // Fetch locations for cameras when they load
-  useEffect(() => {
-    if (displayCameras.length > 0) {
-      const cameraNames = displayCameras.map((c) => c.name);
-      fetchCameraLocations(cameraNames);
-    }
-  }, [displayCameras, fetchCameraLocations]);
-
-  const getStatusIcon = (status: string) => {
-    return status?.toLowerCase() === "online" ? (
-      <Wifi className="w-4 h-4 text-green-600" />
-    ) : (
-      <WifiOff className="w-4 h-4 text-red-600" />
-    );
-  };
-
-  // Helper to search in location data
-  const searchInLocation = (cameraName: string, term: string): boolean => {
-    const loc = cameraLocations[cameraName];
-    if (!loc) return false;
-    const lowerTerm = term.toLowerCase();
-    return (
-      loc.detail_address?.toLowerCase().includes(lowerTerm) ||
-      false ||
-      loc.village_name?.toLowerCase().includes(lowerTerm) ||
-      false ||
-      loc.district_name?.toLowerCase().includes(lowerTerm) ||
-      false ||
-      loc.regency_name?.toLowerCase().includes(lowerTerm) ||
-      false ||
-      loc.province_name?.toLowerCase().includes(lowerTerm) ||
-      false
-    );
-  };
-
   // Get unique vendors for filter
   const uniqueVendors = Array.from(new Set(displayCameras.map((c) => c.vendor).filter(Boolean))).sort() as string[];
-
-  // Get unique provinces from camera locations
-  const uniqueProvinces = Array.from(
-    new Set(
-      Object.values(cameraLocations)
-        .map((loc) => loc?.province_name)
-        .filter(Boolean),
-    ),
-  ).sort() as string[];
-
-  // Get unique districts (kecamatan) - filtered by selected province
-  const uniqueDistricts = Array.from(
-    new Set(
-      Object.values(cameraLocations)
-        .filter((loc) => filterProvince === "all" || loc?.province_name === filterProvince)
-        .map((loc) => loc?.district_name)
-        .filter(Boolean),
-    ),
-  ).sort() as string[];
-
-  // Get unique villages (kelurahan) - filtered by selected district
-  const uniqueVillages = Array.from(
-    new Set(
-      Object.values(cameraLocations)
-        .filter(
-          (loc) =>
-            (filterProvince === "all" || loc?.province_name === filterProvince) &&
-            (filterDistrict === "all" || loc?.district_name === filterDistrict),
-        )
-        .map((loc) => loc?.village_name)
-        .filter(Boolean),
-    ),
-  ).sort() as string[];
 
   const filteredCameras = displayCameras.filter((camera) => {
     // Search filter
@@ -716,8 +387,7 @@ export default function CameraInventory() {
       (camera.location || camera.ip || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       camera.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       camera.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      camera.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      searchInLocation(camera.name, searchTerm);
+      camera.model?.toLowerCase().includes(searchTerm.toLowerCase());
 
     // Status filter
     const matchesStatus = filterStatus === "all" || camera.status?.toLowerCase() === filterStatus.toLowerCase();
@@ -725,16 +395,7 @@ export default function CameraInventory() {
     // Vendor filter
     const matchesVendor = filterVendor === "all" || camera.vendor?.toLowerCase() === filterVendor.toLowerCase();
 
-    // Province filter
-    const matchesProvince = filterProvince === "all" || cameraLocations[camera.name]?.province_name === filterProvince;
-
-    // District filter
-    const matchesDistrict = filterDistrict === "all" || cameraLocations[camera.name]?.district_name === filterDistrict;
-
-    // Village filter
-    const matchesVillage = filterVillage === "all" || cameraLocations[camera.name]?.village_name === filterVillage;
-
-    return matchesSearch && matchesStatus && matchesVendor && matchesProvince && matchesDistrict && matchesVillage;
+    return matchesSearch && matchesStatus && matchesVendor;
   });
 
   // Calculate stats based on displayCameras
@@ -755,47 +416,6 @@ export default function CameraInventory() {
   const handleEditCamera = async (camera: CameraDevice) => {
     setSelectedCamera(camera);
 
-    // Fetch existing location data from database
-    let locationData = {
-      provinceId: "",
-      regencyId: "",
-      districtId: "",
-      villageId: "",
-      detailAddress: "",
-    };
-
-    try {
-      const response = await fetch(`/api/camera-location?camera_name=${encodeURIComponent(camera.name)}`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data) {
-          locationData = {
-            provinceId: data.province_id || "",
-            regencyId: data.regency_id || "",
-            districtId: data.district_id || "",
-            villageId: data.village_id || "",
-            detailAddress: data.detail_address || "",
-          };
-
-          // Load dependent dropdowns
-          if (data.province_id) {
-            const regRes = await fetch(`/api/locations/regencies?province_id=${data.province_id}`);
-            if (regRes.ok) setEditRegencies(await regRes.json());
-          }
-          if (data.regency_id) {
-            const distRes = await fetch(`/api/locations/districts?regency_id=${data.regency_id}`);
-            if (distRes.ok) setEditDistricts(await distRes.json());
-          }
-          if (data.district_id) {
-            const vilRes = await fetch(`/api/locations/villages?district_id=${data.district_id}`);
-            if (vilRes.ok) setEditVillages(await vilRes.json());
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Failed to fetch camera location:", err);
-    }
-
     setEditForm({
       name: camera.name || "",
       physicalId: camera.physicalId || "",
@@ -810,7 +430,6 @@ export default function CameraInventory() {
       groupName: camera.group?.name || "",
       credentialsUser: camera.credentials?.user || "",
       credentialsPassword: camera.credentials?.password || "",
-      ...locationData,
     });
     setShowEditModal(true);
   };
@@ -861,24 +480,6 @@ export default function CameraInventory() {
       const result = await nxAPI.addCamera(payload);
 
       if (result) {
-        // Also save location to database
-        try {
-          await fetch("/api/camera-location", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              camera_name: createForm.name,
-              detail_address: createForm.detailAddress,
-              province_id: createForm.provinceId || null,
-              regency_id: createForm.regencyId || null,
-              district_id: createForm.districtId || null,
-              village_id: createForm.villageId || null,
-            }),
-          });
-        } catch (locErr) {
-          console.error("Failed to save camera location:", locErr);
-        }
-
         alert("Camera created successfully!");
         setShowCreateModal(false);
         // Reset form
@@ -896,16 +497,7 @@ export default function CameraInventory() {
           groupName: "",
           credentialsUser: "",
           credentialsPassword: "",
-          provinceId: "",
-          regencyId: "",
-          districtId: "",
-          villageId: "",
-          detailAddress: "",
         });
-        // Reset location dropdowns
-        setRegencies([]);
-        setDistricts([]);
-        setVillages([]);
         refetch();
       }
     } catch (error: unknown) {
@@ -966,31 +558,9 @@ export default function CameraInventory() {
       const result = await nxAPI.updateCamera(selectedCamera.id, payload);
 
       if (result) {
-        // Also save/update location in database
-        try {
-          await fetch("/api/camera-location", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              camera_name: editForm.name,
-              detail_address: editForm.detailAddress,
-              province_id: editForm.provinceId || null,
-              regency_id: editForm.regencyId || null,
-              district_id: editForm.districtId || null,
-              village_id: editForm.villageId || null,
-            }),
-          });
-        } catch (locErr) {
-          console.error("Failed to update camera location:", locErr);
-        }
-
         alert("Camera updated successfully!");
         setShowEditModal(false);
         setSelectedCamera(null);
-        // Reset edit location dropdowns
-        setEditRegencies([]);
-        setEditDistricts([]);
-        setEditVillages([]);
         refetch();
       }
     } catch (error: unknown) {
@@ -1029,6 +599,14 @@ export default function CameraInventory() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const getStatusIcon = (status: string) => {
+    return status?.toLowerCase() === "online" ? (
+      <Wifi className="w-4 h-4 text-green-600" />
+    ) : (
+      <WifiOff className="w-4 h-4 text-red-600" />
+    );
   };
 
   // Render Create Modal Content (now moved into main render)
@@ -1190,95 +768,6 @@ export default function CameraInventory() {
                 </div>
               </div>
             </div>
-
-            {/* Location Section */}
-            <div className="border-t pt-3 md:pt-4">
-              <h3 className="text-sm font-medium text-gray-700 mb-2 md:mb-3 flex items-center">
-                <MapPin className="w-4 h-4 mr-2" />
-                Location
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Province</label>
-                  <select
-                    value={createForm.provinceId}
-                    onChange={(e) => handleCreateProvinceChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={loadingLocations}
-                  >
-                    <option value="">Select Province</option>
-                    {provinces.map((prov) => (
-                      <option key={prov.id} value={prov.id}>
-                        {prov.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Regency/City</label>
-                  <select
-                    value={createForm.regencyId}
-                    onChange={(e) => handleCreateRegencyChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={!createForm.provinceId}
-                  >
-                    <option value="">Select Regency/City</option>
-                    {regencies.map((reg) => (
-                      <option key={reg.id} value={reg.id}>
-                        {reg.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 mt-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
-                  <select
-                    value={createForm.districtId}
-                    onChange={(e) => handleCreateDistrictChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={!createForm.regencyId}
-                  >
-                    <option value="">Select District</option>
-                    {districts.map((dist) => (
-                      <option key={dist.id} value={dist.id}>
-                        {dist.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Village</label>
-                  <select
-                    value={createForm.villageId}
-                    onChange={(e) => setCreateForm({ ...createForm, villageId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={!createForm.districtId}
-                  >
-                    <option value="">Select Village</option>
-                    {villages.map((vil) => (
-                      <option key={vil.id} value={vil.id}>
-                        {vil.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="mt-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Detail Address</label>
-                <textarea
-                  value={createForm.detailAddress}
-                  onChange={(e) => setCreateForm({ ...createForm, detailAddress: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  rows={2}
-                  placeholder="Street name, building number, etc."
-                />
-              </div>
-            </div>
           </div>
 
           <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4">
@@ -1300,7 +789,7 @@ export default function CameraInventory() {
     );
   };
 
-  // Render Edit Modal Content (now moved into main render)
+  // Render Edit Modal Content
   const renderEditModal = () => {
     if (!selectedCamera) return null;
 
@@ -1469,94 +958,6 @@ export default function CameraInventory() {
                 </div>
               </div>
             </div>
-
-            {/* Location Section */}
-            <div className="border-t pt-3 md:pt-4">
-              <h3 className="text-sm font-medium text-gray-700 mb-2 md:mb-3 flex items-center">
-                <MapPin className="w-4 h-4 mr-2" />
-                Location
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Province</label>
-                  <select
-                    value={editForm.provinceId}
-                    onChange={(e) => handleEditProvinceChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  >
-                    <option value="">Select Province</option>
-                    {provinces.map((prov) => (
-                      <option key={prov.id} value={prov.id}>
-                        {prov.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Regency/City</label>
-                  <select
-                    value={editForm.regencyId}
-                    onChange={(e) => handleEditRegencyChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={!editForm.provinceId}
-                  >
-                    <option value="">Select Regency/City</option>
-                    {editRegencies.map((reg) => (
-                      <option key={reg.id} value={reg.id}>
-                        {reg.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 mt-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
-                  <select
-                    value={editForm.districtId}
-                    onChange={(e) => handleEditDistrictChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={!editForm.regencyId}
-                  >
-                    <option value="">Select District</option>
-                    {editDistricts.map((dist) => (
-                      <option key={dist.id} value={dist.id}>
-                        {dist.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Village</label>
-                  <select
-                    value={editForm.villageId}
-                    onChange={(e) => setEditForm({ ...editForm, villageId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={!editForm.districtId}
-                  >
-                    <option value="">Select Village</option>
-                    {editVillages.map((vil) => (
-                      <option key={vil.id} value={vil.id}>
-                        {vil.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="mt-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Detail Address</label>
-                <textarea
-                  value={editForm.detailAddress}
-                  onChange={(e) => setEditForm({ ...editForm, detailAddress: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  rows={2}
-                  placeholder="Street name, building number, etc."
-                />
-              </div>
-            </div>
           </div>
 
           <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4">
@@ -1654,6 +1055,19 @@ export default function CameraInventory() {
         </div>
       </div>
 
+      <CloudLoginDialog
+        open={showLoginDialog}
+        onOpenChange={setShowLoginDialog}
+        systemId={selectedSystemId}
+        systemName={cloudSystems.find(s => s.id === selectedSystemId)?.name || selectedSystemId}
+        onLoginSuccess={() => {
+          setIsLoggedIn((prev) => new Set(prev).add(selectedSystemId));
+          setRequiresAuth(false);
+          refetch();
+          testConnection();
+        }}
+      />
+
       {/* Search and Filters */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         <div className="flex-1 relative">
@@ -1670,10 +1084,7 @@ export default function CameraInventory() {
           <PopoverTrigger asChild>
             <button
               className={`flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 ${filterStatus !== "all" ||
-                filterVendor !== "all" ||
-                filterProvince !== "all" ||
-                filterDistrict !== "all" ||
-                filterVillage !== "all"
+                filterVendor !== "all"
                 ? "border-blue-500 bg-blue-50 text-blue-700"
                 : ""
                 }`}
@@ -1681,18 +1092,12 @@ export default function CameraInventory() {
               <Filter className="w-4 h-4" />
               <span>Filters</span>
               {(filterStatus !== "all" ||
-                filterVendor !== "all" ||
-                filterProvince !== "all" ||
-                filterDistrict !== "all" ||
-                filterVillage !== "all") && (
+                filterVendor !== "all") && (
                   <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
                     {
                       [
                         filterStatus !== "all",
                         filterVendor !== "all",
-                        filterProvince !== "all",
-                        filterDistrict !== "all",
-                        filterVillage !== "all",
                       ].filter(Boolean).length
                     }
                   </span>
@@ -1704,17 +1109,11 @@ export default function CameraInventory() {
               <div className="flex items-center justify-between sticky top-0 bg-white pb-2">
                 <h4 className="font-semibold text-gray-900">Filters</h4>
                 {(filterStatus !== "all" ||
-                  filterVendor !== "all" ||
-                  filterProvince !== "all" ||
-                  filterDistrict !== "all" ||
-                  filterVillage !== "all") && (
+                  filterVendor !== "all") && (
                     <button
                       onClick={() => {
                         setFilterStatus("all");
                         setFilterVendor("all");
-                        setFilterProvince("all");
-                        setFilterDistrict("all");
-                        setFilterVillage("all");
                       }}
                       className="text-xs text-blue-600 hover:text-blue-800"
                     >
@@ -1755,70 +1154,6 @@ export default function CameraInventory() {
                   ))}
                 </select>
               </div>
-
-              {/* Province Filter */}
-              {uniqueProvinces.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Provinsi</label>
-                  <select
-                    value={filterProvince}
-                    onChange={(e) => {
-                      setFilterProvince(e.target.value);
-                      setFilterDistrict("all");
-                      setFilterVillage("all");
-                    }}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">Semua Provinsi</option>
-                    {uniqueProvinces.map((province) => (
-                      <option key={province} value={province}>
-                        {province}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* District Filter */}
-              {uniqueDistricts.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Kecamatan</label>
-                  <select
-                    value={filterDistrict}
-                    onChange={(e) => {
-                      setFilterDistrict(e.target.value);
-                      setFilterVillage("all");
-                    }}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">Semua Kecamatan</option>
-                    {uniqueDistricts.map((district) => (
-                      <option key={district} value={district}>
-                        {district}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Village Filter */}
-              {uniqueVillages.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Kelurahan</label>
-                  <select
-                    value={filterVillage}
-                    onChange={(e) => setFilterVillage(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">Semua Kelurahan</option>
-                    {uniqueVillages.map((village) => (
-                      <option key={village} value={village}>
-                        {village}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
 
               <button
                 onClick={() => setShowFilters(false)}
@@ -1875,11 +1210,6 @@ export default function CameraInventory() {
           <div className="flex items-center justify-center p-8">
             <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
             <span className="text-gray-600">Loading cameras...</span>
-          </div>
-        ) : error && !loading ? (
-          <div className="flex items-center justify-center p-8 text-red-600">
-            <AlertCircle className="w-6 h-6 mr-2" />
-            <span>Error loading cameras: {error}</span>
           </div>
         ) : viewMode !== "cloud" && servers.length === 0 ? (
           <div className="flex items-center justify-center p-12 text-center">
@@ -1939,27 +1269,17 @@ export default function CameraInventory() {
                       cam.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                       cam.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                       cam.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      cam.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      searchInLocation(cam.name, searchTerm);
+                      cam.model?.toLowerCase().includes(searchTerm.toLowerCase());
 
                     const matchesStatus =
                       filterStatus === "all" || cam.status?.toLowerCase() === filterStatus.toLowerCase();
                     const matchesVendor =
                       filterVendor === "all" || cam.vendor?.toLowerCase() === filterVendor.toLowerCase();
-                    const matchesProvince =
-                      filterProvince === "all" || cameraLocations[cam.name]?.province_name === filterProvince;
-                    const matchesDistrict =
-                      filterDistrict === "all" || cameraLocations[cam.name]?.district_name === filterDistrict;
-                    const matchesVillage =
-                      filterVillage === "all" || cameraLocations[cam.name]?.village_name === filterVillage;
 
                     return (
                       matchesSearch &&
                       matchesStatus &&
-                      matchesVendor &&
-                      matchesProvince &&
-                      matchesDistrict &&
-                      matchesVillage
+                      matchesVendor
                     );
                   });
 
@@ -1988,10 +1308,7 @@ export default function CameraInventory() {
                               {filteredSystemCameras.length} cameras
                               {searchTerm ||
                                 filterStatus !== "all" ||
-                                filterVendor !== "all" ||
-                                filterProvince !== "all" ||
-                                filterDistrict !== "all" ||
-                                filterVillage !== "all"
+                                filterVendor !== "all"
                                 ? ` (filtered from ${systemData.cameras.length})`
                                 : ""}
                             </div>
@@ -2067,51 +1384,6 @@ export default function CameraInventory() {
                                     )}
                                   </div>
 
-                                  {/* Location Details */}
-                                  <div className="flex-grow mt-2 pt-2 border-t border-gray-100">
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <MapPin className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                                      <div className="text-xs text-gray-500 line-clamp-4">
-                                        {cameraLocations[camera.name] ? (
-                                          <div className="space-y-0.5">
-                                            {cameraLocations[camera.name]?.detail_address && (
-                                              <div className="font-medium text-gray-700">
-                                                {cameraLocations[camera.name]?.detail_address}
-                                              </div>
-                                            )}
-                                            {cameraLocations[camera.name]?.village_name && (
-                                              <div>Kel. {cameraLocations[camera.name]?.village_name}</div>
-                                            )}
-                                            {cameraLocations[camera.name]?.district_name && (
-                                              <div>Kec. {cameraLocations[camera.name]?.district_name}</div>
-                                            )}
-                                            {cameraLocations[camera.name]?.regency_name && (
-                                              <div>{cameraLocations[camera.name]?.regency_name}</div>
-                                            )}
-                                            {cameraLocations[camera.name]?.province_name && (
-                                              <div className="text-gray-400">
-                                                {cameraLocations[camera.name]?.province_name}
-                                              </div>
-                                            )}
-                                            {!cameraLocations[camera.name]?.village_name &&
-                                              !cameraLocations[camera.name]?.district_name &&
-                                              !cameraLocations[camera.name]?.regency_name &&
-                                              !cameraLocations[camera.name]?.province_name &&
-                                              !cameraLocations[camera.name]?.detail_address && (
-                                                <div className="flex items-center gap-1.5 text-gray-400 italic bg-gray-50 px-2 py-0.5 rounded border border-dashed border-gray-200 w-fit">
-                                                  <span>Lokasi belum diatur</span>
-                                                </div>
-                                              )}
-                                          </div>
-                                        ) : (
-                                          <div className="flex items-center gap-1.5 text-gray-400 italic bg-gray-50 px-2 py-0.5 rounded border border-dashed border-gray-200 w-fit">
-                                            <span>Lokasi belum diatur</span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-
                                   {/* Status Badge */}
                                   <div className="flex items-center justify-between mt-auto pt-2 border-t">
                                     <div className="group relative">
@@ -2161,14 +1433,6 @@ export default function CameraInventory() {
                 </div>
 
                 <div className="space-y-1 md:space-y-2 text-xs md:text-sm text-gray-600">
-                  <div className="flex items-center space-x-1">
-                    <MapPin className="w-3 h-3 flex-shrink-0" />
-                    <span className="truncate" title={formatCameraLocation(camera.name)}>
-                      {cameraLocations[camera.name]
-                        ? formatCameraLocation(camera.name)
-                        : camera.location || camera.ip || "Lokasi belum diatur"}
-                    </span>
-                  </div>
                   <div className="truncate">Model: {camera.model || "Unknown"}</div>
                   {camera.vendor && <div className="truncate hidden sm:block">Vendor: {camera.vendor}</div>}
                 </div>
@@ -2240,14 +1504,6 @@ export default function CameraInventory() {
                           </div>
                         </div>
                       </td>
-                      <td
-                        className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm text-gray-600"
-                        title={formatCameraLocation(camera.name)}
-                      >
-                        {cameraLocations[camera.name]
-                          ? formatCameraLocation(camera.name)
-                          : camera.location || "Lokasi belum diatur"}
-                      </td>
                       <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{camera.vendor || "-"}</div>
                         <div className="text-sm text-gray-500">{camera.model || "-"}</div>
@@ -2299,9 +1555,7 @@ export default function CameraInventory() {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-gray-900 truncate">{camera.name}</div>
                         <div className="text-xs text-gray-500 truncate">
-                          {cameraLocations[camera.name]
-                            ? formatCameraLocation(camera.name)
-                            : camera.location || camera.ip || "Lokasi belum diatur"}
+                          {camera.location || camera.ip || "Lokasi belum diatur"}
                         </div>
                       </div>
                     </div>
@@ -2345,6 +1599,24 @@ export default function CameraInventory() {
           </>
         )}
       </div>
-    </div >
+      {requiresAuth && (
+        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-xl shadow-xl border max-w-sm w-full text-center">
+            <Shield className="w-12 h-12 text-blue-600 mx-auto mb-4" />
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Admin Login Required</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              To manage cameras and inventory, you need to log in with system administrator credentials.
+            </p>
+            <Button
+              onClick={() => setShowLoginDialog(true)}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+            >
+              <LogIn className="w-4 h-4 mr-2" />
+              Login Admin
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

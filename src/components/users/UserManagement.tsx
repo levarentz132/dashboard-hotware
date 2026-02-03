@@ -35,7 +35,8 @@ import {
   timeUnitToSeconds,
   secondsToTimeUnit,
 } from "./user-service";
-import { getCloudAuthHeader, CLOUD_CONFIG } from "@/lib/config";
+import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -308,67 +309,26 @@ export default function UserManagement() {
     setSelectedSystemId(value);
   };
 
-  // Auto-login function for cloud systems using local account credentials
-  const attemptAutoLogin = useCallback(
+  // Admin login function for cloud systems
+  const attemptAdminLogin = useCallback(
     async (targetSystemId: string, systemName: string): Promise<boolean> => {
-      // Check if auto-login is enabled
-      if (!CLOUD_CONFIG.autoLoginEnabled) {
-        console.log("[User Cloud Auto-Login] Disabled");
-        return false;
-      }
+      console.log(`[UserManagement] Attempting Admin login to ${systemName}...`);
 
-      // Use local user credentials if available, otherwise fall back to config
-      const username = localUser?.username || CLOUD_CONFIG.username;
-      const password = CLOUD_CONFIG.password; // Password must come from config (local passwords are hashed)
+      const success = await performAdminLogin(targetSystemId);
 
-      if (!username || !password) {
-        console.log("[User Cloud Auto-Login] Credentials not available");
-        return false;
-      }
-
-      // Check if we already attempted auto-login for this system
-      if (autoLoginAttempted.has(targetSystemId)) {
-        console.log(`[User Cloud Auto-Login] Already attempted for ${systemName}`);
-        return false;
-      }
-
-      console.log(`[User Cloud Auto-Login] Attempting login to ${systemName} with user: ${username}...`);
-
-      try {
-        const response = await fetch("/api/cloud/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            systemId: targetSystemId,
-            username: username,
-            password: password,
-          }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          console.error(`[User Cloud Auto-Login] Failed for ${systemName}:`, data.error);
-          setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
-          return false;
-        }
-
-        console.log(`[User Cloud Auto-Login] Success for ${systemName} with user: ${username}`);
+      if (success) {
+        console.log(`[UserManagement] Admin login success for ${systemName}`);
         setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
         setIsLoggedIn((prev) => new Set(prev).add(targetSystemId));
-
-        // After successful login, we need to refetch users and groups
+        // After successful login, refetch data
         await Promise.all([refetchUsers(), refetchGroups()]);
         return true;
-      } catch (err) {
-        console.error(`[User Cloud Auto-Login] Error for ${systemName}:`, err);
+      } else {
         setAutoLoginAttempted((prev) => new Set(prev).add(targetSystemId));
         return false;
       }
     },
-    [autoLoginAttempted, refetchUsers, refetchGroups, localUser],
+    [refetchUsers, refetchGroups],
   );
 
   // Sync requiresAuth with login dialog or auto-login
@@ -378,14 +338,14 @@ export default function UserManagement() {
         const system = cloudSystems.find((s) => s.id === systemId);
         const systemName = system?.name || systemId;
 
-        // Try auto-login first using local account credentials
-        if (CLOUD_CONFIG.autoLoginEnabled && !autoLoginAttempted.has(systemId)) {
-          console.log(`[UserManagement] Auth required for ${systemName}, attempting auto-login with local account...`);
-          const success = await attemptAutoLogin(systemId, systemName);
-          if (success) return; // Auto-login succeeded, useEffect will re-run after refetch
+        // Try admin login first
+        if (!autoLoginAttempted.has(systemId)) {
+          console.log(`[UserManagement] Auth required for ${systemName}, attempting admin login...`);
+          const success = await attemptAdminLogin(systemId, systemName);
+          if (success) return;
         }
 
-        // Auto-login failed or not available, show dialog
+        // Admin login failed or not available, show dialog
         setLoginSystemId(systemId);
         setLoginSystemName(systemName);
         setShowLoginDialog(true);
@@ -393,7 +353,7 @@ export default function UserManagement() {
     };
 
     handleAuth();
-  }, [requiresAuth, systemId, cloudSystems, autoLoginAttempted, attemptAutoLogin]);
+  }, [requiresAuth, systemId, cloudSystems, autoLoginAttempted, attemptAdminLogin]);
 
   // Dialog states
   const [showCreateDialog, setShowCreateDialog] = useState(false);

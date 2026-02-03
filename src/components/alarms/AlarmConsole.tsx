@@ -42,7 +42,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 
 // ============================================
@@ -718,52 +719,25 @@ export default function AlarmConsole() {
     }
   }, []);
 
-  // Auto-login function for cloud systems
-  const attemptAutoLogin = useCallback(
+  // Admin login function for cloud systems
+  const attemptAdminLogin = useCallback(
     async (systemId: string, systemName: string): Promise<boolean> => {
-      // Check if auto-login is enabled and credentials are configured
-      if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
-        console.log("[Cloud Auto-Login] Disabled or credentials not configured");
-        return false;
-      }
-
       // Check if we already attempted auto-login for this system
       if (autoLoginAttempted.has(systemId)) {
-        console.log(`[Cloud Auto-Login] Already attempted for ${systemName}`);
+        console.log(`[AlarmConsole] Already attempted for ${systemName}`);
         return false;
       }
 
-      console.log(`[Cloud Auto-Login] Attempting login to ${systemName}...`);
+      console.log(`[AlarmConsole] Attempting Admin login to ${systemName}...`);
 
-      try {
-        const response = await fetch("/api/cloud/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            systemId,
-            username: CLOUD_CONFIG.username,
-            password: CLOUD_CONFIG.password,
-          }),
-        });
+      const success = await performAdminLogin(systemId);
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          console.error(`[Cloud Auto-Login] Failed for ${systemName}:`, data.error);
-          // Mark as attempted to avoid retry loops
-          setAutoLoginAttempted((prev) => new Set(prev).add(systemId));
-          return false;
-        }
-
-        console.log(`[Cloud Auto-Login] Success for ${systemName}`);
-        // Mark as attempted (successfully)
+      if (success) {
+        console.log(`[AlarmConsole] Admin login success for ${systemName}`);
         setAutoLoginAttempted((prev) => new Set(prev).add(systemId));
         setIsLoggedIn((prev) => new Set(prev).add(systemId));
         return true;
-      } catch (err) {
-        console.error(`[Cloud Auto-Login] Error for ${systemName}:`, err);
+      } else {
         setAutoLoginAttempted((prev) => new Set(prev).add(systemId));
         return false;
       }
@@ -824,10 +798,10 @@ export default function AlarmConsole() {
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           if (errorData.requiresAuth) {
-            // Try auto-login first (only if not already retrying after login)
-            if (!retryAfterLogin && CLOUD_CONFIG.autoLoginEnabled) {
-              console.log(`[Cloud] Auth required for ${systemName}, attempting auto-login...`);
-              const loginSuccess = await attemptAutoLogin(systemId, systemName);
+            // Try admin login first (only if not already retrying after login)
+            if (!retryAfterLogin) {
+              console.log(`[Cloud] Auth required for ${systemName}, attempting admin login...`);
+              const loginSuccess = await attemptAdminLogin(systemId, systemName);
               if (loginSuccess) {
                 // Retry fetching servers after successful login
                 setLoadingCloudServers(false);
@@ -860,7 +834,7 @@ export default function AlarmConsole() {
         setLoadingCloudServers(false);
       }
     },
-    [cloudSystems, attemptAutoLogin],
+    [cloudSystems, attemptAdminLogin],
   );
 
   // Auto-select first online system if none selected
