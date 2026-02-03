@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
 import {
   Activity,
   Server,
@@ -13,6 +14,7 @@ import {
   Globe,
   MapPin,
   ExternalLink,
+  Map as MapIcon,
 } from "lucide-react";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { useCameras } from "@/hooks/useNxAPI-camera";
@@ -23,6 +25,25 @@ import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Shield, LogIn } from "lucide-react";
+import type { ServerMarkerData } from "./ServerMap";
+
+// Dynamic import untuk ServerMap (client-side only karena pakai Leaflet)
+const ServerMap = dynamic(() => import("./ServerMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="bg-white rounded-lg border shadow-sm">
+      <div className="p-4 border-b">
+        <div className="flex items-center gap-2">
+          <MapIcon className="w-5 h-5 text-blue-600" />
+          <h3 className="font-semibold text-gray-900">Server Locations Map</h3>
+        </div>
+      </div>
+      <div className="h-[400px] flex items-center justify-center bg-gray-50">
+        <RefreshCw className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    </div>
+  ),
+});
 
 interface SystemInfoData {
   name?: string;
@@ -76,7 +97,7 @@ export default function SystemHealth() {
       onlineSystems.map(async (system) => {
         const details = await fetchSystemDetails(system.id);
         newDetails.set(system.id, details);
-      })
+      }),
     );
 
     setSystemDetails(newDetails);
@@ -164,6 +185,24 @@ export default function SystemHealth() {
   const onlineSystemsCount = cloudSystems.filter((s) => s.stateOfHealth === "online").length;
   const totalSystemsCount = cloudSystems.length;
 
+  // Prepare server data for map
+  const serverMapData: ServerMarkerData[] = useMemo(() => {
+    return cloudSystems.map((system) => {
+      const location = serverLocations.get(system.name);
+      const details = systemDetails.get(system.id);
+      return {
+        id: system.id,
+        name: system.name,
+        isOnline: system.stateOfHealth === "online",
+        latitude: location?.latitude || 0,
+        longitude: location?.longitude || 0,
+        version: details?.version || system.version,
+        ownerFullName: system.ownerFullName,
+        accessRole: system.accessRole,
+      };
+    });
+  }, [cloudSystems, serverLocations, systemDetails]);
+
   if (loading && cloudSystems.length === 0) {
     return (
       <div className="space-y-6">
@@ -242,6 +281,14 @@ export default function SystemHealth() {
           </div>
         </div>
       </div>
+
+      {/* Server Locations Map */}
+      <ServerMap
+        servers={serverMapData}
+        onServerClick={(server) => setEditingLocation(server.name)}
+        onRefresh={handleRefresh}
+        isRefreshing={refreshing}
+      />
 
       {/* Cloud Systems Grid */}
       <div>
