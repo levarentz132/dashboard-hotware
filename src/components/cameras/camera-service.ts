@@ -3,7 +3,7 @@
  */
 
 import { getCloudAuthHeader } from "@/lib/config";
-import type { CloudSystem, CloudCamera, CameraLocationData, Province, Regency, District, Village } from "./types";
+import type { CloudSystem, CloudCamera, Province, Regency, District, Village } from "./types";
 
 // ============================================
 // Cloud Systems API
@@ -134,77 +134,6 @@ export async function logoutFromSystem(systemId: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.error(`Logout error:`, err);
-    return false;
-  }
-}
-
-// ============================================
-// Camera Location API
-// ============================================
-
-/**
- * Fetch location for a single camera
- */
-export async function fetchCameraLocation(cameraName: string): Promise<CameraLocationData | null> {
-  try {
-    const response = await fetch(`/api/camera-location?camera_name=${encodeURIComponent(cameraName)}`);
-    if (response.ok) {
-      return await response.json();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Fetch locations for multiple cameras
- */
-export async function fetchCameraLocations(cameraNames: string[]): Promise<Record<string, CameraLocationData | null>> {
-  const results: Record<string, CameraLocationData | null> = {};
-
-  const locationPromises = cameraNames.map(async (name) => {
-    const data = await fetchCameraLocation(name);
-    return { name, data };
-  });
-
-  const locationResults = await Promise.all(locationPromises);
-  locationResults.forEach(({ name, data }) => {
-    results[name] = data;
-  });
-
-  return results;
-}
-
-/**
- * Save camera location
- */
-export async function saveCameraLocation(
-  cameraName: string,
-  locationData: {
-    province_id?: string;
-    province_name?: string;
-    regency_id?: string;
-    regency_name?: string;
-    district_id?: string;
-    district_name?: string;
-    village_id?: string;
-    village_name?: string;
-    detail_address?: string;
-  },
-): Promise<boolean> {
-  try {
-    const response = await fetch("/api/camera-location", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        camera_name: cameraName,
-        ...locationData,
-      }),
-    });
-    return response.ok;
-  } catch (err) {
-    console.error("Error saving camera location:", err);
     return false;
   }
 }

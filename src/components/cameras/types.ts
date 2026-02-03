@@ -65,18 +65,6 @@ export interface CameraDevice {
   credentials?: { user: string; password: string };
 }
 
-export interface CameraLocationCache {
-  [cameraName: string]: CameraLocationData | null;
-}
-
-export interface CameraLocationData {
-  province_name?: string;
-  regency_name?: string;
-  district_name?: string;
-  village_name?: string;
-  detail_address?: string;
-}
-
 // Location interfaces
 export interface Province {
   id: string;
