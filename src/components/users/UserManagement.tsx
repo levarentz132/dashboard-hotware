@@ -253,14 +253,8 @@ export default function UserManagement() {
   const fetchCloudSystems = useCallback(async () => {
     setLoadingCloud(true);
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+      const response = await fetch("/api/cloud/systems", {
         method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
-        },
       });
 
       if (!response.ok) {

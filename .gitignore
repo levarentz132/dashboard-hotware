@@ -10,6 +10,7 @@ pnpm-debug.log*
 out/
 build/
 dist/
+dist-electron/
 
 # Environment variables
 .env
