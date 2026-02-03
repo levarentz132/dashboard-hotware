@@ -35,7 +35,6 @@ export { default as APIStatusWidget } from "./APIStatusWidget";
 export { default as AuditLogWidget } from "./AuditLogWidget";
 export { default as CameraOverviewWidget } from "./CameraOverviewWidget";
 export { default as ConnectionStatusWidget } from "./ConnectionStatusWidget";
-export { default as RecentAlarmsWidget } from "./RecentAlarmsWidget";
 export { default as ServerMapWidget } from "./ServerMapWidget";
 export { default as StorageSummaryWidget } from "./StorageSummaryWidget";
 export { default as SystemStatusWidget } from "./SystemStatusWidget";

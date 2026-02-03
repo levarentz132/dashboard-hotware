@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
-import { CloudLoginDialog } from "@/components/alarms/CloudLoginDialog";
+import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 
 interface CloudSystem {
   id: string;
@@ -51,9 +51,17 @@ const EVENT_TYPE_INFO: Record<string, { label: string; color: string; icon: stri
   AR_Login: { label: "Login", color: "bg-green-100 text-green-800 border-green-200", icon: "login" },
   AR_Logout: { label: "Logout", color: "bg-gray-100 text-gray-800 border-gray-200", icon: "logout" },
   AR_CameraInsert: { label: "Camera Added", color: "bg-blue-100 text-blue-800 border-blue-200", icon: "camera" },
-  AR_CameraUpdate: { label: "Camera Updated", color: "bg-yellow-100 text-yellow-800 border-yellow-200", icon: "camera" },
+  AR_CameraUpdate: {
+    label: "Camera Updated",
+    color: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    icon: "camera",
+  },
   AR_CameraRemove: { label: "Camera Removed", color: "bg-red-100 text-red-800 border-red-200", icon: "camera" },
-  AR_ServerUpdate: { label: "Server Updated", color: "bg-purple-100 text-purple-800 border-purple-200", icon: "server" },
+  AR_ServerUpdate: {
+    label: "Server Updated",
+    color: "bg-purple-100 text-purple-800 border-purple-200",
+    icon: "server",
+  },
   AR_UserUpdate: { label: "User Updated", color: "bg-indigo-100 text-indigo-800 border-indigo-200", icon: "user" },
   AR_UserInsert: { label: "User Added", color: "bg-teal-100 text-teal-800 border-teal-200", icon: "user" },
   AR_UserRemove: { label: "User Removed", color: "bg-orange-100 text-orange-800 border-orange-200", icon: "user" },
@@ -322,7 +330,9 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
             <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 dark:text-indigo-400" />
           </div>
           <div className="min-w-0">
-            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm sm:text-base block truncate">User Activity Log</span>
+            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm sm:text-base block truncate">
+              User Activity Log
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-1">

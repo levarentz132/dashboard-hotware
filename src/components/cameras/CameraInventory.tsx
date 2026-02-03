@@ -7,11 +7,9 @@ import {
   Camera,
   Wifi,
   WifiOff,
-  Settings,
   RefreshCw,
   AlertCircle,
   Plus,
-  Trash2,
   Cloud,
   Server,
   ChevronDown,
@@ -35,13 +33,7 @@ import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 
 interface CloudSystem {
   id: string;
@@ -112,7 +104,6 @@ export default function CameraInventory() {
 
   const isLoadingContent = loading || (viewMode === "cloud" && loadingCloud);
 
-
   // Admin login function for cloud systems
   const attemptAdminLogin = useCallback(
     async (targetSystemId: string, systemName: string): Promise<boolean> => {
@@ -151,14 +142,18 @@ export default function CameraInventory() {
         }
 
         // Use provided systemId or default to first online
-        const targetId = systemId || (currentSystems.length > 0 ? (currentSystems.find(s => s.stateOfHealth === "online") || currentSystems[0]).id : "");
+        const targetId =
+          systemId ||
+          (currentSystems.length > 0
+            ? (currentSystems.find((s) => s.stateOfHealth === "online") || currentSystems[0]).id
+            : "");
 
         if (targetId && !selectedSystemId) {
           setSelectedSystemId(targetId);
         }
 
         if (targetId && !isLoggedIn.has(targetId) && !loginAttemptedRef.current.has(targetId)) {
-          const system = currentSystems.find(s => s.id === targetId);
+          const system = currentSystems.find((s) => s.id === targetId);
           const systemName = system?.name || targetId;
           const success = await attemptAdminLogin(targetId, systemName);
           if (!success && !isLoggedIn.has(targetId)) {
@@ -217,8 +212,6 @@ export default function CameraInventory() {
         return "bg-gray-100 text-gray-600 border-gray-200";
     }
   };
-
-
 
   // Fetch cameras from a specific cloud system
   const fetchCloudCameras = useCallback(async (system: CloudSystem): Promise<CameraDevice[]> => {
@@ -311,8 +304,6 @@ export default function CameraInventory() {
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedCamera, setSelectedCamera] = useState<CameraDevice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Create form state
@@ -332,26 +323,8 @@ export default function CameraInventory() {
     credentialsPassword: "",
   });
 
-  // Edit form state
-  const [editForm, setEditForm] = useState({
-    name: "",
-    physicalId: "",
-    url: "",
-    typeId: "",
-    mac: "",
-    serverId: "",
-    vendor: "",
-    model: "",
-    logicalId: "",
-    groupId: "",
-    groupName: "",
-    credentialsUser: "",
-    credentialsPassword: "",
-  });
-
   // Form error states
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
-  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
   // Auto-retry connection when component mounts
   useEffect(() => {
@@ -412,28 +385,6 @@ export default function CameraInventory() {
     (c) => c.status?.toLowerCase() === "mismatchedcertificate",
   ).length;
 
-  // Handle Edit Camera
-  const handleEditCamera = async (camera: CameraDevice) => {
-    setSelectedCamera(camera);
-
-    setEditForm({
-      name: camera.name || "",
-      physicalId: camera.physicalId || "",
-      url: camera.url || "",
-      typeId: camera.typeId || "",
-      mac: camera.mac || "",
-      serverId: camera.serverId || "",
-      vendor: camera.vendor || "",
-      model: camera.model || "",
-      logicalId: camera.logicalId || "",
-      groupId: camera.group?.id || "",
-      groupName: camera.group?.name || "",
-      credentialsUser: camera.credentials?.user || "",
-      credentialsPassword: camera.credentials?.password || "",
-    });
-    setShowEditModal(true);
-  };
-
   // Handle Create Camera
   const handleCreateCamera = async () => {
     try {
@@ -467,9 +418,9 @@ export default function CameraInventory() {
         group:
           createForm.groupId || createForm.groupName
             ? {
-              id: createForm.groupId,
-              name: createForm.groupName,
-            }
+                id: createForm.groupId,
+                name: createForm.groupName,
+              }
             : undefined,
         credentials: {
           user: createForm.credentialsUser || "",
@@ -509,98 +460,6 @@ export default function CameraInventory() {
     }
   };
 
-  // Handle Update Camera
-  const handleUpdateCamera = async () => {
-    try {
-      if (!selectedCamera) return;
-
-      // Clear previous errors
-      setEditErrors({});
-      const errors: Record<string, string> = {};
-
-      if (!editForm.name) errors.name = "Camera Name is required";
-      if (!editForm.url) errors.url = "URL is required";
-      if (!editForm.serverId) errors.serverId = "Server is required";
-      if (!editForm.typeId) errors.typeId = "Device Type is required";
-      if (!editForm.physicalId) errors.physicalId = "Physical ID is required";
-
-      if (Object.keys(errors).length > 0) {
-        setEditErrors(errors);
-        return;
-      }
-
-      setIsSubmitting(true);
-
-      const payload = {
-        id: selectedCamera.id,
-        name: editForm.name,
-        physicalId: editForm.physicalId,
-        url: editForm.url,
-        typeId: editForm.typeId,
-        mac: editForm.mac,
-        serverId: editForm.serverId,
-        vendor: editForm.vendor,
-        model: editForm.model,
-        logicalId: editForm.logicalId,
-        group:
-          editForm.groupId || editForm.groupName
-            ? {
-              id: editForm.groupId,
-              name: editForm.groupName,
-            }
-            : undefined,
-        credentials: {
-          user: editForm.credentialsUser,
-          password: editForm.credentialsPassword,
-        },
-      };
-
-      const result = await nxAPI.updateCamera(selectedCamera.id, payload);
-
-      if (result) {
-        alert("Camera updated successfully!");
-        setShowEditModal(false);
-        setSelectedCamera(null);
-        refetch();
-      }
-    } catch (error: unknown) {
-      console.error("[CameraInventory] Failed to update camera:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      alert(`Failed to update camera: ${errorMessage}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Handle Delete Camera
-  const handleDeleteCamera = async (camera: CameraDevice) => {
-    const confirmDelete = confirm(
-      `Are you sure you want to delete camera "${camera.name}"?\n\nThis action cannot be undone.`,
-    );
-
-    if (!confirmDelete) return;
-
-    try {
-      setIsSubmitting(true);
-      await nxAPI.deleteCamera(camera.id);
-      alert("Camera deleted successfully!");
-      // Force refresh the camera list
-      await refetch();
-    } catch (error: unknown) {
-      console.error("[CameraInventory] Failed to delete camera:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      // If it's a JSON parse error but the delete might have succeeded, still refresh
-      if (errorMessage.includes("JSON") || errorMessage.includes("Unexpected end")) {
-        alert("Camera may have been deleted. Refreshing list...");
-        await refetch();
-      } else {
-        alert(`Failed to delete camera: ${errorMessage}`);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const getStatusIcon = (status: string) => {
     return status?.toLowerCase() === "online" ? (
       <Wifi className="w-4 h-4 text-green-600" />
@@ -627,8 +486,9 @@ export default function CameraInventory() {
                 type="text"
                 value={createForm.name}
                 onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.name ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                  createErrors.name ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                }`}
                 placeholder="Camera 1"
               />
               {createErrors.name && <p className="text-xs text-red-500 mt-1">{createErrors.name}</p>}
@@ -642,8 +502,9 @@ export default function CameraInventory() {
                 type="text"
                 value={createForm.url}
                 onChange={(e) => setCreateForm({ ...createForm, url: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.url ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                  createErrors.url ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                }`}
                 placeholder="rtsp://192.168.1.100:554/stream"
               />
               {createErrors.url && <p className="text-xs text-red-500 mt-1">{createErrors.url}</p>}
@@ -656,8 +517,9 @@ export default function CameraInventory() {
               <select
                 value={createForm.serverId}
                 onChange={(e) => setCreateForm({ ...createForm, serverId: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.serverId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                  createErrors.serverId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                }`}
               >
                 <option value="">Select Server</option>
                 {servers.map((server) => (
@@ -676,8 +538,9 @@ export default function CameraInventory() {
               <select
                 value={createForm.typeId}
                 onChange={(e) => setCreateForm({ ...createForm, typeId: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.typeId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                  createErrors.typeId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                }`}
               >
                 <option value="">Select Device Type</option>
                 {deviceType.map((type) => (
@@ -698,8 +561,9 @@ export default function CameraInventory() {
                   type="text"
                   value={createForm.physicalId}
                   onChange={(e) => setCreateForm({ ...createForm, physicalId: e.target.value })}
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.physicalId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                    }`}
+                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                    createErrors.physicalId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
+                  }`}
                 />
                 {createErrors.physicalId && <p className="text-xs text-red-500 mt-1">{createErrors.physicalId}</p>}
               </div>
@@ -789,205 +653,10 @@ export default function CameraInventory() {
     );
   };
 
-  // Render Edit Modal Content
-  const renderEditModal = () => {
-    if (!selectedCamera) return null;
-
-    return (
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-        <DialogContent className="max-w-lg max-h-[95vh] overflow-y-auto p-4 md:p-6 custom-scrollbar">
-          <DialogHeader>
-            <DialogTitle className="text-lg md:text-xl font-semibold text-gray-900">Edit Camera</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-3 md:space-y-4 py-2">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Camera ID</label>
-              <input
-                type="text"
-                value={selectedCamera.id}
-                disabled
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 font-mono text-xs sm:text-sm truncate"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                Camera Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={editForm.name}
-                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.name ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-              />
-              {editErrors.name && <p className="text-xs text-red-500 mt-1">{editErrors.name}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                URL <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={editForm.url}
-                onChange={(e) => setEditForm({ ...editForm, url: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.url ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-              />
-              {editErrors.url && <p className="text-xs text-red-500 mt-1">{editErrors.url}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                Server <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={editForm.serverId}
-                onChange={(e) => setEditForm({ ...editForm, serverId: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.serverId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-              >
-                <option value="">Select Server</option>
-                {servers.map((server) => (
-                  <option key={server.id} value={server.id}>
-                    {server.name || server.id}
-                  </option>
-                ))}
-              </select>
-              {editErrors.serverId && <p className="text-xs text-red-500 mt-1">{editErrors.serverId}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                Device Type <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={editForm.typeId}
-                onChange={(e) => setEditForm({ ...editForm, typeId: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.typeId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-              >
-                <option value="">Select Device Type</option>
-                {deviceType.map((type) => (
-                  <option key={type.id} value={type.id}>
-                    {type.name} - {type.manufacturer}
-                  </option>
-                ))}
-              </select>
-              {editErrors.typeId && <p className="text-xs text-red-500 mt-1">{editErrors.typeId}</p>}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                  Physical ID <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={editForm.physicalId}
-                  onChange={(e) => setEditForm({ ...editForm, physicalId: e.target.value })}
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${editErrors.physicalId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                    }`}
-                />
-                {editErrors.physicalId && <p className="text-xs text-red-500 mt-1">{editErrors.physicalId}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">MAC Address</label>
-                <input
-                  type="text"
-                  value={editForm.mac}
-                  onChange={(e) => setEditForm({ ...editForm, mac: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
-                <input
-                  type="text"
-                  value={editForm.vendor}
-                  onChange={(e) => setEditForm({ ...editForm, vendor: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                <input
-                  type="text"
-                  value={editForm.model}
-                  onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Logical ID</label>
-              <input
-                type="text"
-                value={editForm.logicalId}
-                onChange={(e) => setEditForm({ ...editForm, logicalId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-            </div>
-
-            <div className="border-t pt-3 md:pt-4">
-              <h3 className="text-sm font-medium text-gray-700 mb-2 md:mb-3">Credentials</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                  <input
-                    type="text"
-                    value={editForm.credentialsUser}
-                    onChange={(e) => setEditForm({ ...editForm, credentialsUser: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <input
-                    type="password"
-                    value={editForm.credentialsPassword}
-                    onChange={(e) => setEditForm({ ...editForm, credentialsPassword: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4">
-            <Button
-              onClick={() => {
-                setShowEditModal(false);
-                setSelectedCamera(null);
-              }}
-              disabled={isSubmitting}
-              variant="outline"
-              className="w-full sm:w-auto"
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateCamera} disabled={isSubmitting} className="w-full sm:w-auto">
-              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin mr-2" />}
-              {isSubmitting ? "Updating..." : "Update Camera"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  };
-
-
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Modals */}
       {renderCreateModal()}
-      {renderEditModal()}
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
@@ -1050,7 +719,7 @@ export default function CameraInventory() {
         open={showLoginDialog}
         onOpenChange={setShowLoginDialog}
         systemId={selectedSystemId}
-        systemName={cloudSystems.find(s => s.id === selectedSystemId)?.name || selectedSystemId}
+        systemName={cloudSystems.find((s) => s.id === selectedSystemId)?.name || selectedSystemId}
         onLoginSuccess={() => {
           setIsLoggedIn((prev) => new Set(prev).add(selectedSystemId));
           setRequiresAuth(false);
@@ -1074,43 +743,34 @@ export default function CameraInventory() {
         <Popover open={showFilters} onOpenChange={setShowFilters}>
           <PopoverTrigger asChild>
             <button
-              className={`flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 ${filterStatus !== "all" ||
-                filterVendor !== "all"
-                ? "border-blue-500 bg-blue-50 text-blue-700"
-                : ""
-                }`}
+              className={`flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 ${
+                filterStatus !== "all" || filterVendor !== "all" ? "border-blue-500 bg-blue-50 text-blue-700" : ""
+              }`}
             >
               <Filter className="w-4 h-4" />
               <span>Filters</span>
-              {(filterStatus !== "all" ||
-                filterVendor !== "all") && (
-                  <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
-                    {
-                      [
-                        filterStatus !== "all",
-                        filterVendor !== "all",
-                      ].filter(Boolean).length
-                    }
-                  </span>
-                )}
+              {(filterStatus !== "all" || filterVendor !== "all") && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
+                  {[filterStatus !== "all", filterVendor !== "all"].filter(Boolean).length}
+                </span>
+              )}
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-72" align="end">
             <div className="space-y-3 max-h-[70vh] overflow-y-auto">
               <div className="flex items-center justify-between sticky top-0 bg-white pb-2">
                 <h4 className="font-semibold text-gray-900">Filters</h4>
-                {(filterStatus !== "all" ||
-                  filterVendor !== "all") && (
-                    <button
-                      onClick={() => {
-                        setFilterStatus("all");
-                        setFilterVendor("all");
-                      }}
-                      className="text-xs text-blue-600 hover:text-blue-800"
-                    >
-                      Clear all
-                    </button>
-                  )}
+                {(filterStatus !== "all" || filterVendor !== "all") && (
+                  <button
+                    onClick={() => {
+                      setFilterStatus("all");
+                      setFilterVendor("all");
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Clear all
+                  </button>
+                )}
               </div>
 
               {/* Status Filter */}
@@ -1267,11 +927,7 @@ export default function CameraInventory() {
                     const matchesVendor =
                       filterVendor === "all" || cam.vendor?.toLowerCase() === filterVendor.toLowerCase();
 
-                    return (
-                      matchesSearch &&
-                      matchesStatus &&
-                      matchesVendor
-                    );
+                    return matchesSearch && matchesStatus && matchesVendor;
                   });
 
                   const onlineCount = filteredSystemCameras.filter((c) => c.status?.toLowerCase() === "online").length;
@@ -1297,9 +953,7 @@ export default function CameraInventory() {
                             <div className="font-semibold text-gray-900">{systemData.systemName}</div>
                             <div className="text-xs text-gray-500">
                               {filteredSystemCameras.length} cameras
-                              {searchTerm ||
-                                filterStatus !== "all" ||
-                                filterVendor !== "all"
+                              {searchTerm || filterStatus !== "all" || filterVendor !== "all"
                                 ? ` (filtered from ${systemData.cameras.length})`
                                 : ""}
                             </div>
@@ -1315,8 +969,9 @@ export default function CameraInventory() {
                             </span>
                           </div>
                           <span
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${isOnline ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                              }`}
+                            className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              isOnline ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                            }`}
                           >
                             {isOnline ? "Online" : "Offline"}
                           </span>
@@ -1368,11 +1023,22 @@ export default function CameraInventory() {
                                     {camera.vendor && <div className="truncate">Vendor: {camera.vendor}</div>}
                                     {camera.mac && <div className="truncate">MAC: {camera.mac}</div>}
                                     {camera.physicalId && <div className="truncate">ID: {camera.physicalId}</div>}
-                                    {camera.typeId && <div className="truncate text-gray-500">Type: {camera.typeId}</div>}
-                                    {camera.url && <div className="truncate text-gray-500" title={camera.url}>URL: {camera.url}</div>}
-                                    {!camera.model && !camera.vendor && !camera.mac && !camera.physicalId && !camera.typeId && !camera.url && (
-                                      <div className="text-gray-400 italic">No technical info available</div>
+                                    {camera.typeId && (
+                                      <div className="truncate text-gray-500">Type: {camera.typeId}</div>
                                     )}
+                                    {camera.url && (
+                                      <div className="truncate text-gray-500" title={camera.url}>
+                                        URL: {camera.url}
+                                      </div>
+                                    )}
+                                    {!camera.model &&
+                                      !camera.vendor &&
+                                      !camera.mac &&
+                                      !camera.physicalId &&
+                                      !camera.typeId &&
+                                      !camera.url && (
+                                        <div className="text-gray-400 italic">No technical info available</div>
+                                      )}
                                   </div>
 
                                   {/* Status Badge */}
@@ -1437,22 +1103,6 @@ export default function CameraInventory() {
                   >
                     {camera.status}
                   </span>
-                  <div className="flex items-center space-x-1">
-                    <button
-                      onClick={() => handleEditCamera(camera)}
-                      className="p-1.5 md:p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                      title="Edit camera"
-                    >
-                      <Settings className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCamera(camera)}
-                      className="p-1.5 md:p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                      title="Delete camera"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
                 </div>
               </div>
             ))}
@@ -1475,9 +1125,6 @@ export default function CameraInventory() {
                     </th>
                     <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
-                    </th>
-                    <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
                     </th>
                   </tr>
                 </thead>
@@ -1507,24 +1154,6 @@ export default function CameraInventory() {
                           >
                             {camera.status}
                           </span>
-                        </div>
-                      </td>
-                      <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => handleEditCamera(camera)}
-                            className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                            title="Edit camera"
-                          >
-                            <Settings className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteCamera(camera)}
-                            className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                            title="Delete camera"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1559,26 +1188,10 @@ export default function CameraInventory() {
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t">
+                  <div className="flex items-center mt-2 pt-2 border-t">
                     <div className="text-xs text-gray-500">
                       <span>{camera.vendor || "-"}</span>
                       {camera.model && <span> / {camera.model}</span>}
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => handleEditCamera(camera)}
-                        className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                        title="Edit"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteCamera(camera)}
-                        className="p-1.5 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -1595,10 +1208,7 @@ export default function CameraInventory() {
             <p className="text-sm text-gray-600 mb-6">
               To manage cameras and inventory, you need to log in with system administrator credentials.
             </p>
-            <Button
-              onClick={() => setShowLoginDialog(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700"
-            >
+            <Button onClick={() => setShowLoginDialog(true)} className="w-full bg-blue-600 hover:bg-blue-700">
               <LogIn className="w-4 h-4 mr-2" />
               Login Admin
             </Button>

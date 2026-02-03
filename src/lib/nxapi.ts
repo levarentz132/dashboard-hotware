@@ -121,16 +121,19 @@ class NxWitnessAPI {
         setCookie: true,
       };
 
-      const response = await fetch(`${this.baseURL}${API_ENDPOINTS.login}${this.systemId ? `?systemId=${this.systemId}` : ""}`, {
-        method: "POST",
-        mode: "cors",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
+      const response = await fetch(
+        `${this.baseURL}${API_ENDPOINTS.login}${this.systemId ? `?systemId=${this.systemId}` : ""}`,
+        {
+          method: "POST",
+          mode: "cors",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(loginBody),
         },
-        body: JSON.stringify(loginBody),
-      });
+      );
 
       if (response.ok) {
         return true;
@@ -246,7 +249,7 @@ class NxWitnessAPI {
         let result: T;
         if (contentType && contentType.includes("application/json")) {
           const text = await response.text();
-          result = (!text || text.trim() === "") ? (undefined as unknown as T) : JSON.parse(text);
+          result = !text || text.trim() === "" ? (undefined as unknown as T) : JSON.parse(text);
         } else {
           result = (await response.text()) as unknown as T;
         }
@@ -268,7 +271,6 @@ class NxWitnessAPI {
     this.pendingRequests.set(cacheKey, requestPromise);
     return requestPromise;
   }
-
 
   // Camera methods
   async getCameras(): Promise<NxCamera[]> {
@@ -311,7 +313,7 @@ class NxWitnessAPI {
         const deviceType = deviceTypes.find((type) => type.id === payload.typeId);
         if (!deviceType) {
           throw new Error(
-            `Device type not found: ${payload.typeId}. Available types: ${deviceTypes.map((t) => t.name).join(", ")}`
+            `Device type not found: ${payload.typeId}. Available types: ${deviceTypes.map((t) => t.name).join(", ")}`,
           );
         }
       }
@@ -320,7 +322,7 @@ class NxWitnessAPI {
       const server = servers.find((s) => s.id === payload.serverId);
       if (!server) {
         throw new Error(
-          `Server not found: ${payload.serverId}. Available servers: ${servers.map((s) => s.name).join(", ")}`
+          `Server not found: ${payload.serverId}. Available servers: ${servers.map((s) => s.name).join(", ")}`,
         );
       }
 
@@ -339,15 +341,15 @@ class NxWitnessAPI {
         group:
           payload.group?.id && payload.group?.name
             ? {
-              id: payload.group.id,
-              name: payload.group.name,
-            }
+                id: payload.group.id,
+                name: payload.group.name,
+              }
             : undefined,
         credentials: payload.credentials
           ? {
-            user: payload.credentials.user || "",
-            password: payload.credentials.password || "",
-          }
+              user: payload.credentials.user || "",
+              password: payload.credentials.password || "",
+            }
           : { user: "", password: "" },
         logicalId: payload.logicalId,
       };
@@ -363,119 +365,6 @@ class NxWitnessAPI {
       return response;
     } catch (error) {
       console.error("[createCamera] Failed to create camera:", error);
-      throw error;
-    }
-  }
-  async updateCamera(id: string, payload: Partial<ICamera>) {
-    try {
-      const endpoint = API_ENDPOINTS.modifyDevice(id);
-
-      // Fetch reference data jika ada field yang perlu divalidasi
-      const validationNeeded = payload.typeId || payload.serverId;
-      let deviceTypes: IDeviceType[] = [];
-      let servers: IServer[] = [];
-
-      if (validationNeeded) {
-        [deviceTypes, servers] = await Promise.all([
-          payload.typeId ? this.apiRequest<IDeviceType[]>(API_ENDPOINTS.deviceTypes) : Promise.resolve([]),
-          payload.serverId ? this.apiRequest<IServer[]>(API_ENDPOINTS.servers) : Promise.resolve([]),
-        ]);
-      }
-
-      // Validasi typeId jika ada
-      if (payload.typeId && deviceTypes.length > 0) {
-        const deviceType = deviceTypes.find((type) => type.id === payload.typeId);
-        if (!deviceType) {
-          throw new Error(
-            `Device type not found: ${payload.typeId}. Available types: ${deviceTypes.map((t) => t.name).join(", ")}`
-          );
-        }
-      }
-
-      // Validasi serverId jika ada
-      if (payload.serverId && servers.length > 0) {
-        const server = servers.find((s) => s.id === payload.serverId);
-        if (!server) {
-          throw new Error(
-            `Server not found: ${payload.serverId}. Available servers: ${servers.map((s) => s.name).join(", ")}`
-          );
-        }
-      }
-
-      const body: any = {};
-
-      if (payload.physicalId !== undefined && payload.physicalId !== "") {
-        body.physicalId = payload.physicalId;
-      }
-      if (payload.url !== undefined) body.url = payload.url;
-      if (payload.typeId !== undefined) body.typeId = payload.typeId;
-      if (payload.name !== undefined) body.name = payload.name;
-      if (payload.mac !== undefined) body.mac = payload.mac;
-      if (payload.serverId !== undefined) body.serverId = payload.serverId;
-      if (payload.vendor !== undefined) body.vendor = payload.vendor;
-      if (payload.model !== undefined) body.model = payload.model;
-      if (payload.logicalId !== undefined) body.logicalId = payload.logicalId;
-
-      // Handle group
-      if (payload.group !== undefined) {
-        body.group =
-          payload.group?.id && payload.group?.name
-            ? {
-              id: payload.group.id,
-              name: payload.group.name,
-            }
-            : null;
-      }
-
-      // Handle credentials
-      if (payload.credentials !== undefined) {
-        body.credentials = {
-          user: payload.credentials.user,
-          password: payload.credentials.password,
-        };
-      }
-
-      // Try PATCH first (correct method for NX Witness API)
-      try {
-        const response = await this.apiRequest<ICamera>(endpoint, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        return response;
-      } catch (patchError) {
-        // Fallback to PUT if PATCH fails
-        console.log("[updateCamera] PATCH failed, trying PUT...", patchError);
-        const response = await this.apiRequest<ICamera>(endpoint, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-
-        return response;
-      }
-    } catch (error) {
-      console.error("[updateCamera] Failed to update camera:", error);
-      throw error;
-    }
-  }
-
-  // Delete a camera
-  async deleteCamera(id: string): Promise<boolean> {
-    try {
-      const endpoint = API_ENDPOINTS.deleteDevice(id);
-
-      await this.apiRequest<void>(endpoint, {
-        method: "DELETE",
-      });
-
-      return true;
-    } catch (error) {
-      console.error("[deleteCamera] Failed to delete camera:", error);
       throw error;
     }
   }
@@ -653,7 +542,7 @@ class NxWitnessAPI {
       isUsedForWriting?: boolean;
       isBackup?: boolean;
       parameters?: Record<string, any>;
-    }
+    },
   ): Promise<any> {
     try {
       const endpoint = API_ENDPOINTS.createStorage(serverId);
@@ -711,7 +600,7 @@ class NxWitnessAPI {
       isBackup?: boolean;
       status?: string;
       parameters?: Record<string, any>;
-    }
+    },
   ): Promise<any> {
     try {
       const endpoint = API_ENDPOINTS.updateStorage(serverId, storageId);
@@ -919,7 +808,6 @@ class NxWitnessAPI {
   }
 }
 
-
 // Create singleton instance
 export const nxAPI = new NxWitnessAPI();
 
@@ -935,11 +823,7 @@ if (typeof window !== "undefined" && API_CONFIG.username && API_CONFIG.password)
         // Prefetch critical data to prime the cache
         console.log("[nxAPI] Prefetching critical data...");
         // Use Promise.allSetled to not block if one fails
-        await Promise.allSettled([
-          nxAPI.getCameras(),
-          nxAPI.getSystemInfo(),
-          nxAPI.getServers()
-        ]);
+        await Promise.allSettled([nxAPI.getCameras(), nxAPI.getSystemInfo(), nxAPI.getServers()]);
         console.log("[nxAPI] Prefetched cameras, system info, and servers.");
       }
     } catch (error) {

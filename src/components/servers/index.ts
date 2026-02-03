@@ -18,4 +18,3 @@ export {
 
 // Components
 export { default as ServerOptions } from "./ServerOptions";
-export { default as ServerOptionsSimple } from "./ServerOptionsSimple";
