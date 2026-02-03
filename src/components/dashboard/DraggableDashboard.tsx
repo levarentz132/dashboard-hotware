@@ -77,6 +77,10 @@ const AlarmConsoleWidget = dynamic(() => import("@/components/widgets/AlarmConso
 const AuditLogWidget = dynamic(() => import("@/components/widgets/AuditLogWidget"), {
   loading: () => <WidgetLoading />,
 });
+const ServerMapWidget = dynamic(() => import("@/components/widgets/ServerMapWidget"), {
+  ssr: false,
+  loading: () => <WidgetLoading />,
+});
 
 interface CloudSystem {
   id: string;
@@ -164,6 +168,14 @@ export const widgetRegistry = {
     defaultSize: { w: 4, h: 5 },
     minSize: { w: 3, h: 4 },
   },
+  serverMap: {
+    id: "serverMap",
+    name: "Server Map",
+    description: "Peta lokasi server dengan status online/offline",
+    component: ServerMapWidget,
+    defaultSize: { w: 4, h: 5 },
+    minSize: { w: 3, h: 4 },
+  },
 };
 
 export type WidgetType = keyof typeof widgetRegistry;
@@ -188,76 +200,78 @@ const ROW_HEIGHT = 80;
 const defaultWidgets: DashboardWidget[] = [];
 
 // Memoized Widget Component to prevent unnecessary re-renders
-const MemoizedWidget = memo(({
-  widget,
-  isEditing,
-  removeWidget,
-  systemId
-}: {
-  widget: DashboardWidget;
-  isEditing: boolean;
-  removeWidget: (id: string) => void;
-  systemId: string;
-}) => {
-  const WidgetComponent = widgetRegistry[widget.type]?.component;
-  const widgetName = widgetRegistry[widget.type]?.name || "Widget";
+const MemoizedWidget = memo(
+  ({
+    widget,
+    isEditing,
+    removeWidget,
+    systemId,
+  }: {
+    widget: DashboardWidget;
+    isEditing: boolean;
+    removeWidget: (id: string) => void;
+    systemId: string;
+  }) => {
+    const WidgetComponent = widgetRegistry[widget.type]?.component;
+    const widgetName = widgetRegistry[widget.type]?.name || "Widget";
 
-  return (
-    <div
-      className={cn(
-        "h-full rounded-xl overflow-hidden transition-all duration-200 bg-white border",
-        isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm"
-      )}
-    >
-      <div className="h-full relative group flex flex-col">
-        {/* Delete Button - Only visible in edit mode */}
-        {isEditing && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  removeWidget(widget.i);
-                }}
-                className="absolute top-2 right-2 z-50 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Hapus widget</p>
-            </TooltipContent>
-          </Tooltip>
+    return (
+      <div
+        className={cn(
+          "h-full rounded-xl overflow-hidden transition-all duration-200 bg-white border",
+          isEditing ? "ring-2 ring-blue-400 ring-offset-2 shadow-lg" : "shadow-sm",
         )}
-
-        {/* Widget Header - only show in edit mode */}
-        {isEditing && (
-          <div className="drag-handle flex flex-row items-center justify-between px-3 py-2 bg-gray-50 border-b cursor-move shrink-0">
-            <div className="flex items-center gap-2">
-              <GripVertical className="w-4 h-4 text-gray-400" />
-              <span className="text-sm font-medium text-gray-600">{widgetName}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Widget Content */}
-        <div className="flex-1 overflow-auto">
-          {WidgetComponent ? (
-            <WidgetComponent systemId={systemId} />
-          ) : (
-            <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
+      >
+        <div className="h-full relative group flex flex-col">
+          {/* Delete Button - Only visible in edit mode */}
+          {isEditing && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    removeWidget(widget.i);
+                  }}
+                  className="absolute top-2 right-2 z-50 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-red-100 hover:text-red-600 shadow-sm border"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Hapus widget</p>
+              </TooltipContent>
+            </Tooltip>
           )}
+
+          {/* Widget Header - only show in edit mode */}
+          {isEditing && (
+            <div className="drag-handle flex flex-row items-center justify-between px-3 py-2 bg-gray-50 border-b cursor-move shrink-0">
+              <div className="flex items-center gap-2">
+                <GripVertical className="w-4 h-4 text-gray-400" />
+                <span className="text-sm font-medium text-gray-600">{widgetName}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Widget Content */}
+          <div className="flex-1 overflow-auto">
+            {WidgetComponent ? (
+              <WidgetComponent systemId={systemId} />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
-});
+    );
+  },
+);
 
 MemoizedWidget.displayName = "MemoizedWidget";
 
@@ -319,7 +333,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
         const data = await response.json();
         const systems = (data.systems || []).map((s: any) => ({
           ...s,
-          isOnline: s.stateOfHealth === "online"
+          isOnline: s.stateOfHealth === "online",
         }));
 
         // Sort
@@ -400,39 +414,42 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
   }, [isLoading]);
 
   // Save layout to database
-  const saveLayout = useCallback(async (layoutToSave?: DashboardWidget[]) => {
-    const dataToSave = layoutToSave || widgets;
-    setIsSaving(true);
-    setSaveStatus("saving");
-    try {
-      const response = await fetch("/api/dashboard-layout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          layout_name: "Default Layout",
-          layout_data: dataToSave,
-          set_active: true,
-        }),
-      });
+  const saveLayout = useCallback(
+    async (layoutToSave?: DashboardWidget[]) => {
+      const dataToSave = layoutToSave || widgets;
+      setIsSaving(true);
+      setSaveStatus("saving");
+      try {
+        const response = await fetch("/api/dashboard-layout", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            layout_name: "Default Layout",
+            layout_data: dataToSave,
+            set_active: true,
+          }),
+        });
 
-      if (response.ok) {
-        setSaveStatus("saved");
-        setTimeout(() => setSaveStatus("idle"), 2000);
-      } else {
+        if (response.ok) {
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus("idle"), 2000);
+        } else {
+          setSaveStatus("error");
+          setTimeout(() => setSaveStatus("idle"), 3000);
+        }
+      } catch (error) {
+        console.error("Error saving layout:", error);
         setSaveStatus("error");
         setTimeout(() => setSaveStatus("idle"), 3000);
+      } finally {
+        setIsSaving(false);
       }
-    } catch (error) {
-      console.error("Error saving layout:", error);
-      setSaveStatus("error");
-      setTimeout(() => setSaveStatus("idle"), 3000);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [widgets, userId]);
+    },
+    [widgets, userId],
+  );
 
   // Export layout as JSON file
   const exportLayout = useCallback(() => {
@@ -478,7 +495,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
               typeof w.x === "number" &&
               typeof w.y === "number" &&
               typeof w.w === "number" &&
-              typeof w.h === "number"
+              typeof w.h === "number",
           );
 
           if (validWidgets.length > 0) {
@@ -520,7 +537,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
           };
         }
         return widget;
-      })
+      }),
     );
   };
 
@@ -645,7 +662,12 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                 <>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" size="sm" onClick={exportLayout} className="gap-1 sm:gap-2 px-2 sm:px-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={exportLayout}
+                        className="gap-1 sm:gap-2 px-2 sm:px-3"
+                      >
                         <Upload className="w-4 h-4" />
                         <span className="hidden sm:inline">Export</span>
                       </Button>
@@ -717,7 +739,12 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" onClick={() => setShowResetConfirm(true)} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowResetConfirm(true)}
+                        size="sm"
+                        className="gap-1 sm:gap-2 px-2 sm:px-3"
+                      >
                         <RotateCcw className="w-4 h-4" />
                         <span className="hidden sm:inline">Reset</span>
                       </Button>
@@ -872,10 +899,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={resetLayout}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
+            <AlertDialogAction onClick={resetLayout} className="bg-red-600 hover:bg-red-700 text-white">
               Yes, Reset All
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -896,10 +920,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep Editing</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleCancelEdit}
-              className="bg-orange-600 hover:bg-orange-700 text-white"
-            >
+            <AlertDialogAction onClick={handleCancelEdit} className="bg-orange-600 hover:bg-orange-700 text-white">
               Discard Changes
             </AlertDialogAction>
           </AlertDialogFooter>
