@@ -1,12 +1,32 @@
 {
   "name": "hotware-dashboard",
-  "version": "1.0.0",
+  "version": "1.0.01",
+  "description": "Hotware Dashboard",
+  "main": "electron/main.js",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3130",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "start": "next start -p 3130",
+    "lint": "next lint",
+    "electron": "electron electron/main.js",
+    "dist-electron": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.hotware.dashboard",
+    "productName": "Hotware Dashboard",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "win": {
+      "target": "portable"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asar": true
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -66,13 +86,15 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5",
     "zod": "^4.1.13",
-    "zustand": "^4.4.6"
+    "zustand": "^4.4.6",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.21",
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",
     "baseline-browser-mapping": "^2.9.19",
+    "electron-builder": "^26.7.0",
     "eslint": "^8",
     "eslint-config-next": "15.0.1",
     "postcss": "^8",

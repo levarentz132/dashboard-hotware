@@ -25,14 +25,8 @@ export function useSystemInfo(cloudId?: string) {
   // Fetch available cloud systems
   const fetchCloudSystems = useCallback(async () => {
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+      const response = await fetch("/api/cloud/systems", {
         method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
-        },
       });
 
       if (!response.ok) {
