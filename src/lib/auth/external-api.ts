@@ -9,6 +9,7 @@ export const EXTERNAL_AUTH_API = {
 export interface ExternalAuthRequest {
   username: string;
   password: string;
+  system_id?: string; // Optional: validate user belongs to this system
 }
 
 export interface ExternalAuthResponse {
@@ -22,6 +23,7 @@ export interface ExternalAuthResponse {
     email: string;
     full_name: string;
     role: string;
+    system_id: string; // The system ID this user is licensed for
     license_status: string; // e.g., "monthly", "yearly", "trial", "7_day", "expired"
     license_status_display: string; // e.g., "Monthly", "Yearly", "7 Day"
     license_expires_at: string | null;

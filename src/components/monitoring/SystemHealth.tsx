@@ -331,7 +331,7 @@ export default function SystemHealth() {
                       <div>
                         <h3 className="font-semibold text-gray-900">{system.name}</h3>
                         <p className="text-xs text-gray-500 truncate max-w-[200px]" title={system.id}>
-                          ID: {system.id.substring(0, 8)}...
+                          ID: {system.id}
                         </p>
                       </div>
                     </div>

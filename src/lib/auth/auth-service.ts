@@ -20,6 +20,7 @@ export async function generateAccessToken(user: UserPublic): Promise<string> {
     username: user.username,
     email: user.email,
     role: user.role,
+    system_id: user.system_id,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
@@ -38,6 +39,7 @@ export async function signJWT(payload: JWTCreatePayload): Promise<string> {
     username: payload.username,
     email: payload.email,
     role: payload.role,
+    system_id: payload.system_id,
     ...(payload.type ? { type: payload.type } : {}),
   })
     .setProtectedHeader({ alg: "HS256" })
@@ -57,6 +59,7 @@ export async function generateRefreshToken(user: UserPublic): Promise<string> {
     username: user.username,
     email: user.email,
     role: user.role,
+    system_id: user.system_id,
     type: "refresh",
   })
     .setProtectedHeader({ alg: "HS256" })
@@ -122,6 +125,7 @@ export async function validateSession(
     username: payload.username,
     email: payload.email,
     role: payload.role,
+    system_id: payload.system_id,
     is_active: true, // If token is valid, user is active
     created_at: new Date(),
     last_login: new Date(),
@@ -152,12 +156,13 @@ export async function refreshAccessToken(
     username: payload.username,
     email: payload.email,
     role: payload.role,
+    system_id: payload.system_id,
     is_active: true,
     created_at: new Date(),
     last_login: new Date(),
   };
 
-  if (!userPublic.id || !userPublic.username || !userPublic.email || !userPublic.role) {
+  if (!userPublic.id || !userPublic.username || !userPublic.email || !userPublic.role || !userPublic.system_id) {
     return { success: false, message: AUTH_MESSAGES.INVALID_TOKEN };
   }
 
@@ -168,4 +173,23 @@ export async function refreshAccessToken(
   ]);
 
   return { success: true, accessToken, refreshToken: newRefreshToken };
+}
+
+/**
+ * Check if the user is authorized to access the requested system
+ * Compares the user's licensed system_id with the requested systemId
+ */
+export function isAuthorizedForSystem(userSystemId: string, requestedSystemId: string): boolean {
+  if (!userSystemId || !requestedSystemId) {
+    return false;
+  }
+  return userSystemId === requestedSystemId;
+}
+
+/**
+ * Get system_id from JWT token
+ */
+export async function getSystemIdFromToken(token: string): Promise<string | null> {
+  const payload = await verifyToken(token);
+  return payload?.system_id || null;
 }
