@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { RowDataPacket, ResultSetHeader } from "mysql2";
-
-interface DashboardLayout extends RowDataPacket {
-  id: number;
-  user_id: string;
-  layout_name: string;
-  layout_data: string;
-  is_active: boolean;
-  created_at: Date;
-  updated_at: Date;
-}
+import {
+  getLayoutsByUserId,
+  getLayoutById,
+  getActiveLayout,
+  upsertLayoutByName,
+  updateLayout,
+  deleteLayout,
+} from "@/lib/json-storage";
 
 // GET - Fetch dashboard layout for user
 export async function GET(request: NextRequest) {
@@ -22,50 +18,31 @@ export async function GET(request: NextRequest) {
 
     // List all layouts for user
     if (listAll === "true") {
-      const [rows] = await db.execute<DashboardLayout[]>(
-        "SELECT id, user_id, layout_name, is_active, created_at, updated_at FROM dashboard_layout WHERE user_id = ? ORDER BY updated_at DESC",
-        [userId]
-      );
-      return NextResponse.json({ layouts: rows });
+      const layouts = await getLayoutsByUserId(userId);
+      // Return without layout_data for list view
+      const layoutList = layouts.map(({ layout_data, ...rest }) => rest);
+      return NextResponse.json({ layouts: layoutList });
     }
 
     // Get specific layout by ID
     if (layoutId) {
-      const [rows] = await db.execute<DashboardLayout[]>(
-        "SELECT * FROM dashboard_layout WHERE id = ? AND user_id = ?",
-        [layoutId, userId]
-      );
+      const layout = await getLayoutById(parseInt(layoutId), userId);
 
-      if (rows.length === 0) {
+      if (!layout) {
         return NextResponse.json({ layout: null });
       }
 
-      const layout = rows[0];
-      return NextResponse.json({
-        layout: {
-          ...layout,
-          layout_data: JSON.parse(layout.layout_data),
-        },
-      });
+      return NextResponse.json({ layout });
     }
 
     // Get active layout for user
-    const [rows] = await db.execute<DashboardLayout[]>(
-      "SELECT * FROM dashboard_layout WHERE user_id = ? AND is_active = 1 LIMIT 1",
-      [userId]
-    );
+    const layout = await getActiveLayout(userId);
 
-    if (rows.length === 0) {
+    if (!layout) {
       return NextResponse.json({ layout: null });
     }
 
-    const layout = rows[0];
-    return NextResponse.json({
-      layout: {
-        ...layout,
-        layout_data: JSON.parse(layout.layout_data),
-      },
-    });
+    return NextResponse.json({ layout });
   } catch (error) {
     console.error("[Dashboard Layout API] Error fetching:", error);
     return NextResponse.json({ error: "Failed to fetch dashboard layout" }, { status: 500 });
@@ -82,43 +59,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Layout data is required" }, { status: 400 });
     }
 
-    const layoutJson = JSON.stringify(layout_data);
     const name = layout_name || `Layout ${new Date().toLocaleString("id-ID")}`;
 
-    // If set_active, first deactivate all other layouts for this user
-    if (set_active) {
-      await db.execute<ResultSetHeader>("UPDATE dashboard_layout SET is_active = 0 WHERE user_id = ?", [user_id]);
-    }
+    const { layout, isNew } = await upsertLayoutByName(user_id, name, layout_data, set_active);
 
-    // Check if there's an existing active layout to update
-    const [existing] = await db.execute<DashboardLayout[]>(
-      "SELECT id FROM dashboard_layout WHERE user_id = ? AND layout_name = ?",
-      [user_id, name]
-    );
-
-    if (existing.length > 0) {
-      // Update existing
-      await db.execute<ResultSetHeader>(
-        "UPDATE dashboard_layout SET layout_data = ?, is_active = ?, updated_at = NOW() WHERE id = ?",
-        [layoutJson, set_active ? 1 : 0, existing[0].id]
-      );
-
-      return NextResponse.json({
-        message: "Dashboard layout updated successfully",
-        layout_id: existing[0].id,
-      });
-    } else {
-      // Insert new
-      const [result] = await db.execute<ResultSetHeader>(
-        "INSERT INTO dashboard_layout (user_id, layout_name, layout_data, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())",
-        [user_id, name, layoutJson, set_active ? 1 : 0]
-      );
-
-      return NextResponse.json({
-        message: "Dashboard layout created successfully",
-        layout_id: result.insertId,
-      });
-    }
+    return NextResponse.json({
+      message: isNew ? "Dashboard layout created successfully" : "Dashboard layout updated successfully",
+      layout_id: layout.id,
+    });
   } catch (error) {
     console.error("[Dashboard Layout API] Error saving:", error);
     return NextResponse.json({ error: "Failed to save dashboard layout" }, { status: 500 });
@@ -135,34 +83,27 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Layout ID is required" }, { status: 400 });
     }
 
-    // If setting as active, deactivate others first
-    if (set_active) {
-      await db.execute<ResultSetHeader>("UPDATE dashboard_layout SET is_active = 0 WHERE user_id = ?", [user_id]);
+    const updates: {
+      layout_name?: string;
+      layout_data?: unknown;
+      is_active?: boolean;
+    } = {};
+
+    if (layout_name !== undefined) {
+      updates.layout_name = layout_name;
     }
-
-    // Build update query dynamically
-    const updates: string[] = [];
-    const values: (string | number)[] = [];
-
-    if (layout_name) {
-      updates.push("layout_name = ?");
-      values.push(layout_name);
+    if (layout_data !== undefined) {
+      updates.layout_data = layout_data;
     }
-
-    if (layout_data) {
-      updates.push("layout_data = ?");
-      values.push(JSON.stringify(layout_data));
-    }
-
     if (set_active !== undefined) {
-      updates.push("is_active = ?");
-      values.push(set_active ? 1 : 0);
+      updates.is_active = set_active;
     }
 
-    updates.push("updated_at = NOW()");
-    values.push(layout_id);
+    const updatedLayout = await updateLayout(layout_id, user_id, updates);
 
-    await db.execute<ResultSetHeader>(`UPDATE dashboard_layout SET ${updates.join(", ")} WHERE id = ?`, values);
+    if (!updatedLayout) {
+      return NextResponse.json({ error: "Layout not found" }, { status: 404 });
+    }
 
     return NextResponse.json({
       message: "Dashboard layout updated successfully",
@@ -184,7 +125,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Layout ID is required" }, { status: 400 });
     }
 
-    await db.execute<ResultSetHeader>("DELETE FROM dashboard_layout WHERE id = ?", [layoutId]);
+    const deleted = await deleteLayout(parseInt(layoutId));
+
+    if (!deleted) {
+      return NextResponse.json({ error: "Layout not found" }, { status: 404 });
+    }
 
     return NextResponse.json({
       message: "Dashboard layout deleted successfully",

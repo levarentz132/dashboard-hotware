@@ -3,8 +3,7 @@
  * Services handle business logic and data operations
  */
 
-// Re-export lib utilities for backwards compatibility
-export { db } from "./db";
+// Re-export lib utilities
 export { cn } from "./utils";
 export { API_CONFIG, API_ENDPOINTS, CLOUD_CONFIG } from "./config";
 
@@ -43,3 +42,45 @@ export {
 // Re-export NX API
 export { nxAPI, default as NxWitnessAPI } from "./nxapi";
 export type { NxCamera, NxEvent, NxSystemInfo, NxMetricsAlarm, NxMetricsAlarmsResponse } from "./nxapi";
+
+// Re-export JSON storage utilities
+export {
+  // Dashboard Layout
+  getDashboardLayouts,
+  saveDashboardLayouts,
+  getLayoutsByUserId,
+  getLayoutById,
+  getActiveLayout,
+  createLayout,
+  updateLayout,
+  upsertLayoutByName,
+  deleteLayout,
+  // Server Location
+  getServerLocationStore,
+  saveServerLocationStore,
+  getAllServerLocations,
+  getServerLocationByName,
+  upsertServerLocation,
+  deleteServerLocation,
+  // User Storage
+  getUserStore,
+  saveUserStore,
+  getAllUsers,
+  findUserById,
+  findUserByUsername,
+  findUserByEmail,
+  userExists,
+  createUser,
+  updateLastLogin,
+  updateUser,
+  deleteUser,
+  toUserPublic,
+  // Generic JSON utilities
+  readJsonFile,
+  writeJsonFile,
+  type DashboardLayoutData,
+  type ServerLocationData,
+  type UserData,
+  type UserPublicData,
+  type UserRole,
+} from "./json-storage";

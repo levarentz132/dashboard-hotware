@@ -19,6 +19,9 @@ dist-electron/
 .env.test.local
 .env.production.local
 
+# Local JSON data storage
+data/
+
 # Runtime data
 pids
 *.pid
