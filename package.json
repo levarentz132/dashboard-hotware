@@ -93,12 +93,8 @@
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",
     "baseline-browser-mapping": "^2.9.19",
-<<<<<<< HEAD
     "eslint": "^9.39.2",
-=======
     "electron-builder": "^26.7.0",
-    "eslint": "^8",
->>>>>>> 7ec69ba20d9f236672b19469708bd3daae4daad1
     "eslint-config-next": "15.0.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
