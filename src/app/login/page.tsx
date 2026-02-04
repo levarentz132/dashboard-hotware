@@ -4,8 +4,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,9 +11,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, EyeOff, Loader2, Camera, Shield } from "lucide-react";
+import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle } from "lucide-react";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username harus diisi"),
@@ -27,7 +24,6 @@ type LoginFormData = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const { login, isLoading, error, clearError } = useAuth();
-  const router = useRouter();
 
   const {
     register,
@@ -42,35 +38,35 @@ export default function LoginPage() {
     await login(data);
   };
 
+  const hasError = error || errors.username || errors.password;
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl" />
-      </div>
-
-      <Card className="w-full max-w-md relative bg-slate-800/50 backdrop-blur-sm border-slate-700">
-        <CardHeader className="space-y-4 text-center">
-          {/* Logo */}
-          <div className="flex justify-center">
-            <div className="p-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-lg shadow-blue-500/25">
-              <Camera className="w-8 h-8 text-white" />
-            </div>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        {/* <div className="flex items-center justify-center gap-3 mb-8">
+          <div className="p-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg shadow-blue-500/25">
+            <Camera className="w-7 h-7 text-white" />
           </div>
-
           <div>
-            <CardTitle className="text-2xl font-bold text-white">Hotware Dashboard</CardTitle>
-            <CardDescription className="text-slate-400 mt-2">Masuk ke sistem monitoring CCTV</CardDescription>
+            <h1 className="text-xl font-bold text-slate-800">Hotware</h1>
+            <p className="text-slate-500 text-xs">Surveillance System</p>
           </div>
-        </CardHeader>
+        </div> */}
 
-        <form onSubmit={handleSubmit(onSubmit)}>
-          <CardContent className="space-y-4">
+        {/* Form Card */}
+        <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8">
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-slate-800">Selamat Datang</h2>
+            <p className="text-slate-500 mt-2">Masuk ke akun Anda untuk melanjutkan</p>
+          </div>
+
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             {/* Error Alert */}
-            {(error || errors.username || errors.password) && (
-              <Alert variant="destructive" className="bg-red-500/10 border-red-500/50">
-                <AlertDescription className="text-red-400">
+            {hasError && (
+              <Alert className="bg-red-50 border-red-200 text-red-700">
+                <AlertCircle className="h-4 w-4 text-red-500" />
+                <AlertDescription className="text-red-600 ml-2">
                   {error || "Username atau password salah"}
                 </AlertDescription>
               </Alert>
@@ -78,72 +74,87 @@ export default function LoginPage() {
 
             {/* Username Field */}
             <div className="space-y-2">
-              <Label htmlFor="username" className="text-slate-300">
+              <Label htmlFor="username" className="text-slate-700 font-medium">
                 Username
               </Label>
-              <Input
-                id="username"
-                type="text"
-                placeholder="Masukkan username"
-                className={`bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500 focus:border-blue-500 focus:ring-blue-500/20 ${errors.username || errors.password ? "border-red-500/50 focus:border-red-500 focus:ring-red-500/20" : ""
+              <div className="relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  <User className="w-5 h-5" />
+                </div>
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="Masukkan username"
+                  className={`pl-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
+                    hasError ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
                   }`}
-                {...register("username")}
-                disabled={isLoading}
-              />
+                  {...register("username")}
+                  disabled={isLoading}
+                />
+              </div>
             </div>
 
             {/* Password Field */}
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-slate-300">
+              <Label htmlFor="password" className="text-slate-700 font-medium">
                 Password
               </Label>
               <div className="relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  <Lock className="w-5 h-5" />
+                </div>
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Masukkan password"
-                  className={`bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500 focus:border-blue-500 focus:ring-blue-500/20 pr-10 ${errors.username || errors.password ? "border-red-500/50 focus:border-red-500 focus:ring-red-500/20" : ""
-                    }`}
+                  className={`pl-11 pr-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
+                    hasError ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
+                  }`}
                   {...register("password")}
                   disabled={isLoading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                   tabIndex={-1}
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
-          </CardContent>
 
-          <CardFooter className="flex flex-col gap-4">
+            {/* Submit Button */}
             <Button
               type="submit"
-              className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium"
+              className="w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all duration-200"
               disabled={isLoading}
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                   Memproses...
                 </>
               ) : (
                 <>
-                  <Shield className="mr-2 h-4 w-4" />
+                  <LogIn className="mr-2 h-5 w-5" />
                   Masuk
                 </>
               )}
             </Button>
+          </form>
 
-            <p className="text-sm text-slate-400 text-center">
-              Hubungi administrator untuk mendapatkan akses
+          {/* Help Text */}
+          <div className="mt-6 pt-6 border-t border-slate-100">
+            <p className="text-sm text-slate-500 text-center">
+              Butuh bantuan? <span className="text-blue-600 font-medium">Hubungi Administrator</span>
             </p>
-          </CardFooter>
-        </form>
-      </Card>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <p className="text-center text-slate-400 text-sm mt-8">© 2026 Hotware Technology</p>
+      </div>
     </div>
   );
 }
