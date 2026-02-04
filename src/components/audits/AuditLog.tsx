@@ -380,398 +380,428 @@ export default function AuditLog() {
   // Paginate
   const displayedLogs = sortedLogs.slice(0, displayCount);
 
+  const isCloudEmpty = cloudSystems.length === 0;
+  const showNoCloudAlert = isCloudEmpty && !loadingSystems;
+
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Log</h1>
-          <p className="text-sm text-gray-500 mt-1">User activity history from cloud systems</p>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* System Selector */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="flex items-center gap-2">
-                <Cloud className="w-4 h-4" />
-                <span className="truncate max-w-[150px]">{selectedSystem?.name || "Select System"}</span>
-                <ChevronDown className="w-4 h-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64" align="end">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-700">Select Cloud System</p>
-                {loadingSystems ? (
-                  <div className="flex items-center justify-center py-4">
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  </div>
-                ) : cloudSystems.length === 0 ? (
-                  <p className="text-sm text-gray-500 py-2">No systems found</p>
-                ) : (
-                  <div className="max-h-60 overflow-y-auto space-y-1">
-                    {cloudSystems.map((system) => (
-                      <button
-                        key={system.id}
-                        onClick={() => setSelectedSystem(system)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
-                          ? "bg-blue-100 text-blue-800"
-                          : "hover:bg-gray-100 text-gray-700"
-                          }`}
-                        disabled={system.stateOfHealth !== "online"}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="truncate">{system.name}</span>
-                          <span
-                            className={`w-2 h-2 rounded-full ${system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
-                              }`}
-                          />
-                        </div>
-                        {system.accessRole === "owner" && <span className="text-xs text-purple-600">Owner</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          {/* Refresh Button */}
-          <Button
-            variant="outline"
-            onClick={() => selectedSystem && fetchAuditLogs(selectedSystem)}
-            disabled={loading || !selectedSystem}
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg border p-4 space-y-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search */}
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search events, users, resources..."
-              className="pl-10 pr-4 py-2 w-full border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-
-          {/* From Date */}
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-gray-500" />
-            <input
-              type="datetime-local"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          {/* Event Type Filter */}
-          <select
-            value={filterEventType}
-            onChange={(e) => setFilterEventType(e.target.value)}
-            className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-          >
-            <option value="all">All Event Types</option>
-            {uniqueEventTypes.map((type) => (
-              <option key={type} value={type}>
-                {getEventInfo(type).label}
-              </option>
-            ))}
-          </select>
-
-          {/* User Filter */}
-          <select
-            value={filterUser}
-            onChange={(e) => setFilterUser(e.target.value)}
-            className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-          >
-            <option value="all">All Users</option>
-            {uniqueUsers.map((user) => (
-              <option key={user} value={user}>
-                {user}
-              </option>
-            ))}
-          </select>
-
-          {/* Clear Filters */}
-          {(filterEventType !== "all" || filterUser !== "all" || searchTerm) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setFilterEventType("all");
-                setFilterUser("all");
-                setSearchTerm("");
-              }}
-            >
-              Clear Filters
-            </Button>
+          {!isCloudEmpty && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="flex items-center gap-2">
+                  <Cloud className="w-4 h-4" />
+                  <span className="truncate max-w-[150px]">{selectedSystem?.name || "Select System"}</span>
+                  <ChevronDown className="w-4 h-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64" align="end">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-gray-700">Select Cloud System</p>
+                  {loadingSystems ? (
+                    <div className="flex items-center justify-center py-4">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    </div>
+                  ) : (
+                    <div className="max-h-60 overflow-y-auto space-y-1">
+                      {cloudSystems.map((system) => (
+                        <button
+                          key={system.id}
+                          onClick={() => setSelectedSystem(system)}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
+                            ? "bg-blue-100 text-blue-800"
+                            : "hover:bg-gray-100 text-gray-700"
+                            }`}
+                          disabled={system.stateOfHealth !== "online"}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="truncate">{system.name}</span>
+                            <span
+                              className={`w-2 h-2 rounded-full ${system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
+                                }`}
+                            />
+                          </div>
+                          {system.accessRole === "owner" && <span className="text-xs text-purple-600">Owner</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
           )}
+
+          {/* Refresh Button - Styled like CameraInventory */}
+          <button
+            onClick={() => {
+              if (selectedSystem) {
+                fetchAuditLogs(selectedSystem);
+              } else {
+                fetchCloudSystems();
+              }
+            }}
+            disabled={loading || loadingSystems}
+            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-full"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${loading || loadingSystems ? "animate-spin" : ""}`}
+            />
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
-      {/* Auth Required */}
-      {requiresAuth && !showLoginForm && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-yellow-600" />
-              <div>
-                <p className="font-medium text-yellow-800">Authentication Required</p>
-                <p className="text-sm text-yellow-600">Please login to view audit logs for {selectedSystem?.name}</p>
-              </div>
+      {/* Cloud Systems Error - Now positioned below title */}
+      {showNoCloudAlert && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
+          <div className="flex items-center">
+            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
+            <div>
+              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
+              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
             </div>
-            <Button onClick={() => setShowLoginForm(true)}>
-              <LogIn className="w-4 h-4 mr-2" />
-              Login
-            </Button>
           </div>
         </div>
       )}
 
-      {/* Login Form */}
-      {showLoginForm && (
-        <div className="bg-white border rounded-lg p-4">
-          <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
-          <div className="space-y-3 max-w-md">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <input
-                type="text"
-                value={loginForm.username}
-                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="admin"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <div className="relative">
+      {!isCloudEmpty && (
+        <>
+
+          {/* Filters */}
+          <div className="bg-white rounded-lg border p-4 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Search */}
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <input
-                  type={showPassword ? "text" : "password"}
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
-                  placeholder="••••••••"
+                  type="text"
+                  placeholder="Search events, users, resources..."
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+              </div>
+
+              {/* From Date */}
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gray-500" />
+                <input
+                  type="datetime-local"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
               </div>
             </div>
 
-            {loginError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</p>}
+            <div className="flex flex-wrap gap-3">
+              {/* Event Type Filter */}
+              <select
+                value={filterEventType}
+                onChange={(e) => setFilterEventType(e.target.value)}
+                className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="all">All Event Types</option>
+                {uniqueEventTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {getEventInfo(type).label}
+                  </option>
+                ))}
+              </select>
 
-            <div className="flex gap-2">
-              <Button onClick={handleLogin} disabled={loggingIn}>
-                {loggingIn ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Logging in...
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="w-4 h-4 mr-2" />
-                    Login
-                  </>
-                )}
-              </Button>
-              <Button variant="outline" onClick={() => setShowLoginForm(false)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+              {/* User Filter */}
+              <select
+                value={filterUser}
+                onChange={(e) => setFilterUser(e.target.value)}
+                className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="all">All Users</option>
+                {uniqueUsers.map((user) => (
+                  <option key={user} value={user}>
+                    {user}
+                  </option>
+                ))}
+              </select>
 
-      {/* Stats - only show when authenticated */}
-      {!requiresAuth && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-gray-900">{filteredLogs.length}</div>
-            <div className="text-xs text-gray-500">Total Events</div>
-          </div>
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-blue-600">{uniqueUsers.length}</div>
-            <div className="text-xs text-gray-500">Active Users</div>
-          </div>
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-green-600">
-              {filteredLogs.filter((l) => l.eventType === "AR_Login").length}
+              {/* Clear Filters */}
+              {(filterEventType !== "all" || filterUser !== "all" || searchTerm) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFilterEventType("all");
+                    setFilterUser("all");
+                    setSearchTerm("");
+                  }}
+                >
+                  Clear Filters
+                </Button>
+              )}
             </div>
-            <div className="text-xs text-gray-500">Login Events</div>
           </div>
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-purple-600">{uniqueEventTypes.length}</div>
-            <div className="text-xs text-gray-500">Event Types</div>
-          </div>
-        </div>
-      )}
 
-      {/* Audit Log Table - only show when authenticated */}
-      {!requiresAuth && (
-        <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center p-8">
-              <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-              <span className="text-gray-600">Loading audit logs...</span>
+          {/* Auth Required */}
+          {requiresAuth && !showLoginForm && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-yellow-600" />
+                  <div>
+                    <p className="font-medium text-yellow-800">Authentication Required</p>
+                    <p className="text-sm text-yellow-600">Please login to view audit logs for {selectedSystem?.name}</p>
+                  </div>
+                </div>
+                <Button onClick={() => setShowLoginForm(true)}>
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Login
+                </Button>
+              </div>
             </div>
-          ) : error ? (
-            <div className="flex items-center justify-center p-8 text-red-600">
-              <AlertCircle className="w-6 h-6 mr-2" />
-              <span>{error}</span>
+          )}
+
+          {/* Login Form */}
+          {showLoginForm && (
+            <div className="bg-white border rounded-lg p-4">
+              <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
+              <div className="space-y-3 max-w-md">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <input
+                    type="text"
+                    value={loginForm.username}
+                    onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    placeholder="admin"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={loginForm.password}
+                      onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {loginError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</p>}
+
+                <div className="flex gap-2">
+                  <Button onClick={handleLogin} disabled={loggingIn}>
+                    {loggingIn ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Logging in...
+                      </>
+                    ) : (
+                      <>
+                        <LogIn className="w-4 h-4 mr-2" />
+                        Login
+                      </>
+                    )}
+                  </Button>
+                  <Button variant="outline" onClick={() => setShowLoginForm(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
             </div>
-          ) : !selectedSystem ? (
-            <div className="flex items-center justify-center p-8 text-gray-500">
-              <Cloud className="w-6 h-6 mr-2" />
-              <span>Select a cloud system to view audit logs</span>
+          )}
+
+
+
+          {/* Stats - only show when authenticated */}
+          {!requiresAuth && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white p-3 rounded-lg border">
+                <div className="text-2xl font-bold text-gray-900">{filteredLogs.length}</div>
+                <div className="text-xs text-gray-500">Total Events</div>
+              </div>
+              <div className="bg-white p-3 rounded-lg border">
+                <div className="text-2xl font-bold text-blue-600">{uniqueUsers.length}</div>
+                <div className="text-xs text-gray-500">Active Users</div>
+              </div>
+              <div className="bg-white p-3 rounded-lg border">
+                <div className="text-2xl font-bold text-green-600">
+                  {filteredLogs.filter((l) => l.eventType === "AR_Login").length}
+                </div>
+                <div className="text-xs text-gray-500">Login Events</div>
+              </div>
+              <div className="bg-white p-3 rounded-lg border">
+                <div className="text-2xl font-bold text-purple-600">{uniqueEventTypes.length}</div>
+                <div className="text-xs text-gray-500">Event Types</div>
+              </div>
             </div>
-          ) : displayedLogs.length === 0 ? (
-            <div className="flex items-center justify-center p-8 text-gray-500">
-              <Activity className="w-6 h-6 mr-2" />
-              <span>No audit logs found</span>
-            </div>
-          ) : (
-            <>
-              {/* Desktop Table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Time
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Event
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        User
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Resources
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+          )}
+
+          {/* Audit Log Table - only show when authenticated */}
+          {!requiresAuth && (
+            <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+              {loading ? (
+                <div className="flex items-center justify-center p-8">
+                  <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+                  <span className="text-gray-600">Loading audit logs...</span>
+                </div>
+              ) : error ? (
+                <div className="flex items-center justify-center p-8 text-red-600">
+                  <AlertCircle className="w-6 h-6 mr-2" />
+                  <span>{error}</span>
+                </div>
+              ) : !selectedSystem ? (
+                <div className="flex items-center justify-center p-8 text-gray-500">
+                  <Cloud className="w-6 h-6 mr-2" />
+                  <span>Select a cloud system to view audit logs</span>
+                </div>
+              ) : displayedLogs.length === 0 ? (
+                <div className="flex items-center justify-center p-8 text-gray-500">
+                  <Activity className="w-6 h-6 mr-2" />
+                  <span>No audit logs found</span>
+                </div>
+              ) : (
+                <>
+                  {/* Desktop Table */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Time
+                          </th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Event
+                          </th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            User
+                          </th>
+                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Resources
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {displayedLogs.map((log, index) => {
+                          const eventInfo = getEventInfo(log.eventType);
+                          return (
+                            <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-gray-50">
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <div className="flex items-center text-xs lg:text-sm text-gray-600">
+                                  <Clock className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                                  {formatTimestamp(log.createdTimeSec)}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${eventInfo.color}`}
+                                >
+                                  {getEventIcon(eventInfo.icon)}
+                                  <span className="hidden lg:inline">{eventInfo.label}</span>
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <div className="flex items-center text-xs lg:text-sm">
+                                  <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                                  <div className="flex flex-col">
+                                    <span className="font-medium text-gray-900">{log.authSession?.userName || "-"}</span>
+                                    {log.authSession?.userHost && (
+                                      <span className="text-[10px] text-gray-400">
+                                        {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
+                                  {log.resources && log.resources.length > 0
+                                    ? log.resources
+                                      .slice(0, 2)
+                                      .map((r) => getResourceName(r))
+                                      .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
+                                    : ""}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile Cards */}
+                  <div className="md:hidden space-y-2 p-2">
                     {displayedLogs.map((log, index) => {
                       const eventInfo = getEventInfo(log.eventType);
                       return (
-                        <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-gray-50">
-                          <td className="px-3 py-2.5 whitespace-nowrap">
-                            <div className="flex items-center text-xs lg:text-sm text-gray-600">
-                              <Clock className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
-                              {formatTimestamp(log.createdTimeSec)}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">
+                        <div
+                          key={`${log.createdTimeSec}-${index}`}
+                          className="bg-gray-50 border rounded-lg p-2.5 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${eventInfo.color}`}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${eventInfo.color}`}
                             >
                               {getEventIcon(eventInfo.icon)}
-                              <span className="hidden lg:inline">{eventInfo.label}</span>
+                              {eventInfo.label}
                             </span>
-                          </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">
-                            <div className="flex items-center text-xs lg:text-sm">
-                              <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
-                              <div className="flex flex-col">
-                                <span className="font-medium text-gray-900">{log.authSession?.userName || "-"}</span>
-                                {log.authSession?.userHost && (
-                                  <span className="text-[10px] text-gray-400">
-                                    {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
-                                  </span>
-                                )}
-                              </div>
+                            <span className="text-[10px] text-gray-500 whitespace-nowrap">
+                              {formatTimestamp(log.createdTimeSec)}
+                            </span>
+                          </div>
+                          <div className="flex flex-col text-sm">
+                            <div className="flex items-center">
+                              <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
+                              <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "-"}</span>
                             </div>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
-                              {log.resources && log.resources.length > 0
-                                ? log.resources
-                                  .slice(0, 2)
-                                  .map((r) => getResourceName(r))
-                                  .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
-                                : ""}
+                            {log.authSession?.userHost && (
+                              <span className="text-[9px] text-gray-400 ml-5">
+                                {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                              </span>
+                            )}
+                          </div>
+                          {log.resources && log.resources.length > 0 && (
+                            <div className="text-[10px] text-gray-500 truncate">
+                              <span className="font-medium">Resources:</span>{" "}
+                              {log.resources
+                                .slice(0, 2)
+                                .map((r) => getResourceName(r))
+                                .join(", ")}
+                              {log.resources.length > 2 && ` +${log.resources.length - 2} more`}
                             </div>
-                          </td>
-                        </tr>
+                          )}
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
 
-              {/* Mobile Cards */}
-              <div className="md:hidden space-y-2 p-2">
-                {displayedLogs.map((log, index) => {
-                  const eventInfo = getEventInfo(log.eventType);
-                  return (
-                    <div
-                      key={`${log.createdTimeSec}-${index}`}
-                      className="bg-gray-50 border rounded-lg p-2.5 space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${eventInfo.color}`}
-                        >
-                          {getEventIcon(eventInfo.icon)}
-                          {eventInfo.label}
-                        </span>
-                        <span className="text-[10px] text-gray-500 whitespace-nowrap">
-                          {formatTimestamp(log.createdTimeSec)}
-                        </span>
-                      </div>
-                      <div className="flex flex-col text-sm">
-                        <div className="flex items-center">
-                          <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
-                          <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "-"}</span>
-                        </div>
-                        {log.authSession?.userHost && (
-                          <span className="text-[9px] text-gray-400 ml-5">
-                            {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
-                          </span>
-                        )}
-                      </div>
-                      {log.resources && log.resources.length > 0 && (
-                        <div className="text-[10px] text-gray-500 truncate">
-                          <span className="font-medium">Resources:</span>{" "}
-                          {log.resources
-                            .slice(0, 2)
-                            .map((r) => getResourceName(r))
-                            .join(", ")}
-                          {log.resources.length > 2 && ` +${log.resources.length - 2} more`}
-                        </div>
-                      )}
+                  {/* Load More */}
+                  {sortedLogs.length > displayCount && (
+                    <div className="p-3 border-t text-center">
+                      <Button variant="outline" size="sm" onClick={() => setDisplayCount((prev) => prev + 20)}>
+                        Load More ({sortedLogs.length - displayCount} remaining)
+                      </Button>
                     </div>
-                  );
-                })}
-              </div>
-
-              {/* Load More */}
-              {sortedLogs.length > displayCount && (
-                <div className="p-3 border-t text-center">
-                  <Button variant="outline" size="sm" onClick={() => setDisplayCount((prev) => prev + 20)}>
-                    Load More ({sortedLogs.length - displayCount} remaining)
-                  </Button>
-                </div>
+                  )}
+                </>
               )}
-            </>
+            </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );

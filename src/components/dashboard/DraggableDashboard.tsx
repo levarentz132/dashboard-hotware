@@ -18,9 +18,11 @@ import {
   Check,
   Maximize,
   Minimize,
+  ArrowLeft,
 } from "lucide-react";
 import "react-grid-layout/css/styles.css";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -276,6 +278,7 @@ const MemoizedWidget = memo(
 MemoizedWidget.displayName = "MemoizedWidget";
 
 export default function DraggableDashboard({ userId = "default" }: DraggableDashboardProps) {
+  const router = useRouter();
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [showAddWidget, setShowAddWidget] = useState(false);
@@ -612,6 +615,22 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
         <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-2 sm:px-4 py-2 sm:py-3 shadow-sm">
           <div className="flex items-center justify-between max-w-full gap-2">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 sm:h-9 sm:w-9"
+                    onClick={() => router.back()}
+                  >
+                    <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Kembali</p>
+                </TooltipContent>
+              </Tooltip>
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link href="/">

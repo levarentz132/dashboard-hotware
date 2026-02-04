@@ -57,6 +57,9 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
       return;
     }
 
+    // Update URL with section param to enable browser history (back button support)
+    router.push(`/?section=${item.id}`);
+
     // Otherwise, use section change
     onSectionChange(item.id);
     // Close sidebar on mobile after selection
@@ -102,11 +105,10 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item)}
-                className={`w-full flex items-center px-4 sm:px-6 py-2.5 sm:py-3 text-left transition-colors text-sm sm:text-base ${
-                  activeSection === item.id
+                className={`w-full flex items-center px-4 sm:px-6 py-2.5 sm:py-3 text-left transition-colors text-sm sm:text-base ${activeSection === item.id
                     ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
                     : "text-gray-600 hover:bg-gray-50"
-                }`}
+                  }`}
               >
                 <Icon className="w-5 h-5 mr-3 flex-shrink-0" />
                 <span className="truncate">{item.label}</span>
