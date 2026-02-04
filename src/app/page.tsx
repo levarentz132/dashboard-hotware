@@ -26,9 +26,7 @@ function PageContent() {
 
   useEffect(() => {
     const section = searchParams.get("section");
-    if (section) {
-      setActiveSection(section);
-    }
+    setActiveSection(section || "");
   }, [searchParams]);
 
   const renderContent = () => {

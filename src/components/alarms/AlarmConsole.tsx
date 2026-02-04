@@ -1196,27 +1196,27 @@ export default function AlarmConsole() {
     setDisplayCount((prev) => Math.min(prev + LOAD_MORE_COUNT, filteredEvents.length));
   }, [filteredEvents.length]);
 
+  const isCloudEmpty = cloudSystems.length === 0;
+  const showNoCloudAlert = isCloudEmpty && !loadingCloud;
+
   return (
-    <div className="p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Alarm Console</h1>
-          <p className="text-sm text-gray-500 mt-1 hidden sm:block">
-            Monitor dan analisis event sistem secara real-time
-          </p>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Alarm Console</h1>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Server Selector */}
-          <Select value={selectedCloudSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
-            <SelectTrigger className="w-full sm:w-[220px]">
-              <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
-              <SelectValue placeholder="Pilih system..." />
-            </SelectTrigger>
-            <SelectContent>
-              {cloudSystems.length > 0 ? (
-                cloudSystems.map((system) => (
+          {/* Server Selector - only if systems exist */}
+          {!isCloudEmpty && (
+            <Select value={selectedCloudSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
+              <SelectTrigger className="w-full sm:w-[220px]">
+                <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
+                <SelectValue placeholder="Pilih system..." />
+              </SelectTrigger>
+              <SelectContent>
+                {cloudSystems.map((system) => (
                   <SelectItem key={system.id} value={system.id}>
                     <div className="flex items-center gap-2">
                       <span className={cn("w-2 h-2 rounded-full", system.isOnline ? "bg-blue-500" : "bg-gray-400")} />
@@ -1224,17 +1224,13 @@ export default function AlarmConsole() {
                       {!system.isOnline && <span className="text-xs text-gray-400">(offline)</span>}
                     </div>
                   </SelectItem>
-                ))
-              ) : (
-                <div className="px-2 py-4 text-sm text-gray-500 text-center">
-                  {loadingCloud ? "Memuat system..." : "Tidak ada cloud system tersedia"}
-                </div>
-              )}
-            </SelectContent>
-          </Select>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           {/* Cloud Server Selector - shown when cloud system is selected */}
-          {selectedCloudSystemId && (
+          {!isCloudEmpty && selectedCloudSystemId && (
             <Select
               value={selectedCloudServerId}
               onValueChange={handleCloudServerChange}
@@ -1269,7 +1265,7 @@ export default function AlarmConsole() {
           )}
 
           {/* Cloud Logout Button */}
-          {selectedCloudSystemId && isLoggedIn.has(selectedCloudSystemId) && (
+          {!isCloudEmpty && selectedCloudSystemId && isLoggedIn.has(selectedCloudSystemId) && (
             <Button
               variant="ghost"
               size="sm"
@@ -1282,579 +1278,584 @@ export default function AlarmConsole() {
             </Button>
           )}
 
-          <div className="flex items-center gap-2 ml-auto">
-            {/* Auto Refresh Toggle */}
-            {/* <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={autoRefresh ? "default" : "outline"}
-                    size="icon"
-                    onClick={() => setAutoRefresh(!autoRefresh)}
-                    className="shrink-0"
-                  >
-                    <RefreshCw className={cn("h-4 w-4", autoRefresh && "animate-spin")} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{autoRefresh ? `Auto-refresh aktif (${refreshInterval}s)` : "Aktifkan auto-refresh"}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider> */}
-
-            {/* Manual Refresh */}
-            <Button
-              onClick={fetchEvents}
-              disabled={
-                loading ||
-                !selectedCloudSystemId ||
-                !selectedCloudServerId
+          {/* Refresh Button - Styled like CameraInventory */}
+          <button
+            onClick={() => {
+              if (isCloudEmpty) {
+                fetchCloudSystems();
+              } else {
+                fetchEvents();
               }
-              className="gap-2"
-            >
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-              <span className="hidden sm:inline">Refresh</span>
-            </Button>
-          </div>
+            }}
+            disabled={
+              loading ||
+              loadingCloud ||
+              (!isCloudEmpty && (!selectedCloudSystemId || !selectedCloudServerId))
+            }
+            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-[38px]"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${loading || loadingCloud ? "animate-spin" : ""}`}
+            />
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
-        <StatsCard
-          title="Total"
-          value={stats.total}
-          icon={<Bell className="h-5 w-5 opacity-50" />}
-          variant="default"
-          onClick={() => setFilterLevel("all")}
-          active={filterLevel === "all"}
-        />
-        <StatsCard
-          title="Error"
-          value={stats.errors}
-          icon={<XCircle className="h-5 w-5" />}
-          variant="error"
-          onClick={() => setFilterLevel(filterLevel === "error" ? "all" : "error")}
-          active={filterLevel === "error"}
-        />
-        <StatsCard
-          title="Warning"
-          value={stats.warnings}
-          icon={<AlertTriangle className="h-5 w-5" />}
-          variant="warning"
-          onClick={() => setFilterLevel(filterLevel === "warning" ? "all" : "warning")}
-          active={filterLevel === "warning"}
-        />
-        <StatsCard
-          title="Info"
-          value={stats.info}
-          icon={<Info className="h-5 w-5" />}
-          variant="info"
-          onClick={() => setFilterLevel(filterLevel === "info" ? "all" : "info")}
-          active={filterLevel === "info"}
-        />
-      </div>
-
-      {/* Search & Filters */}
-      <Card>
-        <CardContent className="p-3 sm:p-4 space-y-3 sm:space-y-4">
-          {/* Search Bar */}
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Cari event..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 text-sm"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setShowFilters(!showFilters)}
-                className="gap-2 flex-1 sm:flex-none"
-              >
-                <Filter className="h-4 w-4" />
-                <span>Filter</span>
-                {hasActiveFilters && (
-                  <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
-                    {activeFilterCount}
-                  </Badge>
-                )}
-              </Button>
-
-              {hasActiveFilters && (
-                <Button variant="ghost" size="icon" onClick={clearFilters} className="shrink-0">
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
+      {/* Cloud Systems Error */}
+      {showNoCloudAlert && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
+          <div className="flex items-center">
+            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
+            <div>
+              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
+              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Filter Panel */}
-          {showFilters && (
-            <>
-              <Separator />
+      {!isCloudEmpty && (
+        <>
 
-              {/* Active Filters Summary */}
-              {hasActiveFilters && (
-                <div className="flex flex-wrap gap-2">
-                  {filterEventType !== "all" && (
-                    <Badge variant="secondary" className="gap-1 pr-1">
-                      Event: {getEventTypeLabel(filterEventType)}
-                      <button
-                        onClick={() => setFilterEventType("all")}
-                        className="ml-1 hover:bg-gray-300 rounded p-0.5"
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+            <StatsCard
+              title="Total"
+              value={stats.total}
+              icon={<Bell className="h-5 w-5 opacity-50" />}
+              variant="default"
+              onClick={() => setFilterLevel("all")}
+              active={filterLevel === "all"}
+            />
+            <StatsCard
+              title="Error"
+              value={stats.errors}
+              icon={<XCircle className="h-5 w-5" />}
+              variant="error"
+              onClick={() => setFilterLevel(filterLevel === "error" ? "all" : "error")}
+              active={filterLevel === "error"}
+            />
+            <StatsCard
+              title="Warning"
+              value={stats.warnings}
+              icon={<AlertTriangle className="h-5 w-5" />}
+              variant="warning"
+              onClick={() => setFilterLevel(filterLevel === "warning" ? "all" : "warning")}
+              active={filterLevel === "warning"}
+            />
+            <StatsCard
+              title="Info"
+              value={stats.info}
+              icon={<Info className="h-5 w-5" />}
+              variant="info"
+              onClick={() => setFilterLevel(filterLevel === "info" ? "all" : "info")}
+              active={filterLevel === "info"}
+            />
+          </div>
+
+          {/* Search & Filters */}
+          <Card>
+            <CardContent className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+              {/* Search Bar */}
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    placeholder="Cari event..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 text-sm"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowFilters(!showFilters)}
+                    className="gap-2 flex-1 sm:flex-none"
+                  >
+                    <Filter className="h-4 w-4" />
+                    <span>Filter</span>
+                    {hasActiveFilters && (
+                      <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                        {activeFilterCount}
+                      </Badge>
+                    )}
+                  </Button>
+
+                  {hasActiveFilters && (
+                    <Button variant="ghost" size="icon" onClick={clearFilters} className="shrink-0">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Filter Panel */}
+              {showFilters && (
+                <>
+                  <Separator />
+
+                  {/* Active Filters Summary */}
+                  {hasActiveFilters && (
+                    <div className="flex flex-wrap gap-2">
+                      {filterEventType !== "all" && (
+                        <Badge variant="secondary" className="gap-1 pr-1">
+                          Event: {getEventTypeLabel(filterEventType)}
+                          <button
+                            onClick={() => setFilterEventType("all")}
+                            className="ml-1 hover:bg-gray-300 rounded p-0.5"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      )}
+                      {filterLevel !== "all" && (
+                        <Badge variant="secondary" className="gap-1 pr-1">
+                          Level: {filterLevel}
+                          <button onClick={() => setFilterLevel("all")} className="ml-1 hover:bg-gray-300 rounded p-0.5">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      )}
+                      {filterActionType !== "all" && (
+                        <Badge variant="secondary" className="gap-1 pr-1">
+                          Action: {getActionTypeLabel(filterActionType)}
+                          <button
+                            onClick={() => setFilterActionType("all")}
+                            className="ml-1 hover:bg-gray-300 rounded p-0.5"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      )}
+                      {filterResource !== "all" && (
+                        <Badge variant="secondary" className="gap-1 pr-1">
+                          Resource: {uniqueResources.find((r) => r.id === filterResource)?.name || filterResource}
+                          <button onClick={() => setFilterResource("all")} className="ml-1 hover:bg-gray-300 rounded p-0.5">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      )}
+                      {filterSourceServer !== "all" && (
+                        <Badge variant="secondary" className="gap-1 pr-1">
+                          Server: {uniqueSourceServers.find((s) => s.id === filterSourceServer)?.name || filterSourceServer}
+                          <button
+                            onClick={() => setFilterSourceServer("all")}
+                            className="ml-1 hover:bg-gray-300 rounded p-0.5"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      )}
+                      {(filterDateFrom || filterDateTo) && (
+                        <Badge variant="secondary" className="gap-1 pr-1">
+                          Tanggal: {filterDateFrom || "..."} - {filterDateTo || "..."}
+                          <button
+                            onClick={() => {
+                              setFilterDateFrom("");
+                              setFilterDateTo("");
+                            }}
+                            className="ml-1 hover:bg-gray-300 rounded p-0.5"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+                    {/* Event Type Filter */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Tipe Event</label>
+                      <Select value={filterEventType} onValueChange={setFilterEventType}>
+                        <SelectTrigger className="text-sm">
+                          <SelectValue placeholder="Semua Event" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Semua Event</SelectItem>
+                          {uniqueEventTypes.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              <span className="flex items-center gap-2">
+                                {getEventIcon(type)}
+                                {getEventTypeLabel(type)}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Level Filter */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Level</label>
+                      <Select value={filterLevel} onValueChange={setFilterLevel}>
+                        <SelectTrigger className="text-sm">
+                          <SelectValue placeholder="Semua Level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Semua Level</SelectItem>
+                          <SelectItem value="error">
+                            <span className="flex items-center gap-2">
+                              <XCircle className="h-4 w-4 text-red-500" />
+                              Error
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="warning">
+                            <span className="flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4 text-amber-500" />
+                              Warning
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="info">
+                            <span className="flex items-center gap-2">
+                              <Info className="h-4 w-4 text-blue-500" />
+                              Info
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Action Type Filter */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Tipe Action</label>
+                      <Select value={filterActionType} onValueChange={setFilterActionType}>
+                        <SelectTrigger className="text-sm">
+                          <SelectValue placeholder="Semua Action" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Semua Action</SelectItem>
+                          {uniqueActionTypes.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {getActionTypeLabel(type)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Resource Filter */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Resource</label>
+                      <Select value={filterResource} onValueChange={setFilterResource}>
+                        <SelectTrigger className="text-sm">
+                          <SelectValue placeholder="Semua Resource" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Semua Resource</SelectItem>
+                          {uniqueResources.map((resource) => (
+                            <SelectItem key={resource.id} value={resource.id}>
+                              <span className="flex items-center gap-2">
+                                {resource.type === "camera" ? (
+                                  <Camera className="h-4 w-4 text-blue-500" />
+                                ) : (
+                                  <Server className="h-4 w-4 text-green-500" />
+                                )}
+                                <span className="truncate max-w-[150px]">{resource.name}</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Source Server Filter */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Source Server</label>
+                      <Select value={filterSourceServer} onValueChange={setFilterSourceServer}>
+                        <SelectTrigger className="text-sm">
+                          <SelectValue placeholder="Semua Server" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Semua Server</SelectItem>
+                          {uniqueSourceServers.map((server) => (
+                            <SelectItem key={server.id} value={server.id}>
+                              <span className="flex items-center gap-2">
+                                <Server className="h-4 w-4 text-green-500" />
+                                <span className="truncate max-w-[150px]">{server.name}</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Date From Filter */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Dari Tanggal</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          type="date"
+                          value={filterDateFrom}
+                          onChange={(e) => setFilterDateFrom(e.target.value)}
+                          className="pl-10 text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Date To Filter */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Sampai Tanggal</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          type="date"
+                          value={filterDateTo}
+                          onChange={(e) => setFilterDateTo(e.target.value)}
+                          className="pl-10 text-sm"
+                          min={filterDateFrom}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Auto Refresh Interval */}
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-medium text-gray-700">Auto Refresh</label>
+                      <Select
+                        value={autoRefresh ? refreshInterval.toString() : "off"}
+                        onValueChange={(val) => {
+                          if (val === "off") {
+                            setAutoRefresh(false);
+                          } else {
+                            setAutoRefresh(true);
+                            setRefreshInterval(parseInt(val));
+                          }
+                        }}
                       >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  )}
-                  {filterLevel !== "all" && (
-                    <Badge variant="secondary" className="gap-1 pr-1">
-                      Level: {filterLevel}
-                      <button onClick={() => setFilterLevel("all")} className="ml-1 hover:bg-gray-300 rounded p-0.5">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  )}
-                  {filterActionType !== "all" && (
-                    <Badge variant="secondary" className="gap-1 pr-1">
-                      Action: {getActionTypeLabel(filterActionType)}
-                      <button
-                        onClick={() => setFilterActionType("all")}
-                        className="ml-1 hover:bg-gray-300 rounded p-0.5"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  )}
-                  {filterResource !== "all" && (
-                    <Badge variant="secondary" className="gap-1 pr-1">
-                      Resource: {uniqueResources.find((r) => r.id === filterResource)?.name || filterResource}
-                      <button onClick={() => setFilterResource("all")} className="ml-1 hover:bg-gray-300 rounded p-0.5">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  )}
-                  {filterSourceServer !== "all" && (
-                    <Badge variant="secondary" className="gap-1 pr-1">
-                      Server: {uniqueSourceServers.find((s) => s.id === filterSourceServer)?.name || filterSourceServer}
-                      <button
-                        onClick={() => setFilterSourceServer("all")}
-                        className="ml-1 hover:bg-gray-300 rounded p-0.5"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  )}
-                  {(filterDateFrom || filterDateTo) && (
-                    <Badge variant="secondary" className="gap-1 pr-1">
-                      Tanggal: {filterDateFrom || "..."} - {filterDateTo || "..."}
-                      <button
+                        <SelectTrigger className="text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="off">Off</SelectItem>
+                          <SelectItem value="10">Setiap 10 detik</SelectItem>
+                          <SelectItem value="30">Setiap 30 detik</SelectItem>
+                          <SelectItem value="60">Setiap 1 menit</SelectItem>
+                          <SelectItem value="300">Setiap 5 menit</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Quick Date Filters */}
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <span className="text-xs text-gray-500 self-center mr-1">Rentang cepat:</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        const today = new Date().toISOString().split("T")[0];
+                        setFilterDateFrom(today);
+                        setFilterDateTo(today);
+                      }}
+                    >
+                      Hari ini
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        const today = new Date();
+                        const yesterday = new Date(today);
+                        yesterday.setDate(yesterday.getDate() - 1);
+                        setFilterDateFrom(yesterday.toISOString().split("T")[0]);
+                        setFilterDateTo(yesterday.toISOString().split("T")[0]);
+                      }}
+                    >
+                      Kemarin
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        const today = new Date();
+                        const weekAgo = new Date(today);
+                        weekAgo.setDate(weekAgo.getDate() - 7);
+                        setFilterDateFrom(weekAgo.toISOString().split("T")[0]);
+                        setFilterDateTo(today.toISOString().split("T")[0]);
+                      }}
+                    >
+                      7 hari terakhir
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        const today = new Date();
+                        const monthAgo = new Date(today);
+                        monthAgo.setDate(monthAgo.getDate() - 30);
+                        setFilterDateFrom(monthAgo.toISOString().split("T")[0]);
+                        setFilterDateTo(today.toISOString().split("T")[0]);
+                      }}
+                    >
+                      30 hari terakhir
+                    </Button>
+                    {(filterDateFrom || filterDateTo) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-red-500 hover:text-red-600"
                         onClick={() => {
                           setFilterDateFrom("");
                           setFilterDateTo("");
                         }}
-                        className="ml-1 hover:bg-gray-300 rounded p-0.5"
                       >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  )}
-                </div>
+                        Reset tanggal
+                      </Button>
+                    )}
+                  </div>
+                </>
               )}
+            </CardContent>
+          </Card>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
-                {/* Event Type Filter */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Tipe Event</label>
-                  <Select value={filterEventType} onValueChange={setFilterEventType}>
-                    <SelectTrigger className="text-sm">
-                      <SelectValue placeholder="Semua Event" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua Event</SelectItem>
-                      {uniqueEventTypes.map((type) => (
-                        <SelectItem key={type} value={type}>
-                          <span className="flex items-center gap-2">
-                            {getEventIcon(type)}
-                            {getEventTypeLabel(type)}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+          {/* Results Info */}
+          <div className="flex items-center justify-between text-xs sm:text-sm text-gray-500">
+            <span>
+              Menampilkan {displayedEvents.length} dari {filteredEvents.length} events
+              {filteredEvents.length !== events.length && ` (${events.length} total)`}
+              {hasActiveFilters && " (filtered)"}
+            </span>
+            {autoRefresh && (
+              <span className="flex items-center gap-1 text-green-600">
+                <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="hidden sm:inline">Live update aktif</span>
+              </span>
+            )}
+          </div>
 
-                {/* Level Filter */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Level</label>
-                  <Select value={filterLevel} onValueChange={setFilterLevel}>
-                    <SelectTrigger className="text-sm">
-                      <SelectValue placeholder="Semua Level" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua Level</SelectItem>
-                      <SelectItem value="error">
-                        <span className="flex items-center gap-2">
-                          <XCircle className="h-4 w-4 text-red-500" />
-                          Error
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="warning">
-                        <span className="flex items-center gap-2">
-                          <AlertTriangle className="h-4 w-4 text-amber-500" />
-                          Warning
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="info">
-                        <span className="flex items-center gap-2">
-                          <Info className="h-4 w-4 text-blue-500" />
-                          Info
-                        </span>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+          {/* Events List */}
+          <div className="space-y-2 sm:space-y-3">
+            {/* Loading State */}
+            {(loading || loadingCloudServers) && events.length === 0 && (
+              <>
+                <EventSkeleton />
+                <EventSkeleton />
+                <EventSkeleton />
+              </>
+            )}
 
-                {/* Action Type Filter */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Tipe Action</label>
-                  <Select value={filterActionType} onValueChange={setFilterActionType}>
-                    <SelectTrigger className="text-sm">
-                      <SelectValue placeholder="Semua Action" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua Action</SelectItem>
-                      {uniqueActionTypes.map((type) => (
-                        <SelectItem key={type} value={type}>
-                          {getActionTypeLabel(type)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Resource Filter */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Resource</label>
-                  <Select value={filterResource} onValueChange={setFilterResource}>
-                    <SelectTrigger className="text-sm">
-                      <SelectValue placeholder="Semua Resource" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua Resource</SelectItem>
-                      {uniqueResources.map((resource) => (
-                        <SelectItem key={resource.id} value={resource.id}>
-                          <span className="flex items-center gap-2">
-                            {resource.type === "camera" ? (
-                              <Camera className="h-4 w-4 text-blue-500" />
-                            ) : (
-                              <Server className="h-4 w-4 text-green-500" />
-                            )}
-                            <span className="truncate max-w-[150px]">{resource.name}</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Source Server Filter */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Source Server</label>
-                  <Select value={filterSourceServer} onValueChange={setFilterSourceServer}>
-                    <SelectTrigger className="text-sm">
-                      <SelectValue placeholder="Semua Server" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Semua Server</SelectItem>
-                      {uniqueSourceServers.map((server) => (
-                        <SelectItem key={server.id} value={server.id}>
-                          <span className="flex items-center gap-2">
-                            <Server className="h-4 w-4 text-green-500" />
-                            <span className="truncate max-w-[150px]">{server.name}</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Date From Filter */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Dari Tanggal</label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      type="date"
-                      value={filterDateFrom}
-                      onChange={(e) => setFilterDateFrom(e.target.value)}
-                      className="pl-10 text-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Date To Filter */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Sampai Tanggal</label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      type="date"
-                      value={filterDateTo}
-                      onChange={(e) => setFilterDateTo(e.target.value)}
-                      className="pl-10 text-sm"
-                      min={filterDateFrom}
-                    />
-                  </div>
-                </div>
-
-                {/* Auto Refresh Interval */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <label className="text-xs sm:text-sm font-medium text-gray-700">Auto Refresh</label>
-                  <Select
-                    value={autoRefresh ? refreshInterval.toString() : "off"}
-                    onValueChange={(val) => {
-                      if (val === "off") {
-                        setAutoRefresh(false);
-                      } else {
-                        setAutoRefresh(true);
-                        setRefreshInterval(parseInt(val));
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="off">Off</SelectItem>
-                      <SelectItem value="10">Setiap 10 detik</SelectItem>
-                      <SelectItem value="30">Setiap 30 detik</SelectItem>
-                      <SelectItem value="60">Setiap 1 menit</SelectItem>
-                      <SelectItem value="300">Setiap 5 menit</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Quick Date Filters */}
-              <div className="flex flex-wrap gap-2 pt-2">
-                <span className="text-xs text-gray-500 self-center mr-1">Rentang cepat:</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    const today = new Date().toISOString().split("T")[0];
-                    setFilterDateFrom(today);
-                    setFilterDateTo(today);
-                  }}
-                >
-                  Hari ini
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    const today = new Date();
-                    const yesterday = new Date(today);
-                    yesterday.setDate(yesterday.getDate() - 1);
-                    setFilterDateFrom(yesterday.toISOString().split("T")[0]);
-                    setFilterDateTo(yesterday.toISOString().split("T")[0]);
-                  }}
-                >
-                  Kemarin
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    const today = new Date();
-                    const weekAgo = new Date(today);
-                    weekAgo.setDate(weekAgo.getDate() - 7);
-                    setFilterDateFrom(weekAgo.toISOString().split("T")[0]);
-                    setFilterDateTo(today.toISOString().split("T")[0]);
-                  }}
-                >
-                  7 hari terakhir
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    const today = new Date();
-                    const monthAgo = new Date(today);
-                    monthAgo.setDate(monthAgo.getDate() - 30);
-                    setFilterDateFrom(monthAgo.toISOString().split("T")[0]);
-                    setFilterDateTo(today.toISOString().split("T")[0]);
-                  }}
-                >
-                  30 hari terakhir
-                </Button>
-                {(filterDateFrom || filterDateTo) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-red-500 hover:text-red-600"
-                    onClick={() => {
-                      setFilterDateFrom("");
-                      setFilterDateTo("");
-                    }}
-                  >
-                    Reset tanggal
+            {/* Auth Required State - for cloud systems */}
+            {!loading && !loadingCloudServers && requiresAuth && (
+              <Card className="border-blue-200 bg-blue-50">
+                <CardContent className="flex flex-col items-center justify-center p-6 sm:p-8 text-center">
+                  <Cloud className="h-10 w-10 sm:h-12 sm:w-12 mb-4 text-blue-500" />
+                  <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Login Diperlukan</h3>
+                  <p className="text-sm text-gray-600 mb-4 max-w-md">
+                    Cloud system <strong>{getCurrentCloudSystemName()}</strong> memerlukan autentikasi. Silakan login untuk
+                    melihat event logs.
+                  </p>
+                  <Button onClick={openLoginDialog} className="gap-2">
+                    <LogIn className="h-4 w-4" />
+                    Login ke Cloud System
                   </Button>
-                )}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                </CardContent>
+              </Card>
+            )}
 
-      {/* Results Info */}
-      <div className="flex items-center justify-between text-xs sm:text-sm text-gray-500">
-        <span>
-          Menampilkan {displayedEvents.length} dari {filteredEvents.length} events
-          {filteredEvents.length !== events.length && ` (${events.length} total)`}
-          {hasActiveFilters && " (filtered)"}
-        </span>
-        {autoRefresh && (
-          <span className="flex items-center gap-1 text-green-600">
-            <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-            <span className="hidden sm:inline">Live update aktif</span>
-          </span>
-        )}
-      </div>
+            {/* Error State - General */}
+            {error && !loading && !requiresAuth && (
+              <Card className="border-red-200 bg-red-50">
+                <CardContent className="flex items-center justify-center p-6 sm:p-8 text-red-600">
+                  <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 mr-2 shrink-0" />
+                  <span className="text-sm sm:text-base">{error}</span>
+                </CardContent>
+              </Card>
+            )}
 
-      {/* Events List */}
-      <div className="space-y-2 sm:space-y-3">
-        {/* Loading State */}
-        {(loading || loadingCloudServers) && events.length === 0 && (
-          <>
-            <EventSkeleton />
-            <EventSkeleton />
-            <EventSkeleton />
-          </>
-        )}
+            {/* Empty State */}
+            {!loading && !loadingCloudServers && !error && !requiresAuth && filteredEvents.length === 0 && (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center p-8 sm:p-12 text-gray-500">
+                  <Bell className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-30" />
+                  <h3 className="text-base sm:text-lg font-medium mb-1">Tidak ada event ditemukan</h3>
+                  <p className="text-xs sm:text-sm text-center max-w-md">
+                    {hasActiveFilters
+                      ? "Coba ubah filter atau kata kunci pencarian"
+                      : "Event akan muncul saat sistem mendeteksi aktivitas"}
+                  </p>
+                  {hasActiveFilters && (
+                    <Button variant="outline" onClick={clearFilters} className="mt-4">
+                      Clear Filters
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
-        {/* Auth Required State - for cloud systems */}
-        {!loading && !loadingCloudServers && requiresAuth && (
-          <Card className="border-blue-200 bg-blue-50">
-            <CardContent className="flex flex-col items-center justify-center p-6 sm:p-8 text-center">
-              <Cloud className="h-10 w-10 sm:h-12 sm:w-12 mb-4 text-blue-500" />
-              <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Login Diperlukan</h3>
-              <p className="text-sm text-gray-600 mb-4 max-w-md">
-                Cloud system <strong>{getCurrentCloudSystemName()}</strong> memerlukan autentikasi. Silakan login untuk
-                melihat event logs.
-              </p>
-              <Button onClick={openLoginDialog} className="gap-2">
-                <LogIn className="h-4 w-4" />
-                Login ke Cloud System
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+            {/* Events */}
+            {!loading &&
+              !error &&
+              displayedEvents.length > 0 &&
+              displayedEvents.map((event, index) => (
+                <EventCard
+                  key={index}
+                  event={event}
+                  index={index}
+                  isExpanded={expandedEvents.has(index)}
+                  onToggle={() => toggleEventExpansion(index)}
+                  getResourceName={getResourceName}
+                />
+              ))}
 
-        {/* Error State - General */}
-        {error && !loading && !requiresAuth && (
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="flex items-center justify-center p-6 sm:p-8 text-red-600">
-              <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 mr-2 shrink-0" />
-              <span className="text-sm sm:text-base">{error}</span>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Empty State */}
-        {!loading && !loadingCloudServers && !error && !requiresAuth && filteredEvents.length === 0 && (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center p-8 sm:p-12 text-gray-500">
-              <Bell className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-30" />
-              <h3 className="text-base sm:text-lg font-medium mb-1">Tidak ada event ditemukan</h3>
-              <p className="text-xs sm:text-sm text-center max-w-md">
-                {hasActiveFilters
-                  ? "Coba ubah filter atau kata kunci pencarian"
-                  : "Event akan muncul saat sistem mendeteksi aktivitas"}
-              </p>
-              {hasActiveFilters && (
-                <Button variant="outline" onClick={clearFilters} className="mt-4">
-                  Clear Filters
+            {/* Load More Button */}
+            {!loading && !error && hasMoreEvents && (
+              <div className="flex flex-col items-center gap-2 pt-4">
+                <Button variant="outline" onClick={loadMore} className="w-full sm:w-auto gap-2">
+                  <ChevronDown className="h-4 w-4" />
+                  Muat {Math.min(LOAD_MORE_COUNT, remainingCount)} event lagi
                 </Button>
-              )}
-            </CardContent>
-          </Card>
-        )}
+                <span className="text-xs text-gray-400">{remainingCount} event tersisa</span>
+              </div>
+            )}
 
-        {/* Events */}
-        {!loading &&
-          !error &&
-          displayedEvents.length > 0 &&
-          displayedEvents.map((event, index) => (
-            <EventCard
-              key={index}
-              event={event}
-              index={index}
-              isExpanded={expandedEvents.has(index)}
-              onToggle={() => toggleEventExpansion(index)}
-              getResourceName={getResourceName}
-            />
-          ))}
-
-        {/* Load More Button */}
-        {!loading && !error && hasMoreEvents && (
-          <div className="flex flex-col items-center gap-2 pt-4">
-            <Button variant="outline" onClick={loadMore} className="w-full sm:w-auto gap-2">
-              <ChevronDown className="h-4 w-4" />
-              Muat {Math.min(LOAD_MORE_COUNT, remainingCount)} event lagi
-            </Button>
-            <span className="text-xs text-gray-400">{remainingCount} event tersisa</span>
+            {/* Show All Button - when many events remaining */}
+            {!loading && !error && hasMoreEvents && remainingCount > LOAD_MORE_COUNT && (
+              <div className="flex justify-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDisplayCount(filteredEvents.length)}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Atau tampilkan semua {filteredEvents.length} events
+                </Button>
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Show All Button - when many events remaining */}
-        {!loading && !error && hasMoreEvents && remainingCount > LOAD_MORE_COUNT && (
-          <div className="flex justify-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setDisplayCount(filteredEvents.length)}
-              className="text-xs text-gray-500 hover:text-gray-700"
-            >
-              Atau tampilkan semua {filteredEvents.length} events
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {/* Cloud Login Dialog */}
-      <CloudLoginDialog
-        open={showLoginDialog}
-        onOpenChange={setShowLoginDialog}
-        systemId={loginSystemId}
-        systemName={loginSystemName}
-        onLoginSuccess={() => {
-          // Mark as logged in
-          setIsLoggedIn((prev) => new Set(prev).add(loginSystemId));
-          // Refresh cloud servers and events after successful login
-          if (selectedCloudSystemId) {
-            fetchCloudServers(selectedCloudSystemId);
-          }
-        }}
-      />
+          {/* Cloud Login Dialog */}
+          <CloudLoginDialog
+            open={showLoginDialog}
+            onOpenChange={setShowLoginDialog}
+            systemId={loginSystemId}
+            systemName={loginSystemName}
+            onLoginSuccess={() => {
+              // Mark as logged in
+              setIsLoggedIn((prev) => new Set(prev).add(loginSystemId));
+              // Refresh cloud servers and events after successful login
+              if (selectedCloudSystemId) {
+                fetchCloudServers(selectedCloudSystemId);
+              }
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -71,8 +71,6 @@ export default function SystemHealth() {
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
   const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
-
-  // Fetch system info from cloud relay via proxy
   const fetchSystemDetails = useCallback(async (cloudId: string): Promise<SystemInfoData | null> => {
     try {
       const response = await fetch(`/api/nx/system/info?systemId=${encodeURIComponent(cloudId)}`);
@@ -203,32 +201,17 @@ export default function SystemHealth() {
     });
   }, [cloudSystems, serverLocations, systemDetails]);
 
-  if (loading && cloudSystems.length === 0) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900">System Health</h1>
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-center h-48">
-            <div className="text-center">
-              <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
-              <div className="text-gray-500">Loading system health information...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-gray-900">System Health</h1>
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-sm text-gray-600">Auto-refresh: ON</span>
-          </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">System Health</h1>
+
+        </div>
+        <div className="flex items-center gap-2">
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -240,74 +223,79 @@ export default function SystemHealth() {
         </div>
       </div>
 
+      {/* Cloud Systems Error - Now positioned below title */}
+      {cloudSystems.length === 0 && !refreshing && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
+          <div className="flex items-center">
+            <AlertTriangle className="w-6 h-6 text-yellow-600 mr-3" />
+            <div>
+              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
+              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Overall Status Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <Cloud className="w-8 h-8 text-blue-600" />
-            <div>
-              <div className="text-lg font-bold text-gray-900">{totalSystemsCount}</div>
-              <div className="text-sm text-gray-600">Cloud Systems</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <CheckCircle className="w-8 h-8 text-green-600" />
-            <div>
-              <div className="text-lg font-bold text-green-600">{onlineSystemsCount}</div>
-              <div className="text-sm text-gray-600">Systems Online</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <XCircle className="w-8 h-8 text-red-600" />
-            <div>
-              <div className="text-lg font-bold text-red-600">{totalSystemsCount - onlineSystemsCount}</div>
-              <div className="text-sm text-gray-600">Systems Offline</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-lg border">
-          <div className="flex items-center space-x-3">
-            <Activity className="w-8 h-8 text-purple-600" />
-            <div>
-              <div className="text-lg font-bold text-gray-900">
-                {onlineCameras}/{totalCameras}
+      {cloudSystems.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-6 rounded-lg border">
+            <div className="flex items-center space-x-3">
+              <Cloud className="w-8 h-8 text-blue-600" />
+              <div>
+                <div className="text-lg font-bold text-gray-900">{totalSystemsCount}</div>
+                <div className="text-sm text-gray-600">Cloud Systems</div>
               </div>
-              <div className="text-sm text-gray-600">Cameras Online</div>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-lg border">
+            <div className="flex items-center space-x-3">
+              <CheckCircle className="w-8 h-8 text-green-600" />
+              <div>
+                <div className="text-lg font-bold text-green-600">{onlineSystemsCount}</div>
+                <div className="text-sm text-gray-600">Systems Online</div>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-lg border">
+            <div className="flex items-center space-x-3">
+              <XCircle className="w-8 h-8 text-red-600" />
+              <div>
+                <div className="text-lg font-bold text-red-600">{totalSystemsCount - onlineSystemsCount}</div>
+                <div className="text-sm text-gray-600">Systems Offline</div>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-lg border">
+            <div className="flex items-center space-x-3">
+              <Activity className="w-8 h-8 text-purple-600" />
+              <div>
+                <div className="text-lg font-bold text-gray-900">
+                  {onlineCameras}/{totalCameras}
+                </div>
+                <div className="text-sm text-gray-600">Cameras Online</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Server Locations Map */}
       <ServerMap
         servers={serverMapData}
+        className={cloudSystems.length > 0 ? "" : "hidden"}
         onServerClick={(server) => setEditingLocation(server.name)}
         onRefresh={handleRefresh}
         isRefreshing={refreshing}
       />
 
       {/* Cloud Systems Grid */}
-      <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <Globe className="w-5 h-5" />
-          All Cloud Systems
-        </h2>
-
-        {cloudSystems.length === 0 ? (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-            <div className="flex items-center">
-              <AlertTriangle className="w-6 h-6 text-yellow-600 mr-3" />
-              <div>
-                <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
-                <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
-              </div>
-            </div>
-          </div>
-        ) : (
+      {cloudSystems.length > 0 && (
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Globe className="w-5 h-5" />
+            All Cloud Systems
+          </h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {cloudSystems.map((system) => {
               const details = systemDetails.get(system.id);
@@ -318,9 +306,8 @@ export default function SystemHealth() {
               return (
                 <div
                   key={system.id}
-                  className={`bg-white rounded-lg border-l-4 shadow-sm p-5 ${
-                    isOnline ? "border-l-green-500" : "border-l-red-400"
-                  }`}
+                  className={`bg-white rounded-lg border-l-4 shadow-sm p-5 ${isOnline ? "border-l-green-500" : "border-l-red-400"
+                    }`}
                 >
                   {/* System Header */}
                   <div className="flex items-start justify-between mb-4">
@@ -417,8 +404,8 @@ export default function SystemHealth() {
               );
             })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Current System Info */}
       {connected && systemInfo && (

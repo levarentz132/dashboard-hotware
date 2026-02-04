@@ -5,11 +5,7 @@ import dynamic from "next/dynamic";
 import L from "leaflet";
 import { Server, MapPin, Maximize2, Minimize2, Layers, RefreshCw } from "lucide-react";
 
-// Dynamic import untuk react-leaflet (client-side only)
-const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
-const Marker = dynamic(() => import("react-leaflet").then((mod) => mod.Marker), { ssr: false });
-const Popup = dynamic(() => import("react-leaflet").then((mod) => mod.Popup), { ssr: false });
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 
 // Interface untuk server data
 export interface ServerMarkerData {
@@ -82,6 +78,8 @@ export default function ServerMap({
   const [mapStyle, setMapStyle] = useState<keyof typeof MAP_TILES>("default");
   const [showStyleMenu, setShowStyleMenu] = useState(false);
 
+  const mapId = useMemo(() => `map-${Math.random().toString(36).substr(2, 9)}`, []);
+
   // Filter hanya server yang punya koordinat valid
   const serversWithLocation = useMemo(
     () =>
@@ -128,9 +126,8 @@ export default function ServerMap({
 
   return (
     <div
-      className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-300 ${
-        isExpanded ? "fixed inset-4 z-50" : ""
-      } ${className}`}
+      className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-300 ${isExpanded ? "fixed inset-4 z-50" : ""
+        } ${className}`}
     >
       {/* Backdrop for expanded mode */}
       {isExpanded && <div className="fixed inset-0 bg-black/50 -z-10" onClick={() => setIsExpanded(false)} />}
@@ -192,9 +189,8 @@ export default function ServerMap({
                           setMapStyle(style as keyof typeof MAP_TILES);
                           setShowStyleMenu(false);
                         }}
-                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 capitalize ${
-                          mapStyle === style ? "text-blue-600 font-medium" : "text-gray-700"
-                        }`}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 capitalize ${mapStyle === style ? "text-blue-600 font-medium" : "text-gray-700"
+                          }`}
                       >
                         {style}
                       </button>
@@ -223,7 +219,7 @@ export default function ServerMap({
         className={`w-full relative ${isExpanded ? "flex-1 h-[calc(100%-120px)]" : "h-[300px] sm:h-[350px] lg:h-[400px]"}`}
       >
         {serversWithLocation.length === 0 ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
             <div className="text-center p-6">
               <div className="w-16 h-16 mx-auto mb-4 bg-gray-200 rounded-full flex items-center justify-center">
                 <MapPin className="w-8 h-8 text-gray-400" />
@@ -235,6 +231,7 @@ export default function ServerMap({
         ) : (
           <MapContainer
             key={mapStyle}
+            id={mapId}
             center={mapCenter}
             zoom={zoomLevel}
             style={{ height: "100%", width: "100%" }}
@@ -261,9 +258,8 @@ export default function ServerMap({
                       <div className="flex-1 min-w-0">
                         <h4 className="font-semibold text-gray-900 truncate">{server.name}</h4>
                         <span
-                          className={`inline-flex items-center gap-1 text-xs font-medium ${
-                            server.isOnline ? "text-green-600" : "text-red-500"
-                          }`}
+                          className={`inline-flex items-center gap-1 text-xs font-medium ${server.isOnline ? "text-green-600" : "text-red-500"
+                            }`}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${server.isOnline ? "bg-green-500" : "bg-red-500"}`}
@@ -317,6 +313,7 @@ export default function ServerMap({
             ))}
           </MapContainer>
         )}
+
       </div>
 
       {/* Footer Stats - Responsive */}

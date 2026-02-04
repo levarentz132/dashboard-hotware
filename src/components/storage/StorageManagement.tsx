@@ -653,15 +653,17 @@ export default function StorageManagement() {
     }
   };
 
+  const isCloudEmpty = viewMode === "cloud" && cloudSystems.length === 0;
+  const showNoCloudAlert = isCloudEmpty && !loadingSystems;
+  const isLocalEmpty = viewMode === "local" && localStorages.length === 0;
+  const showNoLocalAlert = isLocalEmpty && !loadingLocal;
+
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Storage Management</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Monitor and manage {viewMode === "local" ? "local" : "cloud"} system storages
-          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -674,7 +676,7 @@ export default function StorageManagement() {
           )}
 
           {/* System Selector - only for cloud mode */}
-          {viewMode === "cloud" && (
+          {viewMode === "cloud" && !isCloudEmpty && (
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="flex items-center gap-2">
@@ -690,8 +692,6 @@ export default function StorageManagement() {
                     <div className="flex items-center justify-center py-4">
                       <RefreshCw className="w-4 h-4 animate-spin" />
                     </div>
-                  ) : cloudSystems.length === 0 ? (
-                    <p className="text-sm text-gray-500 py-2">No systems found</p>
                   ) : (
                     <div className="max-h-60 overflow-y-auto space-y-1">
                       {cloudSystems.map((system) => (
@@ -699,8 +699,8 @@ export default function StorageManagement() {
                           key={system.id}
                           onClick={() => setSelectedSystem(system)}
                           className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
-                              ? "bg-blue-100 text-blue-800"
-                              : "hover:bg-gray-100 text-gray-700"
+                            ? "bg-blue-100 text-blue-800"
+                            : "hover:bg-gray-100 text-gray-700"
                             }`}
                           disabled={system.stateOfHealth !== "online"}
                         >
@@ -721,18 +721,27 @@ export default function StorageManagement() {
             </Popover>
           )}
 
-          {/* Refresh Button */}
-          <Button
-            variant="outline"
-            onClick={handleRefresh}
-            disabled={currentLoading || (viewMode === "cloud" && !selectedSystem)}
+          {/* Refresh Button - Styled like CameraInventory */}
+          <button
+            onClick={() => {
+              if (viewMode === "cloud" && !selectedSystem && cloudSystems.length === 0) {
+                fetchCloudSystems();
+              } else {
+                handleRefresh();
+              }
+            }}
+            disabled={currentLoading || loadingSystems}
+            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-full"
           >
-            <RefreshCw className={`w-4 h-4 ${currentLoading ? "animate-spin" : ""}`} />
-          </Button>
+            <RefreshCw
+              className={`w-4 h-4 ${currentLoading || loadingSystems ? "animate-spin" : ""}`}
+            />
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
-      {/* View Mode Tabs */}
+      {/* View Mode Tabs - Keep outside so user can always switch */}
       <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
         <TabsList className="grid w-full max-w-md grid-cols-2">
           <TabsTrigger value="local" className="flex items-center gap-2">
@@ -746,636 +755,667 @@ export default function StorageManagement() {
         </TabsList>
       </Tabs>
 
-      {/* Auth Required - only for cloud mode */}
-      {viewMode === "cloud" && requiresAuth && !showLoginForm && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-yellow-600" />
-              <div>
-                <p className="font-medium text-yellow-800">Authentication Required</p>
-                <p className="text-sm text-yellow-600">Please login to view storages for {selectedSystem?.name}</p>
-              </div>
-            </div>
-            <Button onClick={() => setShowLoginForm(true)}>
-              <LogIn className="w-4 h-4 mr-2" />
-              Login
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Login Form - only for cloud mode */}
-      {viewMode === "cloud" && showLoginForm && (
-        <div className="bg-white border rounded-lg p-4">
-          <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
-          <div className="space-y-3 max-w-md">
+      {/* View Alerts Below Tabs */}
+      {showNoCloudAlert && viewMode === "cloud" && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
+          <div className="flex items-center">
+            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <input
-                type="text"
-                value={loginForm.username}
-                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="admin"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {loginError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</p>}
-
-            <div className="flex gap-2">
-              <Button onClick={handleLogin} disabled={loggingIn}>
-                {loggingIn ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Logging in...
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="w-4 h-4 mr-2" />
-                    Login
-                  </>
-                )}
-              </Button>
-              <Button variant="outline" onClick={() => setShowLoginForm(false)}>
-                Cancel
-              </Button>
+              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
+              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Stats Overview - show for local mode or when cloud mode is authenticated */}
-      {(viewMode === "local" || (viewMode === "cloud" && !requiresAuth)) && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs">Total Storages</CardDescription>
-              <CardTitle className="text-2xl">{currentStorages.length}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs">Online</CardDescription>
-              <CardTitle className="text-2xl text-green-600">
-                {onlineStorages}/{currentStorages.length}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs">Total Capacity</CardDescription>
-              <CardTitle className="text-2xl">{formatBytes(totalStorage)}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs">Used / Free</CardDescription>
-              <CardTitle className="text-lg">
-                <span className="text-orange-600">{formatBytes(totalUsed)}</span>
-                <span className="text-gray-400 mx-1">/</span>
-                <span className="text-green-600">{formatBytes(totalFree)}</span>
-              </CardTitle>
-            </CardHeader>
-          </Card>
+      {showNoLocalAlert && viewMode === "local" && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
+          <div className="flex items-center">
+            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
+            <div>
+              <h3 className="font-medium text-yellow-800">No Local Storages Found</h3>
+              <p className="text-sm text-yellow-700">Unable to fetch local storages.</p>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Storage List */}
-      {viewMode === "local" ? (
-        // Local Storage List
-        <div className="space-y-4">
-          {loadingLocal ? (
-            <div className="flex items-center justify-center p-8 bg-white rounded-lg border">
-              <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-              <span className="text-gray-600">Loading local storages...</span>
-            </div>
-          ) : localError ? (
-            <div className="flex flex-col items-center justify-center p-8 bg-white rounded-lg border text-red-600">
-              <AlertCircle className="w-6 h-6 mb-2" />
-              <span className="text-center">{localError}</span>
-              <Button variant="outline" size="sm" className="mt-4" onClick={fetchLocalStorages}>
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Retry
-              </Button>
-            </div>
-          ) : localStorages.length === 0 ? (
-            <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
-              <Database className="w-6 h-6 mr-2" />
-              <span>No local storages found</span>
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-              {localStorages.map((storage, index) => {
-                const usagePercent = getUsagePercentage(storage);
-                const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
-                const isLastAndOdd = localStorages.length % 2 !== 0 && index === localStorages.length - 1;
+      {/* Main Content Fragment - Hide subsequent UI sections when appropriate */}
+      {((viewMode === "cloud" && !isCloudEmpty) || (viewMode === "local" && !isLocalEmpty)) && (
+        <>
 
-                return (
-                  <Card
-                    key={storage.id}
-                    className={`${!isOnline ? "opacity-60" : ""} ${isLastAndOdd ? "sm:col-span-2" : ""}`}
-                  >
-                    <CardHeader className="pb-2 sm:pb-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                          <div
-                            className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
-                              }`}
-                          >
-                            {getStorageTypeIcon(storage.type)}
-                          </div>
-                          <div className="min-w-0">
-                            <CardTitle className="text-sm sm:text-base truncate">{storage.name}</CardTitle>
-                            <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
-                              {storage.path}
-                            </CardDescription>
-                          </div>
-                        </div>
-                        <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
-                          {isOnline ? <Wifi className="w-3 h-3 mr-1" /> : <WifiOff className="w-3 h-3 mr-1" />}
-                          <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-2 sm:space-y-3 pt-0">
-                      {/* Usage Bar */}
-                      {storage.statusInfo && (
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                            <span>
-                              Used:{" "}
-                              {formatBytes(
-                                parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
-                              )}
-                            </span>
-                            <span>{usagePercent}%</span>
-                          </div>
-                          <Progress
-                            value={usagePercent}
-                            className={`h-1.5 sm:h-2 ${usagePercent > 90
-                                ? "[&>div]:bg-red-500"
-                                : usagePercent > 70
-                                  ? "[&>div]:bg-yellow-500"
-                                  : "[&>div]:bg-green-500"
-                              }`}
-                          />
-                          <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                            <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
-                            <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Storage Info */}
-                      <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                        <Badge variant="secondary" className="text-[10px] sm:text-xs">
-                          {storage.type || "Unknown"}
-                        </Badge>
-
-                        {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
-                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-green-50 text-green-700">
-                            <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                            Writing
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-gray-50 text-gray-600">
-                            <XCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                            Read-only
-                          </Badge>
-                        )}
-
-                        {(storage.isBackup || storage.statusInfo?.isBackup) && (
-                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700">
-                            <Archive className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                            Backup
-                          </Badge>
-                        )}
-
-                        {storage.statusInfo?.isExternal && (
-                          <Badge variant="secondary" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700">
-                            External
-                          </Badge>
-                        )}
-                      </div>
-
-                      {/* Space Limit */}
-                      {storage.spaceLimitB && storage.spaceLimitB > 0 && (
-                        <div className="text-[10px] sm:text-xs text-gray-500">
-                          Reserved: {formatBytes(storage.spaceLimitB)}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+          {/* Auth Required - only for cloud mode */}
+          {viewMode === "cloud" && requiresAuth && !showLoginForm && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-yellow-600" />
+                  <div>
+                    <p className="font-medium text-yellow-800">Authentication Required</p>
+                    <p className="text-sm text-yellow-600">Please login to view storages for {selectedSystem?.name}</p>
+                  </div>
+                </div>
+                <Button onClick={() => setShowLoginForm(true)}>
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Login
+                </Button>
+              </div>
             </div>
           )}
-        </div>
-      ) : (
-        // Cloud Storage List - only show when authenticated
-        !requiresAuth && (
-          <div className="space-y-4">
-            {loading ? (
-              <div className="flex items-center justify-center p-8 bg-white rounded-lg border">
-                <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-                <span className="text-gray-600">Loading storages...</span>
-              </div>
-            ) : error ? (
-              <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-red-600">
-                <AlertCircle className="w-6 h-6 mr-2" />
-                <span>{error}</span>
-              </div>
-            ) : !selectedSystem ? (
-              <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
-                <Cloud className="w-6 h-6 mr-2" />
-                <span>Select a cloud system to view storages</span>
-              </div>
-            ) : storages.length === 0 ? (
-              <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
-                <Database className="w-6 h-6 mr-2" />
-                <span>No storages found</span>
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-                {storages.map((storage, index) => {
-                  const usagePercent = getUsagePercentage(storage);
-                  const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
-                  // Make last item span full width if odd count
-                  const isLastAndOdd = storages.length % 2 !== 0 && index === storages.length - 1;
 
-                  return (
-                    <Card
-                      key={storage.id}
-                      className={`${!isOnline ? "opacity-60" : ""} ${isLastAndOdd ? "sm:col-span-2" : ""}`}
+          {/* Login Form - only for cloud mode */}
+          {viewMode === "cloud" && showLoginForm && (
+            <div className="bg-white border rounded-lg p-4">
+              <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
+              <div className="space-y-3 max-w-md">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <input
+                    type="text"
+                    value={loginForm.username}
+                    onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    placeholder="admin"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={loginForm.password}
+                      onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
                     >
-                      <CardHeader className="pb-2 sm:pb-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                            <div
-                              className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
-                                }`}
-                            >
-                              {getStorageTypeIcon(storage.type)}
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {loginError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</p>}
+
+                <div className="flex gap-2">
+                  <Button onClick={handleLogin} disabled={loggingIn}>
+                    {loggingIn ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Logging in...
+                      </>
+                    ) : (
+                      <>
+                        <LogIn className="w-4 h-4 mr-2" />
+                        Login
+                      </>
+                    )}
+                  </Button>
+                  <Button variant="outline" onClick={() => setShowLoginForm(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Stats Overview - show for local mode or when cloud mode is authenticated */}
+          {(viewMode === "local" || (viewMode === "cloud" && !requiresAuth)) && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Total Storages</CardDescription>
+                  <CardTitle className="text-2xl">{currentStorages.length}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Online</CardDescription>
+                  <CardTitle className="text-2xl text-green-600">
+                    {onlineStorages}/{currentStorages.length}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Total Capacity</CardDescription>
+                  <CardTitle className="text-2xl">{formatBytes(totalStorage)}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Used / Free</CardDescription>
+                  <CardTitle className="text-lg">
+                    <span className="text-orange-600">{formatBytes(totalUsed)}</span>
+                    <span className="text-gray-400 mx-1">/</span>
+                    <span className="text-green-600">{formatBytes(totalFree)}</span>
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+          )}
+
+          {/* Storage List */}
+          {viewMode === "local" ? (
+            // Local Storage List
+            <div className="space-y-4">
+              {loadingLocal ? (
+                <div className="flex items-center justify-center p-8 bg-white rounded-lg border">
+                  <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+                  <span className="text-gray-600">Loading local storages...</span>
+                </div>
+              ) : localError ? (
+                <div className="flex flex-col items-center justify-center p-8 bg-white rounded-lg border text-red-600">
+                  <AlertCircle className="w-6 h-6 mb-2" />
+                  <span className="text-center">{localError}</span>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={fetchLocalStorages}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Retry
+                  </Button>
+                </div>
+              ) : localStorages.length === 0 ? (
+                <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
+                  <Database className="w-6 h-6 mr-2" />
+                  <span>No local storages found</span>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
+                  {localStorages.map((storage, index) => {
+                    const usagePercent = getUsagePercentage(storage);
+                    const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
+                    const isLastAndOdd = localStorages.length % 2 !== 0 && index === localStorages.length - 1;
+
+                    return (
+                      <Card
+                        key={storage.id}
+                        className={`${!isOnline ? "opacity-60" : ""} ${isLastAndOdd ? "sm:col-span-2" : ""}`}
+                      >
+                        <CardHeader className="pb-2 sm:pb-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                              <div
+                                className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                                  }`}
+                              >
+                                {getStorageTypeIcon(storage.type)}
+                              </div>
+                              <div className="min-w-0">
+                                <CardTitle className="text-sm sm:text-base truncate">{storage.name}</CardTitle>
+                                <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
+                                  {storage.path}
+                                </CardDescription>
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <CardTitle className="text-sm sm:text-base truncate">{storage.name}</CardTitle>
-                              <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
-                                {storage.path}
-                              </CardDescription>
-                            </div>
+                            <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
+                              {isOnline ? <Wifi className="w-3 h-3 mr-1" /> : <WifiOff className="w-3 h-3 mr-1" />}
+                              <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
+                            </Badge>
                           </div>
-                          <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
-                            {isOnline ? <Wifi className="w-3 h-3 mr-1" /> : <WifiOff className="w-3 h-3 mr-1" />}
-                            <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2 sm:space-y-3 pt-0">
-                        {/* Usage Bar */}
-                        {storage.statusInfo && (
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                              <span>
-                                Used:{" "}
-                                {formatBytes(
-                                  parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
-                                )}
-                              </span>
-                              <span>{usagePercent}%</span>
-                            </div>
-                            <Progress
-                              value={usagePercent}
-                              className={`h-1.5 sm:h-2 ${usagePercent > 90
+                        </CardHeader>
+                        <CardContent className="space-y-2 sm:space-y-3 pt-0">
+                          {/* Usage Bar */}
+                          {storage.statusInfo && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
+                                <span>
+                                  Used:{" "}
+                                  {formatBytes(
+                                    parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
+                                  )}
+                                </span>
+                                <span>{usagePercent}%</span>
+                              </div>
+                              <Progress
+                                value={usagePercent}
+                                className={`h-1.5 sm:h-2 ${usagePercent > 90
                                   ? "[&>div]:bg-red-500"
                                   : usagePercent > 70
                                     ? "[&>div]:bg-yellow-500"
                                     : "[&>div]:bg-green-500"
-                                }`}
-                            />
-                            <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                              <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
-                              <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
+                                  }`}
+                              />
+                              <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
+                                <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
+                                <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
+                              </div>
                             </div>
+                          )}
+
+                          {/* Storage Info */}
+                          <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                            <Badge variant="secondary" className="text-[10px] sm:text-xs">
+                              {storage.type || "Unknown"}
+                            </Badge>
+
+                            {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
+                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-green-50 text-green-700">
+                                <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                                Writing
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-gray-50 text-gray-600">
+                                <XCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                                Read-only
+                              </Badge>
+                            )}
+
+                            {(storage.isBackup || storage.statusInfo?.isBackup) && (
+                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700">
+                                <Archive className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                                Backup
+                              </Badge>
+                            )}
+
+                            {storage.statusInfo?.isExternal && (
+                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700">
+                                External
+                              </Badge>
+                            )}
                           </div>
-                        )}
 
-                        {/* Storage Info */}
-                        <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                          <Badge variant="secondary" className="text-[10px] sm:text-xs">
-                            {storage.type || "Unknown"}
-                          </Badge>
-
-                          {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
-                            <Badge variant="secondary" className="text-[10px] sm:text-xs bg-green-50 text-green-700">
-                              <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                              Writing
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px] sm:text-xs bg-gray-50 text-gray-600">
-                              <XCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                              Read-only
-                            </Badge>
+                          {/* Space Limit */}
+                          {storage.spaceLimitB && storage.spaceLimitB > 0 && (
+                            <div className="text-[10px] sm:text-xs text-gray-500">
+                              Reserved: {formatBytes(storage.spaceLimitB)}
+                            </div>
                           )}
-
-                          {(storage.isBackup || storage.statusInfo?.isBackup) && (
-                            <Badge variant="secondary" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700">
-                              <Archive className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                              Backup
-                            </Badge>
-                          )}
-
-                          {storage.statusInfo?.isExternal && (
-                            <Badge variant="secondary" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700">
-                              External
-                            </Badge>
-                          )}
-                        </div>
-
-                        {/* Space Limit */}
-                        {storage.spaceLimitB && storage.spaceLimitB > 0 && (
-                          <div className="text-[10px] sm:text-xs text-gray-500">
-                            Reserved: {formatBytes(storage.spaceLimitB)}
-                          </div>
-                        )}
-
-                        {/* Action Buttons */}
-                        <div className="flex gap-2 pt-2 border-t">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1 h-8 text-xs"
-                            onClick={() => handleOpenEdit(storage)}
-                          >
-                            <Pencil className="w-3 h-3 mr-1" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => handleOpenDelete(storage)}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )
-      )}
-
-      {/* Create Storage Modal - only for cloud mode */}
-      {viewMode === "cloud" && (
-        <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>Add New Storage</DialogTitle>
-              <DialogDescription>Create a new storage location for {selectedSystem?.name}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Storage Name *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., Main Storage"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="path">Path *</Label>
-                <Input
-                  id="path"
-                  value={formData.path}
-                  onChange={(e) => setFormData({ ...formData, path: e.target.value })}
-                  placeholder="e.g., /mnt/storage or C:\Storage"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="type">Storage Type</Label>
-                <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STORAGE_TYPES.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="spaceLimit">Reserved Space (GB)</Label>
-                <Input
-                  id="spaceLimit"
-                  type="number"
-                  value={formatBytesToGB(formData.spaceLimitB)}
-                  onChange={(e) => setFormData({ ...formData, spaceLimitB: parseGBToBytes(e.target.value) })}
-                  placeholder="10"
-                  min="0"
-                />
-                <p className="text-xs text-gray-500">Recommended: 10 GB for local, 100 GB for NAS</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.isUsedForWriting}
-                    onChange={(e) => setFormData({ ...formData, isUsedForWriting: e.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300"
-                  />
-                  <span className="text-sm">Allow Writing</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.isBackup}
-                    onChange={(e) => setFormData({ ...formData, isBackup: e.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300"
-                  />
-                  <span className="text-sm">Use as Backup</span>
-                </label>
-              </div>
-
-              {saveError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{saveError}</p>}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreate} disabled={saving}>
-                {saving ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Creating...
-                  </>
+          ) : (
+            // Cloud Storage List - only show when authenticated
+            !requiresAuth && (
+              <div className="space-y-4">
+                {loading ? (
+                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border">
+                    <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+                    <span className="text-gray-600">Loading storages...</span>
+                  </div>
+                ) : error ? (
+                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-red-600">
+                    <AlertCircle className="w-6 h-6 mr-2" />
+                    <span>{error}</span>
+                  </div>
+                ) : !selectedSystem ? (
+                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
+                    <Cloud className="w-6 h-6 mr-2" />
+                    <span>Select a cloud system to view storages</span>
+                  </div>
+                ) : storages.length === 0 ? (
+                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
+                    <Database className="w-6 h-6 mr-2" />
+                    <span>No storages found</span>
+                  </div>
                 ) : (
-                  <>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Create Storage
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
+                    {storages.map((storage, index) => {
+                      const usagePercent = getUsagePercentage(storage);
+                      const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
+                      // Make last item span full width if odd count
+                      const isLastAndOdd = storages.length % 2 !== 0 && index === storages.length - 1;
 
-      {/* Edit Storage Modal - only for cloud mode */}
-      {viewMode === "cloud" && (
-        <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>Edit Storage</DialogTitle>
-              <DialogDescription>Update storage settings for {selectedStorage?.name}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-name">Storage Name *</Label>
-                <Input
-                  id="edit-name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., Main Storage"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-path">Path *</Label>
-                <Input
-                  id="edit-path"
-                  value={formData.path}
-                  onChange={(e) => setFormData({ ...formData, path: e.target.value })}
-                  placeholder="e.g., /mnt/storage or C:\Storage"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-type">Storage Type</Label>
-                <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STORAGE_TYPES.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-spaceLimit">Reserved Space (GB)</Label>
-                <Input
-                  id="edit-spaceLimit"
-                  type="number"
-                  value={formatBytesToGB(formData.spaceLimitB)}
-                  onChange={(e) => setFormData({ ...formData, spaceLimitB: parseGBToBytes(e.target.value) })}
-                  placeholder="10"
-                  min="0"
-                />
-                <p className="text-xs text-gray-500">Recommended: 10 GB for local, 100 GB for NAS</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.isUsedForWriting}
-                    onChange={(e) => setFormData({ ...formData, isUsedForWriting: e.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300"
-                  />
-                  <span className="text-sm">Allow Writing</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.isBackup}
-                    onChange={(e) => setFormData({ ...formData, isBackup: e.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300"
-                  />
-                  <span className="text-sm">Use as Backup</span>
-                </label>
-              </div>
+                      return (
+                        <Card
+                          key={storage.id}
+                          className={`${!isOnline ? "opacity-60" : ""} ${isLastAndOdd ? "sm:col-span-2" : ""}`}
+                        >
+                          <CardHeader className="pb-2 sm:pb-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                                <div
+                                  className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                                    }`}
+                                >
+                                  {getStorageTypeIcon(storage.type)}
+                                </div>
+                                <div className="min-w-0">
+                                  <CardTitle className="text-sm sm:text-base truncate">{storage.name}</CardTitle>
+                                  <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
+                                    {storage.path}
+                                  </CardDescription>
+                                </div>
+                              </div>
+                              <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
+                                {isOnline ? <Wifi className="w-3 h-3 mr-1" /> : <WifiOff className="w-3 h-3 mr-1" />}
+                                <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-2 sm:space-y-3 pt-0">
+                            {/* Usage Bar */}
+                            {storage.statusInfo && (
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
+                                  <span>
+                                    Used:{" "}
+                                    {formatBytes(
+                                      parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
+                                    )}
+                                  </span>
+                                  <span>{usagePercent}%</span>
+                                </div>
+                                <Progress
+                                  value={usagePercent}
+                                  className={`h-1.5 sm:h-2 ${usagePercent > 90
+                                    ? "[&>div]:bg-red-500"
+                                    : usagePercent > 70
+                                      ? "[&>div]:bg-yellow-500"
+                                      : "[&>div]:bg-green-500"
+                                    }`}
+                                />
+                                <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
+                                  <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
+                                  <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
+                                </div>
+                              </div>
+                            )}
 
-              {saveError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{saveError}</p>}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowEditModal(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleUpdate} disabled={saving}>
-                {saving ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+                            {/* Storage Info */}
+                            <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                              <Badge variant="secondary" className="text-[10px] sm:text-xs">
+                                {storage.type || "Unknown"}
+                              </Badge>
 
-      {/* Delete Confirmation Dialog - only for cloud mode */}
-      {viewMode === "cloud" && (
-        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Storage</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete <strong>{selectedStorage?.name}</strong>?
-                <br />
-                <span className="text-red-600">This action cannot be undone.</span>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700" disabled={saving}>
-                {saving ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete
-                  </>
+                              {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
+                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-green-50 text-green-700">
+                                  <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                                  Writing
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-gray-50 text-gray-600">
+                                  <XCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                                  Read-only
+                                </Badge>
+                              )}
+
+                              {(storage.isBackup || storage.statusInfo?.isBackup) && (
+                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700">
+                                  <Archive className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                                  Backup
+                                </Badge>
+                              )}
+
+                              {storage.statusInfo?.isExternal && (
+                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700">
+                                  External
+                                </Badge>
+                              )}
+                            </div>
+
+                            {/* Space Limit */}
+                            {storage.spaceLimitB && storage.spaceLimitB > 0 && (
+                              <div className="text-[10px] sm:text-xs text-gray-500">
+                                Reserved: {formatBytes(storage.spaceLimitB)}
+                              </div>
+                            )}
+
+                            {/* Action Buttons */}
+                            <div className="flex gap-2 pt-2 border-t">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 h-8 text-xs"
+                                onClick={() => handleOpenEdit(storage)}
+                              >
+                                <Pencil className="w-3 h-3 mr-1" />
+                                Edit
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => handleOpenDelete(storage)}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
                 )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+              </div>
+            )
+          )}
+
+          {/* Create Storage Modal - only for cloud mode */}
+          {viewMode === "cloud" && (
+            <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Add New Storage</DialogTitle>
+                  <DialogDescription>Create a new storage location for {selectedSystem?.name}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Storage Name *</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="e.g., Main Storage"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="path">Path *</Label>
+                    <Input
+                      id="path"
+                      value={formData.path}
+                      onChange={(e) => setFormData({ ...formData, path: e.target.value })}
+                      placeholder="e.g., /mnt/storage or C:\Storage"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="type">Storage Type</Label>
+                    <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STORAGE_TYPES.map((type) => (
+                          <SelectItem key={type.value} value={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="spaceLimit">Reserved Space (GB)</Label>
+                    <Input
+                      id="spaceLimit"
+                      type="number"
+                      value={formatBytesToGB(formData.spaceLimitB)}
+                      onChange={(e) => setFormData({ ...formData, spaceLimitB: parseGBToBytes(e.target.value) })}
+                      placeholder="10"
+                      min="0"
+                    />
+                    <p className="text-xs text-gray-500">Recommended: 10 GB for local, 100 GB for NAS</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.isUsedForWriting}
+                        onChange={(e) => setFormData({ ...formData, isUsedForWriting: e.target.checked })}
+                        className="w-4 h-4 rounded border-gray-300"
+                      />
+                      <span className="text-sm">Allow Writing</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.isBackup}
+                        onChange={(e) => setFormData({ ...formData, isBackup: e.target.checked })}
+                        className="w-4 h-4 rounded border-gray-300"
+                      />
+                      <span className="text-sm">Use as Backup</span>
+                    </label>
+                  </div>
+
+                  {saveError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{saveError}</p>}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleCreate} disabled={saving}>
+                    {saving ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Create Storage
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* Edit Storage Modal - only for cloud mode */}
+          {viewMode === "cloud" && (
+            <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Edit Storage</DialogTitle>
+                  <DialogDescription>Update storage settings for {selectedStorage?.name}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-name">Storage Name *</Label>
+                    <Input
+                      id="edit-name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="e.g., Main Storage"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-path">Path *</Label>
+                    <Input
+                      id="edit-path"
+                      value={formData.path}
+                      onChange={(e) => setFormData({ ...formData, path: e.target.value })}
+                      placeholder="e.g., /mnt/storage or C:\Storage"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-type">Storage Type</Label>
+                    <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STORAGE_TYPES.map((type) => (
+                          <SelectItem key={type.value} value={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-spaceLimit">Reserved Space (GB)</Label>
+                    <Input
+                      id="edit-spaceLimit"
+                      type="number"
+                      value={formatBytesToGB(formData.spaceLimitB)}
+                      onChange={(e) => setFormData({ ...formData, spaceLimitB: parseGBToBytes(e.target.value) })}
+                      placeholder="10"
+                      min="0"
+                    />
+                    <p className="text-xs text-gray-500">Recommended: 10 GB for local, 100 GB for NAS</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.isUsedForWriting}
+                        onChange={(e) => setFormData({ ...formData, isUsedForWriting: e.target.checked })}
+                        className="w-4 h-4 rounded border-gray-300"
+                      />
+                      <span className="text-sm">Allow Writing</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.isBackup}
+                        onChange={(e) => setFormData({ ...formData, isBackup: e.target.checked })}
+                        className="w-4 h-4 rounded border-gray-300"
+                      />
+                      <span className="text-sm">Use as Backup</span>
+                    </label>
+                  </div>
+
+                  {saveError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{saveError}</p>}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowEditModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleUpdate} disabled={saving}>
+                    {saving ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Save Changes
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* Delete Confirmation Dialog - only for cloud mode */}
+          {viewMode === "cloud" && (
+            <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete Storage</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete <strong>{selectedStorage?.name}</strong>?
+                    <br />
+                    <span className="text-red-600">This action cannot be undone.</span>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700" disabled={saving}>
+                    {saving ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete
+                      </>
+                    )}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </>
       )}
     </div>
   );
