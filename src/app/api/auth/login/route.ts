@@ -162,15 +162,76 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      // If no system_id provided in license, reject login
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Lisensi Anda tidak memiliki System ID yang valid. Hubungi administrator.",
-          error_code: "NO_SYSTEM_ID",
-        },
-        { status: 403 },
-      );
+      // If no system_id provided in license, try to find one from cloud systems and bind it
+      const cloudSystems = await fetchCloudSystems();
+
+      if (cloudSystems.length > 0) {
+        // If there are systems, pick the first one (prefer 'online' state)
+        const onlineSystem = cloudSystems.find((s) => s.stateOfHealth === "online");
+        const selectedSystem = onlineSystem || cloudSystems[0];
+        const currentSystemId = selectedSystem.id;
+
+        console.log(`[Login] System ID not set in license. Binding to system: ${currentSystemId} (${selectedSystem.name})`);
+
+        // Post back to external API to store this system ID
+        try {
+          let updateData = await callExternalAuthAPI({
+            username,
+            password,
+            system_id: currentSystemId,
+          });
+
+          // Add a small delay as requested to handle potential server propagation
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+
+          // If first attempt failed, try once more after the delay
+          if (!updateData.success) {
+            console.log("[Login] Initial binding failed, retrying once after delay...");
+            updateData = await callExternalAuthAPI({
+              username,
+              password,
+              system_id: currentSystemId,
+            });
+          }
+
+          if (updateData.success && updateData.user?.system_id) {
+            // Update local state with the newly bound system_id
+            userData.system_id = updateData.user.system_id;
+            user.system_id = updateData.user.system_id;
+            console.log(`[Login] Successfully bound system ID: ${userData.system_id}`);
+          } else {
+            console.warn("[Login] Binding system ID still failed:", updateData.message);
+            return NextResponse.json(
+              {
+                success: false,
+                message: "server too long",
+                error_code: "BINDING_FAILED",
+              },
+              { status: 403 },
+            );
+          }
+        } catch (error) {
+          console.error("[Login] Error during system ID binding:", error);
+          return NextResponse.json(
+            {
+              success: false,
+              message: "server too long",
+              error_code: "BINDING_ERROR",
+            },
+            { status: 500 },
+          );
+        }
+      } else {
+        // No systems found in cloud at all
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Lisensi Anda tidak memiliki System ID dan tidak ada system yang tersedia di cloud.",
+            error_code: "NO_SYSTEM_ID",
+          },
+          { status: 403 },
+        );
+      }
     }
 
     // Generate short-lived access token + long-lived refresh token
