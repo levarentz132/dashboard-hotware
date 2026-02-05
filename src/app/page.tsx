@@ -16,6 +16,7 @@ import ConnectionTest from "@/components/debug/ConnectionTest";
 import StorageManagement from "@/components/storage/StorageManagement";
 import AuditLog from "@/components/audits/AuditLog";
 import UserManagement from "@/components/users/UserManagement";
+import SubAccountManagement from "@/components/subaccounts/SubAccountManagement";
 import Link from "next/link";
 import { ArrowRight, Camera, Eye, Shield } from "lucide-react";
 
@@ -51,6 +52,8 @@ function PageContent() {
         return <ConnectionTest />;
       case "users":
         return <UserManagement />;
+      case "subaccounts":
+        return <SubAccountManagement />;
       default:
         return (
           <div className="h-full bg-white flex items-center justify-center p-4 sm:p-6 md:p-8">

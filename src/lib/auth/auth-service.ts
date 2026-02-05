@@ -126,6 +126,7 @@ export async function validateSession(
     email: payload.email,
     role: payload.role,
     system_id: payload.system_id,
+    privileges: payload.privileges,
     is_active: true, // If token is valid, user is active
     created_at: new Date(),
     last_login: new Date(),

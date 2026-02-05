@@ -1,12 +1,24 @@
 // Authentication Types
 // Centralized type definitions for authentication system
 
+export interface Privilege {
+  module: string;
+  can_view: boolean;
+  can_edit: boolean;
+}
+
+export interface Organization {
+  id: number;
+  name: string;
+  system_id: string;
+}
+
 export interface User {
   id: number;
   username: string;
   email: string;
   password_hash: string;
-  role: UserRole;
+  role: UserRole; // Kept for backward compatibility
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -19,8 +31,11 @@ export interface UserPublic {
   id: number;
   username: string;
   email: string;
-  role: UserRole;
+  full_name?: string;
+  role?: UserRole; // Optional for backward compatibility
   system_id: string; // The system ID this user is licensed for
+  organizations?: Organization[]; // New: organizations the user belongs to
+  privileges?: Privilege[]; // New: user's access privileges
   is_active: boolean;
   created_at: Date;
   last_login?: Date;
@@ -31,8 +46,9 @@ export interface JWTCreatePayload {
   sub: string; // user id
   username: string;
   email: string;
-  role: UserRole;
+  role?: UserRole; // Optional for backward compatibility
   system_id: string; // The system ID this user is licensed for
+  privileges?: Privilege[]; // User's access privileges
   type?: "access" | "refresh";
   iat: number;
   exp: number | string; // number (Unix timestamp) or string duration (e.g., "24h")
@@ -43,8 +59,9 @@ export interface JWTPayload {
   sub: string; // user id
   username: string;
   email: string;
-  role: UserRole;
+  role?: UserRole; // Optional for backward compatibility
   system_id: string; // The system ID this user is licensed for
+  privileges?: Privilege[]; // User's access privileges
   type?: "access" | "refresh";
   iat: number;
   exp: number;

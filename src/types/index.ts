@@ -23,5 +23,17 @@ export type {
   StatusVariant,
 } from "./Common";
 
+// Re-export sub-account types
+export type {
+  Privilege,
+  SubAccount,
+  SubAccountCreateRequest,
+  SubAccountUpdateRequest,
+  SubAccountListResponse,
+  SubAccountResponse,
+  ModuleId,
+} from "./SubAccount.d";
+export { AVAILABLE_MODULES } from "./SubAccount.d";
+
 // Re-export validation types
 export type { Camera, CameraForm } from "@/validations/camera-validation";

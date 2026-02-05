@@ -12,6 +12,18 @@ export interface ExternalAuthRequest {
   system_id?: string; // Optional: validate user belongs to this system
 }
 
+export interface ExternalPrivilege {
+  module: string;
+  can_view: boolean;
+  can_edit: boolean;
+}
+
+export interface ExternalOrganization {
+  id: number;
+  name: string;
+  system_id: string;
+}
+
 export interface ExternalAuthResponse {
   success: boolean;
   message?: string;
@@ -22,8 +34,10 @@ export interface ExternalAuthResponse {
     username: string;
     email: string;
     full_name: string;
-    role: string;
+    role?: string; // Optional for backward compatibility
     system_id: string; // The system ID this user is licensed for
+    organizations?: ExternalOrganization[]; // New: organizations the user belongs to
+    privileges?: ExternalPrivilege[]; // New: user's access privileges
     license_status: string; // e.g., "monthly", "yearly", "trial", "7_day", "expired"
     license_status_display: string; // e.g., "Monthly", "Yearly", "7 Day"
     license_expires_at: string | null;
