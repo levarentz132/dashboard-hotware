@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
 
     const userData = externalData.user;
 
-    // Map license status to role, or use role from API if provided
+    // Map license status to role for backward compatibility
     const role =
       userData.role === "admin" || userData.role === "operator" || userData.role === "viewer"
         ? userData.role
@@ -105,13 +105,30 @@ export async function POST(request: NextRequest) {
       userData.license_status !== "expired" &&
       (userData.days_remaining === null || userData.days_remaining > 0);
 
+    // Transform privileges from external API format
+    const privileges = userData.privileges?.map((p) => ({
+      module: p.module,
+      can_view: p.can_view,
+      can_edit: p.can_edit,
+    }));
+
+    // Transform organizations from external API format
+    const organizations = userData.organizations?.map((org) => ({
+      id: org.id,
+      name: org.name,
+      system_id: org.system_id,
+    }));
+
     // Transform external user data to our UserPublic format
     const user: UserPublic = {
       id: userData.id,
       username: userData.username,
       email: userData.email,
-      role,
+      full_name: userData.full_name,
+      role, // Keep for backward compatibility
       system_id: userData.system_id, // Store the licensed system_id
+      organizations, // Store organizations
+      privileges, // Store privileges
       is_active: isActive,
       created_at: new Date(),
       last_login: userData.last_login ? new Date(userData.last_login) : new Date(),
