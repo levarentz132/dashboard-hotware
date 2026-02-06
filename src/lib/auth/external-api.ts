@@ -10,6 +10,7 @@ export interface ExternalAuthRequest {
   username: string;
   password: string;
   system_id?: string; // Optional: validate user belongs to this system
+  access_role?: string; // Optional: specify role context (e.g. 'owner') when logging in with system_id
 }
 
 export interface ExternalPrivilege {
@@ -293,6 +294,6 @@ export async function callExternalDeleteUser(
     headers: {
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ id: userId }),
+    body: JSON.stringify({ user_id: userId }),
   });
 }

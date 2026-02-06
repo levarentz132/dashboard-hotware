@@ -13,6 +13,7 @@ import type {
   AuthResponse,
 } from "@/lib/auth/types";
 import { AUTH_ROUTES, AUTH_CONFIG } from "@/lib/auth/constants";
+import nxAPI from "@/lib/nxapi";
 
 const initialState: AuthState = {
   user: null,
@@ -42,6 +43,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const data = await response.json();
 
       if (data.success && data.isAuthenticated) {
+        if (data.user?.system_id) {
+          nxAPI.setSystemId(data.user.system_id);
+        }
         setState({
           user: data.user,
           isAuthenticated: true,
@@ -107,6 +111,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const data = await response.json();
 
         if (data.success) {
+          if (data.user?.system_id) {
+            nxAPI.setSystemId(data.user.system_id);
+          }
           setState({
             user: data.user,
             isAuthenticated: true,

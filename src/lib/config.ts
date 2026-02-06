@@ -7,6 +7,7 @@ export const API_CONFIG = {
   wsURL: process.env.NEXT_PUBLIC_WS_URL,
   username: process.env.NEXT_PUBLIC_NX_USERNAME,
   password: process.env.NEXT_PUBLIC_NX_PASSWORD,
+  systemId: process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
   serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST,
   serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT,
   // Fallback URLs to try (now through proxy)

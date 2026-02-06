@@ -79,11 +79,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Call external API for authentication
-    console.log(`[Login] Sending request to External API with system_id: ${system_id || "MISSING"}`);
+    const access_role = system_id ? "owner" : undefined;
+    console.log(`[Login] Sending request to External API with system_id: ${system_id || "MISSING"}, role: ${access_role || "default"}`);
     const externalData = await callExternalAuthAPI({
       username,
       password,
       system_id,
+      access_role,
     });
 
     // Check if login was successful (either success=true or we have an access_token)
