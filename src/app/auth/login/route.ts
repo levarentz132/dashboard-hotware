@@ -15,28 +15,40 @@ interface CloudSystem {
   accessRole: string; // owner | administrator | viewer | custom
 }
 
-// Fetch cloud systems from user profile to verify system_id
+// Fetch cloud systems from /cdb/systems to verify system_id
 async function fetchCloudUserSystems(): Promise<CloudSystem[]> {
   try {
-    const response = await fetch("https://meta.nxvms.com/cdb/user", {
+    const authHeader = getCloudAuthHeader();
+    console.log("[Login] Fetching cloud systems with auth...");
+
+    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
       method: "GET",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
+        Authorization: authHeader,
       },
     });
 
     if (!response.ok) {
-      console.error("Failed to fetch cloud user:", response.status);
+      console.error("[Login] Failed to fetch cloud systems:", response.status, response.statusText);
       return [];
     }
 
     const data = await response.json();
-    // In /cdb/user, systems are returned in the .systems field of the user object
-    return data.systems || [];
+
+    // /cdb/systems returns { systems: [...] }
+    const systems = data.systems || [];
+    console.log(
+      "[Login] Found",
+      systems.length,
+      "systems. Roles:",
+      systems.map((s: CloudSystem) => `${s.name}(${s.accessRole})`).join(", "),
+    );
+
+    return systems;
   } catch (error) {
-    console.error("Error fetching cloud user systems:", error);
+    console.error("[Login] Error fetching cloud systems:", error);
     return [];
   }
 }
