@@ -190,3 +190,109 @@ export async function getExternalPublicKey(): Promise<string> {
 
   return JSON.stringify(response);
 }
+/**
+ * Create a new user/sub-account on the external API
+ */
+export async function callExternalCreateUser(
+  token: string,
+  userData: {
+    username: string;
+    password?: string;
+    email: string;
+    full_name?: string;
+    org_id?: number | string;
+    permissions: Record<string, "view" | "edit" | "none">;
+  }
+): Promise<{ success: boolean; message: string; data?: any }> {
+  return await apiFetch("/create-user", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(userData),
+  });
+}
+
+/**
+ * Get current user profile and organization details from external API
+ */
+export async function getExternalMe(token: string): Promise<ExternalAuthResponse> {
+  return await apiFetch("/me", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+/**
+ * Get users for an organization from external API
+ * The API uses the token to determine the organization
+ */
+export async function callExternalGetUsers(
+  token: string
+): Promise<{ success: boolean; message: string; users?: any[] }> {
+  return await apiFetch("/users", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+/**
+ * Get single user detail + permissions from external API
+ */
+export async function callExternalGetUserDetail(
+  token: string,
+  userId: string | number
+): Promise<{ success: boolean; message: string; user?: any }> {
+  return await apiFetch(`/users/${userId}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+/**
+ * Edit an existing user on the external API
+ */
+export async function callExternalEditUser(
+  token: string,
+  userId: string | number,
+  userData: {
+    username?: string;
+    password?: string;
+    email?: string;
+    full_name?: string;
+    is_active?: boolean;
+    permissions?: Record<string, "view" | "edit" | "none">;
+  }
+): Promise<{ success: boolean; message: string; data?: any }> {
+  return await apiFetch("/edit-user", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      user_id: userId,
+      ...userData
+    }),
+  });
+}
+
+/**
+ * Delete a user on the external API
+ */
+export async function callExternalDeleteUser(
+  token: string,
+  userId: string | number
+): Promise<{ success: boolean; message: string }> {
+  return await apiFetch("/delete-user", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ id: userId }),
+  });
+}
