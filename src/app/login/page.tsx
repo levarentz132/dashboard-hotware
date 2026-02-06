@@ -28,7 +28,7 @@ export default function LoginPage() {
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitted },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
   });
@@ -38,22 +38,12 @@ export default function LoginPage() {
     await login(data);
   };
 
-  const hasError = error || errors.username || errors.password;
+  // Only show error if we have an explicit auth error OR a validation error AFTER submission
+  const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6">
       <div className="w-full max-w-md">
-        {/* Logo */}
-        {/* <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="p-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg shadow-blue-500/25">
-            <Camera className="w-7 h-7 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">Hotware</h1>
-            <p className="text-slate-500 text-xs">Surveillance System</p>
-          </div>
-        </div> */}
-
         {/* Form Card */}
         <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8">
           <div className="text-center mb-8">
@@ -63,11 +53,11 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             {/* Error Alert */}
-            {hasError && (
+            {showErrorMessage && (
               <Alert className="bg-red-50 border-red-200 text-red-700">
                 <AlertCircle className="h-4 w-4 text-red-500" />
                 <AlertDescription className="text-red-600 ml-2">
-                  {error || "Username atau password salah"}
+                  {error || errors.username?.message || errors.password?.message || "Username atau password salah"}
                 </AlertDescription>
               </Alert>
             )}
@@ -85,11 +75,16 @@ export default function LoginPage() {
                   id="username"
                   type="text"
                   placeholder="Masukkan username"
-                  className={`pl-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
-                    hasError ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
-                  }`}
+                  className={`pl-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
+                    }`}
                   {...register("username")}
                   disabled={isLoading}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      document.getElementById("password")?.focus();
+                    }
+                  }}
                 />
               </div>
             </div>
@@ -107,9 +102,8 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Masukkan password"
-                  className={`pl-11 pr-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
-                    hasError ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
-                  }`}
+                  className={`pl-11 pr-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
+                    }`}
                   {...register("password")}
                   disabled={isLoading}
                 />

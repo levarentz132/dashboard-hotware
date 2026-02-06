@@ -62,9 +62,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { username, password, system_id } = validation.data;
+    let { username, password, system_id } = validation.data;
+    console.log(`[Login Attempt] User: ${username}, Provided SystemID: ${system_id || "None"}`);
+
+    // If system_id is not provided, try to detect it from cloud systems
+    if (!system_id) {
+      console.log("[Login] No system_id in request, attempting cloud detection...");
+      const detectedSystems = await fetchCloudSystems();
+      console.log(`[Login] Detected ${detectedSystems.length} systems from cloud`);
+
+      if (detectedSystems.length > 0) {
+        const onlineSystem = detectedSystems.find((s) => s.stateOfHealth === "online");
+        system_id = onlineSystem ? onlineSystem.id : detectedSystems[0].id;
+        console.log(`[Login] Auto-detected system_id: ${system_id} (${onlineSystem ? "online" : "fallback"})`);
+      }
+    }
 
     // Call external API for authentication
+    console.log(`[Login] Sending request to External API with system_id: ${system_id || "MISSING"}`);
     const externalData = await callExternalAuthAPI({
       username,
       password,
@@ -93,6 +108,13 @@ export async function POST(request: NextRequest) {
     }
 
     const userData = externalData.user;
+
+    // If the server didn't explicitly return the system_id in the user object, 
+    // but the login succeeded and we provided a system_id, trust that it's now associated.
+    if (userData && !userData.system_id && system_id && (externalData.success || externalData.access_token)) {
+      userData.system_id = system_id;
+      console.log(`[Login] Using requested system_id: ${system_id}`);
+    }
 
     // Map license status to role for backward compatibility
     const role =
@@ -147,67 +169,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message }, { status: 403 });
     }
 
-    // Verify or bind system_id
-    if (userData.system_id) {
-      const cloudSystems = await fetchCloudSystems();
-
-      // If we can fetch cloud systems, verify the ID exists
-      if (cloudSystems.length > 0) {
-        const systemExists = cloudSystems.some((system) => system.id === userData.system_id);
-
-        if (!systemExists) {
-          console.warn(`[Login] System ID "${userData.system_id}" from license not found in cloud systems.`);
-          // We'll proceed anyway if the license says it's active, but log the discrepancy
-        }
-      } else {
-        console.warn("[Login] Could not fetch/verify cloud systems, proceeding with license data.");
-      }
-    } else {
-      // If no system_id provided in license, try to find one from cloud systems and bind it
-      const cloudSystems = await fetchCloudSystems();
-
-      if (cloudSystems.length > 0) {
-        // If there are systems, pick the first one (prefer 'online' state)
-        const onlineSystem = cloudSystems.find((s) => s.stateOfHealth === "online");
-        const selectedSystem = onlineSystem || cloudSystems[0];
-        const currentSystemId = selectedSystem.id;
-
-        console.log(`[Login] System ID not set in license. Binding to system: ${currentSystemId} (${selectedSystem.name})`);
-
-        // Post back to external API to store this system ID
-        try {
-          let updateData = await callExternalAuthAPI({
-            username,
-            password,
-            system_id: currentSystemId,
-          });
-
-          // Add a small delay as requested to handle potential server propagation
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-
-          if (updateData.success && updateData.user?.system_id) {
-            // Update local state with the newly bound system_id
-            userData.system_id = updateData.user.system_id;
-            user.system_id = updateData.user.system_id;
-            console.log(`[Login] Successfully bound system ID: ${userData.system_id}`);
-
-            // If the re-login provided new tokens, use them
-            if (updateData.access_token) {
-              externalData.access_token = updateData.access_token;
-              externalData.refresh_token = updateData.refresh_token;
-            }
-          } else {
-            console.warn("[Login] Binding system ID failed:", updateData.message);
-            // Don't block login if the user is authenticated, just log it
-          }
-        } catch (error) {
-          console.error("[Auth] Error during system ID binding:", error);
-          // Don't block login on binding error if authentication was successful
-        }
-      } else {
-        console.warn("[Login] No system_id in license and no cloud systems available to bind.");
-      }
-    }
 
     // Use tokens from external API
     const accessToken = externalData.access_token;
