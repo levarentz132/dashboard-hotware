@@ -14,10 +14,10 @@ interface CloudSystem {
   stateOfHealth: string;
 }
 
-// Fetch cloud systems to verify system_id
-async function fetchCloudSystems(): Promise<CloudSystem[]> {
+// Fetch cloud systems from user profile to verify system_id
+async function fetchCloudUserSystems(): Promise<CloudSystem[]> {
   try {
-    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+    const response = await fetch("https://meta.nxvms.com/cdb/user", {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -27,14 +27,15 @@ async function fetchCloudSystems(): Promise<CloudSystem[]> {
     });
 
     if (!response.ok) {
-      console.error("Failed to fetch cloud systems:", response.status);
+      console.error("Failed to fetch cloud user:", response.status);
       return [];
     }
 
     const data = await response.json();
+    // In /cdb/user, systems are returned in the .systems field of the user object
     return data.systems || [];
   } catch (error) {
-    console.error("Error fetching cloud systems:", error);
+    console.error("Error fetching cloud user systems:", error);
     return [];
   }
 }
@@ -68,11 +69,11 @@ export async function POST(request: NextRequest) {
     // If system_id is not provided, try to detect it from cloud systems
     if (!system_id) {
       console.log("[Login] No system_id in request, attempting cloud detection...");
-      const detectedSystems = await fetchCloudSystems();
+      const detectedSystems = await fetchCloudUserSystems();
       console.log(`[Login] Detected ${detectedSystems.length} systems from cloud`);
 
       if (detectedSystems.length > 0) {
-        const onlineSystem = detectedSystems.find((s) => s.stateOfHealth === "online");
+        const onlineSystem = detectedSystems.find((s: CloudSystem) => s.stateOfHealth === "online");
         system_id = onlineSystem ? onlineSystem.id : detectedSystems[0].id;
         console.log(`[Login] Auto-detected system_id: ${system_id} (${onlineSystem ? "online" : "fallback"})`);
       }
