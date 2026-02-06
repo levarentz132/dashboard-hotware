@@ -12,6 +12,7 @@ interface CloudSystem {
   id: string;
   name: string;
   stateOfHealth: string;
+  accessRole: string; // owner | administrator | viewer | custom
 }
 
 // Fetch cloud systems to verify system_id
@@ -37,6 +38,11 @@ async function fetchCloudSystems(): Promise<CloudSystem[]> {
     console.error("Error fetching cloud systems:", error);
     return [];
   }
+}
+
+// Get the primary (owner) system
+function getPrimarySystem(systems: CloudSystem[]): CloudSystem | null {
+  return systems.find((s) => s.accessRole === "owner") || null;
 }
 
 const loginSchema = z.object({
@@ -65,17 +71,45 @@ export async function POST(request: NextRequest) {
     let { username, password, system_id } = validation.data;
     console.log(`[Login Attempt] User: ${username}, Provided SystemID: ${system_id || "None"}`);
 
-    // If system_id is not provided, try to detect it from cloud systems
-    if (!system_id) {
-      console.log("[Login] No system_id in request, attempting cloud detection...");
-      const detectedSystems = await fetchCloudSystems();
-      console.log(`[Login] Detected ${detectedSystems.length} systems from cloud`);
+    // Fetch cloud systems to get the primary (owner) system
+    const cloudSystems = await fetchCloudSystems();
+    console.log(`[Login] Fetched ${cloudSystems.length} cloud systems`);
 
-      if (detectedSystems.length > 0) {
-        const onlineSystem = detectedSystems.find((s) => s.stateOfHealth === "online");
-        system_id = onlineSystem ? onlineSystem.id : detectedSystems[0].id;
-        console.log(`[Login] Auto-detected system_id: ${system_id} (${onlineSystem ? "online" : "fallback"})`);
+    // Get the primary system (owner)
+    const primarySystem = getPrimarySystem(cloudSystems);
+
+    if (!primarySystem) {
+      console.error("[Login] No primary (owner) system found");
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Tidak dapat menemukan system utama. Pastikan akun cloud sudah dikonfigurasi.",
+        },
+        { status: 400 },
+      );
+    }
+
+    console.log(
+      `[Login] Primary system: ${primarySystem.id} (${primarySystem.name}), Status: ${primarySystem.stateOfHealth}`,
+    );
+
+    // If system_id is provided, validate it matches the primary system
+    if (system_id) {
+      if (system_id !== primarySystem.id) {
+        console.warn(`[Login] System ID mismatch: provided=${system_id}, primary=${primarySystem.id}`);
+        return NextResponse.json(
+          {
+            success: false,
+            message: "System ID tidak sesuai dengan system utama Anda.",
+          },
+          { status: 403 },
+        );
       }
+      console.log(`[Login] System ID validated: ${system_id}`);
+    } else {
+      // Auto-use primary system if no system_id provided
+      system_id = primarySystem.id;
+      console.log(`[Login] Auto-selected primary system: ${system_id}`);
     }
 
     // Call external API for authentication
@@ -109,7 +143,7 @@ export async function POST(request: NextRequest) {
 
     const userData = externalData.user;
 
-    // If the server didn't explicitly return the system_id in the user object, 
+    // If the server didn't explicitly return the system_id in the user object,
     // but the login succeeded and we provided a system_id, trust that it's now associated.
     if (userData && !userData.system_id && system_id && (externalData.success || externalData.access_token)) {
       userData.system_id = system_id;
@@ -168,7 +202,6 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({ success: false, message }, { status: 403 });
     }
-
 
     // Use tokens from external API
     const accessToken = externalData.access_token;
