@@ -2,7 +2,7 @@
 // Handles communication with external license API
 
 export const EXTERNAL_AUTH_API = {
-  URL: process.env.EXTERNAL_AUTH_API_URL,
+  URL: process.env.EXTERNAL_AUTH_API_URL, // Base URL: http://16.78.105.192:3000
   TIMEOUT: 10000, // 10 seconds
 };
 
@@ -25,25 +25,29 @@ export interface ExternalOrganization {
 }
 
 export interface ExternalAuthResponse {
-  success: boolean;
+  success?: boolean;
   message?: string;
   error_code?: string;
   error_detail?: string;
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  expires_in?: number;
   user?: {
     id: number;
     username: string;
-    email: string;
-    full_name: string;
+    email?: string;
+    full_name?: string;
     role?: string; // Optional for backward compatibility
-    system_id: string; // The system ID this user is licensed for
+    system_id?: string; // The system ID this user is licensed for
     organizations?: ExternalOrganization[]; // New: organizations the user belongs to
     privileges?: ExternalPrivilege[]; // New: user's access privileges
-    license_status: string; // e.g., "monthly", "yearly", "trial", "7_day", "expired"
-    license_status_display: string; // e.g., "Monthly", "Yearly", "7 Day"
-    license_expires_at: string | null;
-    days_remaining: number | null;
-    last_login: string | null;
-    is_active: boolean;
+    license_status: string; // e.g., "monthly", "yearly", "trial", "7_day", "expired", "ACTIVE"
+    license_status_display?: string; // e.g., "Monthly", "Yearly", "7 Day"
+    license_expires_at?: string | null;
+    days_remaining?: number | null;
+    last_login?: string | null;
+    is_active?: boolean;
   };
 }
 
@@ -53,6 +57,7 @@ export interface ExternalAuthResponse {
 export function mapLicenseToRole(licenseStatus: string): "admin" | "operator" | "viewer" {
   // Map license types to roles - customize as needed
   switch (licenseStatus.toLowerCase()) {
+    case "active":
     case "yearly":
     case "lifetime":
       return "admin";
@@ -66,42 +71,55 @@ export function mapLicenseToRole(licenseStatus: string): "admin" | "operator" | 
 }
 
 /**
- * Call external authentication API
+ * Base fetcher for external API
  */
-export async function callExternalAuthAPI(request: ExternalAuthRequest): Promise<ExternalAuthResponse> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_AUTH_API.TIMEOUT);
+async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<any> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_AUTH_API.TIMEOUT);
 
-    console.log("[External API] Calling:", EXTERNAL_AUTH_API.URL);
+  try {
     if (!EXTERNAL_AUTH_API.URL) {
       throw new Error("EXTERNAL_AUTH_API_URL tidak dikonfigurasi");
     }
 
-    const response = await fetch(EXTERNAL_AUTH_API.URL, {
-      method: "POST",
+    // Ensure endpoint starts with /
+    const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    const url = `${EXTERNAL_AUTH_API.URL}${path}`;
+
+    console.log(`[External API] Calling: ${url}`);
+
+    const response = await fetch(url, {
+      ...options,
       headers: {
         "Content-Type": "application/json",
+        ...options.headers,
       },
-      body: JSON.stringify(request),
       signal: controller.signal,
     });
 
     clearTimeout(timeoutId);
 
-    // Parse JSON response even for non-2xx status codes
-    // PHP API returns 401 for authentication failures but includes error details
-    const data = await response.json();
-    console.log("[External API] Response:", {
-      status: response.status,
-      success: data.success,
-      message: data.message,
-      error_code: data.error_code,
-    });
+    // If it's a 204 No Content, return empty object
+    if (response.status === 204) return { success: true };
 
-    return data;
+    const contentType = response.headers.get("content-type");
+    if (contentType && (contentType.includes("application/json") || contentType.includes("text/javascript"))) {
+      const data = await response.json();
+
+      // If the API doesn't return a success boolean but returns tokens, assume success
+      if (data.access_token && data.success === undefined) {
+        data.success = true;
+      }
+
+      return data;
+    } else {
+      // Return as text for public keys or other non-json responses
+      const text = await response.text();
+      return text;
+    }
   } catch (error) {
-    console.error("[External API] Error:", error);
+    clearTimeout(timeoutId);
+    console.error(`[External API] Error calling ${endpoint}:`, error);
     if (error instanceof Error) {
       if (error.name === "AbortError") {
         throw new Error("Request timeout - server tidak merespon");
@@ -110,4 +128,65 @@ export async function callExternalAuthAPI(request: ExternalAuthRequest): Promise
     }
     throw new Error("Gagal menghubungi server autentikasi");
   }
+}
+
+/**
+ * Call external authentication login API
+ */
+export async function callExternalAuthAPI(request: ExternalAuthRequest): Promise<ExternalAuthResponse> {
+  const data = await apiFetch("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+
+  // Ensure success is set if we have local tokens even if apiFetch didn't catch it
+  if (data?.access_token && data.success === undefined) {
+    data.success = true;
+  }
+
+  console.log("[External API] Login Response:", {
+    success: data.success,
+    message: data.message,
+    has_token: !!data?.access_token,
+  });
+
+  return data;
+}
+
+/**
+ * Refresh access token using external API
+ */
+export async function callExternalRefreshAPI(refreshToken: string): Promise<ExternalAuthResponse> {
+  return await apiFetch("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
+/**
+ * Invalidate session with external API
+ */
+export async function callExternalLogoutAPI(refreshToken?: string): Promise<{ success: boolean; message: string }> {
+  return await apiFetch("/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
+/**
+ * Retrieve the RSA public key to verify access tokens locally
+ */
+export async function getExternalPublicKey(): Promise<string> {
+  const response = await apiFetch("/auth/public-key", { method: "GET" });
+
+  // If the response is just the string, handle it. 
+  // Based on user prompt, it returns the string directly or in some format.
+  // "Retrieve the RSA public key to verify access tokens locally. GET http://localhost:3000/auth/public-key -----BEGIN PUBLIC KEY----- ... -----END PUBLIC KEY-----"
+
+  if (typeof response === "string") return response;
+  if (response.publicKey) return response.publicKey;
+  if (response.key) return response.key;
+  if (response.data) return response.data;
+
+  return JSON.stringify(response);
 }

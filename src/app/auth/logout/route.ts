@@ -1,14 +1,14 @@
 // Logout API Route
-// POST /api/auth/logout - Clear user session
-// GET /api/auth/logout - Clear session and redirect to login
+// POST /auth/logout - Clear user session
+// GET /auth/logout - Clear session and redirect to login
 
 import { NextResponse, NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "@/lib/auth/constants";
+import { callExternalLogoutAPI } from "@/lib/auth/external-api";
 
 function clearAuthCookies(response: NextResponse) {
   // Delete cookies by setting empty value with same attributes and maxAge 0
-  // This ensures the cookie is properly cleared with matching attributes
   response.cookies.set(AUTH_CONFIG.COOKIE_NAME, "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -23,7 +23,7 @@ function clearAuthCookies(response: NextResponse) {
     maxAge: 0,
     path: "/",
   });
-  
+
   // Also try delete as fallback
   response.cookies.delete(AUTH_CONFIG.COOKIE_NAME);
   response.cookies.delete(AUTH_CONFIG.COOKIE_REFRESH_NAME);
@@ -31,8 +31,18 @@ function clearAuthCookies(response: NextResponse) {
 
 // GET - redirect to login after clearing cookies
 export async function GET(request: NextRequest) {
-  // Also try using cookies() API to delete
   const cookieStore = await cookies();
+  const refreshToken = cookieStore.get(AUTH_CONFIG.COOKIE_REFRESH_NAME)?.value;
+
+  // Call external logout if possible
+  if (refreshToken) {
+    try {
+      await callExternalLogoutAPI(refreshToken);
+    } catch (e) {
+      console.warn("External logout failed:", e);
+    }
+  }
+
   cookieStore.delete(AUTH_CONFIG.COOKIE_NAME);
   cookieStore.delete(AUTH_CONFIG.COOKIE_REFRESH_NAME);
 
@@ -42,8 +52,20 @@ export async function GET(request: NextRequest) {
 }
 
 // POST - JSON response
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
+    const cookieStore = await cookies();
+    const refreshToken = cookieStore.get(AUTH_CONFIG.COOKIE_REFRESH_NAME)?.value;
+
+    // Call external logout if possible
+    if (refreshToken) {
+      try {
+        await callExternalLogoutAPI(refreshToken);
+      } catch (e) {
+        console.warn("External logout failed:", e);
+      }
+    }
+
     const response = NextResponse.json({
       success: true,
       message: AUTH_MESSAGES.LOGOUT_SUCCESS,

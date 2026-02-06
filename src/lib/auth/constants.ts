@@ -33,15 +33,15 @@ export const AUTH_ROUTES = {
   LOGIN: "/login",
   LOGOUT: "/logout",
   DASHBOARD: "/",
-  API_LOGIN: "/api/auth/login",
-  API_LOGOUT: "/api/auth/logout",
-  API_SESSION: "/api/auth/session",
-  API_REFRESH: "/api/auth/refresh",
+  API_LOGIN: "/auth/login",
+  API_LOGOUT: "/auth/logout",
+  API_SESSION: "/auth/session",
+  API_REFRESH: "/auth/refresh",
 } as const;
 
 export const PUBLIC_ROUTES = [
   AUTH_ROUTES.LOGIN,
-  "/api/auth/login",
+  "/auth/login",
 ] as const;
 
 export const AUTH_MESSAGES = {

@@ -1,82 +1,43 @@
 ﻿// Authentication Service
 // JWT operations for external authentication
 
-import { SignJWT, jwtVerify } from "jose";
+import { jwtVerify, importSPKI } from "jose";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "./constants";
-import type { UserPublic, JWTPayload, JWTCreatePayload, AuthTokens } from "./types";
+import { callExternalRefreshAPI, getExternalPublicKey } from "./external-api";
+import type { UserPublic, JWTPayload, AuthTokens } from "./types";
 
 // ============================================================================
 // JWT Utilities (Edge-compatible using jose)
 // ============================================================================
 
-const secretKey = new TextEncoder().encode(AUTH_CONFIG.JWT_SECRET);
+let cachedPublicKey: any = null;
+let cachedPublicKeyRaw: string | null = null;
 
 /**
- * Generate JWT access token
+ * Get the public key for verification
  */
-export async function generateAccessToken(user: UserPublic): Promise<string> {
-  const token = await new SignJWT({
-    sub: user.id.toString(),
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    system_id: user.system_id,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(AUTH_CONFIG.JWT_EXPIRES_IN)
-    .sign(secretKey);
+async function getPublicKey() {
+  try {
+    const publicKeyPEM = await getExternalPublicKey();
 
-  return token;
-}
+    // Only re-import if the key has changed
+    if (cachedPublicKeyRaw === publicKeyPEM && cachedPublicKey) {
+      return cachedPublicKey;
+    }
 
-/**
- * Sign JWT with custom payload (for token creation with string expiration)
- */
-export async function signJWT(payload: JWTCreatePayload): Promise<string> {
-  const token = await new SignJWT({
-    sub: payload.sub,
-    username: payload.username,
-    email: payload.email,
-    role: payload.role,
-    system_id: payload.system_id,
-    ...(payload.type ? { type: payload.type } : {}),
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt(payload.iat)
-    .setExpirationTime(payload.exp)
-    .sign(secretKey);
+    // SPKI is for Public Keys (BEGIN PUBLIC KEY)
+    // If it's PKCS8 (BEGIN PRIVATE KEY), we would use importPKCS8
+    const publicKey = await importSPKI(publicKeyPEM, "RS256");
 
-  return token;
-}
+    cachedPublicKey = publicKey;
+    cachedPublicKeyRaw = publicKeyPEM;
 
-/**
- * Generate JWT refresh token
- */
-export async function generateRefreshToken(user: UserPublic): Promise<string> {
-  const token = await new SignJWT({
-    sub: user.id.toString(),
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    system_id: user.system_id,
-    type: "refresh",
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(AUTH_CONFIG.JWT_REFRESH_EXPIRES_IN)
-    .sign(secretKey);
-
-  return token;
-}
-
-/**
- * Generate both access and refresh tokens
- */
-export async function generateTokens(user: UserPublic): Promise<AuthTokens> {
-  const [accessToken, refreshToken] = await Promise.all([generateAccessToken(user), generateRefreshToken(user)]);
-
-  return { accessToken, refreshToken };
+    return publicKey;
+  } catch (error) {
+    console.error("[Auth Service] Error importing public key:", error);
+    // Fallback to secret key if RSA fails (for backward compatibility during migration)
+    return new TextEncoder().encode(AUTH_CONFIG.JWT_SECRET);
+  }
 }
 
 /**
@@ -84,9 +45,11 @@ export async function generateTokens(user: UserPublic): Promise<AuthTokens> {
  */
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, secretKey);
+    const key = await getPublicKey();
+    const { payload } = await jwtVerify(token, key);
     return payload as unknown as JWTPayload;
-  } catch {
+  } catch (error) {
+    console.error("[Auth Service] Token verification failed:", error);
     return null;
   }
 }
@@ -101,14 +64,11 @@ export function isTokenExpiringSoon(payload: JWTPayload): boolean {
 }
 
 // ============================================================================
-// Session Operations (JWT-based, no database)
+// Session Operations (Now using remote tokens)
 // ============================================================================
 
 /**
  * Validate session from token
- *
- * For external authentication, we don't need database lookup
- * since all user info is already in the JWT payload
  */
 export async function validateSession(
   token: string,
@@ -119,7 +79,7 @@ export async function validateSession(
     return { valid: false };
   }
 
-  // Reconstruct user from JWT payload (works without database)
+  // Reconstruct user from JWT payload
   const userPublic: UserPublic = {
     id: parseInt(payload.sub),
     username: payload.username,
@@ -136,44 +96,30 @@ export async function validateSession(
 }
 
 /**
- * Refresh access token using refresh token
+ * Refresh access token using remote external API
  */
 export async function refreshAccessToken(
   refreshToken: string,
 ): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; message?: string }> {
-  const payload = await verifyToken(refreshToken);
+  try {
+    const data = await callExternalRefreshAPI(refreshToken);
 
-  if (!payload) {
-    return { success: false, message: AUTH_MESSAGES.INVALID_TOKEN };
+    if (!data.success || !data.access_token) {
+      return {
+        success: false,
+        message: data.message || AUTH_MESSAGES.INVALID_TOKEN
+      };
+    }
+
+    return {
+      success: true,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token
+    };
+  } catch (error) {
+    console.error("[Auth Service] Refresh error:", error);
+    return { success: false, message: "Gagal menyegarkan token" };
   }
-
-  if (payload.type !== "refresh") {
-    return { success: false, message: AUTH_MESSAGES.INVALID_TOKEN };
-  }
-
-  // Reconstruct user from refresh token payload
-  const userPublic: UserPublic = {
-    id: parseInt(payload.sub),
-    username: payload.username,
-    email: payload.email,
-    role: payload.role,
-    system_id: payload.system_id,
-    is_active: true,
-    created_at: new Date(),
-    last_login: new Date(),
-  };
-
-  if (!userPublic.id || !userPublic.username || !userPublic.email || !userPublic.role || !userPublic.system_id) {
-    return { success: false, message: AUTH_MESSAGES.INVALID_TOKEN };
-  }
-
-  const [accessToken, newRefreshToken] = await Promise.all([
-    generateAccessToken(userPublic),
-    // Rotate refresh token on every refresh
-    generateRefreshToken(userPublic),
-  ]);
-
-  return { success: true, accessToken, refreshToken: newRefreshToken };
 }
 
 /**
@@ -194,3 +140,6 @@ export async function getSystemIdFromToken(token: string): Promise<string | null
   const payload = await verifyToken(token);
   return payload?.system_id || null;
 }
+
+// Local token generation removed as we now use tokens from the external API
+// generateAccessToken, generateRefreshToken, generateTokens, signJWT are deprecated
