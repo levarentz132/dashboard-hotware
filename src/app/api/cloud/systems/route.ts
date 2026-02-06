@@ -3,7 +3,7 @@ import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 export async function GET(request: NextRequest) {
     try {
-        const response = await fetch(`${CLOUD_CONFIG.baseURL}/cdb/systems`, {
+        const response = await fetch(`${CLOUD_CONFIG.baseURL}/cdb/user`, {
             method: "GET",
             headers: {
                 "Accept": "application/json",
