@@ -100,6 +100,7 @@ class NxWitnessAPI {
 
   constructor() {
     this.baseURL = API_CONFIG.baseURL;
+    this.systemId = API_CONFIG.systemId || null;
   }
 
   setSystemId(id: string | null) {
@@ -114,6 +115,11 @@ class NxWitnessAPI {
 
   // Authentication - Nx Witness REST API v3
   async login(username: string, password: string): Promise<boolean> {
+    if (!this.systemId && this.baseURL.includes("/api/nx")) {
+      console.warn("[nxAPI] Login skipped: systemId is required for cloud relay proxy.");
+      return false;
+    }
+
     try {
       const loginBody = {
         username: username,
@@ -341,15 +347,15 @@ class NxWitnessAPI {
         group:
           payload.group?.id && payload.group?.name
             ? {
-                id: payload.group.id,
-                name: payload.group.name,
-              }
+              id: payload.group.id,
+              name: payload.group.name,
+            }
             : undefined,
         credentials: payload.credentials
           ? {
-              user: payload.credentials.user || "",
-              password: payload.credentials.password || "",
-            }
+            user: payload.credentials.user || "",
+            password: payload.credentials.password || "",
+          }
           : { user: "", password: "" },
         logicalId: payload.logicalId,
       };

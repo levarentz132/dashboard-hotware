@@ -251,7 +251,10 @@ export default function SubAccountManagement() {
           password: "", // Don't pre-fill password
           role: userDetail.role || account.role || "user",
           is_active: userDetail.is_active ?? account.is_active,
-          privileges: userDetail.privileges?.length > 0 ? userDetail.privileges : getDefaultPrivileges(),
+          privileges: AVAILABLE_MODULES.map((m) => {
+            const existing = userDetail.privileges?.find((p: any) => p.module === m.id);
+            return existing || { module: m.id, can_view: false, can_edit: false };
+          }),
         });
         setFormError(null);
         setShowEditModal(true);
@@ -274,19 +277,35 @@ export default function SubAccountManagement() {
 
   // Update privilege
   const updatePrivilege = (moduleId: string, field: "can_view" | "can_edit", value: boolean) => {
-    setFormData((prev) => ({
-      ...prev,
-      privileges: prev.privileges.map((p) =>
-        p.module === moduleId
-          ? {
-            ...p,
-            [field]: value,
-            // If removing view, also remove edit
-            ...(field === "can_view" && !value ? { can_edit: false } : {}),
-          }
-          : p,
-      ),
-    }));
+    setFormData((prev) => {
+      const existingIdx = prev.privileges.findIndex((p) => p.module === moduleId);
+      let newPrivileges = [...prev.privileges];
+
+      if (existingIdx >= 0) {
+        // Update existing
+        const p = newPrivileges[existingIdx];
+        newPrivileges[existingIdx] = {
+          ...p,
+          [field]: value,
+          // If turning on edit, MUST turn on view
+          ...(field === "can_edit" && value ? { can_view: true } : {}),
+          // If removing view, MUST remove edit
+          ...(field === "can_view" && !value ? { can_edit: false } : {}),
+        };
+      } else {
+        // Add new
+        newPrivileges.push({
+          module: moduleId,
+          can_view: field === "can_view" ? value : (field === "can_edit" && value),
+          can_edit: field === "can_edit" ? value : false,
+        });
+      }
+
+      return {
+        ...prev,
+        privileges: newPrivileges,
+      };
+    });
   };
 
   // Create sub-account
