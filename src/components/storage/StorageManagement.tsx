@@ -20,7 +20,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Monitor,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -41,7 +40,7 @@ import {
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
+
 import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 type ViewMode = "local" | "cloud";
@@ -110,7 +109,7 @@ const STORAGE_TYPES = [
 
 export default function StorageManagement() {
   // View mode state
-  const [viewMode, setViewMode] = useState<ViewMode>("local");
+  const [viewMode, setViewMode] = useState<ViewMode>("cloud");
 
   // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
@@ -667,13 +666,7 @@ export default function StorageManagement() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Add Storage Button - only for cloud mode with selected system */}
-          {viewMode === "cloud" && !requiresAuth && selectedSystem && (
-            <Button onClick={handleOpenCreate} className="gap-2">
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Add Storage</span>
-            </Button>
-          )}
+
 
           {/* System Selector - only for cloud mode */}
           {viewMode === "cloud" && !isCloudEmpty && (
@@ -742,18 +735,7 @@ export default function StorageManagement() {
       </div>
 
       {/* View Mode Tabs - Keep outside so user can always switch */}
-      <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="local" className="flex items-center gap-2">
-            <Monitor className="w-4 h-4" />
-            Local Server
-          </TabsTrigger>
-          <TabsTrigger value="cloud" className="flex items-center gap-2">
-            <Cloud className="w-4 h-4" />
-            Cloud Systems
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+
 
       {/* View Alerts Below Tabs */}
       {showNoCloudAlert && viewMode === "cloud" && (
@@ -768,17 +750,7 @@ export default function StorageManagement() {
         </div>
       )}
 
-      {showNoLocalAlert && viewMode === "local" && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
-          <div className="flex items-center">
-            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
-            <div>
-              <h3 className="font-medium text-yellow-800">No Local Storages Found</h3>
-              <p className="text-sm text-yellow-700">Unable to fetch local storages.</p>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Main Content Fragment - Hide subsequent UI sections when appropriate */}
       {((viewMode === "cloud" && !isCloudEmpty) || (viewMode === "local" && !isLocalEmpty)) && (
@@ -866,13 +838,13 @@ export default function StorageManagement() {
           {(viewMode === "local" || (viewMode === "cloud" && !requiresAuth)) && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <Card>
-                <CardHeader className="pb-2">
+                <CardHeader className="pb-6">
                   <CardDescription className="text-xs">Total Storages</CardDescription>
                   <CardTitle className="text-2xl">{currentStorages.length}</CardTitle>
                 </CardHeader>
               </Card>
               <Card>
-                <CardHeader className="pb-2">
+                <CardHeader className="pb-6">
                   <CardDescription className="text-xs">Online</CardDescription>
                   <CardTitle className="text-2xl text-green-600">
                     {onlineStorages}/{currentStorages.length}
@@ -880,18 +852,18 @@ export default function StorageManagement() {
                 </CardHeader>
               </Card>
               <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription className="text-xs">Total Capacity</CardDescription>
-                  <CardTitle className="text-2xl">{formatBytes(totalStorage)}</CardTitle>
+                <CardHeader className="pb-6">
+                  <CardDescription className="text-xs">Free</CardDescription>
+                  <CardTitle className="text-2xl text-green-600">{formatBytes(totalFree)}</CardTitle>
                 </CardHeader>
               </Card>
               <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription className="text-xs">Used / Free</CardDescription>
+                <CardHeader className="pb-6">
+                  <CardDescription className="text-xs">Used / Total Capacity</CardDescription>
                   <CardTitle className="text-lg">
                     <span className="text-orange-600">{formatBytes(totalUsed)}</span>
                     <span className="text-gray-400 mx-1">/</span>
-                    <span className="text-green-600">{formatBytes(totalFree)}</span>
+                    <span className="text-gray-600">{formatBytes(totalStorage)}</span>
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -1076,14 +1048,16 @@ export default function StorageManagement() {
                                   {getStorageTypeIcon(storage.type)}
                                 </div>
                                 <div className="min-w-0">
-                                  <CardTitle className="text-sm sm:text-base truncate">{storage.name}</CardTitle>
+                                  <CardTitle className="text-sm sm:text-base truncate">
+                                    {storage.statusInfo?.name || storage.name}
+                                  </CardTitle>
                                   <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
-                                    {storage.path}
+                                    {storage.statusInfo?.url || storage.path}
                                   </CardDescription>
                                 </div>
                               </div>
                               <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
-                                {isOnline ? <Wifi className="w-3 h-3 mr-1" /> : <WifiOff className="w-3 h-3 mr-1" />}
+                                {isOnline ? <Wifi className="w-4 h-4 mr-1" /> : <WifiOff className="w-4 h-4 mr-1" />}
                                 <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
                               </Badge>
                             </div>
@@ -1093,13 +1067,12 @@ export default function StorageManagement() {
                             {storage.statusInfo && (
                               <div className="space-y-1">
                                 <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
+                                  <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
                                   <span>
-                                    Used:{" "}
                                     {formatBytes(
                                       parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
-                                    )}
+                                    )} / {formatBytes(storage.statusInfo.totalSpace)}
                                   </span>
-                                  <span>{usagePercent}%</span>
                                 </div>
                                 <Progress
                                   value={usagePercent}
@@ -1107,12 +1080,11 @@ export default function StorageManagement() {
                                     ? "[&>div]:bg-red-500"
                                     : usagePercent > 70
                                       ? "[&>div]:bg-yellow-500"
-                                      : "[&>div]:bg-green-500"
+                                      : "[&>div]:bg-blue-500"
                                     }`}
                                 />
-                                <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                                  <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
-                                  <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
+                                <div className="flex justify-end text-[10px] sm:text-xs text-gray-500">
+                                  <span>{usagePercent}%</span>
                                 </div>
                               </div>
                             )}
@@ -1120,7 +1092,7 @@ export default function StorageManagement() {
                             {/* Storage Info */}
                             <div className="flex flex-wrap gap-1.5 sm:gap-2">
                               <Badge variant="secondary" className="text-[10px] sm:text-xs">
-                                {storage.type || "Unknown"}
+                                {storage.statusInfo?.storageType || storage.type || "Unknown"}
                               </Badge>
 
                               {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
@@ -1149,33 +1121,9 @@ export default function StorageManagement() {
                               )}
                             </div>
 
-                            {/* Space Limit */}
-                            {storage.spaceLimitB && storage.spaceLimitB > 0 && (
-                              <div className="text-[10px] sm:text-xs text-gray-500">
-                                Reserved: {formatBytes(storage.spaceLimitB)}
-                              </div>
-                            )}
 
-                            {/* Action Buttons */}
-                            <div className="flex gap-2 pt-2 border-t">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex-1 h-8 text-xs"
-                                onClick={() => handleOpenEdit(storage)}
-                              >
-                                <Pencil className="w-3 h-3 mr-1" />
-                                Edit
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => handleOpenDelete(storage)}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </Button>
-                            </div>
+
+
                           </CardContent>
                         </Card>
                       );
