@@ -1,3 +1,30 @@
+import { NextRequest } from "next/server";
+
+// In Electron, we inject the local AppData config via window.electronConfig
+const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+
+/**
+ * Helper to resolve config from headers (server-side) or window (client-side)
+ */
+export function getDynamicConfig(request?: Request | NextRequest) {
+  if (typeof window !== 'undefined') {
+    return (window as any).electronConfig || null;
+  }
+
+  if (request) {
+    const headers = (request as any).headers;
+    // Check for Electron-specific headers passed from the frontend
+    return {
+      NEXT_PUBLIC_NX_SYSTEM_ID: headers.get('x-electron-system-id'),
+      NEXT_PUBLIC_NX_USERNAME: headers.get('x-electron-username'),
+      NX_ADMIN_HASH: headers.get('x-electron-admin-hash'),
+      NX_CLOUD_TOKEN: headers.get('x-electron-cloud-token'),
+    };
+  }
+
+  return null;
+}
+
 // Nx Witness API Configuration
 export const API_CONFIG = {
   // Use Next.js API proxy to avoid CORS issues
@@ -5,11 +32,13 @@ export const API_CONFIG = {
   // Direct server URL for server-side requests
   serverURL: process.env.NEXT_PUBLIC_API_URL,
   wsURL: process.env.NEXT_PUBLIC_WS_URL,
-  username: process.env.NEXT_PUBLIC_NX_USERNAME,
+  username: extConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME,
   password: process.env.NEXT_PUBLIC_NX_PASSWORD,
-  systemId: process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
+  systemId: extConfig?.NEXT_PUBLIC_NX_SYSTEM_ID || process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
   serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST,
   serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT,
+  adminHash: extConfig?.NX_ADMIN_HASH || process.env.NX_ADMIN_HASH,
+  hashedPassword: extConfig?.NX_ADMIN_HASH || process.env.NX_ADMIN_HASH,
   // Fallback URLs to try (now through proxy)
   fallbackURLs: ["/api/nx"],
 };
@@ -59,18 +88,33 @@ export const API_ENDPOINTS = {
 
 // NX Cloud Configuration for auto-login
 export const CLOUD_CONFIG = {
-  // Cloud credentials for auto-login (set via environment variables for security)
-  username: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME,
-  password: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD,
-  // Enable auto-login when credentials are configured
+  // Secure Cloud Token (New)
+  token: extConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN,
+  // Enable auto-login when token is configured
   autoLoginEnabled: true,
   // Base URL for NX Cloud API
   baseURL: "https://meta.nxvms.com",
 };
 
-// Generate Basic Auth header for NX Cloud API
-export function getCloudAuthHeader(): string {
-  const credentials = `${CLOUD_CONFIG.username}:${CLOUD_CONFIG.password}`;
+// Generate Auth header for NX Cloud API
+export function getCloudAuthHeader(request?: Request | NextRequest): string {
+  const dynamicConfig = getDynamicConfig(request);
+  const token = dynamicConfig?.NX_CLOUD_TOKEN || CLOUD_CONFIG.token;
+
+  // Prefer Token-based auth
+  if (token) {
+    return `Bearer ${token}`;
+  }
+
+  // Fallback to Basic Auth (legacy) - read directly from env to avoid object typing issues
+  const username = process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME;
+  const password = process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
+
+  if (!username || !password) {
+    return "";
+  }
+
+  const credentials = `${username}:${password}`;
   const base64Credentials =
     typeof window !== "undefined" ? btoa(credentials) : Buffer.from(credentials).toString("base64");
   return `Basic ${base64Credentials}`;

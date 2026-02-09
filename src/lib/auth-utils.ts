@@ -12,57 +12,19 @@ export async function performAdminLogin(systemId: string): Promise<boolean> {
     if (!systemId) return false;
 
     try {
-        // Step 1: Admin login (using NEXT_PUBLIC_NX_USERNAME)
-        if (API_CONFIG.username && API_CONFIG.password) {
-            console.log(`[Admin Authentication] Step 1: Admin login for ${systemId} using ${API_CONFIG.username}...`);
-            const adminResponse = await fetch("/api/cloud/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    systemId,
-                    username: API_CONFIG.username,
-                    password: API_CONFIG.password,
-                }),
-            });
+        // Attempt to check connection using existing token/session
+        // This will now use the NX_CLOUD_TOKEN from env fallback if no cookie exists
+        const testResponse = await fetch(`/api/cloud/audit-log?systemId=${encodeURIComponent(systemId)}&from=${new Date().toISOString()}`);
 
-            if (adminResponse.ok) {
-                console.log(`[Admin Authentication] Admin login successful for ${systemId}`);
-                return true;
-            } else {
-                const errorData = await adminResponse.json();
-                console.warn(`[Admin Authentication] Admin login failed for ${systemId}:`, errorData.error, "proceeding to cloud login...");
-            }
-        } else {
-            console.warn("[Admin Authentication] Admin credentials (NEXT_PUBLIC_NX_USERNAME) not configured");
+        if (testResponse.ok) {
+            console.log(`[Admin Authentication] Silent login successful for ${systemId} using secure token/fallback`);
+            return true;
         }
 
-        // Step 2: Cloud login (if possible)
-        // Skip if Cloud credentials are identical to Admin credentials to avoid redundant failing calls
-        const isIdentical = CLOUD_CONFIG.username === API_CONFIG.username && CLOUD_CONFIG.password === API_CONFIG.password;
-
-        if (CLOUD_CONFIG.autoLoginEnabled && CLOUD_CONFIG.username && CLOUD_CONFIG.password && !isIdentical) {
-            console.log(`[Admin Authentication] Step 2: Cloud login for ${systemId}...`);
-            const cloudResponse = await fetch("/api/cloud/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    systemId,
-                    username: CLOUD_CONFIG.username,
-                    password: CLOUD_CONFIG.password,
-                }),
-            });
-
-            if (cloudResponse.ok) {
-                console.log(`[Admin Authentication] Cloud login successful for ${systemId}`);
-                return true;
-            } else {
-                console.error(`[Admin Authentication] Cloud login failed for ${systemId} (Status ${cloudResponse.status})`);
-            }
-        }
-
+        console.log(`[Admin Authentication] Automated login for ${systemId} requires manual password entry (Secure Hash Check)`);
         return false;
     } catch (error) {
-        console.error(`[Admin Authentication] Error during login for ${systemId}:`, error);
+        console.error(`[Admin Authentication] Error during silent login check for ${systemId}:`, error);
         return false;
     }
 }

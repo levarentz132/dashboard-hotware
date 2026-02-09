@@ -14,15 +14,17 @@ interface CloudSystem {
   stateOfHealth: string;
 }
 
+import { getDynamicConfig } from "@/lib/config";
+
 // Fetch cloud systems to verify system_id
-async function fetchCloudSystems(): Promise<CloudSystem[]> {
+async function fetchCloudSystems(request?: Request): Promise<CloudSystem[]> {
   try {
     const response = await fetch("https://meta.nxvms.com/cdb/systems", {
       method: "GET",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
+        Authorization: getCloudAuthHeader(request),
       },
     });
 
@@ -63,12 +65,20 @@ export async function POST(request: NextRequest) {
     }
 
     let { username, password, system_id } = validation.data;
+    const dynamicConfig = getDynamicConfig(request);
+
+    // Prioritize system_id from Electron headers if missing from body
+    if (!system_id && dynamicConfig?.NEXT_PUBLIC_NX_SYSTEM_ID) {
+      system_id = dynamicConfig.NEXT_PUBLIC_NX_SYSTEM_ID;
+      console.log(`[Login] Using system_id from Electron header: ${system_id}`);
+    }
+
     console.log(`[Login Attempt] User: ${username}, Provided SystemID: ${system_id || "None"}`);
 
     // If system_id is not provided, try to detect it from cloud systems
     if (!system_id) {
       console.log("[Login] No system_id in request, attempting cloud detection...");
-      const detectedSystems = await fetchCloudSystems();
+      const detectedSystems = await fetchCloudSystems(request);
       console.log(`[Login] Detected ${detectedSystems.length} systems from cloud`);
 
       if (detectedSystems.length > 0) {

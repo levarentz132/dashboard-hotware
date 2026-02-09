@@ -155,10 +155,20 @@ class NxWitnessAPI {
 
   // Get request headers without auth (Nx Witness uses cookies)
   private getHeaders(): Record<string, string> {
-    return {
+    const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
     };
+
+    if (extConfig) {
+      headers['X-Electron-System-ID'] = extConfig.NEXT_PUBLIC_NX_SYSTEM_ID || '';
+      headers['X-Electron-Username'] = extConfig.NEXT_PUBLIC_NX_USERNAME || '';
+      headers['X-Electron-Admin-Hash'] = extConfig.NX_ADMIN_HASH || '';
+      headers['X-Electron-Cloud-Token'] = extConfig.NX_CLOUD_TOKEN || '';
+    }
+
+    return headers;
   }
 
   // Check if Nx Witness API is available

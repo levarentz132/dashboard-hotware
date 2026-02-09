@@ -32,11 +32,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [state, setState] = useState<AuthState>(initialState);
   const router = useRouter();
 
+  // Helper to get Electron headers
+  const getElectronHeaders = useCallback((): Record<string, string> => {
+    const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+    if (!extConfig) return {};
+
+    return {
+      'X-Electron-System-ID': extConfig.NEXT_PUBLIC_NX_SYSTEM_ID || '',
+      'X-Electron-Username': extConfig.NEXT_PUBLIC_NX_USERNAME || '',
+      'X-Electron-Admin-Hash': extConfig.NX_ADMIN_HASH || '',
+      'X-Electron-Cloud-Token': extConfig.NX_CLOUD_TOKEN || '',
+    };
+  }, []);
+
   // Check session on mount and periodically
   const checkSession = useCallback(async () => {
     try {
       const response = await fetch(AUTH_ROUTES.API_SESSION, {
         method: "GET",
+        headers: {
+          ...getElectronHeaders()
+        },
         credentials: "include",
       });
 
@@ -103,7 +119,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const response = await fetch(AUTH_ROUTES.API_LOGIN, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...getElectronHeaders()
+          },
           credentials: "include",
           body: JSON.stringify(credentials),
         });

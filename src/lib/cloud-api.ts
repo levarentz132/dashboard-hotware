@@ -34,9 +34,14 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
  * Includes authorization token if available in cookies
  */
 export function buildCloudHeaders(request: NextRequest, systemId: string): Record<string, string> {
-  const systemToken = request.cookies.get(`nx-cloud-${systemId}`)?.value;
-  const cookies = request.headers.get("cookie") || "";
+  let systemToken = request.cookies.get(`nx-cloud-${systemId}`)?.value;
 
+  // Fallback to Env Token (from setup.js)
+  if (!systemToken && process.env.NX_CLOUD_TOKEN) {
+    systemToken = process.env.NX_CLOUD_TOKEN;
+  }
+
+  const cookies = request.headers.get("cookie") || "";
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -104,8 +109,14 @@ export function createConnectionErrorResponse(systemId: string, systemName?: str
  */
 export function validateSystemId(request: NextRequest): { systemId: string | null; systemName: string | null } {
   const searchParams = request.nextUrl.searchParams;
+  let systemId = searchParams.get("systemId");
+
+  if (!systemId) {
+    systemId = request.headers.get('x-electron-system-id');
+  }
+
   return {
-    systemId: searchParams.get("systemId"),
+    systemId,
     systemName: searchParams.get("systemName"),
   };
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getDynamicConfig } from "@/lib/config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,7 +10,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "System ID, username, and password are required" }, { status: 400 });
     }
 
-    // Login to cloud relay system
+    const dynamicConfig = getDynamicConfig(request);
+
+    // 1. Check if this is the hashed admin account
+    const isAdminUser = username === (dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME);
+    const adminHash = dynamicConfig?.NX_ADMIN_HASH || process.env.NX_ADMIN_HASH;
+    const cloudToken = dynamicConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN;
+
+    if (isAdminUser && adminHash && cloudToken) {
+      const bcrypt = await import("bcryptjs");
+      const isMatch = await bcrypt.compare(password, adminHash);
+
+      if (isMatch) {
+        console.log(`[Cloud Login] Admin verified via secure hash for system ${systemId}`);
+        const response = NextResponse.json({
+          success: true,
+          token: cloudToken,
+          username: username,
+          systemId,
+        });
+
+        response.cookies.set(`nx-cloud-${systemId}`, cloudToken, {
+          path: "/",
+          maxAge: 60 * 60 * 24 * 30, // 30 days for token
+          httpOnly: false,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+        });
+
+        return response;
+      }
+    }
+
+    // 2. Standard login to cloud relay system (fallback)
     const loginUrl = `https://${systemId}.relay.vmsproxy.com/rest/v3/login/sessions`;
 
     const loginResponse = await fetch(loginUrl, {

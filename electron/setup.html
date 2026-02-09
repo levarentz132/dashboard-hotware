@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Hotware Dashboard Configuration</title>
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --success: #22c55e;
+            --error: #ef4444;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            padding: 40px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border);
+            position: relative;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0 0 8px 0;
+            background: linear-gradient(to right, #60a5fa, #3b82f6);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin: 0;
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 32px;
+        }
+
+        .step-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .step-dot.active {
+            background: var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+            transform: scale(1.2);
+        }
+
+        .form-step {
+            display: none;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        .form-step.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            background: #0f172a;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: white;
+            font-size: 15px;
+            transition: all 0.2s;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            transition: color 0.2s;
+            user-select: none;
+        }
+
+        .password-toggle:hover {
+            color: var(--text);
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 12px;
+        }
+
+        button:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-message {
+            margin-top: 20px;
+            font-size: 13px;
+            text-align: center;
+            min-height: 20px;
+        }
+
+        .status-message.error {
+            color: var(--error);
+        }
+
+        .status-message.success {
+            color: var(--success);
+        }
+
+        .status-message.info {
+            color: var(--primary);
+        }
+
+        .system-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+
+        .system-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .system-item:last-child {
+            border-bottom: none;
+        }
+
+        .system-item:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .system-item .name {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .system-item .id {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Icon styling */
+        .eye-icon {
+            width: 20px;
+            height: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Hotware Setup</h1>
+            <p id="step-description">Securely configure your dashboard</p>
+        </div>
+
+        <div class="step-indicator">
+            <div id="dot-1" class="step-dot active"></div>
+            <div id="dot-2" class="step-dot"></div>
+            <div id="dot-3" class="step-dot"></div>
+        </div>
+
+        <!-- Step 1: Cloud Login -->
+        <div id="step-1" class="form-step active">
+            <div class="input-group">
+                <label>Nx Cloud Email</label>
+                <div class="input-wrapper">
+                    <input type="email" id="cloud-email" placeholder="email@example.com">
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Nx Cloud Password</label>
+                <div class="input-wrapper">
+                    <input type="password" id="cloud-password" placeholder="••••••••">
+                    <div class="password-toggle" onclick="togglePassword('cloud-password')">
+                        <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <button id="btn-1" onclick="validateCloud()">Continue to System Selection</button>
+        </div>
+
+        <!-- Step 2: System Selection -->
+        <div id="step-2" class="form-step">
+            <label style="font-size: 14px; font-weight: 500; color: var(--text-muted);">Select your Nx System</label>
+            <div id="system-list" class="system-list">
+                <!-- Systems will be injected here -->
+            </div>
+        </div>
+
+        <!-- Step 3: Local Admin -->
+        <div id="step-3" class="form-step">
+            <div class="input-group">
+                <label>VMS Local Admin Username</label>
+                <input type="text" id="vms-user" placeholder="admin">
+            </div>
+            <div class="input-group">
+                <label>VMS Local Admin Password</label>
+                <div class="input-wrapper">
+                    <input type="password" id="vms-password" placeholder="••••••••">
+                    <div class="password-toggle" onclick="togglePassword('vms-password')">
+                        <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <button id="btn-3" onclick="finalize()">Complete Setup</button>
+        </div>
+
+        <div id="status" class="status-message"></div>
+    </div>
+
+    <script>
+        const state = {
+            currentStep: 1,
+            credentials: {},
+            systems: [],
+            selectedSystem: null
+        };
+
+        function togglePassword(id) {
+            const el = document.getElementById(id);
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
+
+        function showStatus(text, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = `status-message ${type}`;
+        }
+
+        function setStep(num) {
+            document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
+            document.getElementById(`step-${num}`).classList.add('active');
+
+            document.querySelectorAll('.step-dot').forEach((d, i) => {
+                if (i < num) d.classList.add('active');
+                else d.classList.remove('active');
+            });
+
+            const desc = document.getElementById('step-description');
+            if (num === 1) desc.textContent = "Log in to your Nx Cloud Account";
+            if (num === 2) desc.textContent = "Choose the system you want to manage";
+            if (num === 3) desc.textContent = "Connect to your local VMS instance";
+
+            state.currentStep = num;
+        }
+
+        async function validateCloud() {
+            const email = document.getElementById('cloud-email').value;
+            const password = document.getElementById('cloud-password').value;
+
+            if (!email || !password) {
+                showStatus('Please enter both email and password', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('btn-1');
+            btn.disabled = true;
+            showStatus('Authenticating with Nx Cloud...', 'info');
+
+            try {
+                const result = await window.electron.setup.validateCloud({ cloudEmail: email, cloudPassword: password });
+                if (result.success) {
+                    state.credentials.cloudEmail = email;
+                    state.credentials.cloudPassword = password;
+                    state.systems = result.systems;
+
+                    if (state.systems.length === 1) {
+                        state.selectedSystem = state.systems[0];
+                        setStep(3);
+                    } else {
+                        renderSystems();
+                        setStep(2);
+                    }
+                    showStatus('');
+                } else {
+                    showStatus(result.error, 'error');
+                }
+            } catch (e) {
+                showStatus(e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function renderSystems() {
+            const list = document.getElementById('system-list');
+            list.innerHTML = '';
+
+            if (!Array.isArray(state.systems)) return;
+
+            state.systems.forEach(sys => {
+                const div = document.createElement('div');
+                div.className = 'system-item';
+                div.innerHTML = `
+                    <span class="name">${sys.name}</span>
+                    <span class="id">${sys.id}</span>
+                `;
+                div.onclick = () => selectSystem(sys);
+                list.appendChild(div);
+            });
+        }
+
+        function selectSystem(sys) {
+            state.selectedSystem = sys;
+            setStep(3);
+        }
+
+        async function finalize() {
+            const vmsUser = document.getElementById('vms-user').value;
+            const vmsPass = document.getElementById('vms-password').value;
+
+            if (!vmsUser || !vmsPass) {
+                showStatus('VMS credentials are required', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('btn-3');
+            btn.disabled = true;
+            showStatus('Verifying VMS Connection (V4 API)...', 'info');
+
+            try {
+                const relayCheck = await window.electron.setup.checkRelay({
+                    systemId: state.selectedSystem.id,
+                    vmsUser: vmsUser,
+                    vmsPassword: vmsPass
+                });
+
+                if (relayCheck.success) {
+                    showStatus('Connection verified! Saving...', 'success');
+
+                    const saveResult = await window.electron.setup.save({
+                        systemId: state.selectedSystem.id,
+                        username: vmsUser,
+                        password: vmsPass
+                    });
+
+                    if (saveResult.success) {
+                        showStatus('Setup Complete! Launching dashboard...', 'success');
+                        setTimeout(() => window.electron.setup.launch(), 2000);
+                    } else {
+                        showStatus(saveResult.error, 'error');
+                    }
+                } else {
+                    showStatus(relayCheck.error, 'error');
+                }
+            } catch (e) {
+                showStatus(e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+
+</html>
