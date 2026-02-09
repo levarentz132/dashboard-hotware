@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Users,
   Plus,
@@ -8,17 +8,22 @@ import {
   RefreshCw,
   Search,
   AlertCircle,
-  CheckCircle,
-  XCircle,
   Shield,
   UserPlus,
   X,
-  Mail,
-  Key,
   Pause,
   Play,
   EyeOff,
   Eye,
+  Settings2,
+  UserCheck,
+  UserX,
+  MoreHorizontal,
+  Pencil,
+  ShieldCheck,
+  Mail,
+  User,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +50,21 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/auth-context";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Types
 interface Privilege {
@@ -69,14 +88,14 @@ interface SubAccount {
 
 // Available modules for privileges
 const AVAILABLE_MODULES = [
-  { id: "dashboard", label: "Dashboard", description: "Lihat dan kelola dashboard" },
-  { id: "camera_inventory", label: "Camera Inventory", description: "Kelola kamera dan perangkat" },
-  { id: "health", label: "System Health", description: "Monitor kesehatan sistem" },
-  { id: "alarm_console", label: "Alarm Console", description: "Kelola alarm dan notifikasi" },
-  { id: "user_logs", label: "User Logs", description: "Lihat log aktivitas pengguna" },
-  { id: "analytics", label: "Analytics", description: "Lihat analitik dan laporan" },
-  { id: "storage", label: "Storage", description: "Kelola penyimpanan" },
-  { id: "users", label: "User Management", description: "Kelola pengguna NX System" },
+  { id: "dashboard", label: "Dashboard", description: "Lihat dan kelola dashboard", icon: "📊" },
+  { id: "camera_inventory", label: "Camera Inventory", description: "Kelola kamera dan perangkat", icon: "📹" },
+  { id: "health", label: "System Health", description: "Monitor kesehatan sistem", icon: "💚" },
+  { id: "alarm_console", label: "Alarm Console", description: "Kelola alarm dan notifikasi", icon: "🔔" },
+  { id: "user_logs", label: "User Logs", description: "Lihat log aktivitas pengguna", icon: "📋" },
+  { id: "analytics", label: "Analytics", description: "Lihat analitik dan laporan", icon: "📈" },
+  { id: "storage", label: "Storage", description: "Kelola penyimpanan", icon: "💾" },
+  { id: "users", label: "User Management", description: "Kelola pengguna NX System", icon: "👥" },
 ];
 
 // Default privileges (all view, no edit)
@@ -87,6 +106,49 @@ const getDefaultPrivileges = (): Privilege[] =>
     can_edit: false,
   }));
 
+// Stats Card Component
+function StatsCard({
+  title,
+  value,
+  icon: Icon,
+  variant = "default",
+}: {
+  title: string;
+  value: number;
+  icon: React.ElementType;
+  variant?: "default" | "success" | "warning" | "danger";
+}) {
+  const variants = {
+    default: "bg-slate-50 border-slate-200 text-slate-600",
+    success: "bg-emerald-50 border-emerald-200 text-emerald-600",
+    warning: "bg-amber-50 border-amber-200 text-amber-600",
+    danger: "bg-red-50 border-red-200 text-red-600",
+  };
+
+  const iconVariants = {
+    default: "bg-slate-100 text-slate-600",
+    success: "bg-emerald-100 text-emerald-600",
+    warning: "bg-amber-100 text-amber-600",
+    danger: "bg-red-100 text-red-600",
+  };
+
+  return (
+    <Card className={`${variants[variant]} border`}>
+      <CardContent className="p-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-lg ${iconVariants[variant]}`}>
+            <Icon className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-2xl font-bold">{value}</p>
+            <p className="text-sm opacity-80">{title}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SubAccountManagement() {
   const { user } = useAuth();
   const [subAccounts, setSubAccounts] = useState<SubAccount[]>([]);
@@ -94,6 +156,7 @@ export default function SubAccountManagement() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [orgId, setOrgId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState("all");
 
   // Check if user is admin
   const isAdmin = user?.role === "admin";
@@ -108,7 +171,6 @@ export default function SubAccountManagement() {
 
       console.log("[RoleManagement] Checking for orgId in user context...", user);
 
-      // If already in user context, use it
       if (user?.organizations && user.organizations.length > 0) {
         const id = user.organizations[0].id || (user.organizations[0] as any).org_id;
         if (id) {
@@ -118,14 +180,13 @@ export default function SubAccountManagement() {
         }
       }
 
-      // Otherwise fetch from /me API
       try {
         console.log("[RoleManagement] Fetching orgId from /api/auth/me...");
         const response = await fetch("/api/auth/me");
         const data = await response.json();
 
-        // Very flexible check based on different possible API response structures
-        const id = data.organization?.id ||
+        const id =
+          data.organization?.id ||
           data.organization?.org_id ||
           data.user?.organization_id ||
           data.user?.organizations?.[0]?.id ||
@@ -147,7 +208,7 @@ export default function SubAccountManagement() {
     };
 
     getOrgId();
-  }, [user, isAdmin]);
+  }, [user, isAdmin, loading]);
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -200,15 +261,26 @@ export default function SubAccountManagement() {
     }
   }, [fetchSubAccounts, isAdmin]);
 
+  // Computed stats
+  const stats = useMemo(() => {
+    const total = subAccounts.length;
+    const active = subAccounts.filter((a) => a.is_active).length;
+    const inactive = total - active;
+    const admins = subAccounts.filter((a) => a.role === "admin").length;
+    return { total, active, inactive, admins };
+  }, [subAccounts]);
+
   // If not admin, don't show the management UI
   if (!isAdmin && !loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <Shield className="w-16 h-16 text-slate-300 mb-4" />
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-6">
+          <Shield className="w-10 h-10 text-slate-400" />
+        </div>
         <h3 className="text-xl font-semibold text-slate-900">Akses Terbatas</h3>
         <p className="text-slate-500 max-w-md mt-2">
-          Hanya administrator yang dapat mengelola akun pengguna dan perizinan.
-          Silakan hubungi admin sistem Anda untuk bantuan.
+          Hanya administrator yang dapat mengelola akun pengguna dan perizinan. Silakan hubungi admin sistem Anda untuk
+          bantuan.
         </p>
       </div>
     );
@@ -248,11 +320,11 @@ export default function SubAccountManagement() {
         setFormData({
           username: userDetail.username,
           email: userDetail.email || account.email,
-          password: "", // Don't pre-fill password
+          password: "",
           role: userDetail.role || account.role || "user",
           is_active: userDetail.is_active ?? account.is_active,
           privileges: AVAILABLE_MODULES.map((m) => {
-            const existing = userDetail.privileges?.find((p: any) => p.module === m.id);
+            const existing = userDetail.privileges?.find((p: Privilege) => p.module === m.id);
             return existing || { module: m.id, can_view: false, can_edit: false };
           }),
         });
@@ -279,32 +351,25 @@ export default function SubAccountManagement() {
   const updatePrivilege = (moduleId: string, field: "can_view" | "can_edit", value: boolean) => {
     setFormData((prev) => {
       const existingIdx = prev.privileges.findIndex((p) => p.module === moduleId);
-      let newPrivileges = [...prev.privileges];
+      const newPrivileges = [...prev.privileges];
 
       if (existingIdx >= 0) {
-        // Update existing
         const p = newPrivileges[existingIdx];
         newPrivileges[existingIdx] = {
           ...p,
           [field]: value,
-          // If turning on edit, MUST turn on view
           ...(field === "can_edit" && value ? { can_view: true } : {}),
-          // If removing view, MUST remove edit
           ...(field === "can_view" && !value ? { can_edit: false } : {}),
         };
       } else {
-        // Add new
         newPrivileges.push({
           module: moduleId,
-          can_view: field === "can_view" ? value : (field === "can_edit" && value),
+          can_view: field === "can_view" ? value : field === "can_edit" && value,
           can_edit: field === "can_edit" ? value : false,
         });
       }
 
-      return {
-        ...prev,
-        privileges: newPrivileges,
-      };
+      return { ...prev, privileges: newPrivileges };
     });
   };
 
@@ -314,7 +379,6 @@ export default function SubAccountManagement() {
     setFormError(null);
 
     try {
-      // Map privileges to permissions format for API
       const permissions: Record<string, "view" | "edit" | "none"> = {};
       formData.privileges.forEach((p) => {
         if (p.can_edit) permissions[p.module] = "edit";
@@ -322,7 +386,6 @@ export default function SubAccountManagement() {
         else permissions[p.module] = "none";
       });
 
-      // Use orgId from state
       if (orgId === null) {
         setFormError("ID organisasi tidak tersedia.");
         setSaving(false);
@@ -367,7 +430,6 @@ export default function SubAccountManagement() {
     setFormError(null);
 
     try {
-      // Map privileges to permissions format for API
       const permissions: Record<string, "view" | "edit" | "none"> = {};
       formData.privileges.forEach((p) => {
         if (p.can_edit) permissions[p.module] = "edit";
@@ -375,13 +437,11 @@ export default function SubAccountManagement() {
         else permissions[p.module] = "none";
       });
 
-      // Prepare update data
       const updateData = {
         id: selectedAccount.id,
         username: formData.username,
         email: formData.email,
         role: formData.role,
-        password: formData.password || undefined,
         is_active: formData.is_active ? 1 : 0,
         permissions,
       };
@@ -410,10 +470,9 @@ export default function SubAccountManagement() {
     }
   };
 
-  // Toggle user status (Activate/Deactivate)
+  // Toggle user status
   const handleToggleStatus = async (account: SubAccount) => {
     try {
-      // Fetch full details first to ensure we have current permissions
       const detailResponse = await fetch(`/api/users/${account.id}`);
       const detailData = await detailResponse.json();
 
@@ -424,7 +483,7 @@ export default function SubAccountManagement() {
 
       const userDetail = detailData.user;
       const permissions: Record<string, string> = {};
-      userDetail.privileges?.forEach((p: any) => {
+      userDetail.privileges?.forEach((p: Privilege) => {
         if (p.can_edit) permissions[p.module] = "edit";
         else if (p.can_view) permissions[p.module] = "view";
         else permissions[p.module] = "none";
@@ -434,7 +493,7 @@ export default function SubAccountManagement() {
         id: account.id,
         email: userDetail.email || account.email,
         role: userDetail.role || account.role,
-        is_active: account.is_active ? 0 : 1, // Toggle
+        is_active: account.is_active ? 0 : 1,
         permissions,
       };
 
@@ -482,371 +541,568 @@ export default function SubAccountManagement() {
     }
   };
 
-  // Filter accounts by search
-  const filteredAccounts = subAccounts.filter(
-    (account) =>
-      account.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      account.email.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+  // Filter accounts by search and tab
+  const filteredAccounts = useMemo(() => {
+    return subAccounts.filter((account) => {
+      const matchesSearch =
+        account.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        account.email.toLowerCase().includes(searchTerm.toLowerCase());
 
-  // Format date
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString("id-ID", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+      const matchesTab =
+        activeTab === "all" ||
+        (activeTab === "active" && account.is_active) ||
+        (activeTab === "inactive" && !account.is_active);
+
+      return matchesSearch && matchesTab;
     });
+  }, [subAccounts, searchTerm, activeTab]);
+
+  // Get user initials for avatar
+  const getInitials = (username: string) => {
+    return username
+      .split(/[\s_-]/)
+      .map((word) => word[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
   };
 
   // Form component (reused for create and edit)
   const renderForm = (isEdit: boolean) => (
-    <div className="space-y-6 max-h-[70vh] overflow-y-auto px-2 pb-4 text-slate-900">
-      {formError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
-          <AlertCircle className="w-4 h-4" />
-          <span className="text-sm">{formError}</span>
-        </div>
-      )}
+    <ScrollArea className="max-h-[65vh] pr-4">
+      <div className="space-y-6 pb-4">
+        {formError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="text-sm">{formError}</span>
+          </div>
+        )}
 
-      {/* Basic Info */}
-      <div className="space-y-4">
-        <h4 className="font-medium text-gray-900">Informasi Akun</h4>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="username">Username *</Label>
-            <Input
-              id="username"
-              value={formData.username}
-              onChange={(e) => setFormData((prev) => ({ ...prev, username: e.target.value }))}
-              placeholder="johndoe"
-              className="h-11 border-slate-200 focus-visible:ring-blue-600"
-            />
+        {/* Account Information Section */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-slate-900">
+            <User className="w-4 h-4 text-blue-600" />
+            <h4 className="font-semibold">Informasi Akun</h4>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email *</Label>
-            <Input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
-              placeholder="john@example.com"
-              className="h-11 border-slate-200 focus-visible:ring-blue-600"
-            />
-          </div>
-        </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="username" className="text-slate-700">
+                Username <span className="text-red-500">*</span>
+              </Label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input
+                  id="username"
+                  value={formData.username}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, username: e.target.value }))}
+                  placeholder="johndoe"
+                  className="pl-10 h-11"
+                />
+              </div>
+            </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="role">Role *</Label>
-            <select
-              id="role"
-              value={formData.role}
-              onChange={(e) => setFormData((prev) => ({ ...prev, role: e.target.value }))}
-              className="flex h-11 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all shadow-sm"
-            >
-              <option value="admin">Admin</option>
-              <option value="user">User</option>
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="password">Password {isEdit ? "" : "*"}</Label>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                value={formData.password}
-                onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                placeholder={isEdit ? "••••••••" : "Masukkan password"}
-                className="h-11 pr-10 border-slate-200 focus-visible:ring-blue-600"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-slate-700">
+                Email <span className="text-red-500">*</span>
+              </Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="john@example.com"
+                  className="pl-10 h-11"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Privileges - Hidden for Admin */}
-      {formData.role !== "admin" && (
-        <div className="space-y-4 pt-4 border-t">
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-blue-600" />
-            <h4 className="font-medium text-gray-900">Hak Akses</h4>
+          <div className={`grid gap-4 ${isEdit ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
+            <div className="space-y-2">
+              <Label htmlFor="role" className="text-slate-700">
+                Role <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={formData.role}
+                onValueChange={(value) => setFormData((prev) => ({ ...prev, role: value }))}
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Pilih role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-amber-600" />
+                      <span>Admin</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="user">
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-blue-600" />
+                      <span>User</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {!isEdit && (
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-slate-700">
+                  Password <span className="text-red-500">*</span>
+                </Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
+                    placeholder="Masukkan password"
+                    className="pl-10 pr-10 h-11"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
+        </div>
 
-          <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-            <Table>
-              <TableHeader className="bg-slate-100">
-                <TableRow>
-                  <TableHead className="w-[40%]">Module</TableHead>
-                  <TableHead className="text-center">View</TableHead>
-                  <TableHead className="text-center">Edit</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {AVAILABLE_MODULES.map((module) => {
-                  const privilege = formData.privileges.find((p) => p.module === module.id) || {
-                    module: module.id,
-                    can_view: false,
-                    can_edit: false,
-                  };
+        {/* Privileges Section - Hidden for Admin */}
+        {formData.role !== "admin" && (
+          <>
+            <Separator />
 
-                  return (
-                    <TableRow key={module.id} className="hover:bg-slate-100/50">
-                      <TableCell>
-                        <div className="font-medium text-slate-900">{module.label}</div>
-                        <div className="text-xs text-slate-500">{module.description}</div>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <button
-                          type="button"
-                          onClick={() => updatePrivilege(module.id, "can_view", !privilege.can_view)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${privilege.can_view ? "bg-blue-600" : "bg-slate-300"
-                            }`}
-                        >
-                          <span
-                            className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${privilege.can_view ? "translate-x-5" : "translate-x-1"
-                              }`}
-                          />
-                        </button>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <button
-                          type="button"
-                          onClick={() => updatePrivilege(module.id, "can_edit", !privilege.can_edit)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${privilege.can_edit ? "bg-blue-600" : "bg-slate-300"
-                            }`}
-                        >
-                          <span
-                            className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${privilege.can_edit ? "translate-x-5" : "translate-x-1"
-                              }`}
-                          />
-                        </button>
-                      </TableCell>
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-slate-900">
+                <Shield className="w-4 h-4 text-blue-600" />
+                <h4 className="font-semibold">Hak Akses Modul</h4>
+              </div>
+              <p className="text-sm text-slate-500">
+                Atur akses untuk setiap modul. &quot;View&quot; untuk melihat, &quot;Edit&quot; untuk mengubah data.
+              </p>
+
+              <div className="bg-slate-50 rounded-xl border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-100 hover:bg-slate-100 border-0">
+                      <TableHead className="w-[50%] font-semibold">Modul</TableHead>
+                      <TableHead className="text-center font-semibold">View</TableHead>
+                      <TableHead className="text-center font-semibold">Edit</TableHead>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {AVAILABLE_MODULES.map((module) => {
+                      const privilege = formData.privileges.find((p) => p.module === module.id) || {
+                        module: module.id,
+                        can_view: false,
+                        can_edit: false,
+                      };
+
+                      return (
+                        <TableRow key={module.id} className="hover:bg-slate-100/50 border-0">
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <span className="text-lg">{module.icon}</span>
+                              <div>
+                                <p className="font-medium text-slate-900">{module.label}</p>
+                                <p className="text-xs text-slate-500">{module.description}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Switch
+                              checked={privilege.can_view}
+                              onCheckedChange={(checked) => updatePrivilege(module.id, "can_view", checked)}
+                              className="data-[state=checked]:bg-blue-600"
+                            />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Switch
+                              checked={privilege.can_edit}
+                              onCheckedChange={(checked) => updatePrivilege(module.id, "can_edit", checked)}
+                              className="data-[state=checked]:bg-emerald-600"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {formData.role === "admin" && (
+          <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <ShieldCheck className="w-5 h-5 text-amber-600" />
+            <p className="text-sm text-amber-800">
+              Admin memiliki akses penuh ke semua modul. Pengaturan hak akses tidak diperlukan.
+            </p>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </ScrollArea>
   );
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <UserPlus className="w-7 h-7 text-blue-600" />
-            Role Management
-          </h2>
-          <p className="text-gray-500 mt-1">Manage users and access permissions in your organization</p>
+    <TooltipProvider>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Settings2 className="w-6 h-6 text-blue-600" />
+              </div>
+              Role Management
+            </h2>
+            <p className="text-slate-500 mt-1 ml-12">Kelola pengguna dan hak akses dalam organisasi Anda</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" onClick={fetchSubAccounts} disabled={loading}>
+                  <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Muat ulang</TooltipContent>
+            </Tooltip>
+
+            <Button onClick={handleOpenCreate} className="gap-2">
+              <UserPlus className="w-4 h-4" />
+              Tambah Pengguna
+            </Button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={fetchSubAccounts} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-          <Button onClick={handleOpenCreate}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Member
-          </Button>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatsCard title="Total Pengguna" value={stats.total} icon={Users} />
+          <StatsCard title="Aktif" value={stats.active} icon={UserCheck} variant="success" />
+          <StatsCard title="Nonaktif" value={stats.inactive} icon={UserX} variant="danger" />
+          <StatsCard title="Admin" value={stats.admins} icon={ShieldCheck} variant="warning" />
         </div>
-      </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <Input
-          placeholder="Search username or email..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
-        />
-      </div>
+        {/* Error Alert */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span className="flex-1">{error}</span>
+            <button onClick={() => setError(null)} className="p-1 hover:bg-red-100 rounded transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
-      {/* Error */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
-          <AlertCircle className="w-4 h-4" />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+        {/* Main Content Card */}
+        <Card className="border-slate-200">
+          <CardHeader className="border-b bg-slate-50/50">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg">Daftar Pengguna</CardTitle>
+                <CardDescription>
+                  {filteredAccounts.length} dari {subAccounts.length} pengguna
+                </CardDescription>
+              </div>
 
-      {/* Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Member List</CardTitle>
-          <CardDescription>{filteredAccounts.length} members found</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                {/* Tabs */}
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
+                  <TabsList className="grid grid-cols-3 w-full sm:w-auto">
+                    <TabsTrigger value="all" className="gap-1.5">
+                      <Users className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Semua</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="active" className="gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Aktif</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="inactive" className="gap-1.5">
+                      <UserX className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Nonaktif</span>
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                {/* Search */}
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input
+                    placeholder="Cari username atau email..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
             </div>
-          ) : filteredAccounts.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No members found</p>
-              <p className="text-sm">Click "Tambah Pengguna" to create a new one</p>
-            </div>
-          ) : (
-            <Table className="border-collapse">
-              <TableHeader className="bg-[#343f4b] hover:bg-[#343f4b]">
-                <TableRow className="hover:bg-transparent border-none">
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4">Username</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4">Email</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4 text-center">Role</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4 text-center">Status</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredAccounts.map((account) => (
-                  <TableRow key={account.id}>
-                    <TableCell className="py-4">
-                      <span className="font-bold text-slate-800">{account.username}</span>
-                    </TableCell>
-                    <TableCell className="py-4 text-slate-500">
-                      {account.email}
-                    </TableCell>
-                    <TableCell className="py-4 text-center text-slate-600">
-                      {account.role || "User"}
-                    </TableCell>
-                    <TableCell className="py-4 text-center">
-                      {account.is_active ? (
-                        <Badge variant="outline" className="bg-[#d1fadf] text-[#027a48] border-none rounded-full px-4 py-1 font-bold uppercase text-[10px] tracking-widest shadow-sm">
-                          Active
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="bg-red-100 text-red-700 border-none rounded-full px-4 py-1 font-bold uppercase text-[10px] tracking-widest shadow-sm">
-                          Inactive
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="py-4">
-                      <div className="flex justify-start gap-2 pl-4">
-                        {/* Edit Action (Key icon as per mockup) */}
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="h-9 w-9 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg shadow-sm border border-slate-200 transition-all duration-200"
-                          onClick={() => handleOpenEdit(account)}
-                          title="Permissions / Edit"
-                        >
-                          <Key className="w-4 h-4" />
-                        </Button>
+          </CardHeader>
 
-                        {/* Toggle Action (Pause icon as per mockup) */}
-                        <Button
-                          size="icon"
-                          className={`h-9 w-9 rounded-lg shadow-md transition-all duration-200 ${account.is_active
-                            ? "bg-[#e28a0d] hover:bg-[#c97b0a] text-white"
-                            : "bg-[#027a48] hover:bg-[#02663c] text-white"
-                            }`}
-                          onClick={() => handleToggleStatus(account)}
-                          title={account.is_active ? "Deactivate" : "Activate"}
-                        >
-                          {account.is_active ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
-                        </Button>
-
-                        {/* Delete Action (Red icon as per mockup) */}
-                        <Button
-                          size="icon"
-                          className="h-9 w-9 bg-[#dc2626] hover:bg-[#b91c1c] text-white rounded-lg shadow-md transition-all duration-200"
-                          onClick={() => handleOpenDelete(account)}
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4 fill-white" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-6 space-y-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex items-center gap-4">
+                    <Skeleton className="w-10 h-10 rounded-full" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-48" />
+                    </div>
+                    <Skeleton className="h-6 w-16" />
+                    <Skeleton className="h-8 w-24" />
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+            ) : filteredAccounts.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Users className="w-8 h-8 text-slate-400" />
+                </div>
+                <h3 className="text-lg font-medium text-slate-900 mb-1">Tidak ada pengguna</h3>
+                <p className="text-slate-500 mb-4">
+                  {searchTerm
+                    ? "Tidak ada hasil untuk pencarian Anda"
+                    : 'Klik "Tambah Pengguna" untuk membuat akun baru'}
+                </p>
+                {!searchTerm && (
+                  <Button onClick={handleOpenCreate} variant="outline" className="gap-2">
+                    <Plus className="w-4 h-4" />
+                    Tambah Pengguna Pertama
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-100 hover:bg-slate-100 border-0">
+                    <TableHead className="text-slate-700 font-semibold w-[25%]">Pengguna</TableHead>
+                    <TableHead className="text-slate-700 font-semibold w-[30%]">Email</TableHead>
+                    <TableHead className="text-slate-700 font-semibold text-center w-[15%]">Role</TableHead>
+                    <TableHead className="text-slate-700 font-semibold text-center w-[15%]">Status</TableHead>
+                    <TableHead className="text-slate-700 font-semibold text-center w-[15%]">Aksi</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredAccounts.map((account) => (
+                    <TableRow key={account.id} className="group hover:bg-slate-50 border-0">
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-9 w-9 border-2 border-slate-200">
+                            <AvatarFallback
+                              className={`text-xs font-semibold ${
+                                account.role === "admin" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                              }`}
+                            >
+                              {getInitials(account.username)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="font-medium text-slate-900">{account.username}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-slate-500">{account.email}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge
+                          variant="outline"
+                          className={`${
+                            account.role === "admin"
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-blue-50 text-blue-700 border-blue-200"
+                          }`}
+                        >
+                          {account.role === "admin" ? (
+                            <ShieldCheck className="w-3 h-3 mr-1" />
+                          ) : (
+                            <User className="w-3 h-3 mr-1" />
+                          )}
+                          {account.role || "User"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {account.is_active ? (
+                          <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100">
+                            Aktif
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-red-100 text-red-700 border-red-200">
+                            Nonaktif
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleOpenEdit(account)}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Edit</TooltipContent>
+                          </Tooltip>
 
-      {/* Create Modal */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Tambah Pengguna Baru</DialogTitle>
-            <DialogDescription>Buat akun pengguna baru dan atur hak aksesnya</DialogDescription>
-          </DialogHeader>
-          {renderForm(false)}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-              Batal
-            </Button>
-            <Button onClick={handleCreate} disabled={saving}>
-              {saving && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
-              Simpan
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`h-8 w-8 ${
+                                  account.is_active
+                                    ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                    : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                }`}
+                                onClick={() => handleToggleStatus(account)}
+                              >
+                                {account.is_active ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{account.is_active ? "Nonaktifkan" : "Aktifkan"}</TooltipContent>
+                          </Tooltip>
 
-      {/* Edit Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Edit Pengguna</DialogTitle>
-            <DialogDescription>Perbarui informasi dan hak akses untuk {selectedAccount?.username}</DialogDescription>
-          </DialogHeader>
-          {renderForm(true)}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditModal(false)}>
-              Batal
-            </Button>
-            <Button onClick={handleUpdate} disabled={saving}>
-              {saving && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
-              Simpan Perubahan
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => handleOpenDelete(account)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Hapus</TooltipContent>
+                          </Tooltip>
+                        </div>
 
-      {/* Delete Confirmation */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Hapus Pengguna?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Anda yakin ingin menghapus akun <strong>{selectedAccount?.username}</strong>? Tindakan ini tidak dapat
-              dibatalkan.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Batal</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-              Hapus
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+                        {/* Mobile dropdown */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild className="lg:hidden">
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleOpenEdit(account)}>
+                              <Pencil className="w-4 h-4 mr-2" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleToggleStatus(account)}>
+                              {account.is_active ? (
+                                <>
+                                  <Pause className="w-4 h-4 mr-2" />
+                                  Nonaktifkan
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-4 h-4 mr-2" />
+                                  Aktifkan
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => handleOpenDelete(account)}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Hapus
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Create Modal */}
+        <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-blue-600" />
+                Tambah Pengguna Baru
+              </DialogTitle>
+              <DialogDescription>Buat akun pengguna baru dan atur hak aksesnya ke berbagai modul.</DialogDescription>
+            </DialogHeader>
+            {renderForm(false)}
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+                Batal
+              </Button>
+              <Button onClick={handleCreate} disabled={saving} className="gap-2">
+                {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                Simpan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Modal */}
+        <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-blue-600" />
+                Edit Pengguna
+              </DialogTitle>
+              <DialogDescription>
+                Perbarui informasi dan hak akses untuk <strong>{selectedAccount?.username}</strong>
+              </DialogDescription>
+            </DialogHeader>
+            {renderForm(true)}
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setShowEditModal(false)}>
+                Batal
+              </Button>
+              <Button onClick={handleUpdate} disabled={saving} className="gap-2">
+                {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                Simpan Perubahan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation */}
+        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+                <Trash2 className="w-5 h-5" />
+                Hapus Pengguna?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Anda yakin ingin menghapus akun <strong>{selectedAccount?.username}</strong>? Tindakan ini tidak dapat
+                dibatalkan dan semua data pengguna akan dihapus permanen.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Batal</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+                Ya, Hapus
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </TooltipProvider>
   );
 }
