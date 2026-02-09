@@ -282,6 +282,7 @@ export async function callExternalEditUser(
   });
 }
 
+
 /**
  * Delete a user on the external API
  */
@@ -295,5 +296,25 @@ export async function callExternalDeleteUser(
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ user_id: userId }),
+  });
+}
+
+/**
+ * Change a user's password on the external API
+ */
+export async function callExternalChangePassword(
+  token: string,
+  userId: string | number,
+  newPassword: string
+): Promise<{ success: boolean; message: string }> {
+  return await apiFetch("/change-password", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      user_id: userId,
+      new_password: newPassword,
+    }),
   });
 }

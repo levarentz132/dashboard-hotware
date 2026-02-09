@@ -16,9 +16,12 @@ import {
   Mail,
   Key,
   Pause,
+  MoreHorizontal,
+  Pencil,
+  Lock,
   Play,
-  EyeOff,
   Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +46,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/auth-context";
@@ -168,6 +178,15 @@ export default function SubAccountManagement() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Password Change State
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    password: "",
+    confirmPassword: "",
+  });
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   // Fetch sub-accounts
   const fetchSubAccounts = useCallback(async () => {
     if (!isAdmin) {
@@ -232,6 +251,13 @@ export default function SubAccountManagement() {
   const handleOpenCreate = () => {
     resetForm();
     setShowCreateModal(true);
+  };
+
+  const handleOpenChangePassword = (account: SubAccount) => {
+    setSelectedAccount(account);
+    setPasswordForm({ password: "", confirmPassword: "" });
+    setFormError(null);
+    setShowChangePasswordModal(true);
   };
 
   // Open edit modal
@@ -456,6 +482,49 @@ export default function SubAccountManagement() {
     }
   };
 
+  const handleChangePassword = async () => {
+    if (!selectedAccount) return;
+
+    if (passwordForm.password.length < 6) {
+      setFormError("Password must be at least 6 characters");
+      return;
+    }
+
+    if (passwordForm.password !== passwordForm.confirmPassword) {
+      setFormError("Passwords do not match");
+      return;
+    }
+
+    setSaving(true);
+    setFormError(null);
+
+    try {
+      const response = await fetch("/api/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: selectedAccount.id,
+          new_password: passwordForm.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setShowChangePasswordModal(false);
+        setPasswordForm({ password: "", confirmPassword: "" });
+        // Optional: Show success toast
+      } else {
+        setFormError(data.message || "Failed to update password");
+      }
+    } catch (err) {
+      console.error("Error changing password:", err);
+      setFormError("Failed to connect to server");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Delete user
   const handleDelete = async () => {
     if (!selectedAccount) return;
@@ -554,26 +623,28 @@ export default function SubAccountManagement() {
             </select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="password">Password {isEdit ? "" : "*"}</Label>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                value={formData.password}
-                onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                placeholder={isEdit ? "••••••••" : "Masukkan password"}
-                className="h-11 pr-10 border-slate-200 focus-visible:ring-blue-600"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+          {!isEdit && (
+            <div className="space-y-2">
+              <Label htmlFor="password">Password *</Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={formData.password}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
+                  placeholder="Masukkan password"
+                  className="h-11 pr-10 border-slate-200 focus-visible:ring-blue-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -612,7 +683,7 @@ export default function SubAccountManagement() {
                         <button
                           type="button"
                           onClick={() => updatePrivilege(module.id, "can_view", !privilege.can_view)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${privilege.can_view ? "bg-blue-600" : "bg-slate-300"
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors select-none ${privilege.can_view ? "bg-blue-600" : "bg-slate-300"
                             }`}
                         >
                           <span
@@ -625,7 +696,7 @@ export default function SubAccountManagement() {
                         <button
                           type="button"
                           onClick={() => updatePrivilege(module.id, "can_edit", !privilege.can_edit)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${privilege.can_edit ? "bg-blue-600" : "bg-slate-300"
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors select-none ${privilege.can_edit ? "bg-blue-600" : "bg-slate-300"
                             }`}
                         >
                           <span
@@ -651,21 +722,25 @@ export default function SubAccountManagement() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <UserPlus className="w-7 h-7 text-blue-600" />
             Role Management
           </h2>
           <p className="text-gray-500 mt-1">Manage users and access permissions in your organization</p>
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={fetchSubAccounts} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
+          <Button onClick={handleOpenCreate} className="gap-2" size="sm">
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Add User</span>
           </Button>
-          <Button onClick={handleOpenCreate}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Member
-          </Button>
+
+          <button
+            onClick={fetchSubAccounts}
+            disabled={loading}
+            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-[38px]"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
@@ -711,75 +786,84 @@ export default function SubAccountManagement() {
               <p className="text-sm">Click "Tambah Pengguna" to create a new one</p>
             </div>
           ) : (
-            <Table className="border-collapse">
-              <TableHeader className="bg-[#343f4b] hover:bg-[#343f4b]">
-                <TableRow className="hover:bg-transparent border-none">
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4">Username</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4">Email</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4 text-center">Role</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4 text-center">Status</TableHead>
-                  <TableHead className="text-white font-bold uppercase tracking-wider py-4">Actions</TableHead>
+            <Table className="border-collapse table-fixed w-full">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[20%]">Username</TableHead>
+                  <TableHead className="w-[20%]">Email</TableHead>
+                  <TableHead className="w-[20%]">Role</TableHead>
+                  <TableHead className="w-[20%]">Status</TableHead>
+                  <TableHead className="w-[20%]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredAccounts.map((account) => (
                   <TableRow key={account.id}>
-                    <TableCell className="py-4">
-                      <span className="font-bold text-slate-800">{account.username}</span>
+                    <TableCell className="font-medium text-slate-900">
+                      {account.username}
                     </TableCell>
-                    <TableCell className="py-4 text-slate-500">
+                    <TableCell className="text-slate-500">
                       {account.email}
                     </TableCell>
-                    <TableCell className="py-4 text-center text-slate-600">
+                    <TableCell className="text-slate-600">
                       {account.role || "User"}
                     </TableCell>
-                    <TableCell className="py-4 text-center">
+                    <TableCell>
                       {account.is_active ? (
-                        <Badge variant="outline" className="bg-[#d1fadf] text-[#027a48] border-none rounded-full px-4 py-1 font-bold uppercase text-[10px] tracking-widest shadow-sm">
+                        <Badge
+                          variant="outline"
+                          className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all"
+                        >
                           Active
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="bg-red-100 text-red-700 border-none rounded-full px-4 py-1 font-bold uppercase text-[10px] tracking-widest shadow-sm">
+                        <Badge
+                          variant="outline"
+                          className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all"
+                        >
                           Inactive
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="py-4">
-                      <div className="flex justify-start gap-2 pl-4">
-                        {/* Edit Action (Key icon as per mockup) */}
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="h-9 w-9 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg shadow-sm border border-slate-200 transition-all duration-200"
-                          onClick={() => handleOpenEdit(account)}
-                          title="Permissions / Edit"
-                        >
-                          <Key className="w-4 h-4" />
-                        </Button>
-
-                        {/* Toggle Action (Pause icon as per mockup) */}
-                        <Button
-                          size="icon"
-                          className={`h-9 w-9 rounded-lg shadow-md transition-all duration-200 ${account.is_active
-                            ? "bg-[#e28a0d] hover:bg-[#c97b0a] text-white"
-                            : "bg-[#027a48] hover:bg-[#02663c] text-white"
-                            }`}
-                          onClick={() => handleToggleStatus(account)}
-                          title={account.is_active ? "Deactivate" : "Activate"}
-                        >
-                          {account.is_active ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
-                        </Button>
-
-                        {/* Delete Action (Red icon as per mockup) */}
-                        <Button
-                          size="icon"
-                          className="h-9 w-9 bg-[#dc2626] hover:bg-[#b91c1c] text-white rounded-lg shadow-md transition-all duration-200"
-                          onClick={() => handleOpenDelete(account)}
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4 fill-white" />
-                        </Button>
-                      </div>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleOpenChangePassword(account)}>
+                            <Lock className="h-4 w-4 mr-2" />
+                            Change Password
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleOpenEdit(account)}>
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Edit Permissions
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleToggleStatus(account)}>
+                            {account.is_active ? (
+                              <>
+                                <Pause className="h-4 w-4 mr-2" />
+                                Deactivate
+                              </>
+                            ) : (
+                              <>
+                                <Play className="h-4 w-4 mr-2" />
+                                Activate
+                              </>
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => handleOpenDelete(account)}
+                            className="text-red-600 focus:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -829,6 +913,90 @@ export default function SubAccountManagement() {
         </DialogContent>
       </Dialog>
 
+      {/* Change Password Modal */}
+      <Dialog open={showChangePasswordModal} onOpenChange={setShowChangePasswordModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+            <DialogDescription>Set a new password for {selectedAccount?.username}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {formError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm">{formError}</span>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="new-password">New Password</Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  value={passwordForm.password}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const confirmInput = document.getElementById("confirm-password");
+                      if (confirmInput) {
+                        (confirmInput as HTMLInputElement).focus();
+                      }
+                    }
+                  }}
+                  placeholder="Enter new password"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">Confirm Password</Label>
+              <div className="relative">
+                <Input
+                  id="confirm-password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleChangePassword();
+                    }
+                  }}
+                  placeholder="Confirm new password"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowChangePasswordModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleChangePassword} disabled={saving}>
+              {saving && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
+              Update Password
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Confirmation */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
@@ -847,6 +1015,6 @@ export default function SubAccountManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </div >
   );
 }

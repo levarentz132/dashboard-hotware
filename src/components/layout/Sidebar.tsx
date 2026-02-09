@@ -39,7 +39,7 @@ const navigationItems: NavItem[] = [
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle },
   { id: "audits", label: "User Logs", icon: Users },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "debug", label: "Connection Debug", icon: Settings },
+  // { id: "debug", label: "Connection Debug", icon: Settings },
   { id: "storage", label: "Storage", icon: Database },
   { id: "users", label: "User Management", icon: Users },
   { id: "subaccounts", label: "Role Management", icon: UserPlus },
