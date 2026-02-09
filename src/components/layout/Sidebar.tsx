@@ -16,6 +16,8 @@ import {
   UserPlus,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/auth-context";
+import { Privilege, isAdmin } from "@/lib/auth";
 
 interface SidebarProps {
   activeSection: string;
@@ -29,25 +31,48 @@ interface NavItem {
   label: string;
   icon: typeof Camera;
   href?: string;
+  module?: string; // Add module for permission check
 }
 
 const navigationItems: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard-full-view" },
-  { id: "cameras", label: "Camera Inventory", icon: Camera },
-  // { id: "servers", label: "Server Options", icon: Server },
-  { id: "health", label: "System Health", icon: Activity },
-  { id: "alarms", label: "Alarm Console", icon: AlertTriangle },
-  { id: "audits", label: "User Logs", icon: Users },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
-  // { id: "debug", label: "Connection Debug", icon: Settings },
-  { id: "storage", label: "Storage", icon: Database },
-  { id: "users", label: "User Management", icon: Users },
-  { id: "subaccounts", label: "Role Management", icon: UserPlus },
-  // { id: "settings", label: "Settings", icon: Settings },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard-full-view", module: "dashboard" },
+  { id: "cameras", label: "Camera Inventory", icon: Camera, module: "camera_inventory" },
+  { id: "health", label: "System Health", icon: Activity, module: "system_health" },
+  { id: "alarms", label: "Alarm Console", icon: AlertTriangle, module: "alarm_console" },
+  { id: "audits", label: "User Logs", icon: Users, module: "user_logs" },
+  { id: "analytics", label: "Analytics", icon: BarChart3, module: "analytics" },
+  { id: "storage", label: "Storage", icon: Database, module: "storage" },
+  { id: "users", label: "User Management", icon: Users, module: "user_management" },
+  { id: "subaccounts", label: "Role Management", icon: UserPlus, module: "user_management" },
 ];
 
 export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose }: SidebarProps) {
   const router = useRouter();
+  const { user } = useAuth();
+
+  // Filter navigation items based on user privileges
+  const filteredItems = navigationItems.filter(item => {
+    // Admins see everything
+    if (isAdmin(user)) return true;
+
+    // Explicitly hide sensitive management items from non-admins
+    if (item.id === 'debug' || item.id === 'subaccounts') return false;
+
+    // If item has a module requirement, check privileges
+    if (item.module) {
+      const privilege = user?.privileges?.find((p: Privilege) => {
+        if (p.module === item.module) return true;
+        // Support legacy module names
+        if (item.module === "system_health" && p.module === "health") return true;
+        if (item.module === "user_management" && p.module === "users") return true;
+        return false;
+      });
+      return privilege?.can_view === true;
+    }
+
+    // Default to visible if no module specified (like home/general)
+    return true;
+  });
 
   const handleNavClick = (item: NavItem) => {
     // If item has href, navigate to that page
@@ -101,15 +126,15 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
 
         {/* Navigation */}
         <nav className="mt-4 sm:mt-6 overflow-y-auto max-h-[calc(100vh-100px)]">
-          {navigationItems.map((item) => {
+          {filteredItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item)}
                 className={`w-full flex items-center px-4 sm:px-6 py-2.5 sm:py-3 text-left transition-colors text-sm sm:text-base ${activeSection === item.id
-                    ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
-                    : "text-gray-600 hover:bg-gray-50"
+                  ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
+                  : "text-gray-600 hover:bg-gray-50"
                   }`}
               >
                 <Icon className="w-5 h-5 mr-3 flex-shrink-0" />

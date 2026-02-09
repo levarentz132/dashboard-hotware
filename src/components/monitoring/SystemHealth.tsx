@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { isAdmin } from "@/lib/auth";
 import dynamic from "next/dynamic";
 import {
   Activity,
@@ -24,7 +25,8 @@ import ServerLocationForm from "@/components/servers/ServerLocationForm";
 import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
-import { Shield, LogIn } from "lucide-react";
+import { Shield, LogIn, Lock } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import type { ServerMarkerData } from "./ServerMap";
 
 // Dynamic import untuk ServerMap (client-side only karena pakai Leaflet)
@@ -59,6 +61,10 @@ interface ServerLocationData {
 }
 
 export default function SystemHealth() {
+  const { user: localUser } = useAuth();
+  const isUserAdmin = isAdmin(localUser);
+  const canEditHealth = isUserAdmin || localUser?.privileges?.find(p => p.module === "system_health" || p.module === "health")?.can_edit === true;
+
   const { systemInfo, connected, loading } = useSystemInfo();
   const { cameras } = useCameras();
   const { data: cloudSystems, refetch: refetchCloudSystems } = useCloudSystems();
@@ -355,12 +361,14 @@ export default function SystemHealth() {
                         <MapPin className="w-4 h-4 text-gray-500" />
                         <span className="text-sm text-gray-600">Lokasi Server</span>
                       </div>
-                      <button
-                        onClick={() => setEditingLocation(system.name)}
-                        className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-                      >
-                        {hasLocation ? "Edit" : "Set Lokasi"}
-                      </button>
+                      {canEditHealth && (
+                        <button
+                          onClick={() => setEditingLocation(system.name)}
+                          className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                        >
+                          {hasLocation ? "Edit" : "Set Lokasi"}
+                        </button>
+                      )}
                     </div>
                     {hasLocation ? (
                       <button

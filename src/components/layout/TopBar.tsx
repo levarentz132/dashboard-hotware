@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Bell, User, Settings, Menu, LogOut, Loader2, RefreshCw } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { isAdmin } from "@/lib/auth";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import {
   DropdownMenu,
@@ -95,9 +96,13 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
                 <div className="flex flex-col">
                   <span className="font-medium">{user?.username ?? "User"}</span>
                   <span className="text-xs text-gray-500">
-                    {user?.role
-                      ? ROLE_LABELS[user.role.toLowerCase()] ?? user.role
-                      : "Role not set"}
+                    {isAdmin(user)
+                      ? "Administrator"
+                      : user?.role
+                        ? typeof user.role === "string"
+                          ? ROLE_LABELS[user.role.toLowerCase()] ?? user.role
+                          : user.role.name
+                        : "Role not set"}
                   </span>
                 </div>
               </DropdownMenuLabel>

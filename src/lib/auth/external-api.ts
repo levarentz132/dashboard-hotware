@@ -49,6 +49,7 @@ export interface ExternalAuthResponse {
     days_remaining?: number | null;
     last_login?: string | null;
     is_active?: boolean;
+    created_at?: string;
   };
 }
 

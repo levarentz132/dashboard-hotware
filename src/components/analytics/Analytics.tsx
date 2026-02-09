@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { isAdmin } from "@/lib/auth";
 import {
   Thermometer,
   Droplets,
@@ -18,6 +19,7 @@ import {
   Power,
   Loader2,
 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -47,6 +49,10 @@ interface SSEData {
 type ConnectionMode = "realtime" | "polling";
 
 export default function Analytics() {
+  const { user: localUser } = useAuth();
+  const isUserAdmin = isAdmin(localUser);
+  const canEditAnalytics = isUserAdmin || localUser?.privileges?.find(p => p.module === "analytics")?.can_edit === true;
+
   const [temperature, setTemperature] = useState<SensorData>({
     value: null,
     lastUpdated: null,
@@ -370,22 +376,20 @@ export default function Analytics() {
           <div className="flex items-center bg-gray-100 rounded-lg p-1">
             <button
               onClick={() => setConnectionMode("realtime")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-                connectionMode === "realtime"
-                  ? "bg-white shadow text-green-600 font-medium"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${connectionMode === "realtime"
+                ? "bg-white shadow text-green-600 font-medium"
+                : "text-gray-600 hover:text-gray-900"
+                }`}
             >
               <Zap className="w-3.5 h-3.5" />
               <span>Realtime</span>
             </button>
             <button
               onClick={() => setConnectionMode("polling")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-                connectionMode === "polling"
-                  ? "bg-white shadow text-blue-600 font-medium"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${connectionMode === "polling"
+                ? "bg-white shadow text-blue-600 font-medium"
+                : "text-gray-600 hover:text-gray-900"
+                }`}
             >
               <Clock className="w-3.5 h-3.5" />
               <span>Polling</span>
@@ -440,9 +444,8 @@ export default function Analytics() {
             {/* Left: Info */}
             <div className="flex items-center gap-4">
               <div
-                className={`p-3 rounded-full transition-all duration-300 ${
-                  powerState ? "bg-green-100" : "bg-gray-100"
-                }`}
+                className={`p-3 rounded-full transition-all duration-300 ${powerState ? "bg-green-100" : "bg-gray-100"
+                  }`}
               >
                 {powerLoading ? (
                   <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
@@ -462,16 +465,14 @@ export default function Analytics() {
             <div className="flex items-center gap-3">
               {powerError && <span className="text-xs text-red-500 mr-2">{powerError}</span>}
               <button
-                onClick={() => !powerLoading && updatePowerState(!powerState)}
-                disabled={powerLoading}
-                className={`relative w-14 h-7 rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                  powerState ? "bg-green-500 focus:ring-green-500" : "bg-gray-300 focus:ring-gray-400"
-                } ${powerLoading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                onClick={() => !powerLoading && canEditAnalytics && updatePowerState(!powerState)}
+                disabled={powerLoading || !canEditAnalytics}
+                className={`relative w-14 h-7 rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 ${powerState ? "bg-green-500 focus:ring-green-500" : "bg-gray-300 focus:ring-gray-400"
+                  } ${powerLoading || !canEditAnalytics ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
               >
                 <span
-                  className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all duration-300 ${
-                    powerState ? "left-7" : "left-0.5"
-                  }`}
+                  className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all duration-300 ${powerState ? "left-7" : "left-0.5"
+                    }`}
                 />
               </button>
             </div>
@@ -658,8 +659,8 @@ export default function Analytics() {
             <div className="text-2xl font-bold text-gray-900">
               {history.length > 0 && history.some((h) => h.temperature !== null)
                 ? `${Math.max(
-                    ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number),
-                  ).toFixed(1)}°`
+                  ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number),
+                ).toFixed(1)}°`
                 : "-"}
             </div>
             <div className="text-xs text-gray-500">Max Temp (Session)</div>
@@ -671,8 +672,8 @@ export default function Analytics() {
             <div className="text-2xl font-bold text-gray-900">
               {history.length > 0 && history.some((h) => h.temperature !== null)
                 ? `${Math.min(
-                    ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number),
-                  ).toFixed(1)}°`
+                  ...history.filter((h) => h.temperature !== null).map((h) => h.temperature as number),
+                ).toFixed(1)}°`
                 : "-"}
             </div>
             <div className="text-xs text-gray-500">Min Temp (Session)</div>

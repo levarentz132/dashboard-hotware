@@ -35,13 +35,49 @@ export async function GET(request: NextRequest) {
 
     const session = await validateSession(token);
 
+    if (session.valid && session.user) {
+      // Try to get freshest user data from /me endpoint if requested or by default
+      try {
+        const { getExternalMe } = await import("@/lib/auth/external-api");
+        const meResult = await getExternalMe(token);
+        if (meResult && meResult.user) {
+          // Merge JWT data with freshest API data
+          session.user = {
+            ...session.user,
+            ...meResult.user,
+            // Ensure ID is number and role is typed correctly
+            id: Number(meResult.user.id),
+            role: meResult.user.role as any,
+          };
+          console.log(`[Session API] Enriched user data from /me for ${session.user?.username}`);
+        }
+      } catch (meError) {
+        console.warn("[Session API] Failed to enrich user data from /me:", meError);
+        // Continue with JWT data if enrichment fails
+      }
+    }
+
     if (!session.valid) {
       // Access token invalid/expired - try refresh once
       if (refreshToken) {
         const refreshed = await refreshAccessToken(refreshToken);
         if (refreshed.success && refreshed.accessToken) {
           const refreshedSession = await validateSession(refreshed.accessToken);
-          if (refreshedSession.valid) {
+          if (refreshedSession.valid && refreshedSession.user) {
+            // Also enrich the refreshed session user
+            try {
+              const { getExternalMe } = await import("@/lib/auth/external-api");
+              const meResult = await getExternalMe(refreshed.accessToken);
+              if (meResult && meResult.user) {
+                refreshedSession.user = {
+                  ...refreshedSession.user,
+                  ...meResult.user,
+                  id: Number(meResult.user.id),
+                  role: meResult.user.role as any,
+                };
+              }
+            } catch (e) { }
+
             const response = NextResponse.json({
               success: true,
               isAuthenticated: true,

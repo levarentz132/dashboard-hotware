@@ -27,18 +27,23 @@ export interface User {
 
 export type UserRole = "admin" | "operator" | "viewer";
 
+export interface Role {
+  id: number;
+  name: string;
+}
+
 export interface UserPublic {
   id: number;
   username: string;
   email: string;
   full_name?: string;
-  role?: UserRole; // Optional for backward compatibility
+  role?: UserRole | Role; // Support both old string and new object role
   system_id: string; // The system ID this user is licensed for
   organizations?: Organization[]; // New: organizations the user belongs to
   privileges?: Privilege[]; // New: user's access privileges
   is_active: boolean;
-  created_at: Date;
-  last_login?: Date;
+  created_at: Date | string;
+  last_login?: Date | string | null;
 }
 
 // Payload for creating JWT tokens (exp can be string like "24h")

@@ -97,6 +97,8 @@ const getDefaultPrivileges = (): Privilege[] =>
     can_edit: false,
   }));
 
+import { isAdmin } from "@/lib/auth";
+
 export default function SubAccountManagement() {
   const { user } = useAuth();
   const [subAccounts, setSubAccounts] = useState<SubAccount[]>([]);
@@ -105,13 +107,14 @@ export default function SubAccountManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const [orgId, setOrgId] = useState<number | null>(null);
 
-  // Check if user is admin
-  const isAdmin = user?.role === "admin";
+  // Check permissions
+  const isUserAdmin = isAdmin(user);
+  const canEditMembers = isUserAdmin || user?.privileges?.find(p => p.module === "user_management" || p.module === "users")?.can_edit === true;
 
   // Fetch organization ID if not available in context
   useEffect(() => {
     const getOrgId = async () => {
-      if (!isAdmin) {
+      if (!isUserAdmin) {
         if (!loading) setLoading(false);
         return;
       }
@@ -211,16 +214,16 @@ export default function SubAccountManagement() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, [isUserAdmin]);
 
   useEffect(() => {
-    if (isAdmin) {
+    if (isUserAdmin) {
       fetchSubAccounts();
     }
-  }, [fetchSubAccounts, isAdmin]);
+  }, [fetchSubAccounts, isUserAdmin]);
 
   // If not admin, don't show the management UI
-  if (!isAdmin && !loading) {
+  if (!isUserAdmin && !loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Shield className="w-16 h-16 text-slate-300 mb-4" />
@@ -728,10 +731,12 @@ export default function SubAccountManagement() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button onClick={handleOpenCreate} className="gap-2" size="sm">
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Add User</span>
-          </Button>
+          {canEditMembers && (
+            <Button onClick={handleOpenCreate} className="gap-2" size="sm">
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Add User</span>
+            </Button>
+          )}
 
           <button
             onClick={fetchSubAccounts}
@@ -826,44 +831,50 @@ export default function SubAccountManagement() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleOpenChangePassword(account)}>
-                            <Lock className="h-4 w-4 mr-2" />
-                            Change Password
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleOpenEdit(account)}>
-                            <Pencil className="h-4 w-4 mr-2" />
-                            Edit Permissions
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleToggleStatus(account)}>
-                            {account.is_active ? (
-                              <>
-                                <Pause className="h-4 w-4 mr-2" />
-                                Deactivate
-                              </>
-                            ) : (
-                              <>
-                                <Play className="h-4 w-4 mr-2" />
-                                Activate
-                              </>
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => handleOpenDelete(account)}
-                            className="text-red-600 focus:text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      {canEditMembers ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleOpenChangePassword(account)}>
+                              <Lock className="h-4 w-4 mr-2" />
+                              Change Password
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleOpenEdit(account)}>
+                              <Pencil className="h-4 w-4 mr-2" />
+                              Edit Permissions
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleToggleStatus(account)}>
+                              {account.is_active ? (
+                                <>
+                                  <Pause className="h-4 w-4 mr-2" />
+                                  Deactivate
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-4 w-4 mr-2" />
+                                  Activate
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => handleOpenDelete(account)}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

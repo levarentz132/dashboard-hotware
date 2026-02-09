@@ -1,5 +1,7 @@
 "use client";
 
+import { isAdmin } from "@/lib/auth";
+
 import { useState, useEffect, useCallback } from "react";
 import {
   RefreshCw,
@@ -21,6 +23,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Progress } from "../ui/progress";
@@ -108,6 +111,10 @@ const STORAGE_TYPES = [
 ];
 
 export default function StorageManagement() {
+  const { user: localUser } = useAuth();
+  const isUserAdmin = isAdmin(localUser);
+  const canEditStorage = isUserAdmin || localUser?.privileges?.find(p => p.module === "storage")?.can_edit === true;
+
   // View mode state
   const [viewMode, setViewMode] = useState<ViewMode>("cloud");
 

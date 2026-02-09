@@ -180,11 +180,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Server tidak memberikan token akses" }, { status: 500 });
     }
 
+    // Attempt to enrich user data from /me endpoint immediately
+    // This ensures permissions and role objects are correct from the very first response
+    let finalUser = user;
+    try {
+      const { getExternalMe } = await import("@/lib/auth/external-api");
+      const profileData = await getExternalMe(accessToken);
+      if (profileData && profileData.user) {
+        // Merge with profile data for more accuracy
+        finalUser = {
+          ...user,
+          ...profileData.user,
+          id: Number(profileData.user.id),
+          role: profileData.user.role as any, // Cast to any to handle string/object
+          created_at: profileData.user.created_at || user.created_at,
+          last_login: profileData.user.last_login || user.last_login as any,
+        };
+        console.log(`[Login] User profile enriched from /me for ${finalUser.username}`);
+      }
+    } catch (profileError) {
+      console.warn("[Login] Could not enrich profile from /me:", profileError);
+      // Proceed with basic user info from login
+    }
+
     // Create response with user data
     const response = NextResponse.json({
       success: true,
       message: "Login berhasil",
-      user,
+      user: finalUser,
     });
 
     // Set HTTP-only cookie for access token (short-lived)

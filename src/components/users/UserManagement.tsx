@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
 import { useAuth } from "@/contexts/auth-context";
+import { isAdmin } from "@/lib/auth";
 import {
   fetchUsers,
   fetchUserGroups,
@@ -228,8 +229,11 @@ function useUserGroups(systemId?: string) {
   return { groups, loading, error, refetch: fetchGroupsData };
 }
 
+
 export default function UserManagement() {
   const { user: localUser } = useAuth();
+  const isUserAdmin = isAdmin(localUser);
+  const canEditUsers = isUserAdmin || localUser?.privileges?.find(p => p.module === "user_management" || p.module === "users")?.can_edit === true;
   const [selectedSystemId, setSelectedSystemId] = useState<string>("");
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(false);
@@ -1055,7 +1059,7 @@ export default function UserManagement() {
             </Select>
           )}
 
-          {!isCloudEmpty && (
+          {!isCloudEmpty && canEditUsers && (
             <Button onClick={handleOpenCreate} className="gap-2" size="sm">
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">Add User</span>
@@ -1305,28 +1309,34 @@ export default function UserManagement() {
                                 )}
                               </TableCell>
                               <TableCell>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                      <MoreHorizontal className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => handleOpenEdit(user)} disabled={user.type === "ldap"}>
-                                      <Pencil className="h-4 w-4 mr-2" />
-                                      Edit
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onClick={() => handleOpenDelete(user)}
-                                      className="text-red-600 focus:text-red-600"
-                                      disabled={user.type === "ldap"}
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-2" />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
+                                {canEditUsers ? (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => handleOpenEdit(user)} disabled={user.type === "ldap"}>
+                                        <Pencil className="h-4 w-4 mr-2" />
+                                        Edit
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => handleOpenDelete(user)}
+                                        className="text-red-600 focus:text-red-600"
+                                        disabled={user.type === "ldap"}
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                ) : (
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                )}
                               </TableCell>
                             </TableRow>
                           );

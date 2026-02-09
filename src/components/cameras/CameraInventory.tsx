@@ -9,7 +9,6 @@ import {
   WifiOff,
   RefreshCw,
   AlertCircle,
-  Plus,
   Cloud,
   Server,
   ChevronDown,
@@ -22,7 +21,7 @@ import {
   Shield,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useCameras, useDeviceType } from "@/hooks/useNxAPI-camera";
+import { useCameras } from "@/hooks/useNxAPI-camera";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { fetchCloudSystems as getCachedCloudSystems } from "@/hooks/use-async-data";
@@ -33,7 +32,8 @@ import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
+import { useAuth } from "@/contexts/auth-context";
+import { isAdmin } from "@/lib/auth";
 
 interface CloudSystem {
   id: string;
@@ -72,6 +72,9 @@ interface CamerasBySystem {
 }
 
 export default function CameraInventory() {
+  const { user: localUser } = useAuth();
+  const isUserAdmin = isAdmin(localUser);
+
   const [viewMode, setViewMode] = useState<"grid" | "list" | "cloud">("cloud");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSystemId, setSelectedSystemId] = useState<string>("");
@@ -87,7 +90,6 @@ export default function CameraInventory() {
   const { cameras, loading: loadingCameras, error: camerasError, refetch } = useCameras(systemId);
   const { connected, testConnection } = useSystemInfo(systemId);
   const { servers, loading: loadingServers, error: serversError } = useServers(systemId);
-  const { deviceType } = useDeviceType(systemId);
 
   const loading = loadingCameras || loadingServers;
   const error = camerasError || serversError;
@@ -302,29 +304,6 @@ export default function CameraInventory() {
     }
   }, [systemId, refetch, viewMode, fetchAllCloudCameras]);
 
-  // Modal states
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Create form state
-  const [createForm, setCreateForm] = useState({
-    name: "",
-    physicalId: "",
-    url: "",
-    typeId: "",
-    mac: "",
-    serverId: "",
-    vendor: "",
-    model: "",
-    logicalId: "",
-    groupId: "",
-    groupName: "",
-    credentialsUser: "",
-    credentialsPassword: "",
-  });
-
-  // Form error states
-  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
 
   // Auto-retry connection when component mounts
   useEffect(() => {
@@ -334,13 +313,6 @@ export default function CameraInventory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Set default serverId when servers load
-  useEffect(() => {
-    if (servers.length > 0 && !createForm.serverId) {
-      setCreateForm((prev) => ({ ...prev, serverId: servers[0].id }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [servers]);
 
   const displayCameras = useMemo(() => {
     if (viewMode === "cloud") {
@@ -385,80 +357,6 @@ export default function CameraInventory() {
     (c) => c.status?.toLowerCase() === "mismatchedcertificate",
   ).length;
 
-  // Handle Create Camera
-  const handleCreateCamera = async () => {
-    try {
-      // Clear previous errors
-      setCreateErrors({});
-      const errors: Record<string, string> = {};
-
-      if (!createForm.name) errors.name = "Camera Name is required";
-      if (!createForm.url) errors.url = "URL is required";
-      if (!createForm.serverId) errors.serverId = "Server is required";
-      if (!createForm.typeId) errors.typeId = "Device Type is required";
-      if (!createForm.physicalId) errors.physicalId = "Physical ID is required";
-
-      if (Object.keys(errors).length > 0) {
-        setCreateErrors(errors);
-        return;
-      }
-
-      setIsSubmitting(true);
-
-      const payload = {
-        name: createForm.name,
-        physicalId: createForm.physicalId,
-        url: createForm.url,
-        typeId: createForm.typeId,
-        mac: createForm.mac,
-        serverId: createForm.serverId,
-        vendor: createForm.vendor,
-        model: createForm.model,
-        logicalId: createForm.logicalId,
-        group:
-          createForm.groupId || createForm.groupName
-            ? {
-              id: createForm.groupId,
-              name: createForm.groupName,
-            }
-            : undefined,
-        credentials: {
-          user: createForm.credentialsUser || "",
-          password: createForm.credentialsPassword || "",
-        },
-      };
-
-      const result = await nxAPI.addCamera(payload);
-
-      if (result) {
-        alert("Camera created successfully!");
-        setShowCreateModal(false);
-        // Reset form
-        setCreateForm({
-          name: "",
-          physicalId: "",
-          url: "",
-          typeId: "",
-          mac: "",
-          serverId: servers.length > 0 ? servers[0].id : "",
-          vendor: "",
-          model: "",
-          logicalId: "",
-          groupId: "",
-          groupName: "",
-          credentialsUser: "",
-          credentialsPassword: "",
-        });
-        refetch();
-      }
-    } catch (error: unknown) {
-      console.error("[CameraInventory] Failed to create camera:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      alert(`Failed to create camera: ${errorMessage}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const getStatusIcon = (status: string) => {
     return status?.toLowerCase() === "online" ? (
@@ -468,185 +366,6 @@ export default function CameraInventory() {
     );
   };
 
-  // Render Create Modal Content (now moved into main render)
-  const renderCreateModal = () => {
-    return (
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-4 md:p-6 custom-scrollbar">
-          <DialogHeader>
-            <DialogTitle className="text-lg md:text-xl font-semibold text-gray-900">Create New Camera</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-3 md:space-y-4 py-2">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                Camera Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={createForm.name}
-                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.name ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-                placeholder="Camera 1"
-              />
-              {createErrors.name && <p className="text-xs text-red-500 mt-1">{createErrors.name}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                URL <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={createForm.url}
-                onChange={(e) => setCreateForm({ ...createForm, url: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.url ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-                placeholder="rtsp://192.168.1.100:554/stream"
-              />
-              {createErrors.url && <p className="text-xs text-red-500 mt-1">{createErrors.url}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                Server <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={createForm.serverId}
-                onChange={(e) => setCreateForm({ ...createForm, serverId: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.serverId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-              >
-                <option value="">Select Server</option>
-                {servers.map((server) => (
-                  <option key={server.id} value={server.id}>
-                    {server.name || server.id}
-                  </option>
-                ))}
-              </select>
-              {createErrors.serverId && <p className="text-xs text-red-500 mt-1">{createErrors.serverId}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                Device Type <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={createForm.typeId}
-                onChange={(e) => setCreateForm({ ...createForm, typeId: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.typeId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                  }`}
-              >
-                <option value="">Select Device Type</option>
-                {deviceType.map((type) => (
-                  <option key={type.id} value={type.id}>
-                    {type.name} - {type.manufacturer}
-                  </option>
-                ))}
-              </select>
-              {createErrors.typeId && <p className="text-xs text-red-500 mt-1">{createErrors.typeId}</p>}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                  Physical ID <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={createForm.physicalId}
-                  onChange={(e) => setCreateForm({ ...createForm, physicalId: e.target.value })}
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${createErrors.physicalId ? "border-red-500 focus:ring-red-500" : "border-gray-300"
-                    }`}
-                />
-                {createErrors.physicalId && <p className="text-xs text-red-500 mt-1">{createErrors.physicalId}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">MAC Address</label>
-                <input
-                  type="text"
-                  value={createForm.mac}
-                  onChange={(e) => setCreateForm({ ...createForm, mac: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
-                <input
-                  type="text"
-                  value={createForm.vendor}
-                  onChange={(e) => setCreateForm({ ...createForm, vendor: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                <input
-                  type="text"
-                  value={createForm.model}
-                  onChange={(e) => setCreateForm({ ...createForm, model: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Logical ID</label>
-              <input
-                type="text"
-                value={createForm.logicalId}
-                onChange={(e) => setCreateForm({ ...createForm, logicalId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-            </div>
-
-            <div className="border-t pt-3 md:pt-4">
-              <h3 className="text-sm font-medium text-gray-700 mb-2 md:mb-3">Credentials</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                  <input
-                    type="text"
-                    value={createForm.credentialsUser}
-                    onChange={(e) => setCreateForm({ ...createForm, credentialsUser: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <input
-                    type="password"
-                    value={createForm.credentialsPassword}
-                    onChange={(e) => setCreateForm({ ...createForm, credentialsPassword: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 mt-4">
-            <Button
-              onClick={() => setShowCreateModal(false)}
-              disabled={isSubmitting}
-              variant="outline"
-              className="w-full sm:w-auto"
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleCreateCamera} disabled={isSubmitting} className="w-full sm:w-auto">
-              {isSubmitting && <RefreshCw className="w-4 h-4 animate-spin mr-2" />}
-              {isSubmitting ? "Creating..." : "Create Camera"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  };
 
   const isCloudEmpty = viewMode === "cloud" && cloudSystems.length === 0;
   const showNoCloudAlert = isCloudEmpty && !loadingCloud;
@@ -654,7 +373,6 @@ export default function CameraInventory() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Modals */}
-      {renderCreateModal()}
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
@@ -687,6 +405,7 @@ export default function CameraInventory() {
               </button>
             </div>
           )}
+
 
           <button
             onClick={() => {
@@ -889,9 +608,6 @@ export default function CameraInventory() {
                   <Camera className="w-12 h-12 text-gray-300 mx-auto" />
                   <p>No camera detected in this system.</p>
                   <div className="flex gap-3 justify-center">
-                    <Button onClick={() => setShowCreateModal(true)}>
-                      <Plus className="w-4 h-4 mr-2" /> Add Camera
-                    </Button>
                     <Button onClick={() => refetch()} variant="outline">
                       <RefreshCw className="w-4 h-4 mr-2" /> Refresh
                     </Button>

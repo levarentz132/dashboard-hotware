@@ -1,5 +1,9 @@
 "use client";
 
+import { useAuth } from "@/contexts/auth-context";
+import { isAdmin } from "@/lib/auth";
+import { Lock } from "lucide-react";
+
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { ReactGridLayout as GridLayout, type Layout as LayoutType } from "react-grid-layout/legacy";
 import {
@@ -216,6 +220,23 @@ const MemoizedWidget = memo(
   }) => {
     const WidgetComponent = widgetRegistry[widget.type]?.component;
     const widgetName = widgetRegistry[widget.type]?.name || "Widget";
+    const { user } = useAuth();
+    const isUserAdmin = isAdmin(user);
+
+    // Map widget type to module name for permission check
+    const widgetModuleMap: Record<string, string> = {
+      cameraOverview: "camera_inventory",
+      storage: "storage",
+      systemStatus: "system_health",
+      health: "health",
+      alarmConsole: "alarm_console",
+      auditLog: "user_logs",
+      analytics: "analytics",
+      serverMap: "system_health", // Or whatever module maps to server map
+    };
+
+    const moduleName = widgetModuleMap[widget.type];
+    const hasViewPermission = isUserAdmin || !moduleName || user?.privileges?.find(p => p.module === moduleName || (moduleName === "system_health" && p.module === "health"))?.can_view === true;
 
     return (
       <div
@@ -263,7 +284,13 @@ const MemoizedWidget = memo(
 
           {/* Widget Content */}
           <div className="flex-1 overflow-auto">
-            {WidgetComponent ? (
+            {!hasViewPermission ? (
+              <div className="flex flex-col items-center justify-center h-full text-gray-400 p-4 text-center">
+                <Lock className="w-8 h-8 mb-2 opacity-50" />
+                <p className="text-xs font-medium">Akses Terbatas</p>
+                <p className="text-[10px] opacity-70">Anda tidak memiliki izin untuk melihat modul ini</p>
+              </div>
+            ) : WidgetComponent ? (
               <WidgetComponent systemId={systemId} />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-400">Widget not found</div>
@@ -279,6 +306,10 @@ MemoizedWidget.displayName = "MemoizedWidget";
 
 export default function DraggableDashboard({ userId = "default" }: DraggableDashboardProps) {
   const router = useRouter();
+  const { user } = useAuth();
+  const isUserAdmin = isAdmin(user);
+  const canCustomize = isUserAdmin || user?.privileges?.find(p => p.module === "dashboard")?.can_edit === true;
+
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [showAddWidget, setShowAddWidget] = useState(false);
@@ -776,22 +807,26 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                 </>
               )}
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={isEditing ? "destructive" : "outline"}
-                    size="sm"
-                    onClick={handleToggleEdit}
-                    className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
-                  >
-                    {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
-                    <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{isEditing ? "Batalkan perubahan" : "Kustomisasi dashboard"}</p>
-                </TooltipContent>
-              </Tooltip>
+              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
+
+              {canCustomize && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={isEditing ? "destructive" : "outline"}
+                      size="sm"
+                      onClick={handleToggleEdit}
+                      className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
+                    >
+                      {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
+                      <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{isEditing ? "Batalkan perubahan" : "Kustomisasi dashboard"}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
