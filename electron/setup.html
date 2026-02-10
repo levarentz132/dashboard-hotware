@@ -414,7 +414,15 @@
                     state.credentials.cloudEmail = email;
                     state.credentials.cloudPassword = password;
                     state.credentials.cloudAuthToken = result.cloudAuthToken;
-                    state.systems = result.systems;
+
+                    // Filter systems to only include those where the user is an owner
+                    const ownerSystems = (result.systems || []).filter(sys => sys.accessRole === 'owner');
+                    state.systems = ownerSystems;
+
+                    if (state.systems.length === 0) {
+                        showStatus('No systems found where you are an owner.', 'error');
+                        return;
+                    }
 
                     if (state.systems.length === 1) {
                         state.selectedSystem = state.systems[0];
