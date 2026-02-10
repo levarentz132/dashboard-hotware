@@ -5,13 +5,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import type {
-  AuthContextValue,
-  AuthState,
-  UserPublic,
-  LoginCredentials,
-  AuthResponse,
-} from "@/lib/auth/types";
+import type { AuthContextValue, AuthState, UserPublic, LoginCredentials, AuthResponse } from "@/lib/auth/types";
 import { AUTH_ROUTES, AUTH_CONFIG } from "@/lib/auth/constants";
 import nxAPI from "@/lib/nxapi";
 
@@ -140,7 +134,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { success: false, message };
       }
     },
-    [router]
+    [router],
   );
 
   // Logout handler

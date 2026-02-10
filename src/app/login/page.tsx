@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle, Settings } from "lucide-react";
 import { ConnectionSettingsDialog } from "@/components/settings/ConnectionSettingsDialog";
+import { getNxCloudConfig } from "@/lib/connection-settings";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username harus diisi"),
@@ -37,17 +38,23 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginFormData) => {
     clearError();
-    await login(data);
+    // Read system_id from connection settings and pass it with login
+    const cloudConfig = getNxCloudConfig();
+    const loginData = {
+      ...data,
+      ...(cloudConfig.systemId ? { system_id: cloudConfig.systemId } : {}),
+    };
+    await login(loginData);
   };
 
   // Only show error if we have an explicit auth error OR a validation error AFTER submission
   const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6">
-      <div className="w-full max-w-md">
+    <div className="min-h-dvh flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 px-4 py-6 sm:p-6">
+      <div className="w-full max-w-[90vw] sm:max-w-md">
         {/* Form Card */}
-        <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8 relative">
+        <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-5 sm:p-8 relative">
           {/* Settings Button */}
           <button
             type="button"
@@ -58,12 +65,12 @@ export default function LoginPage() {
             <Settings className="w-5 h-5" />
           </button>
 
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-slate-800">Selamat Datang</h2>
-            <p className="text-slate-500 mt-2">Masuk ke akun Anda untuk melanjutkan</p>
+          <div className="text-center mb-6 sm:mb-8">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-800">Selamat Datang</h2>
+            <p className="text-sm sm:text-base text-slate-500 mt-1.5 sm:mt-2">Masuk ke akun Anda untuk melanjutkan</p>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 sm:space-y-5">
             {/* Error Alert */}
             {showErrorMessage && (
               <Alert className="bg-red-50 border-red-200 text-red-700">
@@ -87,7 +94,7 @@ export default function LoginPage() {
                   id="username"
                   type="text"
                   placeholder="Masukkan username"
-                  className={`pl-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
+                  className={`pl-10 sm:pl-11 h-10 sm:h-12 text-sm sm:text-base bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-lg sm:rounded-xl transition-all ${
                     showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
                   }`}
                   {...register("username")}
@@ -115,7 +122,7 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Masukkan password"
-                  className={`pl-11 pr-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
+                  className={`pl-10 sm:pl-11 pr-10 sm:pr-11 h-10 sm:h-12 text-sm sm:text-base bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-lg sm:rounded-xl transition-all ${
                     showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
                   }`}
                   {...register("password")}
@@ -135,7 +142,7 @@ export default function LoginPage() {
             {/* Submit Button */}
             <Button
               type="submit"
-              className="w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all duration-200"
+              className="w-full h-10 sm:h-12 text-sm sm:text-base bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-lg sm:rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all duration-200"
               disabled={isLoading}
             >
               {isLoading ? (
@@ -153,15 +160,15 @@ export default function LoginPage() {
           </form>
 
           {/* Help Text */}
-          <div className="mt-6 pt-6 border-t border-slate-100">
-            <p className="text-sm text-slate-500 text-center">
+          <div className="mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-slate-100">
+            <p className="text-xs sm:text-sm text-slate-500 text-center">
               Butuh bantuan? <span className="text-blue-600 font-medium">Hubungi Administrator</span>
             </p>
           </div>
         </div>
 
         {/* Footer */}
-        <p className="text-center text-slate-400 text-sm mt-8">© 2026 Hotware Technology</p>
+        <p className="text-center text-slate-400 text-xs sm:text-sm mt-6 sm:mt-8">© 2026 Hotware Technology</p>
       </div>
       {/* Connection Settings Dialog */}
       <ConnectionSettingsDialog open={showSettings} onOpenChange={setShowSettings} />{" "}

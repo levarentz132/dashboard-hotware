@@ -16,6 +16,7 @@ export interface NxServerSettings {
 export interface NxCloudSettings {
   username: string;
   password: string;
+  systemId: string;
 }
 
 export interface ConnectionSettings {
@@ -33,6 +34,7 @@ const DEFAULT_SETTINGS: ConnectionSettings = {
   nxCloud: {
     username: "",
     password: "",
+    systemId: "",
   },
 };
 
@@ -123,5 +125,6 @@ export function getNxCloudConfig() {
   return {
     username: settings.nxCloud.username || process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME || "",
     password: settings.nxCloud.password || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD || "",
+    systemId: settings.nxCloud.systemId || process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "",
   };
 }

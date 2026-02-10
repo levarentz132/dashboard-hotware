@@ -80,7 +80,9 @@ export async function POST(request: NextRequest) {
 
     // Call external API for authentication
     const access_role = system_id ? "owner" : undefined;
-    console.log(`[Login] Sending request to External API with system_id: ${system_id || "MISSING"}, role: ${access_role || "default"}`);
+    console.log(
+      `[Login] Sending request to External API with system_id: ${system_id || "MISSING"}, role: ${access_role || "default"}`,
+    );
     const externalData = await callExternalAuthAPI({
       username,
       password,
@@ -111,7 +113,7 @@ export async function POST(request: NextRequest) {
 
     const userData = externalData.user;
 
-    // If the server didn't explicitly return the system_id in the user object, 
+    // If the server didn't explicitly return the system_id in the user object,
     // but the login succeeded and we provided a system_id, trust that it's now associated.
     if (userData && !userData.system_id && system_id && (externalData.success || externalData.access_token)) {
       userData.system_id = system_id;
@@ -171,7 +173,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message }, { status: 403 });
     }
 
-
     // Use tokens from external API
     const accessToken = externalData.access_token;
     const refreshToken = externalData.refresh_token;
@@ -194,7 +195,7 @@ export async function POST(request: NextRequest) {
           id: Number(profileData.user.id),
           role: profileData.user.role as any, // Cast to any to handle string/object
           created_at: profileData.user.created_at || user.created_at,
-          last_login: profileData.user.last_login || user.last_login as any,
+          last_login: profileData.user.last_login || (user.last_login as any),
         };
         console.log(`[Login] User profile enriched from /me for ${finalUser.username}`);
       }

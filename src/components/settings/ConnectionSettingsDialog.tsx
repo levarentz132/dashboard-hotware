@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Eye, EyeOff, Server, Cloud, Save, CheckCircle2, RotateCcw } from "lucide-react";
+import { Eye, EyeOff, Server, Cloud, Save, CheckCircle2, RotateCcw, RefreshCw, Loader2 } from "lucide-react";
 import {
   getConnectionSettings,
   saveConnectionSettings,
@@ -32,11 +32,14 @@ interface ConnectionSettingsDialogProps {
 export function ConnectionSettingsDialog({ open, onOpenChange }: ConnectionSettingsDialogProps) {
   const [settings, setSettings] = useState<ConnectionSettings>({
     nxServer: { host: "", port: "", username: "", password: "" },
-    nxCloud: { username: "", password: "" },
+    nxCloud: { username: "", password: "", systemId: "" },
   });
   const [showServerPassword, setShowServerPassword] = useState(false);
   const [showCloudPassword, setShowCloudPassword] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [fetchingSystemId, setFetchingSystemId] = useState(false);
+  const [cloudSystems, setCloudSystems] = useState<Array<{ id: string; name: string; stateOfHealth: string }>>([]);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Load existing settings when dialog opens
   useEffect(() => {
@@ -57,9 +60,11 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: ConnectionSetti
     clearConnectionSettings();
     setSettings({
       nxServer: { host: "localhost", port: "7001", username: "", password: "" },
-      nxCloud: { username: "", password: "" },
+      nxCloud: { username: "", password: "", systemId: "" },
     });
     setSaved(false);
+    setCloudSystems([]);
+    setFetchError(null);
   };
 
   const updateServer = (field: string, value: string) => {
@@ -78,15 +83,53 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: ConnectionSetti
     setSaved(false);
   };
 
+  // Fetch cloud systems to auto-fill system_id
+  const fetchCloudSystems = async () => {
+    const { username, password } = settings.nxCloud;
+    if (!username || !password) {
+      setFetchError("Masukkan username dan password NX Cloud terlebih dahulu");
+      return;
+    }
+    setFetchingSystemId(true);
+    setFetchError(null);
+    setCloudSystems([]);
+    try {
+      const auth = btoa(`${username}:${password}`);
+      const res = await fetch("https://meta.nxvms.com/cdb/systems", {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Basic ${auth}`,
+        },
+      });
+      if (!res.ok) {
+        setFetchError(`Cloud API error: ${res.status}`);
+        return;
+      }
+      const data = await res.json();
+      const systems = data.systems || [];
+      setCloudSystems(systems);
+      if (systems.length === 0) {
+        setFetchError("Tidak ada sistem ditemukan di akun NX Cloud ini");
+      } else if (systems.length === 1) {
+        // Auto-fill if only one system
+        updateCloud("systemId", systems[0].id);
+      }
+    } catch (err: any) {
+      setFetchError(`Gagal mengambil data: ${err.message}`);
+    } finally {
+      setFetchingSystemId(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="max-w-[95vw] sm:max-w-[500px] max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg">
-            <Server className="h-5 w-5 text-blue-500" />
+          <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Server className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500" />
             Konfigurasi Koneksi
           </DialogTitle>
-          <DialogDescription>Atur kredensial NX Witness Server dan NX Cloud sebelum login.</DialogDescription>
+          <DialogDescription className="text-xs sm:text-sm">Atur kredensial NX Witness Server dan NX Cloud sebelum login.</DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="server" className="w-full">
@@ -191,6 +234,75 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: ConnectionSetti
                 </button>
               </div>
             </div>
+
+            {/* System ID Field */}
+            <div className="space-y-2">
+              <Label htmlFor="cloud-system-id" className="text-sm font-medium">
+                System ID
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="cloud-system-id"
+                  placeholder="System ID dari NX Cloud"
+                  value={settings.nxCloud.systemId}
+                  onChange={(e) => updateCloud("systemId", e.target.value)}
+                  className="h-10 flex-1 font-mono text-xs"
+                  autoComplete="off"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchCloudSystems}
+                  disabled={fetchingSystemId}
+                  className="h-10 px-3 shrink-0"
+                  title="Ambil System ID dari NX Cloud"
+                >
+                  {fetchingSystemId ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">
+                Klik tombol refresh untuk mengambil System ID dari NX Cloud, atau masukkan manual.
+              </p>
+            </div>
+
+            {/* Cloud Systems List */}
+            {cloudSystems.length > 1 && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Pilih Sistem</Label>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {cloudSystems.map((sys) => (
+                    <button
+                      key={sys.id}
+                      type="button"
+                      onClick={() => updateCloud("systemId", sys.id)}
+                      className={`w-full text-left px-3 py-2 rounded-md border text-xs transition-colors ${
+                        settings.nxCloud.systemId === sys.id
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="font-medium">{sys.name}</span>
+                      <span
+                        className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${
+                          sys.stateOfHealth === "online" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                        }`}
+                      >
+                        {sys.stateOfHealth}
+                      </span>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">{sys.id}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Fetch Error */}
+            {fetchError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                {fetchError}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 

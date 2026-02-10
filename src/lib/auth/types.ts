@@ -80,6 +80,7 @@ export interface AuthTokens {
 export interface LoginCredentials {
   username: string;
   password: string;
+  system_id?: string;
 }
 
 export interface RegisterData {
