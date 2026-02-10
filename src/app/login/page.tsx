@@ -12,7 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle, Settings } from "lucide-react";
+import { ConnectionSettingsDialog } from "@/components/settings/ConnectionSettingsDialog";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username harus diisi"),
@@ -23,6 +24,7 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const { login, isLoading, error, clearError } = useAuth();
 
   const {
@@ -45,7 +47,17 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6">
       <div className="w-full max-w-md">
         {/* Form Card */}
-        <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8">
+        <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8 relative">
+          {/* Settings Button */}
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+            title="Konfigurasi Koneksi"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+
           <div className="text-center mb-8">
             <h2 className="text-2xl font-bold text-slate-800">Selamat Datang</h2>
             <p className="text-slate-500 mt-2">Masuk ke akun Anda untuk melanjutkan</p>
@@ -75,8 +87,9 @@ export default function LoginPage() {
                   id="username"
                   type="text"
                   placeholder="Masukkan username"
-                  className={`pl-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
-                    }`}
+                  className={`pl-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
+                    showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
+                  }`}
                   {...register("username")}
                   disabled={isLoading}
                   onKeyDown={(e) => {
@@ -102,8 +115,9 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Masukkan password"
-                  className={`pl-11 pr-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
-                    }`}
+                  className={`pl-11 pr-11 h-12 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl transition-all ${
+                    showErrorMessage ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""
+                  }`}
                   {...register("password")}
                   disabled={isLoading}
                 />
@@ -149,6 +163,8 @@ export default function LoginPage() {
         {/* Footer */}
         <p className="text-center text-slate-400 text-sm mt-8">© 2026 Hotware Technology</p>
       </div>
+      {/* Connection Settings Dialog */}
+      <ConnectionSettingsDialog open={showSettings} onOpenChange={setShowSettings} />{" "}
     </div>
   );
 }

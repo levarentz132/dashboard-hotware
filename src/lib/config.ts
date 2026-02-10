@@ -1,18 +1,28 @@
 // Nx Witness API Configuration
-export const API_CONFIG = {
-  // Use Next.js API proxy to avoid CORS issues
-  baseURL: "/api/nx",
-  // Direct server URL for server-side requests
-  serverURL: process.env.NEXT_PUBLIC_API_URL,
-  wsURL: process.env.NEXT_PUBLIC_WS_URL,
-  username: process.env.NEXT_PUBLIC_NX_USERNAME,
-  password: process.env.NEXT_PUBLIC_NX_PASSWORD,
-  systemId: process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
-  serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST,
-  serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT,
-  // Fallback URLs to try (now through proxy)
-  fallbackURLs: ["/api/nx"],
-};
+import { getNxServerConfig, getNxCloudConfig } from "./connection-settings";
+
+// Helper to get dynamic API config (reads localStorage on client)
+function getApiConfig() {
+  const server = getNxServerConfig();
+  return {
+    baseURL: "/api/nx",
+    serverURL: process.env.NEXT_PUBLIC_API_URL,
+    wsURL: process.env.NEXT_PUBLIC_WS_URL,
+    username: server.username,
+    password: server.password,
+    systemId: process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
+    serverHost: server.host,
+    serverPort: server.port,
+    fallbackURLs: ["/api/nx"],
+  };
+}
+
+// Export as getter so it reads fresh values each time
+export const API_CONFIG = new Proxy({} as ReturnType<typeof getApiConfig>, {
+  get(_target, prop: string) {
+    return getApiConfig()[prop as keyof ReturnType<typeof getApiConfig>];
+  },
+});
 
 // Nx Witness REST v3 API Endpoints
 export const API_ENDPOINTS = {
@@ -58,19 +68,26 @@ export const API_ENDPOINTS = {
 };
 
 // NX Cloud Configuration for auto-login
-export const CLOUD_CONFIG = {
-  // Cloud credentials for auto-login (set via environment variables for security)
-  username: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME,
-  password: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD,
-  // Enable auto-login when credentials are configured
-  autoLoginEnabled: true,
-  // Base URL for NX Cloud API
-  baseURL: "https://meta.nxvms.com",
-};
+function getCloudConfig() {
+  const cloud = getNxCloudConfig();
+  return {
+    username: cloud.username,
+    password: cloud.password,
+    autoLoginEnabled: true,
+    baseURL: "https://meta.nxvms.com",
+  };
+}
+
+export const CLOUD_CONFIG = new Proxy({} as ReturnType<typeof getCloudConfig>, {
+  get(_target, prop: string) {
+    return getCloudConfig()[prop as keyof ReturnType<typeof getCloudConfig>];
+  },
+});
 
 // Generate Basic Auth header for NX Cloud API
 export function getCloudAuthHeader(): string {
-  const credentials = `${CLOUD_CONFIG.username}:${CLOUD_CONFIG.password}`;
+  const cloud = getNxCloudConfig();
+  const credentials = `${cloud.username}:${cloud.password}`;
   const base64Credentials =
     typeof window !== "undefined" ? btoa(credentials) : Buffer.from(credentials).toString("base64");
   return `Basic ${base64Credentials}`;
