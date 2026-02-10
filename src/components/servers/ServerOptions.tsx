@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Server, Cpu, HardDrive, Network, RefreshCw, AlertTriangle } from "lucide-react";
-import { getCloudAuthHeader } from "@/lib/config";
+import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 
 interface ServerInfo {
   id: string;
@@ -38,13 +38,13 @@ export default function ServerOptions() {
       setLoading(true);
       setError(null);
 
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+      const response = await fetch("/api/cloud/systems", {
         method: "GET",
         credentials: "include",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
+          ...getElectronHeaders(),
         },
       });
 
@@ -140,9 +140,8 @@ export default function ServerOptions() {
             return (
               <div
                 key={server.id}
-                className={`bg-white rounded-lg shadow-md p-6 border-l-4 ${
-                  isOnline ? "border-green-500" : "border-gray-400"
-                }`}
+                className={`bg-white rounded-lg shadow-md p-6 border-l-4 ${isOnline ? "border-green-500" : "border-gray-400"
+                  }`}
               >
                 {/* Server Header */}
                 <div className="flex items-center justify-between mb-6">
@@ -156,9 +155,8 @@ export default function ServerOptions() {
                     </div>
                   </div>
                   <div
-                    className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      isOnline ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
-                    }`}
+                    className={`px-3 py-1 rounded-full text-xs font-medium ${isOnline ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
+                      }`}
                   >
                     {isOnline ? "Online" : "Offline"}
                   </div>

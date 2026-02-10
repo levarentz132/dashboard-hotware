@@ -41,7 +41,7 @@ function PageContent() {
   const { user } = useAuth();
 
   useEffect(() => {
-    const section = searchParams.get("section") || "";
+    const section = searchParams?.get("section") || "";
 
     if (!section) {
       setActiveSection("");

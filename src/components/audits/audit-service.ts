@@ -2,7 +2,7 @@
  * Audit service - handles all audit-related API calls
  */
 
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import type { CloudSystem, CloudDevice, AuditLogEntry, EventTypeInfo } from "./types";
 import { EVENT_TYPE_INFO } from "./types";
 
@@ -11,18 +11,16 @@ import { EVENT_TYPE_INFO } from "./types";
 // ============================================
 
 /**
- * Fetch all cloud systems from NX Cloud
+ * Fetch all cloud systems from internal proxy
  */
 export async function fetchCloudSystems(): Promise<CloudSystem[]> {
   try {
-    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+    const response = await fetch("/api/cloud/systems", {
       method: "GET",
       credentials: "include",
       headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
-      },
+        ...getElectronHeaders()
+      }
     });
 
     if (!response.ok) return [];
@@ -51,7 +49,13 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
  */
 export async function fetchDevices(systemId: string): Promise<Record<string, string>> {
   try {
-    const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(systemId)}`);
+    const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(systemId)}`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        ...getElectronHeaders()
+      }
+    });
     if (response.ok) {
       const devices: CloudDevice[] = await response.json();
       const map: Record<string, string> = {};
@@ -65,36 +69,6 @@ export async function fetchDevices(systemId: string): Promise<Record<string, str
     console.error("Error fetching devices:", err);
   }
   return {};
-}
-
-// ============================================
-// Authentication
-// ============================================
-
-/**
- * Attempt auto-login with configured credentials
- */
-export async function attemptAutoLogin(systemId: string): Promise<boolean> {
-  if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
-    return false;
-  }
-
-  try {
-    const response = await fetch("/api/cloud/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemId,
-        username: CLOUD_CONFIG.username,
-        password: CLOUD_CONFIG.password,
-      }),
-    });
-
-    return response.ok;
-  } catch (err) {
-    console.error("Auto-login failed:", err);
-    return false;
-  }
 }
 
 /**
@@ -149,24 +123,16 @@ export async function fetchAuditLogs(
     const fromDateFormatted = new Date(fromDate).toISOString();
     const response = await fetch(
       `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted)}`,
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          ...getElectronHeaders()
+        }
+      }
     );
 
     if (response.status === 401) {
-      if (autoLogin) {
-        const autoLoginSuccess = await attemptAutoLogin(system.id);
-        if (autoLoginSuccess) {
-          const retryResponse = await fetch(
-            `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(
-              fromDateFormatted,
-            )}`,
-          );
-          if (retryResponse.ok) {
-            const data = await retryResponse.json();
-            const logs = data.reply || data;
-            return { logs: Array.isArray(logs) ? logs : [], requiresAuth: false };
-          }
-        }
-      }
       return { logs: [], requiresAuth: true };
     }
 

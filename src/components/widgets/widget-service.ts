@@ -2,7 +2,7 @@
  * Widget service - shared utilities for dashboard widgets
  */
 
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import type { CloudSystem, EventLog, Storage, AuditLogEntry } from "./types";
 
 // ============================================
@@ -14,13 +14,13 @@ import type { CloudSystem, EventLog, Storage, AuditLogEntry } from "./types";
  */
 export async function fetchCloudSystems(): Promise<CloudSystem[]> {
   try {
-    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+    const response = await fetch("/api/cloud/systems", {
       method: "GET",
       credentials: "include",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
+        ...getElectronHeaders(),
       },
     });
 
@@ -56,25 +56,11 @@ export function getFirstOnlineSystem(systems: CloudSystem[]): CloudSystem | null
 // ============================================
 
 /**
- * Attempt auto-login with config credentials
+ * Attempt auto-login with config credentials (disabled - using Dual-Login flow)
  */
 export async function attemptAutoLogin(systemId: string): Promise<boolean> {
-  if (!CLOUD_CONFIG.username || !CLOUD_CONFIG.password) return false;
-
-  try {
-    const response = await fetch("/api/cloud/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemId,
-        username: CLOUD_CONFIG.username,
-        password: CLOUD_CONFIG.password,
-      }),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
+  // Authentication is now handled centrally by the Dual-Login flow
+  return false;
 }
 
 // ============================================

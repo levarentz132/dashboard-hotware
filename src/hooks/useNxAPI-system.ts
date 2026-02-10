@@ -2,7 +2,7 @@
 
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
 import { useCallback, useEffect, useState } from "react";
-import { getCloudAuthHeader } from "@/lib/config";
+import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 
 // Interface for cloud system
 interface CloudSystem {
@@ -27,6 +27,9 @@ export function useSystemInfo(cloudId?: string) {
     try {
       const response = await fetch("/api/cloud/systems", {
         method: "GET",
+        headers: {
+          ...getElectronHeaders()
+        }
       });
 
       if (!response.ok) {

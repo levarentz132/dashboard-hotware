@@ -88,15 +88,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Call external API for authentication
-    const access_role = system_id ? "owner" : undefined;
-    console.log(`[Login] Sending request to External API with system_id: ${system_id || "MISSING"}, role: ${access_role || "default"}`);
-    const externalData = await callExternalAuthAPI({
-      username,
-      password,
-      system_id,
-      access_role,
-    });
+    // 2. Handle Auto-Login or Identity Swap for Electron
+    let externalData: any = null;
+    const isAutoLogin = password === 'AUTO_LOGIN_CONTEXT';
+    const localHash = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
+
+    if (isAutoLogin && localHash) {
+      console.log(`[Login] Executing Identity Swap for ${username}...`);
+      externalData = {
+        success: true,
+        user: {
+          username,
+          email: username,
+          role: 'admin',
+          system_id,
+          license_status: 'ACTIVE'
+        }
+      };
+    } else {
+      // Call external API for authentication
+      const access_role = system_id ? "owner" : undefined;
+      console.log(`[Login] Authenticating with External API: ${username} @ ${system_id || "Global"}`);
+      externalData = await callExternalAuthAPI({
+        username,
+        password,
+        system_id,
+        access_role,
+      });
+    }
 
     // Check if login was successful (either success=true or we have an access_token)
     if (!externalData.success && !externalData.access_token) {
@@ -141,14 +160,14 @@ export async function POST(request: NextRequest) {
       (userData.days_remaining === undefined || userData.days_remaining === null || userData.days_remaining > 0);
 
     // Transform privileges from external API format
-    const privileges = userData.privileges?.map((p) => ({
+    const privileges = (userData.privileges || []).map((p: any) => ({
       module: p.module,
       can_view: p.can_view,
       can_edit: p.can_edit,
     }));
 
     // Transform organizations from external API format
-    const organizations = userData.organizations?.map((org) => ({
+    const organizations = userData.organizations?.map((org: any) => ({
       id: org.id,
       name: org.name,
       system_id: org.system_id,
@@ -220,7 +239,7 @@ export async function POST(request: NextRequest) {
       user: finalUser,
     });
 
-    // Set HTTP-only cookie for access token (short-lived)
+    // 1. Establish Dashboard Session
     response.cookies.set(AUTH_CONFIG.COOKIE_NAME, accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -229,7 +248,6 @@ export async function POST(request: NextRequest) {
       path: "/",
     });
 
-    // Set HTTP-only cookie for refresh token (long-lived)
     if (refreshToken) {
       response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, refreshToken, {
         httpOnly: true,
@@ -238,6 +256,83 @@ export async function POST(request: NextRequest) {
         maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
         path: "/",
       });
+    }
+
+    // 2. Establish VMS Relay Session (Dual-Login)
+    // Use VMS credentials from environment to establish relay session
+    if (system_id) {
+      try {
+        // Get VMS credentials from environment (plain-text for dev, decrypt for Electron)
+        const vmsUsername = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
+        let vmsPassword: string | null = null;
+
+        // Try to decrypt if encrypted password exists
+        const vmsEncrypted = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED;
+        if (vmsEncrypted) {
+          // Import decryption function
+          const crypto = require('crypto');
+          const os = require('os');
+          try {
+            const machineId = os.hostname() + os.platform() + os.arch();
+            const key = crypto.createHash('sha256').update(machineId).digest();
+            const parts = vmsEncrypted.split(':');
+            const iv = Buffer.from(parts[0], 'hex');
+            const authTag = Buffer.from(parts[1], 'hex');
+            const encrypted = parts[2];
+            const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+            decipher.setAuthTag(authTag);
+            let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+            decrypted += decipher.final('utf8');
+            vmsPassword = decrypted;
+            console.log(`[Dual-Login] Decrypted VMS password for relay login`);
+          } catch (decryptError) {
+            console.warn(`[Dual-Login] Decryption failed, using plain-text fallback`);
+          }
+        }
+
+        // Fallback to plain-text password (dev environment or Electron legacy)
+        if (!vmsPassword) {
+          const rawPassword = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+
+          if (rawPassword && (rawPassword.startsWith('$2b$') || rawPassword.startsWith('$2y$') || rawPassword.length === 60)) {
+            console.warn(`[Dual-Login] Detected bcrypt hash in VMS password field, ignoring for relay login`);
+          } else {
+            vmsPassword = rawPassword;
+          }
+        }
+
+        if (vmsUsername && vmsPassword) {
+          const relayLoginUrl = `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`;
+          console.log(`[Dual-Login] Attempting relay login for ${system_id} with VMS user: ${vmsUsername}, password length: ${vmsPassword.length}`);
+
+          const relayResponse = await fetch(relayLoginUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: vmsUsername, password: vmsPassword, setCookie: true }),
+          });
+          if (relayResponse.ok) {
+            const relayData = await relayResponse.json();
+            const relayToken = relayData.token || relayData.id;
+            if (relayToken) {
+              response.cookies.set(`nx-cloud-${system_id}`, relayToken, {
+                path: "/",
+                maxAge: 60 * 60 * 24 * 3, // 3 days
+                httpOnly: false,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "lax",
+              });
+              console.log(`[Dual-Login] ✓ Relay session established for ${system_id} with token: ${relayToken.substring(0, 8)}...`);
+            }
+          } else {
+            const errorText = await relayResponse.text();
+            console.warn(`[Dual-Login] Relay login failed (${relayResponse.status}): ${errorText}`);
+          }
+        } else {
+          console.warn(`[Dual-Login] Missing VMS credentials for relay login`);
+        }
+      } catch (e) {
+        console.error(`[Dual-Login] Relay login error:`, e);
+      }
     }
 
     return response;

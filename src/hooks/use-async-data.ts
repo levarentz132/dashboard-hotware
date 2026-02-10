@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getCloudAuthHeader } from "@/lib/config";
+import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 
 /**
  * State interface for async data fetching hooks
@@ -133,7 +133,7 @@ let cloudSystemsCache: { data: CloudSystem[]; timestamp: number } | null = null;
 const CLOUD_CACHE_TTL = 300000; // 5 minutes
 
 /**
- * Fetch cloud systems from meta API
+ * Fetch cloud systems from internal API proxy
  */
 export async function fetchCloudSystems(): Promise<CloudSystem[]> {
   // Return from cache if valid
@@ -141,14 +141,12 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
     return cloudSystemsCache.data;
   }
 
-  const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+  const response = await fetch("/api/cloud/systems", {
     method: "GET",
     credentials: "include",
     headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: getCloudAuthHeader(),
-    },
+      ...getElectronHeaders()
+    }
   });
 
   if (!response.ok) {
@@ -166,17 +164,16 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
 }
 
 /**
- * Fetch data from cloud relay
+ * Fetch data from cloud relay via proxy
  */
 export async function fetchFromCloudRelay<T>(cloudId: string, endpoint: string): Promise<T | null> {
   try {
-    const response = await fetch(`https://${cloudId}.relay.vmsproxy.com${endpoint}`, {
+    const response = await fetch(`/api/nx${endpoint}?systemId=${encodeURIComponent(cloudId)}`, {
       method: "GET",
       credentials: "include",
       headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
+        ...getElectronHeaders()
+      }
     });
 
     if (!response.ok) return null;

@@ -2,7 +2,7 @@
  * Camera service - handles all camera-related API calls
  */
 
-import { getCloudAuthHeader } from "@/lib/config";
+import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import type { CloudSystem, CloudCamera, Province, Regency, District, Village } from "./types";
 
 // ============================================
@@ -10,18 +10,16 @@ import type { CloudSystem, CloudCamera, Province, Regency, District, Village } f
 // ============================================
 
 /**
- * Fetch all cloud systems from NX Cloud
+ * Fetch all cloud systems from internal proxy
  */
 export async function fetchCloudSystems(): Promise<CloudSystem[]> {
   try {
-    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+    const response = await fetch("/api/cloud/systems", {
       method: "GET",
       credentials: "include",
       headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
-      },
+        ...getElectronHeaders()
+      }
     });
 
     if (!response.ok) return [];
@@ -59,6 +57,7 @@ export async function fetchCloudCameras(system: CloudSystem): Promise<CloudCamer
         credentials: "include",
         headers: {
           Accept: "application/json",
+          ...getElectronHeaders()
         },
       },
     );

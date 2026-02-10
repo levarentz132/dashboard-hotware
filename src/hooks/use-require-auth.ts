@@ -30,8 +30,9 @@ export function useRequireAuth(options: UseRequireAuthOptions = {}) {
     // Check role if specified
     if (requiredRole && user) {
       const allowedRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+      const userRole = typeof user.role === 'string' ? user.role : user.role?.name;
 
-      if (!allowedRoles.includes(user.role)) {
+      if (userRole && !allowedRoles.includes(userRole as UserRole)) {
         // User doesn't have required role
         router.push(AUTH_ROUTES.DASHBOARD);
       }
@@ -45,6 +46,9 @@ export function useRequireAuth(options: UseRequireAuthOptions = {}) {
     hasAccess:
       isAuthenticated &&
       (!requiredRole ||
-        (user && (Array.isArray(requiredRole) ? requiredRole.includes(user.role) : user.role === requiredRole))),
+        (user && (() => {
+          const userRole = typeof user.role === 'string' ? user.role : user.role?.name;
+          return userRole && (Array.isArray(requiredRole) ? requiredRole.includes(userRole as UserRole) : userRole === requiredRole);
+        })())),
   };
 }

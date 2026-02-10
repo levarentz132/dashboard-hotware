@@ -164,7 +164,11 @@ class NxWitnessAPI {
     if (extConfig) {
       headers['X-Electron-System-ID'] = extConfig.NEXT_PUBLIC_NX_SYSTEM_ID || '';
       headers['X-Electron-Username'] = extConfig.NEXT_PUBLIC_NX_USERNAME || '';
-      headers['X-Electron-Admin-Hash'] = extConfig.NX_ADMIN_HASH || '';
+      headers['X-Electron-VMS-Password'] = extConfig.NEXT_PUBLIC_NX_PASSWORD || '';
+      headers['X-Electron-VMS-Password-Encrypted'] = extConfig.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || '';
+      headers['X-Electron-Cloud-Username'] = extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '';
+      headers['X-Electron-Cloud-Password'] = extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '';
+      headers['X-Electron-Cloud-Password-Encrypted'] = extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '';
       headers['X-Electron-Cloud-Token'] = extConfig.NX_CLOUD_TOKEN || '';
     }
 

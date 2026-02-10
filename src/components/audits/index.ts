@@ -11,7 +11,6 @@ export { EVENT_TYPE_INFO } from "./types";
 export {
   fetchCloudSystems,
   fetchDevices,
-  attemptAutoLogin,
   loginToCloudSystem,
   fetchAuditLogs,
   formatTimestamp,

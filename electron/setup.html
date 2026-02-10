@@ -238,6 +238,45 @@
             width: 20px;
             height: 20px;
         }
+
+        /* Loading Dots Animation */
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 0.3;
+                transform: scale(0.8);
+            }
+
+            50% {
+                opacity: 1;
+                transform: scale(1.2);
+            }
+        }
+
+        .loading-dots {
+            display: inline-flex;
+            gap: 4px;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+        .loading-dots span {
+            width: 4px;
+            height: 4px;
+            background-color: currentColor;
+            border-radius: 50%;
+            display: inline-block;
+            animation: pulse 1.4s infinite ease-in-out;
+        }
+
+        .loading-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .loading-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
     </style>
 </head>
 
@@ -259,13 +298,15 @@
             <div class="input-group">
                 <label>Nx Cloud Email</label>
                 <div class="input-wrapper">
-                    <input type="email" id="cloud-email" placeholder="email@example.com">
+                    <input type="email" id="cloud-email" placeholder="email@example.com"
+                        onkeydown="if(event.key==='Enter') document.getElementById('cloud-password').focus()">
                 </div>
             </div>
             <div class="input-group">
                 <label>Nx Cloud Password</label>
                 <div class="input-wrapper">
-                    <input type="password" id="cloud-password" placeholder="••••••••">
+                    <input type="password" id="cloud-password" placeholder="••••••••"
+                        onkeydown="if(event.key==='Enter') validateCloud()">
                     <div class="password-toggle" onclick="togglePassword('cloud-password')">
                         <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                             stroke-linecap="round" stroke-linejoin="round">
@@ -290,12 +331,14 @@
         <div id="step-3" class="form-step">
             <div class="input-group">
                 <label>VMS Local Admin Username</label>
-                <input type="text" id="vms-user" placeholder="admin">
+                <input type="text" id="vms-user" placeholder="admin"
+                    onkeydown="if(event.key==='Enter') document.getElementById('vms-password').focus()">
             </div>
             <div class="input-group">
                 <label>VMS Local Admin Password</label>
                 <div class="input-wrapper">
-                    <input type="password" id="vms-password" placeholder="••••••••">
+                    <input type="password" id="vms-password" placeholder="••••••••"
+                        onkeydown="if(event.key==='Enter') finalize()">
                     <div class="password-toggle" onclick="togglePassword('vms-password')">
                         <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                             stroke-linecap="round" stroke-linejoin="round">
@@ -326,7 +369,12 @@
 
         function showStatus(text, type = 'info') {
             const status = document.getElementById('status');
-            status.textContent = text;
+            if (text.endsWith('...')) {
+                const baseText = text.slice(0, -3);
+                status.innerHTML = `${baseText}<span class="loading-dots"><span></span><span></span><span></span></span>`;
+            } else {
+                status.textContent = text;
+            }
             status.className = `status-message ${type}`;
         }
 
@@ -365,6 +413,7 @@
                 if (result.success) {
                     state.credentials.cloudEmail = email;
                     state.credentials.cloudPassword = password;
+                    state.credentials.cloudAuthToken = result.cloudAuthToken;
                     state.systems = result.systems;
 
                     if (state.systems.length === 1) {
@@ -419,13 +468,14 @@
 
             const btn = document.getElementById('btn-3');
             btn.disabled = true;
-            showStatus('Verifying VMS Connection (V4 API)...', 'info');
+            showStatus('Verifying VMS Connection...', 'info');
 
             try {
                 const relayCheck = await window.electron.setup.checkRelay({
                     systemId: state.selectedSystem.id,
                     vmsUser: vmsUser,
-                    vmsPassword: vmsPass
+                    vmsPassword: vmsPass,
+                    cloudAuthToken: state.credentials.cloudAuthToken
                 });
 
                 if (relayCheck.success) {
@@ -433,8 +483,11 @@
 
                     const saveResult = await window.electron.setup.save({
                         systemId: state.selectedSystem.id,
+                        cloudEmail: state.credentials.cloudEmail,
+                        cloudPassword: state.credentials.cloudPassword,
                         username: vmsUser,
-                        password: vmsPass
+                        password: vmsPass,
+                        cloudToken: relayCheck.cloudToken
                     });
 
                     if (saveResult.success) {

@@ -36,7 +36,7 @@ import {
   timeUnitToSeconds,
   secondsToTimeUnit,
 } from "./user-service";
-import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import { performAdminLogin } from "@/lib/auth-utils";
 import { cn } from "@/lib/utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
@@ -260,6 +260,10 @@ export default function UserManagement() {
     try {
       const response = await fetch("/api/cloud/systems", {
         method: "GET",
+        credentials: "include",
+        headers: {
+          ...getElectronHeaders()
+        }
       });
 
       if (!response.ok) {

@@ -4,6 +4,54 @@ import { NextRequest } from "next/server";
 const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
 
 /**
+ * Helper to get Electron headers for client-side fetch calls
+ */
+export function getElectronHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+
+  const extConfig = (window as any).electronConfig;
+  if (!extConfig) return {};
+
+  return {
+    'X-Electron-System-ID': extConfig.NEXT_PUBLIC_NX_SYSTEM_ID || '',
+    'X-Electron-Username': extConfig.NEXT_PUBLIC_NX_USERNAME || '',
+    'X-Electron-VMS-Password': extConfig.NEXT_PUBLIC_NX_PASSWORD || '',
+    'X-Electron-VMS-Password-Encrypted': extConfig.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || '',
+    'X-Electron-Cloud-Username': extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
+    'X-Electron-Cloud-Password': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '',
+    'X-Electron-Cloud-Password-Encrypted': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '',
+    'X-Electron-Cloud-Token': extConfig.NX_CLOUD_TOKEN || '',
+  };
+}
+
+/**
+ * Internal helper for server-side decryption (Electron parity)
+ */
+function decryptPassword(encryptedData: string | null): string | null {
+  if (!encryptedData || typeof window !== 'undefined') return null;
+  try {
+    const crypto = require('crypto');
+    const os = require('os');
+    const machineId = os.hostname() + os.platform() + os.arch();
+    const key = crypto.createHash('sha256').update(machineId).digest();
+    const parts = encryptedData.split(':');
+    if (parts.length !== 3) return null;
+
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (error) {
+    console.error('[Config] Decryption failed:', error);
+    return null;
+  }
+}
+
+/**
  * Helper to resolve config from headers (server-side) or window (client-side)
  */
 export function getDynamicConfig(request?: Request | NextRequest) {
@@ -13,13 +61,46 @@ export function getDynamicConfig(request?: Request | NextRequest) {
 
   if (request) {
     const headers = (request as any).headers;
-    // Check for Electron-specific headers passed from the frontend
-    return {
-      NEXT_PUBLIC_NX_SYSTEM_ID: headers.get('x-electron-system-id'),
-      NEXT_PUBLIC_NX_USERNAME: headers.get('x-electron-username'),
-      NX_ADMIN_HASH: headers.get('x-electron-admin-hash'),
-      NX_CLOUD_TOKEN: headers.get('x-electron-cloud-token'),
+    const isHeadersObject = typeof headers.get === 'function';
+
+    // Helper for case-insensitive lookup
+    const getH = (key: string) => {
+      if (isHeadersObject) return headers.get(key);
+      const lowerKey = key.toLowerCase();
+      // For plain objects, we need to manually find the key
+      const keys = Object.keys(headers);
+      const actualKey = keys.find(k => k.toLowerCase() === lowerKey);
+      return actualKey ? headers[actualKey] : null;
     };
+
+    const config = {
+      NEXT_PUBLIC_NX_SYSTEM_ID: getH('x-electron-system-id'),
+      NEXT_PUBLIC_NX_USERNAME: getH('x-electron-username'),
+      NEXT_PUBLIC_NX_PASSWORD: getH('x-electron-vms-password'),
+      NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED: getH('x-electron-vms-password-encrypted'),
+      NEXT_PUBLIC_NX_CLOUD_USERNAME: getH('x-electron-cloud-username'),
+      NEXT_PUBLIC_NX_CLOUD_PASSWORD: getH('x-electron-cloud-password'),
+      NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED: getH('x-electron-cloud-password-encrypted'),
+      NX_CLOUD_TOKEN: getH('x-electron-cloud-token'),
+    };
+
+    // DEBUG: Log detected electron headers
+    const electronHeaders: any = {};
+    if (isHeadersObject) {
+      headers.forEach((v: string, k: string) => {
+        if (k.toLowerCase().startsWith('x-electron-')) electronHeaders[k] = v ? '(set)' : '(empty)';
+      });
+    } else {
+      Object.keys(headers).forEach(k => {
+        if (k.toLowerCase().startsWith('x-electron-')) electronHeaders[k] = headers[k] ? '(set)' : '(empty)';
+      });
+    }
+
+    if (Object.keys(electronHeaders).length > 0 && !request.url.includes('api/nx')) {
+      console.log(`[DynamicConfig] Headers for ${request.url}:`, electronHeaders);
+    }
+
+    return config;
   }
 
   return null;
@@ -33,12 +114,13 @@ export const API_CONFIG = {
   serverURL: process.env.NEXT_PUBLIC_API_URL,
   wsURL: process.env.NEXT_PUBLIC_WS_URL,
   username: extConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME,
+  vmsPasswordHash: extConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD,
+  cloudUsername: extConfig?.NEXT_PUBLIC_NX_CLOUD_USERNAME || process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME,
+  cloudPasswordHash: extConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD,
   password: process.env.NEXT_PUBLIC_NX_PASSWORD,
   systemId: extConfig?.NEXT_PUBLIC_NX_SYSTEM_ID || process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
   serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST,
   serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT,
-  adminHash: extConfig?.NX_ADMIN_HASH || process.env.NX_ADMIN_HASH,
-  hashedPassword: extConfig?.NX_ADMIN_HASH || process.env.NX_ADMIN_HASH,
   // Fallback URLs to try (now through proxy)
   fallbackURLs: ["/api/nx"],
 };
@@ -98,26 +180,54 @@ export const CLOUD_CONFIG = {
 
 // Generate Auth header for NX Cloud API
 export function getCloudAuthHeader(request?: Request | NextRequest): string {
-  const dynamicConfig = getDynamicConfig(request);
-  const token = dynamicConfig?.NX_CLOUD_TOKEN || CLOUD_CONFIG.token;
+  if (typeof window !== 'undefined') {
+    return ""; // Auth header should be handled by the server proxy
+  }
 
-  // Prefer Token-based auth
-  if (token) {
+  const dynamicConfig = getDynamicConfig(request);
+  const username = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_USERNAME || process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME;
+  let password: string | null = null;
+
+  // PRIORITY 1: Attempt to get real password from Electron (Decryption)
+  const encryptedPassword = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED;
+  if (encryptedPassword) {
+    password = decryptPassword(encryptedPassword);
+    if (password) {
+      console.log(`[Cloud Auth] ✓ Using decrypted password for ${username}`);
+    }
+  }
+
+  // PRIORITY 2: Use plain-text password from headers/env (if not a hash)
+  if (!password) {
+    const rawPassword = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
+    if (rawPassword && rawPassword.length > 0) {
+      // Skip bcrypt hashes (length 60 is standard for bcrypt)
+      if (rawPassword.length !== 60 && !rawPassword.startsWith('$2')) {
+        password = rawPassword;
+        console.log(`[Cloud Auth] Using raw password for ${username}`);
+      } else {
+        console.log(`[Cloud Auth] Skipping bcrypt hash for ${username}`);
+      }
+    }
+  }
+
+  // PRIORITY 3: If we have a username and password, use Basic Auth (Highest reliability)
+  if (username && password) {
+    const credentials = `${username}:${password}`;
+    const base64Credentials = Buffer.from(credentials).toString("base64");
+    console.log(`[Cloud Auth] ✓ Generated Basic Auth header for ${username}`);
+    return `Basic ${base64Credentials}`;
+  }
+
+  // PRIORITY 4: Fallback to Cloud Token (Bearer)
+  const token = dynamicConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN;
+  if (token && token !== 'undefined' && token.length > 20) {
+    console.log(`[Cloud Auth] ✓ Using Bearer token for ${username || 'detected'}`);
     return `Bearer ${token}`;
   }
 
-  // Fallback to Basic Auth (legacy) - read directly from env to avoid object typing issues
-  const username = process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME;
-  const password = process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
-
-  if (!username || !password) {
-    return "";
-  }
-
-  const credentials = `${username}:${password}`;
-  const base64Credentials =
-    typeof window !== "undefined" ? btoa(credentials) : Buffer.from(credentials).toString("base64");
-  return `Basic ${base64Credentials}`;
+  console.error(`[Cloud Auth] ✗ No credentials available for cloud auth (user: ${!!username}, pass: ${!!password}, token: ${!!token})`);
+  return "";
 }
 
 // Helper to make authenticated fetch to NX Cloud

@@ -44,7 +44,7 @@ import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 
 type ViewMode = "local" | "cloud";
 
@@ -154,13 +154,13 @@ export default function StorageManagement() {
   const fetchCloudSystems = useCallback(async () => {
     setLoadingSystems(true);
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+      const response = await fetch("/api/cloud/systems", {
         method: "GET",
         credentials: "include",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
+          ...getElectronHeaders(),
         },
       });
 
@@ -196,30 +196,9 @@ export default function StorageManagement() {
     }
   }, []);
 
-  // Auto-login function
+  // Auto-login function (disabled - authentication handled by Dual-Login flow)
   const attemptAutoLogin = useCallback(async (systemId: string) => {
-    if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
-      return false;
-    }
-
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId,
-          username: CLOUD_CONFIG.username,
-          password: CLOUD_CONFIG.password,
-        }),
-      });
-
-      if (response.ok) {
-        setRequiresAuth(false);
-        return true;
-      }
-    } catch (err) {
-      console.error("Auto-login failed:", err);
-    }
+    // Authentication is now handled centrally by the Dual-Login flow
     return false;
   }, []);
 
@@ -319,7 +298,13 @@ export default function StorageManagement() {
     setLocalError(null);
 
     try {
-      const response = await fetch(`/api/nx/storages?systemId=${encodeURIComponent(systemId)}`);
+      const response = await fetch(`/api/nx/storages?systemId=${encodeURIComponent(systemId)}`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          ...getElectronHeaders()
+        }
+      });
       const data = await response.json();
 
       // Check for error response

@@ -2,7 +2,7 @@
  * Server service - handles all server-related API calls
  */
 
-import { getCloudAuthHeader } from "@/lib/config";
+import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import type { ServerInfo } from "./types";
 
 // ============================================
@@ -14,13 +14,13 @@ import type { ServerInfo } from "./types";
  */
 export async function fetchCloudServers(): Promise<{ servers: ServerInfo[]; error?: string }> {
   try {
-    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+    const response = await fetch("/api/cloud/systems", {
       method: "GET",
       credentials: "include",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
+        ...getElectronHeaders(),
       },
     });
 
@@ -57,11 +57,12 @@ export async function fetchCloudServers(): Promise<{ servers: ServerInfo[]; erro
  */
 export async function fetchServerDetails(systemId: string): Promise<{ server: ServerInfo | null; error?: string }> {
   try {
-    const response = await fetch(`https://${systemId}.relay.vmsproxy.com/rest/v3/system/info`, {
+    const response = await fetch(`/api/nx/system/info?systemId=${encodeURIComponent(systemId)}`, {
       method: "GET",
       credentials: "include",
       headers: {
         Accept: "application/json",
+        ...getElectronHeaders(),
       },
     });
 

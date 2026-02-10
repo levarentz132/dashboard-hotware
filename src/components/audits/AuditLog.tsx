@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import { performAdminLogin } from "@/lib/auth-utils";
 
 interface AuthSession {
@@ -114,13 +114,13 @@ export default function AuditLog() {
   const fetchCloudSystems = useCallback(async () => {
     setLoadingSystems(true);
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+      const response = await fetch("/api/cloud/systems", {
         method: "GET",
         credentials: "include",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
+          ...getElectronHeaders(),
         },
       });
 

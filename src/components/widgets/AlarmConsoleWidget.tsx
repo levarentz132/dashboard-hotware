@@ -128,24 +128,9 @@ export default function AlarmConsoleWidget({ systemId }: { systemId?: string }) 
   const [error, setError] = useState<string | null>(null);
   const [serverId, setServerId] = useState<string | null>(null);
 
-  // Auto-login
+  // Auto-login (disabled - using Dual-Login flow)
   const attemptAutoLogin = useCallback(async (targetSystemId: string) => {
-    if (!CLOUD_CONFIG.username || !CLOUD_CONFIG.password) return false;
-
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId: targetSystemId,
-          username: CLOUD_CONFIG.username,
-          password: CLOUD_CONFIG.password,
-        }),
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+    return false;
   }, []);
 
   // Fetch servers for a system

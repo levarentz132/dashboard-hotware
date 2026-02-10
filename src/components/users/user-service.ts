@@ -3,6 +3,7 @@
  */
 
 import type { NxUser, NxUserGroup, UserFormData, TimeUnit } from "./types";
+import { API_CONFIG, getElectronHeaders } from "@/lib/config";
 
 // ============================================
 // Users API
@@ -20,6 +21,7 @@ export async function fetchUsers(systemId?: string): Promise<{ users: NxUser[]; 
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...getElectronHeaders(),
       },
     });
 
@@ -56,6 +58,7 @@ export async function fetchUserGroups(systemId?: string): Promise<{ groups: NxUs
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...getElectronHeaders(),
       },
     });
 
@@ -84,7 +87,10 @@ export async function createUser(formData: UserFormData, systemId?: string): Pro
     const url = systemId ? `/api/nx/users?systemId=${encodeURIComponent(systemId)}` : "/api/nx/users";
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...getElectronHeaders()
+      },
       body: JSON.stringify(formData),
     });
 
@@ -116,7 +122,10 @@ export async function updateUser(
       : `/api/nx/users/${userId}`;
     const response = await fetch(url, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...getElectronHeaders()
+      },
       body: JSON.stringify(formData),
     });
 
@@ -144,6 +153,9 @@ export async function deleteUser(userId: string, systemId?: string): Promise<{ s
       : `/api/nx/users/${userId}`;
     const response = await fetch(url, {
       method: "DELETE",
+      headers: {
+        ...getElectronHeaders()
+      }
     });
 
     if (!response.ok) {

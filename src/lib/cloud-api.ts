@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getDynamicConfig } from "./config";
 
 /**
  * Common interface for cloud API request options
@@ -33,12 +34,41 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
  * Build headers for cloud API request
  * Includes authorization token if available in cookies
  */
+// Server-side decryption for Electron encrypted passwords
+function decryptPassword(encryptedData: string): string | null {
+  try {
+    const crypto = require('crypto');
+    const os = require('os');
+
+    // Derive same key as Electron main process
+    const machineId = os.hostname() + os.platform() + os.arch();
+    const key = crypto.createHash('sha256').update(machineId).digest();
+
+    const parts = encryptedData.split(':');
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+
+    return decrypted;
+  } catch (error) {
+    console.error('[Decryption] Failed:', error);
+    return null;
+  }
+}
+
 export function buildCloudHeaders(request: NextRequest, systemId: string): Record<string, string> {
   let systemToken = request.cookies.get(`nx-cloud-${systemId}`)?.value;
 
-  // Fallback to Env Token (from setup.js)
-  if (!systemToken && process.env.NX_CLOUD_TOKEN) {
-    systemToken = process.env.NX_CLOUD_TOKEN;
+  // Fallback to Dynamic Config Token (from Electron headers or Env)
+  if (!systemToken) {
+    const dynamicConfig = getDynamicConfig(request);
+    systemToken = dynamicConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN;
   }
 
   const cookies = request.headers.get("cookie") || "";
@@ -48,8 +78,41 @@ export function buildCloudHeaders(request: NextRequest, systemId: string): Recor
     Cookie: cookies,
   };
 
-  if (systemToken) {
+  if (systemToken && systemToken !== 'undefined') {
     headers["Authorization"] = `Bearer ${systemToken}`;
+    console.log(`[Cloud API] Using Bearer token for ${systemId}`);
+  } else {
+    // Fallback: Use VMS Basic Auth
+    const vmsUser = process.env.NEXT_PUBLIC_NX_USERNAME || request.headers.get('x-electron-username');
+    let vmsPass: string | null = null;
+
+    // Priority 1: Decrypt Electron encrypted password
+    const vmsEncrypted = process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || request.headers.get('x-electron-vms-password-encrypted');
+    if (vmsEncrypted) {
+      console.log(`[Cloud API] Found encrypted password, attempting decryption for ${systemId}`);
+      vmsPass = decryptPassword(vmsEncrypted);
+      if (vmsPass) {
+        console.log(`[Cloud API] Successfully decrypted VMS password for ${systemId}`);
+      } else {
+        console.warn(`[Cloud API] Decryption failed for ${systemId}, falling back to plain-text`);
+      }
+    }
+
+    // Priority 2: Use plain-text from dev environment
+    if (!vmsPass) {
+      vmsPass = process.env.NEXT_PUBLIC_NX_PASSWORD || request.headers.get('x-electron-vms-password');
+      if (vmsPass) {
+        console.log(`[Cloud API] Using plain-text VMS password for ${systemId} (length: ${vmsPass.length})`);
+      }
+    }
+
+    if (vmsUser && vmsPass) {
+      const creds = Buffer.from(`${vmsUser}:${vmsPass}`).toString('base64');
+      headers["Authorization"] = `Basic ${creds}`;
+      console.log(`[Cloud API] ✓ VMS Basic Auth configured for ${systemId} (user: ${vmsUser})`);
+    } else {
+      console.error(`[Cloud API] ✗ No authentication available for ${systemId} - user: ${vmsUser}, pass: ${!!vmsPass}`);
+    }
   }
 
   return headers;

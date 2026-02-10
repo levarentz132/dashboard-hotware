@@ -26,7 +26,7 @@ import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { fetchCloudSystems as getCachedCloudSystems } from "@/hooks/use-async-data";
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
-import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
@@ -227,6 +227,7 @@ export default function CameraInventory() {
           credentials: "include",
           headers: {
             Accept: "application/json",
+            ...getElectronHeaders(),
           },
         },
       );

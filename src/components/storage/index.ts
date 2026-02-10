@@ -10,7 +10,6 @@ export { defaultStorageFormData, STORAGE_TYPES } from "./types";
 // Service functions
 export {
   fetchCloudSystems,
-  attemptAutoLogin,
   loginToCloudSystem,
   fetchCloudStorages,
   createCloudStorage,

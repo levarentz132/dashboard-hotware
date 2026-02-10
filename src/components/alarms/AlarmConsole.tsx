@@ -42,7 +42,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 
@@ -680,13 +680,13 @@ export default function AlarmConsole() {
   const fetchCloudSystems = useCallback(async () => {
     setLoadingCloud(true);
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+      const response = await fetch("/api/cloud/systems", {
         method: "GET",
         credentials: "include",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: getCloudAuthHeader(),
+          ...getElectronHeaders(),
         },
       });
 

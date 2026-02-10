@@ -20,6 +20,7 @@ import {
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { useCameras } from "@/hooks/useNxAPI-camera";
 import { useCloudSystems, fetchFromCloudRelay, type CloudSystem } from "@/hooks/use-async-data";
+import { getElectronHeaders } from "@/lib/config";
 import { getOnlineOfflineBadgeClass, getRoleBadgeClass } from "@/lib/status-utils";
 import ServerLocationForm from "@/components/servers/ServerLocationForm";
 import { performAdminLogin } from "@/lib/auth-utils";
@@ -79,7 +80,12 @@ export default function SystemHealth() {
   const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
   const fetchSystemDetails = useCallback(async (cloudId: string): Promise<SystemInfoData | null> => {
     try {
-      const response = await fetch(`/api/nx/system/info?systemId=${encodeURIComponent(cloudId)}`);
+      const response = await fetch(`/api/nx/system/info?systemId=${encodeURIComponent(cloudId)}`, {
+        method: "GET",
+        headers: {
+          ...getElectronHeaders()
+        }
+      });
       if (response.ok) {
         return await response.json();
       }

@@ -40,7 +40,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return {
       'X-Electron-System-ID': extConfig.NEXT_PUBLIC_NX_SYSTEM_ID || '',
       'X-Electron-Username': extConfig.NEXT_PUBLIC_NX_USERNAME || '',
-      'X-Electron-Admin-Hash': extConfig.NX_ADMIN_HASH || '',
+      'X-Electron-VMS-Password': extConfig.NEXT_PUBLIC_NX_PASSWORD || '',
+      'X-Electron-VMS-Password-Encrypted': extConfig.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || '',
+      'X-Electron-Cloud-Username': extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
+      'X-Electron-Cloud-Password': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '',
+      'X-Electron-Cloud-Password-Encrypted': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '',
       'X-Electron-Cloud-Token': extConfig.NX_CLOUD_TOKEN || '',
     };
   }, []);
@@ -97,9 +101,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  // Initial session check
+  // Initial session check and Auto-Login for Electron
   useEffect(() => {
-    checkSession();
+    const initAuth = async () => {
+      // 1. First check if we already have a valid session cookie
+      await checkSession();
+
+      // 2. If in Electron and not authenticated, attempt Auto-Login using local config
+      const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+      if (extConfig && !state.isAuthenticated && !state.isLoading) {
+        console.log("[Auth] Electron detected, attempting Auto-Login with local identity...");
+
+        // We use the cloud email as username and the plain password (which we don't have)
+        // BUT the backend has been updated to accept the hash as verification if username matches.
+        // Wait, for this to work we'll pass a special 'auto_login' flag.
+        login({
+          username: extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
+          password: 'AUTO_LOGIN_CONTEXT', // Backend will detect this and use headers
+          system_id: extConfig.NEXT_PUBLIC_NX_SYSTEM_ID
+        });
+      }
+    };
+
+    initAuth();
   }, [checkSession]);
 
   // Periodic session check

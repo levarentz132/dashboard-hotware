@@ -70,26 +70,8 @@ export default function StorageSummaryWidget({ systemId }: { systemId?: string }
 
   // Auto-login function - always try with config credentials
   const attemptAutoLogin = useCallback(async (systemId: string) => {
-    // Always try auto-login if credentials exist in config
-    if (!CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
-      return false;
-    }
-
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId,
-          username: CLOUD_CONFIG.username,
-          password: CLOUD_CONFIG.password,
-        }),
-      });
-
-      return response.ok;
-    } catch {
-      return false;
-    }
+    // Authentication is now handled centrally by the Dual-Login flow
+    return false;
   }, []);
 
   // Fetch storages

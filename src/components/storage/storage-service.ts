@@ -2,7 +2,7 @@
  * Storage service - handles all storage-related API calls
  */
 
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import type { CloudSystem, Storage, StorageFormData, StorageStatusInfo } from "./types";
 
 // ============================================
@@ -10,18 +10,16 @@ import type { CloudSystem, Storage, StorageFormData, StorageStatusInfo } from ".
 // ============================================
 
 /**
- * Fetch all cloud systems from NX Cloud
+ * Fetch all cloud systems from internal proxy
  */
 export async function fetchCloudSystems(): Promise<CloudSystem[]> {
   try {
-    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+    const response = await fetch("/api/cloud/systems", {
       method: "GET",
       credentials: "include",
       headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
-      },
+        ...getElectronHeaders()
+      }
     });
 
     if (!response.ok) return [];
@@ -48,32 +46,6 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
 // ============================================
 // Authentication
 // ============================================
-
-/**
- * Auto-login to cloud system
- */
-export async function attemptAutoLogin(systemId: string): Promise<boolean> {
-  if (!CLOUD_CONFIG.autoLoginEnabled || !CLOUD_CONFIG.username || !CLOUD_CONFIG.password) {
-    return false;
-  }
-
-  try {
-    const response = await fetch("/api/cloud/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemId,
-        username: CLOUD_CONFIG.username,
-        password: CLOUD_CONFIG.password,
-      }),
-    });
-
-    return response.ok;
-  } catch (err) {
-    console.error("Auto-login failed:", err);
-    return false;
-  }
-}
 
 /**
  * Manual login to cloud system
@@ -114,27 +86,21 @@ export interface FetchStoragesResult {
 /**
  * Fetch storages from cloud system
  */
-export async function fetchCloudStorages(system: CloudSystem, autoLogin: boolean = true): Promise<FetchStoragesResult> {
+export async function fetchCloudStorages(system: CloudSystem): Promise<FetchStoragesResult> {
   if (!system || system.stateOfHealth !== "online") {
     return { storages: [], requiresAuth: false };
   }
 
   try {
-    const response = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`);
+    const response = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        ...getElectronHeaders()
+      }
+    });
 
     if (response.status === 401) {
-      // Try auto-login
-      if (autoLogin) {
-        const autoLoginSuccess = await attemptAutoLogin(system.id);
-        if (autoLoginSuccess) {
-          // Retry fetch
-          const retryResponse = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`);
-          if (retryResponse.ok) {
-            const data = await retryResponse.json();
-            return { storages: Array.isArray(data) ? data : [], requiresAuth: false };
-          }
-        }
-      }
       return { storages: [], requiresAuth: true };
     }
 
@@ -266,7 +232,13 @@ export async function deleteCloudStorage(
  */
 export async function fetchLocalStorages(systemId: string): Promise<{ storages: Storage[]; error?: string }> {
   try {
-    const response = await fetch(`/api/nx/storages?systemId=${encodeURIComponent(systemId)}`);
+    const response = await fetch(`/api/nx/storages?systemId=${encodeURIComponent(systemId)}`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        ...getElectronHeaders()
+      }
+    });
     const data = await response.json();
 
     if (!response.ok || data.error) {

@@ -150,29 +150,9 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
     return deviceMap[resourceId] || resourceId;
   };
 
-  // Auto-login
+  // Auto-login (disabled - using Dual-Login flow)
   const attemptAutoLogin = useCallback(async (targetSystemId: string) => {
-    if (autoLoginBlockedSystemsRef.current.has(targetSystemId)) return false;
-    if (!CLOUD_CONFIG.username || !CLOUD_CONFIG.password) return false;
-
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId: targetSystemId,
-          username: CLOUD_CONFIG.username,
-          password: CLOUD_CONFIG.password,
-        }),
-      });
-      // If credentials are invalid, don't keep retrying on subsequent refresh attempts.
-      if (response.status === 401 || response.status === 403) {
-        autoLoginBlockedSystemsRef.current.add(targetSystemId);
-      }
-      return response.ok;
-    } catch {
-      return false;
-    }
+    return false;
   }, []);
 
   // Fetch audit logs
@@ -196,7 +176,7 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
         );
 
         if (response.status === 401 && !retry) {
-          const hasAutoLoginCreds = !!CLOUD_CONFIG.username && !!CLOUD_CONFIG.password;
+          const hasAutoLoginCreds = false; // Disabled - using Dual-Login flow
           const autoLoginBlocked = autoLoginBlockedSystemsRef.current.has(targetSystemId);
 
           if (hasAutoLoginCreds && !autoLoginBlocked) {

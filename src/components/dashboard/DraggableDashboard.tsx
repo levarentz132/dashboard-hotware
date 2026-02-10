@@ -98,7 +98,7 @@ interface CloudSystem {
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Cloud, RefreshCw } from "lucide-react";
-import { getCloudAuthHeader } from "@/lib/config";
+import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 
 // Define LayoutItem type for react-grid-layout
 interface LayoutItem {
@@ -357,10 +357,10 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
   const fetchSystems = useCallback(async () => {
     setLoadingCloud(true);
     try {
-      const response = await fetch("https://meta.nxvms.com/cdb/systems", {
+      const response = await fetch("/api/cloud/systems", {
         headers: {
           Accept: "application/json",
-          Authorization: getCloudAuthHeader(),
+          ...getElectronHeaders(),
         },
       });
       if (response.ok) {
