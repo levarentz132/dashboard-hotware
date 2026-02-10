@@ -129,7 +129,9 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: ConnectionSetti
             <Server className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500" />
             Konfigurasi Koneksi
           </DialogTitle>
-          <DialogDescription className="text-xs sm:text-sm">Atur kredensial NX Witness Server dan NX Cloud sebelum login.</DialogDescription>
+          <DialogDescription className="text-xs sm:text-sm">
+            Atur kredensial NX Witness Server dan NX Cloud sebelum login.
+          </DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="server" className="w-full">
