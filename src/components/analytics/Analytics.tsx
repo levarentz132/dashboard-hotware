@@ -344,7 +344,7 @@ export default function Analytics() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 select-none">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">IoT Analytics</h1>
           <div className="flex items-center space-x-2">

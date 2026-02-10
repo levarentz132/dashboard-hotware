@@ -1202,7 +1202,7 @@ export default function AlarmConsole() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Alarm Console</h1>
         </div>
@@ -1359,18 +1359,18 @@ export default function AlarmConsole() {
             <CardContent className="p-3 sm:p-4 space-y-3 sm:space-y-4">
               {/* Search Bar */}
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <div className="relative flex-1 select-none">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                   <Input
                     placeholder="Cari event..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 text-sm"
+                    className="pl-10 text-sm select-text h-10"
                   />
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -1381,12 +1381,12 @@ export default function AlarmConsole() {
                   <Button
                     variant="outline"
                     onClick={() => setShowFilters(!showFilters)}
-                    className="gap-2 flex-1 sm:flex-none"
+                    className="gap-2 flex-1 sm:flex-none select-none w-[110px] justify-center"
                   >
-                    <Filter className="h-4 w-4" />
+                    <Filter className="h-4 w-4 shrink-0" />
                     <span>Filter</span>
                     {hasActiveFilters && (
-                      <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                      <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0">
                         {activeFilterCount}
                       </Badge>
                     )}

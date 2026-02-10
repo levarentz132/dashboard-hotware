@@ -93,11 +93,6 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
             <p className="text-[10px] sm:text-xs text-muted-foreground">{totalCameras} cameras</p>
           </div>
         </div>
-        <Link href="/monitoring-cctv" className="shrink-0">
-          <Badge variant="outline" className="cursor-pointer hover:bg-accent text-[10px] sm:text-xs">
-            View All
-          </Badge>
-        </Link>
       </div>
 
       <Tabs defaultValue="summary" className="flex-1 flex flex-col min-h-0">
@@ -228,6 +223,6 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
           </ScrollArea>
         </TabsContent>
       </Tabs>
-    </div>
+    </div >
   );
 }

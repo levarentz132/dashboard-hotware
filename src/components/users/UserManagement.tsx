@@ -23,6 +23,7 @@ import {
   Check,
   Link,
   MoreHorizontal,
+  X,
 } from "lucide-react";
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
 import { useAuth } from "@/contexts/auth-context";
@@ -1036,7 +1037,7 @@ export default function UserManagement() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Management</h1>
         </div>
@@ -1045,7 +1046,7 @@ export default function UserManagement() {
           {/* Cloud System Selector - only if systems exist */}
           {!isCloudEmpty && (
             <Select value={selectedSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
-              <SelectTrigger className="w-full sm:w-[220px]">
+              <SelectTrigger className="w-full sm:w-[220px] h-10">
                 <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
                 <SelectValue placeholder="Select system..." />
               </SelectTrigger>
@@ -1148,43 +1149,76 @@ export default function UserManagement() {
           </div>
 
           {/* Search and Filter */}
-          <div className="flex flex-col md:flex-row gap-2 sm:gap-4 items-center">
-            <div className="relative flex-1 w-full">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search users..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-            </div>
+          <Card className="mb-4">
+            <CardContent className="p-3 sm:p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="relative flex-1 select-none">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search users..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-10 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text h-10"
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="flex items-center gap-2 w-full md:w-auto justify-center" size="sm">
-                  <Filter className="h-4 w-4" />
-                  {filterType === "all" ? "All Types" : getUserTypeBadge(filterType as NxUser["type"]).label}
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setFilterType("all")}>All Types</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setFilterType("local")}>
-                  <Users className="h-4 w-4 mr-2" /> Local
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setFilterType("temporaryLocal")}>
-                  <Clock className="h-4 w-4 mr-2" /> Temporary
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setFilterType("ldap")}>
-                  <Shield className="h-4 w-4 mr-2" /> LDAP
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setFilterType("cloud")}>
-                  <Cloud className="h-4 w-4 mr-2" /> Cloud
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                <div className="flex gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={`gap-2 flex-1 sm:flex-none select-none w-[110px] justify-center h-10 ${filterType !== "all" ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : ""
+                          }`}
+                      >
+                        <Filter className="h-4 w-4 shrink-0" />
+                        <span>Filter</span>
+                        {filterType !== "all" && (
+                          <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0">
+                            1
+                          </Badge>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem onClick={() => setFilterType("all")}>All Types</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setFilterType("local")}>
+                        <Users className="h-4 w-4 mr-2" /> Local
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setFilterType("temporaryLocal")}>
+                        <Clock className="h-4 w-4 mr-2" /> Temporary
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setFilterType("ldap")}>
+                        <Shield className="h-4 w-4 mr-2" /> LDAP
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setFilterType("cloud")}>
+                        <Cloud className="h-4 w-4 mr-2" /> Cloud
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  {filterType !== "all" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-gray-400 hover:text-gray-600 h-10"
+                      onClick={() => setFilterType("all")}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Error State */}
           {error && (

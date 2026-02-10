@@ -9,7 +9,6 @@ import {
   Server,
   Cloud,
   ChevronDown,
-  Calendar,
   Activity,
   Camera,
   Settings,
@@ -18,9 +17,27 @@ import {
   Eye,
   EyeOff,
   Search,
+  Filter,
+  X,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Badge } from "../ui/badge";
+import { Card, CardContent } from "../ui/card";
+import { Separator } from "../ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { DateRange } from "react-day-picker";
+import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import { performAdminLogin } from "@/lib/auth-utils";
 
@@ -88,15 +105,21 @@ export default function AuditLog() {
   const [error, setError] = useState<string | null>(null);
 
   // Filter state
+  // Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [filterEventType, setFilterEventType] = useState<string>("all");
   const [filterUser, setFilterUser] = useState<string>("all");
-  const [fromDate, setFromDate] = useState<string>(() => {
-    // Default to 7 days ago
-    const date = new Date();
-    date.setDate(date.getDate() - 7);
-    return date.toISOString().slice(0, 16);
+
+  const [date, setDate] = useState<DateRange | undefined>(() => {
+    const from = new Date();
+    from.setDate(from.getDate() - 7);
+    return {
+      from,
+      to: undefined,
+    };
   });
+
+  const [showFilters, setShowFilters] = useState(false);
 
   // Pagination
   const [displayCount, setDisplayCount] = useState(20);
@@ -236,12 +259,22 @@ export default function AuditLog() {
       setError(null);
 
       try {
-        // Format from date
-        const fromDateFormatted = new Date(fromDate).toISOString();
+        if (!date?.from) return;
 
-        const response = await fetch(
-          `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted)}`,
-        );
+        // Format dates
+        // from: start of the selected from day
+        const fromDateFormatted = new Date(date.from);
+        fromDateFormatted.setHours(0, 0, 0, 0);
+
+        // to: end of the selected to day, OR end of the from day if only from is selected
+        const toDateTarget = date.to || date.from;
+        const toDateFormatted = new Date(toDateTarget);
+        toDateFormatted.setHours(23, 59, 59, 999);
+
+        let queryParams = `systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted.toISOString())}`;
+        queryParams += `&to=${encodeURIComponent(toDateFormatted.toISOString())}`;
+
+        const response = await fetch(`/api/cloud/audit-log?${queryParams}`);
 
         if (response.status === 401) {
           setRequiresAuth(true);
@@ -249,11 +282,7 @@ export default function AuditLog() {
           const adminLoginSuccess = await attemptAdminLogin(system.id);
           if (adminLoginSuccess) {
             // Retry fetch
-            const retryResponse = await fetch(
-              `/api/cloud/audit-log?systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(
-                fromDateFormatted,
-              )}`,
-            );
+            const retryResponse = await fetch(`/api/cloud/audit-log?${queryParams}`);
             if (retryResponse.ok) {
               const data = await retryResponse.json();
               const logs = data.reply || data;
@@ -280,7 +309,7 @@ export default function AuditLog() {
         setLoading(false);
       }
     },
-    [fromDate, attemptAdminLogin],
+    [date, attemptAdminLogin],
   );
 
   // Initial load
@@ -380,13 +409,40 @@ export default function AuditLog() {
   // Paginate
   const displayedLogs = sortedLogs.slice(0, displayCount);
 
+  // Active filter count
+  const defaultFrom = new Date();
+  defaultFrom.setDate(defaultFrom.getDate() - 7);
+  // Check if date matches default (from is 7 days ago, to is undefined or same day)
+  const isDateChanged = !date?.from ||
+    date.from.toDateString() !== defaultFrom.toDateString() ||
+    !!date.to;
+
+  const activeFilterCount = [
+    filterEventType !== "all",
+    filterUser !== "all",
+    isDateChanged
+  ].filter(Boolean).length;
+  const hasActiveFilters = activeFilterCount > 0;
+
+  const clearFilters = () => {
+    setFilterEventType("all");
+    setFilterUser("all");
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    setDate({
+      from: sevenDaysAgo,
+      to: undefined
+    });
+    setSearchTerm("");
+  };
+
   const isCloudEmpty = cloudSystems.length === 0;
   const showNoCloudAlert = isCloudEmpty && !loadingSystems;
 
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Log</h1>
         </div>
@@ -457,6 +513,13 @@ export default function AuditLog() {
         </div>
       </div>
 
+      {/* Cloud Systems Loading Skeleton */}
+      {loadingSystems && isCloudEmpty && (
+        <div className="space-y-4">
+          <Skeleton className="h-24 w-full rounded-lg" />
+        </div>
+      )}
+
       {/* Cloud Systems Error - Now positioned below title */}
       {showNoCloudAlert && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
@@ -474,77 +537,194 @@ export default function AuditLog() {
         <>
 
           {/* Filters */}
-          <div className="bg-white rounded-lg border p-4 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3">
-              {/* Search */}
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="Search events, users, resources..."
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+          <Card className="mb-4">
+            <CardContent className="p-3 sm:p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="relative flex-1 select-none">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search events, users, resources..."
+                    className="w-full pl-10 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text bg-white h-10"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Popover open={showFilters} onOpenChange={setShowFilters}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={`gap-2 flex-1 sm:flex-none select-none min-w-[110px] w-auto justify-between h-10 px-3 ${hasActiveFilters ? "border-blue-500 bg-blue-50 text-blue-700 font-medium hover:bg-blue-100 hover:text-blue-800" : ""}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-4 w-4 shrink-0" />
+                          <span>Filter</span>
+                          {hasActiveFilters && (
+                            <Badge variant="secondary" className="h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0 hover:bg-blue-700">
+                              {activeFilterCount}
+                            </Badge>
+                          )}
+                        </div>
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72" align="end">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-semibold text-gray-900">Filters</h4>
+                          {hasActiveFilters && (
+                            <button
+                              onClick={clearFilters}
+                              className="text-xs text-blue-600 hover:text-blue-800"
+                            >
+                              Clear all
+                            </button>
+                          )}
+                        </div>
+
+                        <Separator />
+
+                        <div className="space-y-3">
+                          {/* Event Type Filter */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Event Type</label>
+                            <Select value={filterEventType} onValueChange={setFilterEventType}>
+                              <SelectTrigger className="w-full bg-white">
+                                <SelectValue placeholder="All Event Types" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Event Types</SelectItem>
+                                {uniqueEventTypes.map((type) => (
+                                  <SelectItem key={type} value={type}>
+                                    {getEventInfo(type).label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* User Filter */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">User</label>
+                            <Select value={filterUser} onValueChange={setFilterUser}>
+                              <SelectTrigger className="w-full bg-white">
+                                <SelectValue placeholder="All Users" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Users</SelectItem>
+                                {uniqueUsers.map((user) => (
+                                  <SelectItem key={user} value={user}>
+                                    {user}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Date Range Filter */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">Date Range</label>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  id="date"
+                                  variant={"outline"}
+                                  className={cn(
+                                    "w-full justify-start text-left font-normal",
+                                    !date && "text-muted-foreground"
+                                  )}
+                                >
+                                  <CalendarIcon className="mr-2 h-4 w-4" />
+                                  {date?.from ? (
+                                    date.to ? (
+                                      <>
+                                        {format(date.from, "LLL dd, y")} -{" "}
+                                        {format(date.to, "LLL dd, y")}
+                                      </>
+                                    ) : (
+                                      format(date.from, "LLL dd, y")
+                                    )
+                                  ) : (
+                                    <span>Pick a date</span>
+                                  )}
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0" align="end">
+                                <Calendar
+                                  initialFocus
+                                  mode="range"
+                                  defaultMonth={date?.from}
+                                  selected={date}
+                                  onSelect={setDate}
+                                  numberOfMonths={2}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </div>
+
+                        <Button onClick={() => setShowFilters(false)} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                          Apply Filters
+                        </Button>
+                        {hasActiveFilters && (
+                          <button
+                            onClick={clearFilters}
+                            className="w-full text-xs text-blue-600 hover:underline mt-2 text-center"
+                          >
+                            Clear all filters
+                          </button>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
 
-              {/* From Date */}
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-gray-500" />
-                <input
-                  type="datetime-local"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              {/* Event Type Filter */}
-              <select
-                value={filterEventType}
-                onChange={(e) => setFilterEventType(e.target.value)}
-                className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              >
-                <option value="all">All Event Types</option>
-                {uniqueEventTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {getEventInfo(type).label}
-                  </option>
-                ))}
-              </select>
-
-              {/* User Filter */}
-              <select
-                value={filterUser}
-                onChange={(e) => setFilterUser(e.target.value)}
-                className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              >
-                <option value="all">All Users</option>
-                {uniqueUsers.map((user) => (
-                  <option key={user} value={user}>
-                    {user}
-                  </option>
-                ))}
-              </select>
-
-              {/* Clear Filters */}
-              {(filterEventType !== "all" || filterUser !== "all" || searchTerm) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setFilterEventType("all");
-                    setFilterUser("all");
-                    setSearchTerm("");
-                  }}
-                >
-                  Clear Filters
-                </Button>
+              {hasActiveFilters && (
+                <>
+                  <Separator className="my-2" />
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {filterEventType !== "all" && (
+                      <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                        Type: {getEventInfo(filterEventType).label}
+                        <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterEventType("all")} />
+                      </Badge>
+                    )}
+                    {filterUser !== "all" && (
+                      <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                        User: {filterUser}
+                        <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterUser("all")} />
+                      </Badge>
+                    )}
+                    {isDateChanged && date?.from && (
+                      <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                        Date: {format(date.from, "LLL dd, y")}
+                        {date.to ? ` - ${format(date.to, "LLL dd, y")}` : ""}
+                        <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => {
+                          const sevenDaysAgo = new Date();
+                          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                          setDate({
+                            from: sevenDaysAgo,
+                            to: undefined
+                          });
+                        }} />
+                      </Badge>
+                    )}
+                    <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline px-2">Clear all</button>
+                  </div>
+                </>
               )}
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* Auth Required */}
           {requiresAuth && !showLoginForm && (

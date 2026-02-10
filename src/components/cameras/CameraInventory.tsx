@@ -32,6 +32,8 @@ import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Card, CardContent } from "../ui/card";
+import { Badge } from "../ui/badge";
 import { useAuth } from "@/contexts/auth-context";
 import { isAdmin } from "@/lib/auth";
 
@@ -375,7 +377,7 @@ export default function CameraInventory() {
     <div className="space-y-4 md:space-y-6">
       {/* Modals */}
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Camera Inventory</h1>
           {error && !isCloudEmpty && <AlertCircle className="w-4 h-4 text-red-500 ml-2" />}
@@ -457,94 +459,6 @@ export default function CameraInventory() {
             }}
           />
 
-          {/* Search and Filters */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                type="text"
-                placeholder="Search cameras, location, vendor..."
-                className="pl-10 pr-4 py-2 w-full border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <Popover open={showFilters} onOpenChange={setShowFilters}>
-              <PopoverTrigger asChild>
-                <button
-                  className={`flex items-center justify-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 ${filterStatus !== "all" || filterVendor !== "all" ? "border-blue-500 bg-blue-50 text-blue-700" : ""
-                    }`}
-                >
-                  <Filter className="w-4 h-4" />
-                  <span>Filters</span>
-                  {(filterStatus !== "all" || filterVendor !== "all") && (
-                    <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
-                      {[filterStatus !== "all", filterVendor !== "all"].filter(Boolean).length}
-                    </span>
-                  )}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72" align="end">
-                <div className="space-y-3 max-h-[70vh] overflow-y-auto">
-                  <div className="flex items-center justify-between sticky top-0 bg-white pb-2">
-                    <h4 className="font-semibold text-gray-900">Filters</h4>
-                    {(filterStatus !== "all" || filterVendor !== "all") && (
-                      <button
-                        onClick={() => {
-                          setFilterStatus("all");
-                          setFilterVendor("all");
-                        }}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Status Filter */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                    <select
-                      value={filterStatus}
-                      onChange={(e) => setFilterStatus(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="all">All Status</option>
-                      <option value="online">Online</option>
-                      <option value="offline">Offline</option>
-                      <option value="recording">Recording</option>
-                      <option value="unauthorized">Unauthorized</option>
-                    </select>
-                  </div>
-
-                  {/* Vendor Filter */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
-                    <select
-                      value={filterVendor}
-                      onChange={(e) => setFilterVendor(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="all">All Vendors</option>
-                      {uniqueVendors.map((vendor) => (
-                        <option key={vendor} value={vendor.toLowerCase()}>
-                          {vendor}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    onClick={() => setShowFilters(false)}
-                    className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 sticky bottom-0"
-                  >
-                    Apply Filters
-                  </button>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-
           {/* Stats Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
             <div className="bg-white p-2 md:p-3 rounded-lg border">
@@ -583,6 +497,114 @@ export default function CameraInventory() {
             </div>
           </div>
 
+          {/* Search and Filters */}
+          <Card className="mb-4">
+            <CardContent className="p-3 sm:p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="relative flex-1 select-none">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search cameras, location, vendor..."
+                    className="w-full pl-10 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text bg-white h-10"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Popover open={showFilters} onOpenChange={setShowFilters}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={`gap-2 flex-1 sm:flex-none select-none w-[110px] justify-between h-10 px-3 ${filterStatus !== "all" || filterVendor !== "all" ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : ""
+                          }`}
+                      >
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <Filter className="h-4 w-4 shrink-0" />
+                          <span>Filter</span>
+                          {(filterStatus !== "all" || filterVendor !== "all") && (
+                            <Badge variant="secondary" className="h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0">
+                              {[filterStatus !== "all", filterVendor !== "all"].filter(Boolean).length}
+                            </Badge>
+                          )}
+                        </div>
+                        <ChevronDown className="h-4 w-4 shrink-0 opacity-50 ml-1" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72" align="end">
+                      <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+                        <div className="flex items-center justify-between sticky top-0 bg-white pb-2">
+                          <h4 className="font-semibold text-gray-900">Filters</h4>
+                          {(filterStatus !== "all" || filterVendor !== "all") && (
+                            <button
+                              onClick={() => {
+                                setFilterStatus("all");
+                                setFilterVendor("all");
+                              }}
+                              className="text-xs text-blue-600 hover:text-blue-800"
+                            >
+                              Clear all
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Status Filter */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                          <select
+                            value={filterStatus}
+                            onChange={(e) => setFilterStatus(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="all">All Status</option>
+                            <option value="online">Online</option>
+                            <option value="offline">Offline</option>
+                            <option value="recording">Recording</option>
+                            <option value="unauthorized">Unauthorized</option>
+                          </select>
+                        </div>
+
+                        {/* Vendor Filter */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
+                          <select
+                            value={filterVendor}
+                            onChange={(e) => setFilterVendor(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="all">All Vendors</option>
+                            {uniqueVendors.map((vendor) => (
+                              <option key={vendor} value={vendor.toLowerCase()}>
+                                {vendor}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <button
+                          onClick={() => setShowFilters(false)}
+                          className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 sticky bottom-0"
+                        >
+                          Apply Filters
+                        </button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Camera Grid/List */}
           <div className="bg-white rounded-lg shadow-sm border">
             {isLoadingContent ? (
@@ -593,10 +615,10 @@ export default function CameraInventory() {
             ) : viewMode !== "cloud" && servers.length === 0 ? (
               <div className="flex items-center justify-center p-12 text-center">
                 <div className="space-y-4">
-                  <Server className="w-12 h-12 text-gray-300 mx-auto" />
-                  <h3 className="text-lg font-medium text-gray-900">No Server Available</h3>
+                  <Camera className="w-12 h-12 text-gray-300 mx-auto" />
+                  <h3 className="text-lg font-medium text-gray-900">No camera detected</h3>
                   <p className="text-sm text-gray-500 max-w-xs mx-auto">
-                    Your system is connected but no servers are currently detected.
+                    Your system is connected but no cameras are currently detected.
                   </p>
                   <Button onClick={() => refetch()} variant="outline">
                     <RefreshCw className="w-4 h-4 mr-2" /> Refresh
@@ -629,8 +651,8 @@ export default function CameraInventory() {
               <div className="p-3 md:p-6 w-full">
                 {camerasBySystem.length === 0 ? (
                   <div className="flex items-center justify-center p-8 text-gray-500">
-                    <Cloud className="w-6 h-6 mr-2" />
-                    <span>No systems found</span>
+                    <Camera className="w-6 h-6 mr-2" />
+                    <span>No cameras found</span>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -743,8 +765,8 @@ export default function CameraInventory() {
 
                                       {/* Camera Info */}
                                       <div className="space-y-0.5 text-xs text-gray-600">
-                                        {camera.model && <div className="truncate">Model: {camera.model}</div>}
-                                        {camera.vendor && <div className="truncate">Vendor: {camera.vendor}</div>}
+                                        <div className="truncate">Model: {camera.model || "-"}</div>
+                                        <div className="truncate">Vendor: {camera.vendor || "-"}</div>
                                         {camera.mac && <div className="truncate">MAC: {camera.mac}</div>}
                                         {camera.physicalId && <div className="truncate">ID: {camera.physicalId}</div>}
                                         {camera.typeId && (
@@ -814,8 +836,8 @@ export default function CameraInventory() {
                     </div>
 
                     <div className="space-y-1 md:space-y-2 text-xs md:text-sm text-gray-600">
-                      <div className="truncate">Model: {camera.model || "Unknown"}</div>
-                      {camera.vendor && <div className="truncate hidden sm:block">Vendor: {camera.vendor}</div>}
+                      <div className="truncate">Model: {camera.model || "-"}</div>
+                      <div className="truncate">Vendor: {camera.vendor || "-"}</div>
                     </div>
 
                     <div className="flex items-center justify-between mt-3 md:mt-4 pt-2 md:pt-3 border-t">

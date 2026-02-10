@@ -29,6 +29,7 @@ import { Button } from "../ui/button";
 import { Shield, LogIn, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import type { ServerMarkerData } from "./ServerMap";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Dynamic import untuk ServerMap (client-side only karena pakai Leaflet)
 const ServerMap = dynamic(() => import("./ServerMap"), {
@@ -213,12 +214,88 @@ export default function SystemHealth() {
     });
   }, [cloudSystems, serverLocations, systemDetails]);
 
+  // Loading Skeleton
+  if (loading || (cloudSystems.length === 0 && refreshing)) {
+    return (
+      <div className="space-y-6">
+        {/* Header Skeleton */}
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-10 w-24 rounded-lg" />
+        </div>
+
+        {/* Status Cards Skeleton */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white p-6 rounded-lg border">
+              <div className="flex items-center space-x-3">
+                <Skeleton className="h-8 w-8 rounded-full" />
+                <div className="space-y-2">
+                  <Skeleton className="h-6 w-12" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Map Skeleton */}
+        <div className="bg-white rounded-lg border shadow-sm p-4">
+          <div className="flex items-center justify-between border-b pb-4 mb-4">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-5 w-5 rounded-full" />
+              <Skeleton className="h-6 w-48" />
+            </div>
+            <Skeleton className="h-8 w-24 rounded-lg" />
+          </div>
+          <Skeleton className="w-full h-[350px] rounded-md" />
+        </div>
+
+        {/* Monitor Server Status Skeleton */}
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <Skeleton className="h-5 w-5 rounded-full" />
+            <Skeleton className="h-6 w-48" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {[...Array(2)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg border-l-4 border-gray-200 shadow-sm p-5">
+                <div className="flex justify-between mb-4">
+                  <div className="flex gap-3">
+                    <Skeleton className="h-10 w-10 rounded-lg" />
+                    <div className="space-y-1">
+                      <Skeleton className="h-5 w-32" />
+                      <Skeleton className="h-3 w-48" />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1 items-end">
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                    <Skeleton className="h-6 w-12 rounded-full" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <Skeleton className="h-16 w-full rounded-lg" />
+                  <Skeleton className="h-16 w-full rounded-lg" />
+                  <Skeleton className="h-16 w-full rounded-lg col-span-2" />
+                </div>
+                <div className="border-t pt-3 mt-3 flex justify-between">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-4 w-32" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
 
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 select-none">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">System Health</h1>
 
