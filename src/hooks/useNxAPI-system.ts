@@ -25,8 +25,19 @@ export function useSystemInfo(cloudId?: string) {
   // Fetch available cloud systems
   const fetchCloudSystems = useCallback(async () => {
     try {
+      // Pass cloud credentials via header so server route can use them
+      const headers: Record<string, string> = {};
+      try {
+        const { getNxCloudConfig } = await import("@/lib/connection-settings");
+        const cloud = getNxCloudConfig();
+        if (cloud.username && cloud.password) {
+          headers["x-cloud-auth"] = btoa(`${cloud.username}:${cloud.password}`);
+        }
+      } catch {}
+
       const response = await fetch("/api/cloud/systems", {
         method: "GET",
+        headers,
       });
 
       if (!response.ok) {
@@ -168,4 +179,3 @@ export function useSystemInfo(cloudId?: string) {
     switchSystem,
   };
 }
-

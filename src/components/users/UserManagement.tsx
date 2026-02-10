@@ -229,11 +229,12 @@ function useUserGroups(systemId?: string) {
   return { groups, loading, error, refetch: fetchGroupsData };
 }
 
-
 export default function UserManagement() {
   const { user: localUser } = useAuth();
   const isUserAdmin = isAdmin(localUser);
-  const canEditUsers = isUserAdmin || localUser?.privileges?.find(p => p.module === "user_management" || p.module === "users")?.can_edit === true;
+  const canEditUsers =
+    isUserAdmin ||
+    localUser?.privileges?.find((p) => p.module === "user_management" || p.module === "users")?.can_edit === true;
   const [selectedSystemId, setSelectedSystemId] = useState<string>("");
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(false);
@@ -258,8 +259,19 @@ export default function UserManagement() {
   const fetchCloudSystems = useCallback(async () => {
     setLoadingCloud(true);
     try {
+      // Pass cloud credentials via header so server route can use them
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      try {
+        const { getNxCloudConfig } = await import("@/lib/connection-settings");
+        const cloud = getNxCloudConfig();
+        if (cloud.username && cloud.password) {
+          headers["x-cloud-auth"] = btoa(`${cloud.username}:${cloud.password}`);
+        }
+      } catch {}
+
       const response = await fetch("/api/cloud/systems", {
         method: "GET",
+        headers,
       });
 
       if (!response.ok) {
@@ -1078,9 +1090,7 @@ export default function UserManagement() {
             disabled={isRefreshing || loadingCloud}
             className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-[38px]"
           >
-            <RefreshCw
-              className={`w-4 h-4 ${isRefreshing || loadingCloud ? "animate-spin" : ""}`}
-            />
+            <RefreshCw className={`w-4 h-4 ${isRefreshing || loadingCloud ? "animate-spin" : ""}`} />
             <span>Refresh</span>
           </button>
         </div>
@@ -1215,7 +1225,9 @@ export default function UserManagement() {
                   <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-muted-foreground">
                     <Users className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-50" />
                     <p className="text-sm sm:text-base">No users found</p>
-                    {searchTerm && <p className="text-xs sm:text-sm mt-1">Try adjusting your search or filter criteria</p>}
+                    {searchTerm && (
+                      <p className="text-xs sm:text-sm mt-1">Try adjusting your search or filter criteria</p>
+                    )}
                   </div>
                 ) : (
                   <div className="rounded-md border overflow-x-auto">
@@ -1253,7 +1265,9 @@ export default function UserManagement() {
                                     )}
                                     {/* Show email on mobile */}
                                     {user.email && (
-                                      <p className="text-[10px] text-muted-foreground truncate md:hidden">{user.email}</p>
+                                      <p className="text-[10px] text-muted-foreground truncate md:hidden">
+                                        {user.email}
+                                      </p>
                                     )}
                                   </div>
                                 </div>
@@ -1317,7 +1331,10 @@ export default function UserManagement() {
                                       </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
-                                      <DropdownMenuItem onClick={() => handleOpenEdit(user)} disabled={user.type === "ldap"}>
+                                      <DropdownMenuItem
+                                        onClick={() => handleOpenEdit(user)}
+                                        disabled={user.type === "ldap"}
+                                      >
                                         <Pencil className="h-4 w-4 mr-2" />
                                         Edit
                                       </DropdownMenuItem>
@@ -1333,7 +1350,12 @@ export default function UserManagement() {
                                     </DropdownMenuContent>
                                   </DropdownMenu>
                                 ) : (
-                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto"
+                                    disabled
+                                  >
                                     <MoreHorizontal className="h-4 w-4" />
                                   </Button>
                                 )}
@@ -1373,7 +1395,9 @@ export default function UserManagement() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{group.name}</p>
-                        {group.description && <p className="text-xs text-muted-foreground truncate">{group.description}</p>}
+                        {group.description && (
+                          <p className="text-xs text-muted-foreground truncate">{group.description}</p>
+                        )}
                       </div>
                       <Badge variant="secondary" className="text-xs">
                         {users.filter((u) => u.groupIds?.includes(group.id)).length} users
@@ -1463,12 +1487,17 @@ export default function UserManagement() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete User</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Are you sure you want to delete user <strong>{selectedUser?.name}</strong>? This action cannot be undone.
+                  Are you sure you want to delete user <strong>{selectedUser?.name}</strong>? This action cannot be
+                  undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete} disabled={isSubmitting} className="bg-red-600 hover:bg-red-700">
+                <AlertDialogAction
+                  onClick={handleDelete}
+                  disabled={isSubmitting}
+                  className="bg-red-600 hover:bg-red-700"
+                >
                   {isSubmitting ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
