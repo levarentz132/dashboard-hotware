@@ -34,6 +34,3 @@ export type {
   ModuleId,
 } from "./SubAccount.d";
 export { AVAILABLE_MODULES } from "./SubAccount.d";
-
-// Re-export validation types
-export type { Camera, CameraForm } from "@/validations/camera-validation";
