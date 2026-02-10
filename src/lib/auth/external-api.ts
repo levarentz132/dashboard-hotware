@@ -90,16 +90,38 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<an
 
     console.log(`[External API] Calling: ${url}`);
 
+    const method = options.method || "GET";
+    const headers: Record<string, string> = {};
+
+    // Copy existing headers
+    if (options.headers) {
+      if (options.headers instanceof Headers) {
+        options.headers.forEach((v, k) => { headers[k] = v; });
+      } else if (Array.isArray(options.headers)) {
+        options.headers.forEach(([k, v]) => { headers[k] = v; });
+      } else {
+        Object.assign(headers, options.headers);
+      }
+    }
+
+    if (method !== "GET" && method !== "HEAD" && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+
     const response = await fetch(url, {
       ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
+      headers,
       signal: controller.signal,
     });
 
     clearTimeout(timeoutId);
+
+    // Handle error responses
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[External API] Error ${response.status} from ${endpoint}:`, errorText);
+      throw new Error(`API error ${response.status}: ${errorText || response.statusText}`);
+    }
 
     // If it's a 204 No Content, return empty object
     if (response.status === 204) return { success: true };
@@ -117,7 +139,7 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<an
     } else {
       // Return as text for public keys or other non-json responses
       const text = await response.text();
-      return text;
+      return text.trim();
     }
   } catch (error) {
     clearTimeout(timeoutId);
@@ -185,10 +207,10 @@ export async function getExternalPublicKey(): Promise<string> {
   // Based on user prompt, it returns the string directly or in some format.
   // "Retrieve the RSA public key to verify access tokens locally. GET http://localhost:3000/auth/public-key -----BEGIN PUBLIC KEY----- ... -----END PUBLIC KEY-----"
 
-  if (typeof response === "string") return response;
-  if (response.publicKey) return response.publicKey;
-  if (response.key) return response.key;
-  if (response.data) return response.data;
+  if (typeof response === "string") return response.trim();
+  if (response.publicKey) return response.publicKey.trim();
+  if (response.key) return response.key.trim();
+  if (response.data && typeof response.data === 'string') return response.data.trim();
 
   return JSON.stringify(response);
 }

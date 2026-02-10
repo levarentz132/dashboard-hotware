@@ -20,23 +20,34 @@ async function getPublicKey() {
   try {
     const publicKeyPEM = await getExternalPublicKey();
 
+    if (!publicKeyPEM || typeof publicKeyPEM !== 'string') {
+      throw new Error(`Public key is not a valid string: ${typeof publicKeyPEM}`);
+    }
+
+    const trimmedKey = publicKeyPEM.trim();
+
+    // Debug log for troubleshooting (first 50 chars)
+    if (!trimmedKey.startsWith("-----BEGIN PUBLIC KEY-----")) {
+      console.warn(`[Auth Service] Public key missing SPKI header. Starts with: ${trimmedKey.substring(0, 50)}...`);
+    }
+
     // Only re-import if the key has changed
-    if (cachedPublicKeyRaw === publicKeyPEM && cachedPublicKey) {
+    if (cachedPublicKeyRaw === trimmedKey && cachedPublicKey) {
       return cachedPublicKey;
     }
 
     // SPKI is for Public Keys (BEGIN PUBLIC KEY)
-    // If it's PKCS8 (BEGIN PRIVATE KEY), we would use importPKCS8
-    const publicKey = await importSPKI(publicKeyPEM, "RS256");
+    const publicKey = await importSPKI(trimmedKey, "RS256");
 
     cachedPublicKey = publicKey;
-    cachedPublicKeyRaw = publicKeyPEM;
+    cachedPublicKeyRaw = trimmedKey;
 
     return publicKey;
   } catch (error) {
     console.error("[Auth Service] Error importing public key:", error);
-    // Fallback to secret key if RSA fails (for backward compatibility during migration)
-    return new TextEncoder().encode(AUTH_CONFIG.JWT_SECRET);
+    // FALLBACK: If we have a JWT_SECRET, we return it but it will only work for HS256
+    // RS256 will still fail verification, which is safer than using a wrong key
+    return new TextEncoder().encode(AUTH_CONFIG.JWT_SECRET || "fallback-secret");
   }
 }
 
