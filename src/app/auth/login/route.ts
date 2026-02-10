@@ -119,14 +119,29 @@ export async function POST(request: NextRequest) {
 
     // Check if login was successful (either success=true or we have an access_token)
     if (!externalData.success && !externalData.access_token) {
-      // Handle specific error codes
-      const isCredentialError = externalData.error_code !== "LICENSE_EXPIRED";
-      const status = externalData.error_code === "LICENSE_EXPIRED" ? 403 : 401;
+      // Handle specific error codes from external API
+      let message: string = AUTH_MESSAGES.LOGIN_FAILED;
+      let status = 401;
+
+      if (externalData.error_code === "LICENSE_EXPIRED") {
+        message = externalData.message || "Lisensi Anda telah berakhir";
+        status = 403;
+      } else if (externalData.error_code === "LICENSE_MISMATCH" || externalData.error_code === "SYSTEM_ID_MISMATCH") {
+        message = AUTH_MESSAGES.LICENSE_MISMATCH;
+        status = 403;
+      } else if (externalData.error_code === "USER_NOT_FOUND" || externalData.error_code === "INVALID_PASSWORD") {
+        // Obfuscate specific credential errors for security
+        message = AUTH_MESSAGES.LOGIN_FAILED;
+        status = 401;
+      } else if (externalData.message) {
+        // Use message from API if available but not a standard credential error
+        message = externalData.message;
+      }
 
       return NextResponse.json(
         {
           success: false,
-          message: isCredentialError ? AUTH_MESSAGES.LOGIN_FAILED : externalData.message || "Lisensi tidak valid",
+          message: message,
           error_code: externalData.error_code,
         },
         { status },

@@ -1211,7 +1211,7 @@ export default function AlarmConsole() {
           {/* Server Selector - only if systems exist */}
           {!isCloudEmpty && (
             <Select value={selectedCloudSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
-              <SelectTrigger className="w-full sm:w-[220px]">
+              <SelectTrigger className="w-full sm:w-[220px] h-10">
                 <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
                 <SelectValue placeholder="Pilih system..." />
               </SelectTrigger>
@@ -1236,7 +1236,7 @@ export default function AlarmConsole() {
               onValueChange={handleCloudServerChange}
               disabled={loadingCloudServers || cloudServers.length === 0}
             >
-              <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectTrigger className="w-full sm:w-[200px] h-10">
                 <Server className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
                 <SelectValue placeholder={loadingCloudServers ? "Memuat server..." : "Pilih server..."} />
               </SelectTrigger>
@@ -1268,8 +1268,8 @@ export default function AlarmConsole() {
           {!isCloudEmpty && selectedCloudSystemId && isLoggedIn.has(selectedCloudSystemId) && (
             <Button
               variant="ghost"
-              size="sm"
-              className="text-xs text-muted-foreground hover:text-red-500 gap-1"
+              size="default"
+              className="h-10 text-xs text-muted-foreground hover:text-red-500 gap-1"
               onClick={handleCloudLogout}
               disabled={loggingOut}
             >
@@ -1292,12 +1292,12 @@ export default function AlarmConsole() {
               loadingCloud ||
               (!isCloudEmpty && (!selectedCloudSystemId || !selectedCloudServerId))
             }
-            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-[38px]"
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
           >
             <RefreshCw
               className={`w-4 h-4 ${loading || loadingCloud ? "animate-spin" : ""}`}
             />
-            <span>Refresh</span>
+            <span className="font-medium">Refresh</span>
           </button>
         </div>
       </div>

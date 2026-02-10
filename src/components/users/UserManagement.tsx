@@ -1064,7 +1064,7 @@ export default function UserManagement() {
           )}
 
           {!isCloudEmpty && canEditUsers && (
-            <Button onClick={handleOpenCreate} className="gap-2" size="sm">
+            <Button onClick={handleOpenCreate} className="gap-2 h-10 px-4" size="default">
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">Add User</span>
             </Button>
@@ -1080,12 +1080,12 @@ export default function UserManagement() {
               }
             }}
             disabled={isRefreshing || loadingCloud}
-            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-[38px]"
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
           >
             <RefreshCw
               className={`w-4 h-4 ${isRefreshing || loadingCloud ? "animate-spin" : ""}`}
             />
-            <span>Refresh</span>
+            <span className="font-medium">Refresh</span>
           </button>
         </div>
       </div>

@@ -54,12 +54,12 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             {/* Error Alert */}
             {showErrorMessage && (
-              <Alert className="bg-red-50 border-red-200 text-red-700">
-                <AlertCircle className="h-4 w-4 text-red-500" />
-                <AlertDescription className="text-red-600 ml-2">
+              <div className="flex items-center p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 animate-in fade-in slide-in-from-top-1 duration-200">
+                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                <div className="ml-3 text-sm font-medium text-red-600">
                   {error || errors.username?.message || errors.password?.message || "Username atau password salah"}
-                </AlertDescription>
-              </Alert>
+                </div>
+              </div>
             )}
 
             {/* Username Field */}

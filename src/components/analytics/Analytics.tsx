@@ -373,10 +373,10 @@ export default function Analytics() {
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Connection Mode Toggle */}
-          <div className="flex items-center bg-gray-100 rounded-lg p-1">
+          <div className="flex items-center bg-gray-100 rounded-lg p-1 h-10">
             <button
               onClick={() => setConnectionMode("realtime")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${connectionMode === "realtime"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm h-full transition-colors ${connectionMode === "realtime"
                 ? "bg-white shadow text-green-600 font-medium"
                 : "text-gray-600 hover:text-gray-900"
                 }`}
@@ -386,7 +386,7 @@ export default function Analytics() {
             </button>
             <button
               onClick={() => setConnectionMode("polling")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${connectionMode === "polling"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm h-full transition-colors ${connectionMode === "polling"
                 ? "bg-white shadow text-blue-600 font-medium"
                 : "text-gray-600 hover:text-gray-900"
                 }`}
@@ -401,7 +401,7 @@ export default function Analytics() {
             <select
               value={refreshInterval}
               onChange={(e) => setRefreshInterval(Number(e.target.value))}
-              className="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 h-10"
             >
               <option value={5}>5s</option>
               <option value={10}>10s</option>
@@ -410,16 +410,15 @@ export default function Analytics() {
             </select>
           )}
 
-          {/* Manual Refresh */}
-          <Button
+          {/* Manual Refresh - Styled like other pages */}
+          <button
             onClick={handleManualRefresh}
             disabled={temperature.loading || humidity.loading}
-            variant="outline"
-            className="flex items-center gap-2"
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
           >
             <RefreshCw className={`w-4 h-4 ${temperature.loading || humidity.loading ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
+            <span className="font-medium">Refresh</span>
+          </button>
         </div>
       </div>
 

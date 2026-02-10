@@ -664,7 +664,7 @@ export default function StorageManagement() {
           {viewMode === "cloud" && !isCloudEmpty && (
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="flex items-center gap-2">
+                <Button variant="outline" className="flex items-center gap-2 h-10">
                   <Cloud className="w-4 h-4" />
                   <span className="truncate max-w-[150px]">{selectedSystem?.name || "Select System"}</span>
                   <ChevronDown className="w-4 h-4" />
@@ -716,12 +716,12 @@ export default function StorageManagement() {
               }
             }}
             disabled={currentLoading || loadingSystems}
-            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-full"
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
           >
             <RefreshCw
               className={`w-4 h-4 ${currentLoading || loadingSystems ? "animate-spin" : ""}`}
             />
-            <span>Refresh</span>
+            <span className="font-medium">Refresh</span>
           </button>
         </div>
       </div>

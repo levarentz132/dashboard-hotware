@@ -116,19 +116,22 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<an
 
     clearTimeout(timeoutId);
 
-    // Handle error responses
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[External API] Error ${response.status} from ${endpoint}:`, errorText);
-      throw new Error(`API error ${response.status}: ${errorText || response.statusText}`);
-    }
-
     // If it's a 204 No Content, return empty object
     if (response.status === 204) return { success: true };
 
-    const contentType = response.headers.get("content-type");
-    if (contentType && (contentType.includes("application/json") || contentType.includes("text/javascript"))) {
+    const contentType = response.headers.get("content-type") || "";
+    const isJson = contentType.includes("application/json") || contentType.includes("text/javascript");
+
+    if (isJson) {
       const data = await response.json();
+
+      // If the response is not OK but we have JSON, return it so the caller can handle error_code
+      if (!response.ok) {
+        console.warn(`[External API] Error ${response.status} from ${endpoint} (JSON):`, data);
+        // Ensure success is false if not explicitly set
+        if (data.success === undefined) data.success = false;
+        return data;
+      }
 
       // If the API doesn't return a success boolean but returns tokens, assume success
       if (data.access_token && data.success === undefined) {
@@ -137,6 +140,13 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<an
 
       return data;
     } else {
+      // Not JSON
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[External API] Error ${response.status} from ${endpoint}:`, errorText);
+        throw new Error(`API error ${response.status}: ${errorText || response.statusText}`);
+      }
+
       // Return as text for public keys or other non-json responses
       const text = await response.text();
       return text.trim();

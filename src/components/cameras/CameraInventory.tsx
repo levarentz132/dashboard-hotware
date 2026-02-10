@@ -418,12 +418,12 @@ export default function CameraInventory() {
               testConnection();
             }}
             disabled={loading || loadingCloud}
-            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-full"
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
           >
             <RefreshCw
               className={`w-4 h-4 ${loading || loadingCloud ? "animate-spin" : ""}`}
             />
-            <span>Refresh</span>
+            <span className="font-medium">Refresh</span>
           </button>
         </div>
       </div>

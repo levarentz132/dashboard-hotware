@@ -59,6 +59,7 @@ export const AUTH_MESSAGES = {
   ACCOUNT_LOCKED: "Akun terkunci sementara karena terlalu banyak percobaan login",
   ACCOUNT_INACTIVE: "Akun tidak aktif",
   PASSWORD_TOO_SHORT: `Password minimal ${AUTH_CONFIG.MIN_PASSWORD_LENGTH} karakter`,
+  LICENSE_MISMATCH: "Lisensi ini sudah terikat dengan System ID lain",
 } as const;
 
 export const ROLE_PERMISSIONS = {

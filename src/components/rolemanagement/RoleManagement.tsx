@@ -722,31 +722,31 @@ export default function SubAccountManagement() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             Role Management
           </h2>
-          <p className="text-gray-500 mt-1">Manage users and access permissions in your organization</p>
-        </div>
 
-        <div className="flex items-center gap-2">
-          {canEditMembers && (
-            <Button onClick={handleOpenCreate} className="gap-2" size="sm">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Add User</span>
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canEditMembers && (
+              <Button onClick={handleOpenCreate} className="gap-2 h-10 px-4" size="default">
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Add User</span>
+              </Button>
+            )}
 
-          <button
-            onClick={fetchSubAccounts}
-            disabled={loading}
-            className="flex items-center space-x-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-[38px]"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </button>
+            <button
+              onClick={fetchSubAccounts}
+              disabled={loading}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              <span className="font-medium">Refresh</span>
+            </button>
+          </div>
         </div>
+        <p className="text-gray-500">Manage users and access permissions in your organization</p>
       </div>
 
       {/* Search */}
