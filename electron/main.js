@@ -3,7 +3,6 @@ const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const { spawn } = require('child_process');
-const { autoUpdater } = require("electron-updater");
 
 let nextProcess;
 let mainWindow;
@@ -283,17 +282,48 @@ ipcMain.on('setup:launch', () => {
     createMainWindow();
 });
 
-function startNextProd() {
-    nextProcess = spawn('npm', ['run', 'start'], {
-        cwd: path.join(process.resourcesPath, 'app.asar.unpacked'),
+function startNextDev() {
+    console.log('[Electron] Starting Next.js dev server...');
+    nextProcess = spawn('npm', ['run', 'dev'], {
+        cwd: __dirname.replace(/electron$/, ''),
         shell: true,
-        stdio: 'inherit'
+        stdio: 'inherit',
+        env: { 
+            ...process.env,
+            NODE_OPTIONS: '--max-old-space-size=1024'
+        }
+    });
+
+    nextProcess.on('error', (err) => {
+        console.error('[Electron] Failed to start dev server:', err);
     });
 }
 
+function startNextProd() {
+    console.log('[Electron] Starting Next.js prod server...');
+    const cwd = isPackaged 
+        ? path.join(process.resourcesPath, 'app.asar.unpacked')
+        : __dirname.replace(/electron$/, '');
+    
+    nextProcess = spawn('npm', ['run', 'start'], {
+        cwd: cwd,
+        shell: true,
+        stdio: 'inherit',
+        env: { 
+            ...process.env,
+            NODE_ENV: 'production',
+            NODE_OPTIONS: '--max-old-space-size=512'
+        }
+    });
 
-function stopNextProd() {
+    nextProcess.on('error', (err) => {
+        console.error('[Electron] Failed to start prod server:', err);
+    });
+}
+
+function stopNextServer() {
     if (nextProcess) {
+        console.log('[Electron] Stopping Next.js server...');
         nextProcess.kill();
         nextProcess = null;
     }
@@ -315,17 +345,14 @@ async function waitForServer(url, timeout = 15000) {
 }
 
 app.whenReady().then(async () => {
-    autoUpdater.on("update-available", () => {
-        console.log("Update available");
-    });
-
-    autoUpdater.on("update-downloaded", () => {
-        console.log("Update downloaded, will install now...");
-        autoUpdater.quitAndInstall();
-    });
-
-    // start next server in production
-    startNextProd();
+    // Start next server (dev or prod based on packaging or NODE_ENV)
+    const isProduction = isPackaged || process.env.NODE_ENV === 'production';
+    
+    if (isProduction) {
+        startNextProd();
+    } else {
+        startNextDev();
+    }
 
     // wait until server is ready
     const url = 'http://localhost:3130';
@@ -345,7 +372,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
-    stopNextProd();
+    stopNextServer();
 });
 
 app.on('window-all-closed', () => {

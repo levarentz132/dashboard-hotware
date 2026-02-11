@@ -7,41 +7,59 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3130",
+    "dev:electron": "electron electron/main.js",
     "build": "next build",
     "start": "next start -p 3130",
+    "prod:electron": "npm run build && set NODE_ENV=production&&electron electron/main.js",
     "lint": "next lint",
     "electron": "electron electron/main.js",
-    "dist": "npm run build && npx electron-builder --win",
+    "dist": "npm run build && npx electron-builder --win --publish never",
     "setup": "node scripts/setup.js"
   },
   "build": {
     "appId": "com.hotware.dashboard",
     "productName": "Hotware Dashboard",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "assets"
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Hotware Dashboard"
     },
     "files": [
       "electron/**/*",
       ".next/**",
       "package.json",
       "next.config.js",
+      "tailwind.config.js",
+      "postcss.config.js",
       "node_modules/**"
     ],
-    "asar": true,
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "asar": {
+      "smartUnpack": true
+    },
     "asarUnpack": [
-      "node_modules/**",
-      ".next/**",
-      "package.json"
-    ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "levarentz132",
-        "repo": "dashboard-hotware"
-      }
+      "node_modules/bcryptjs/**",
+      "node_modules/crypto/**",
+      "node_modules/dotenv/**",
+      "node_modules/child_process/**"
     ]
   },
   "dependencies": {
