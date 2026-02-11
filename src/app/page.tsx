@@ -133,7 +133,7 @@ function PageContent() {
             <div className="max-w-5xl w-full text-center">
               {/* Welcome Text */}
               <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-gray-800 mb-3 sm:mb-4">
-                Selamat Datang
+                Selamat Datang Halo
               </h1>
               <p className="text-lg sm:text-xl md:text-2xl text-gray-600 mb-2 sm:mb-3">di Sistem Monitoring CCTV</p>
               <p className="text-sm sm:text-base md:text-lg text-gray-500 mb-8 sm:mb-10 md:mb-12 max-w-2xl mx-auto px-4">

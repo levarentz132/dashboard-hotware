@@ -11,24 +11,38 @@
     "start": "next start -p 3130",
     "lint": "next lint",
     "electron": "electron electron/main.js",
-    "dist-electron": "electron-builder --win",
+    "dist": "npm run build && npx electron-builder --win",
     "setup": "node scripts/setup.js"
   },
   "build": {
     "appId": "com.hotware.dashboard",
     "productName": "Hotware Dashboard",
     "directories": {
-      "output": "dist-electron"
+      "output": "dist"
     },
     "win": {
       "target": "nsis"
     },
     "files": [
       "electron/**/*",
+      ".next/**",
       "package.json",
-      "node_modules/**/*"
+      "next.config.js",
+      "node_modules/**"
     ],
-    "asar": true
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/**",
+      ".next/**",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "levarentz132",
+        "repo": "dashboard-hotware"
+      }
+    ]
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -62,6 +76,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^2.30.0",
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.7.3",
     "eslint-config-next": "15.0.1",
     "framer-motion": "^10.16.4",
     "hls.js": "^1.6.15",

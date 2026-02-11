@@ -2,10 +2,22 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const { spawn } = require('child_process');
+const { autoUpdater } = require("electron-updater");
 
+let nextProcess;
 let mainWindow;
 let setupWindow;
 let cloudToken = null;
+
+const isPackaged = app.isPackaged;
+
+function getPreloadPath() {
+    if (isPackaged) {
+        return path.join(process.resourcesPath, 'app.asar', 'electron', 'preload.js');
+    }
+    return path.join(__dirname, 'preload.js');
+}
 
 const CONFIG_PATH = path.join(app.getPath('userData'), '.env.local');
 
@@ -24,14 +36,18 @@ function createSetupWindow() {
         height: 600,
         backgroundColor: '#0c0c0c',
         webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
+            preload: getPreloadPath(),
             nodeIntegration: false,
             contextIsolation: true,
         },
         autoHideMenuBar: true
     });
 
-    setupWindow.loadFile(path.join(__dirname, 'setup.html'));
+    const setupHtmlPath = isPackaged
+        ? path.join(process.resourcesPath, 'app.asar', 'electron', 'setup.html')
+        : path.join(__dirname, 'setup.html');
+
+    setupWindow.loadFile(setupHtmlPath);
 }
 
 function createMainWindow() {
@@ -40,7 +56,7 @@ function createMainWindow() {
         height: 1080,
         autoHideMenuBar: true,
         webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
+            preload: getPreloadPath(),
             nodeIntegration: false,
             contextIsolation: true,
         }
@@ -267,12 +283,69 @@ ipcMain.on('setup:launch', () => {
     createMainWindow();
 });
 
-app.whenReady().then(() => {
+function startNextProd() {
+    nextProcess = spawn('npm', ['run', 'start'], {
+        cwd: path.join(process.resourcesPath, 'app.asar.unpacked'),
+        shell: true,
+        stdio: 'inherit'
+    });
+}
+
+
+function stopNextProd() {
+    if (nextProcess) {
+        nextProcess.kill();
+        nextProcess = null;
+    }
+}
+
+async function waitForServer(url, timeout = 15000) {
+    const start = Date.now();
+
+    while (Date.now() - start < timeout) {
+        try {
+            const res = await fetch(url);
+            if (res.ok) return true;
+        } catch (e) {
+            // ignore
+        }
+        await new Promise(r => setTimeout(r, 300));
+    }
+    return false;
+}
+
+app.whenReady().then(async () => {
+    autoUpdater.on("update-available", () => {
+        console.log("Update available");
+    });
+
+    autoUpdater.on("update-downloaded", () => {
+        console.log("Update downloaded, will install now...");
+        autoUpdater.quitAndInstall();
+    });
+
+    // start next server in production
+    startNextProd();
+
+    // wait until server is ready
+    const url = 'http://localhost:3130';
+    const ready = await waitForServer(url);
+
+    if (!ready) {
+        console.error('Next server failed to start');
+        app.quit();
+        return;
+    }
+
     if (process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME && process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD) {
         createMainWindow();
     } else {
         createSetupWindow();
     }
+});
+
+app.on('before-quit', () => {
+    stopNextProd();
 });
 
 app.on('window-all-closed', () => {
