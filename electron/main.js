@@ -1,13 +1,33 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
-const { spawn } = require('child_process');
+const { spawn, fork } = require('child_process');
+const net = require('net');
 
 let nextProcess;
 let mainWindow;
 let setupWindow;
 let cloudToken = null;
+let currentPort = 3130;
+
+const LOG_PATH = path.join(app.getPath('userData'), 'main.log');
+
+function logtoFile(msg) {
+    const timestamp = new Date().toISOString();
+    const logLine = `[${timestamp}] ${msg}\n`;
+    try {
+        fs.appendFileSync(LOG_PATH, logLine);
+    } catch (e) {
+        console.error('Failed to write log:', e);
+    }
+    console.log(msg); // Keep console logging
+}
+
+logtoFile('-----------------------------------');
+logtoFile(`App starting. User Data: ${app.getPath('userData')}`);
+logtoFile(`Resources Path: ${process.resourcesPath}`);
+logtoFile(`Is Packaged: ${app.isPackaged}`);
 
 const isPackaged = app.isPackaged;
 
@@ -16,6 +36,64 @@ function getPreloadPath() {
         return path.join(process.resourcesPath, 'app.asar', 'electron', 'preload.js');
     }
     return path.join(__dirname, 'preload.js');
+}
+
+function listDirRecursive(dir, depth = 0, maxDepth = 3) {
+    if (depth > maxDepth) return;
+    try {
+        const files = fs.readdirSync(dir);
+        files.forEach(file => {
+            const filePath = path.join(dir, file);
+            const stats = fs.statSync(filePath);
+            if (stats.isDirectory()) {
+                logtoFile(`${'  '.repeat(depth)}[DIR] ${file}`);
+                listDirRecursive(filePath, depth + 1, maxDepth);
+            } else {
+                logtoFile(`${'  '.repeat(depth)}[FILE] ${file}`);
+            }
+        });
+    } catch (e) {
+        logtoFile(`${'  '.repeat(depth)}[ERROR] ${e.message}`);
+    }
+}
+
+function findServerJs(dir, depth = 0, maxDepth = 4) {
+    if (depth > maxDepth) return null;
+    try {
+        const files = fs.readdirSync(dir);
+        // Check current dir first
+        if (files.includes('server.js')) return path.join(dir, 'server.js');
+
+        // Then search subdirs
+        for (const file of files) {
+            const filePath = path.join(dir, file);
+            if (fs.statSync(filePath).isDirectory()) {
+                const found = findServerJs(filePath, depth + 1, maxDepth);
+                if (found) return found;
+            }
+        }
+    } catch (e) { }
+    return null;
+}
+
+function findAvailablePort(startPort) {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.unref();
+        server.on('error', (err) => {
+            if (err.code === 'EADDRINUSE') {
+                resolve(findAvailablePort(startPort + 1));
+            } else {
+                reject(err);
+            }
+        });
+        server.listen(startPort, () => {
+            const { port } = server.address();
+            server.close(() => {
+                resolve(port);
+            });
+        });
+    });
 }
 
 const CONFIG_PATH = path.join(app.getPath('userData'), '.env.local');
@@ -61,9 +139,15 @@ function createMainWindow() {
         }
     });
 
-    const url = 'http://localhost:3130';
+    const url = `http://localhost:${currentPort}`;
+    console.log(`[Electron] Loading URL: ${url}`);
+    logtoFile(`[Electron] Loading URL: ${url}`);
+
     mainWindow.loadURL(url).catch(err => {
-        console.error(`Failed to load ${url}:`, err);
+        const msg = `Failed to load ${url}: ${err.message}`;
+        console.error(msg);
+        logtoFile(msg);
+        dialog.showErrorBox('Load Error', msg);
     });
 }
 
@@ -282,46 +366,264 @@ ipcMain.on('setup:launch', () => {
     createMainWindow();
 });
 
-function startNextDev() {
-    console.log('[Electron] Starting Next.js dev server...');
-    nextProcess = spawn('npm', ['run', 'dev'], {
-        cwd: __dirname.replace(/electron$/, ''),
+
+let isServerStopping = false;
+let healthCheckInterval;
+let serverParams = null;
+let restartAttempts = 0;
+const MAX_RESTARTS = 5;
+const RESTART_WINDOW = 60000; // 1 minute
+let lastRestartTime = 0;
+
+function launchServer(command, args, cwd, customEnv) {
+    if (nextProcess) return;
+
+    // Reset loop protection if enough time has passed
+    if (Date.now() - lastRestartTime > RESTART_WINDOW) {
+        restartAttempts = 0;
+    }
+
+    if (restartAttempts >= MAX_RESTARTS) {
+        console.error('[Electron] Too many server restarts. Giving up.');
+        return;
+    }
+
+    restartAttempts++;
+    lastRestartTime = Date.now();
+
+    logtoFile(`[Electron] Spawning server (Attempt ${restartAttempts}): ${command} ${args.join(' ')}`);
+    serverParams = { command, args, cwd, customEnv };
+    isServerStopping = false;
+
+    nextProcess = spawn(command, args, {
+        cwd,
         shell: true,
         stdio: 'inherit',
-        env: { 
-            ...process.env,
-            NODE_OPTIONS: '--max-old-space-size=1024'
-        }
+        env: customEnv
     });
 
     nextProcess.on('error', (err) => {
-        console.error('[Electron] Failed to start dev server:', err);
+        logtoFile(`[Electron] Failed to start server process: ${err.message}`);
     });
+
+    nextProcess.on('exit', (code, signal) => {
+        console.log(`[Electron] Server exited with code ${code}, signal ${signal}`);
+        nextProcess = null;
+        if (!isServerStopping) {
+            console.log('[Electron] Server crashed or stopped unexpectedly. Restarting in 2s...');
+            setTimeout(() => {
+                launchServer(command, args, cwd, customEnv);
+            }, 2000);
+        }
+    });
+}
+
+function startNextDev() {
+    console.log('[Electron] Configuring Next.js dev server...');
+    const cwd = __dirname.replace(/electron$/, '');
+    const env = {
+        ...process.env,
+        PORT: currentPort,
+        NODE_OPTIONS: '--max-old-space-size=1024'
+    };
+    launchServer('npm', ['run', 'dev'], cwd, env);
+}
+
+function launchNodeScript(scriptPath, env) {
+    if (nextProcess) return;
+
+    // Reset loop protection if enough time has passed
+    if (Date.now() - lastRestartTime > RESTART_WINDOW) {
+        restartAttempts = 0;
+    }
+
+    if (restartAttempts >= MAX_RESTARTS) {
+        const msg = '[Electron] Too many server restarts. Giving up.';
+        logtoFile(msg);
+        dialog.showErrorBox('Server Error', 'The application server failed to start after multiple attempts. Please check logs.');
+        return;
+    }
+
+    restartAttempts++;
+    lastRestartTime = Date.now();
+
+    logtoFile(`[Electron] Forking server (Attempt ${restartAttempts}): ${scriptPath}`);
+    isServerStopping = false;
+
+    try {
+        // Use fork to run the server script with Electron's internal Node
+        nextProcess = fork(scriptPath, [], {
+            env: { ...process.env, ...env },
+            cwd: path.dirname(scriptPath),
+            stdio: ['ignore', 'pipe', 'pipe', 'ipc']
+        });
+
+        nextProcess.stdout.on('data', d => logtoFile(`[Next.js stdout] ${d.toString().trim()}`));
+        nextProcess.stderr.on('data', d => logtoFile(`[Next.js stderr] ${d.toString().trim()}`));
+
+        nextProcess.on('error', (err) => {
+            logtoFile(`[Electron] Failed to fork process: ${err.message}`);
+        });
+
+        nextProcess.on('exit', (code, signal) => {
+            logtoFile(`[Electron] Server exited with code ${code}, signal ${signal}`);
+            nextProcess = null;
+            if (!isServerStopping) {
+                logtoFile('[Electron] Server crashed or stopped unexpectedly. Restarting in 2s...');
+                setTimeout(() => {
+                    launchNodeScript(scriptPath, env);
+                }, 2000);
+            }
+        });
+    } catch (e) {
+        logtoFile(`[Electron] Critical error forking process: ${e.message}`);
+        dialog.showErrorBox('Process Error', `Failed to start server process: ${e.message}`);
+    }
+}
+
+// Helper function to recursively find server.js
+function findServerJs(dir) {
+    try {
+        const files = fs.readdirSync(dir, { withFileTypes: true });
+        for (const file of files) {
+            const fullPath = path.join(dir, file.name);
+            if (file.isDirectory()) {
+                const found = findServerJs(fullPath);
+                if (found) return found;
+            } else if (file.isFile() && file.name === 'server.js') {
+                return fullPath;
+            }
+        }
+    } catch (e) {
+        // Ignore errors like permission denied for specific directories
+        logtoFile(`[Electron] Error reading directory ${dir}: ${e.message}`);
+    }
+    return null;
+}
+
+// Helper function to recursively list directory contents for debugging
+function listDirRecursive(dir, indent = 0) {
+    const prefix = '  '.repeat(indent);
+    try {
+        const files = fs.readdirSync(dir, { withFileTypes: true });
+        for (const file of files) {
+            logtoFile(`${prefix}- ${file.name}`);
+            if (file.isDirectory()) {
+                listDirRecursive(path.join(dir, file.name), indent + 1);
+            }
+        }
+    } catch (e) {
+        logtoFile(`${prefix}- Error listing ${dir}: ${e.message}`);
+    }
 }
 
 function startNextProd() {
-    console.log('[Electron] Starting Next.js prod server...');
-    const cwd = isPackaged 
-        ? path.join(process.resourcesPath, 'app.asar.unpacked')
-        : __dirname.replace(/electron$/, '');
-    
-    nextProcess = spawn('npm', ['run', 'start'], {
-        cwd: cwd,
-        shell: true,
-        stdio: 'inherit',
-        env: { 
+    logtoFile('[Electron] Configuring Next.js prod server...');
+
+    if (isPackaged) {
+        // In packaged mode, run the standalone server bundled in app.asar.unpacked
+        let serverPath = path.join(process.resourcesPath, 'app.asar.unpacked', '.next', 'standalone', 'server.js');
+        logtoFile(`[Electron] Checking server path: ${serverPath}`);
+
+        if (!fs.existsSync(serverPath)) {
+            const msg = `[Electron] Standalone server not found at expected path. Searching deeply...`;
+            logtoFile(msg);
+
+            // Try to find server.js recursively
+            const unpackedRoot = path.join(process.resourcesPath, 'app.asar.unpacked');
+            const foundPath = findServerJs(unpackedRoot);
+
+            if (foundPath) {
+                logtoFile(`[Electron] FOUND server.js at: ${foundPath}`);
+                serverPath = foundPath;
+            } else {
+                logtoFile(`[Electron] FATAL: server.js not found in ${unpackedRoot}`);
+                logtoFile(`[Electron] Directory dump of ${unpackedRoot}:`);
+                listDirRecursive(unpackedRoot);
+
+                dialog.showErrorBox('Setup Error', `Core application file missing: server.js\nSee main.log`);
+                return false;
+            }
+        }
+
+        // Inherit all environment variables (including those from .env.local)
+        // and override with production-specific settings
+        const env = {
+            ...process.env,
+            PORT: currentPort,
+            NODE_ENV: 'production',
+            HOSTNAME: 'localhost',
+            // Point to the root unpacked node_modules where next is located
+            NODE_PATH: path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
+        };
+
+        logtoFile(`[Electron] Environment variables configured for server:`)
+        logtoFile(`  - PORT: ${env.PORT}`)
+        logtoFile(`  - NODE_ENV: ${env.NODE_ENV}`)
+        logtoFile(`  - EXTERNAL_AUTH_API_URL: ${env.EXTERNAL_AUTH_API_URL || 'NOT SET'}`)
+        logtoFile(`  - JWT_SECRET: ${env.JWT_SECRET ? '***SET***' : 'NOT SET'}`);
+
+        const nodeModulesPath = env.NODE_PATH;
+        logtoFile(`[Electron] Setting NODE_PATH to: ${nodeModulesPath}`);
+
+        if (fs.existsSync(nodeModulesPath)) {
+            try {
+                const nextPath = path.join(nodeModulesPath, 'next');
+                if (fs.existsSync(nextPath)) {
+                    logtoFile(`[Electron] Verified 'next' module exists at: ${nextPath}`);
+                } else {
+                    logtoFile(`[Electron] WARNING: 'next' module NOT FOUND in node_modules!`);
+                }
+
+                const styledJsxPath = path.join(nodeModulesPath, 'styled-jsx');
+                if (fs.existsSync(styledJsxPath)) {
+                    logtoFile(`[Electron] Verified 'styled-jsx' module exists at: ${styledJsxPath}`);
+                } else {
+                    logtoFile(`[Electron] WARNING: 'styled-jsx' module NOT FOUND in node_modules!`);
+                }
+
+                const sharpPath = path.join(nodeModulesPath, 'sharp');
+                if (fs.existsSync(sharpPath)) {
+                    logtoFile(`[Electron] Verified 'sharp' module exists at: ${sharpPath}`);
+                } else {
+                    logtoFile(`[Electron] Note: 'sharp' module not found (optional, used for image optimization).`);
+                }
+
+                if (!fs.existsSync(nextPath) || !fs.existsSync(styledJsxPath)) {
+                    logtoFile(`[Electron] Listing node_modules to debug:`);
+                    try {
+                        const files = fs.readdirSync(nodeModulesPath);
+                        logtoFile(`Files in node_modules: ${files.join(', ')}`);
+                    } catch (e) { logtoFile(`Failed to list node_modules: ${e.message}`); }
+                }
+            } catch (e) {
+                logtoFile(`[Electron] Error checking verify 'next': ${e.message}`);
+            }
+        } else {
+            logtoFile(`[Electron] CRITICAL: node_modules path does not exist: ${nodeModulesPath}`);
+        }
+
+        launchNodeScript(serverPath, env);
+        return true;
+    } else {
+        // In development production simulation, use npm start
+        const cwd = __dirname.replace(/electron$/, '');
+        const env = {
             ...process.env,
             NODE_ENV: 'production',
+            PORT: currentPort,
             NODE_OPTIONS: '--max-old-space-size=512'
-        }
-    });
+        };
 
-    nextProcess.on('error', (err) => {
-        console.error('[Electron] Failed to start prod server:', err);
-    });
+        launchServer('npm', ['run', 'start'], cwd, env);
+        return true;
+    }
 }
 
 function stopNextServer() {
+    isServerStopping = true;
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
+
     if (nextProcess) {
         console.log('[Electron] Stopping Next.js server...');
         nextProcess.kill();
@@ -329,37 +631,93 @@ function stopNextServer() {
     }
 }
 
-async function waitForServer(url, timeout = 15000) {
+function startHealthCheck() {
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
+
+    console.log('[Electron] Starting health check monitor...');
+    healthCheckInterval = setInterval(async () => {
+        if (isServerStopping) return;
+        if (!nextProcess) return; // Wait for process to exist
+
+        // Simple fetch check
+        try {
+            // Using a short timeout to detect hangs
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+            const res = await fetch(`http://localhost:${currentPort}`, {
+                method: 'HEAD',
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!res.ok && res.status >= 500) {
+                console.warn(`[Health] Server returned error status ${res.status}`);
+            }
+        } catch (e) {
+            console.error(`[Health] Check failed: ${e.message}`);
+            // If we can't connect, trigger a restart
+            if (nextProcess && !isServerStopping) {
+                console.log('[Health] Server appears unresponsive. Restarting...');
+                // Kill process, let exit handler restart it
+                nextProcess.kill();
+            }
+        }
+    }, 15000); // Check every 15 seconds
+}
+
+async function waitForServer(url, timeout = 30000) {
     const start = Date.now();
+    logtoFile(`[Electron] Waiting for server at ${url} (Timeout: ${timeout}ms)...`);
 
     while (Date.now() - start < timeout) {
         try {
             const res = await fetch(url);
-            if (res.ok) return true;
+            if (res.ok) {
+                logtoFile('[Electron] Server is ready!');
+                return true;
+            }
         } catch (e) {
             // ignore
         }
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 500));
     }
+    logtoFile('[Electron] Server wait timed out.');
     return false;
 }
 
 app.whenReady().then(async () => {
+    // Find free port
+    const startPort = parseInt(process.env.PORT || '3130', 10);
+    currentPort = await findAvailablePort(startPort);
+    console.log(`[Electron] Found available port: ${currentPort}`);
+
     // Start next server (dev or prod based on packaging or NODE_ENV)
     const isProduction = isPackaged || process.env.NODE_ENV === 'production';
-    
+
     if (isProduction) {
-        startNextProd();
+        const success = startNextProd();
+        if (!success) {
+            app.quit();
+            return;
+        }
     } else {
         startNextDev();
     }
 
     // wait until server is ready
-    const url = 'http://localhost:3130';
+    const url = `http://localhost:${currentPort}`;
     const ready = await waitForServer(url);
 
     if (!ready) {
-        console.error('Next server failed to start');
+        const msg = 'Next server failed to start (Timeout 30s)';
+        logtoFile(msg);
+        await dialog.showMessageBox({
+            type: 'error',
+            title: 'Startup Error',
+            message: 'The application service failed to initialize.',
+            detail: 'Please check the log file in your user data folder:\n' + LOG_PATH
+        });
         app.quit();
         return;
     }
@@ -369,6 +727,9 @@ app.whenReady().then(async () => {
     } else {
         createSetupWindow();
     }
+
+    // Start monitoring only after initial successful launch
+    startHealthCheck();
 });
 
 app.on('before-quit', () => {

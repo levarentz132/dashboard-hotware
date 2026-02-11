@@ -1,6 +1,6 @@
 {
   "name": "hotware-dashboard",
-  "version": "1.0.01",
+  "version": "1.0.1",
   "description": "Hotware Dashboard",
   "author": "Hotware",
   "main": "electron/main.js",
@@ -8,8 +8,8 @@
   "scripts": {
     "dev": "next dev -p 3130",
     "dev:electron": "electron electron/main.js",
-    "build": "next build",
-    "start": "next start -p 3130",
+    "build": "next build && node scripts/post-build.js",
+    "start": "next start",
     "prod:electron": "npm run build && set NODE_ENV=production&&electron electron/main.js",
     "lint": "next lint",
     "electron": "electron electron/main.js",
@@ -59,7 +59,15 @@
       "node_modules/bcryptjs/**",
       "node_modules/crypto/**",
       "node_modules/dotenv/**",
-      "node_modules/child_process/**"
+      "node_modules/child_process/**",
+      "node_modules/next/**",
+      "node_modules/react/**",
+      "node_modules/react-dom/**",
+      "node_modules/styled-jsx/**",
+      "node_modules/@swc/**",
+      "node_modules/@next/**",
+      "node_modules/sharp/**",
+      ".next/standalone/**"
     ]
   },
   "dependencies": {
