@@ -10,7 +10,6 @@
     "dev:electron": "electron electron/main.js",
     "build": "next build && node scripts/post-build.js",
     "start": "next start",
-    "prod:electron": "npm run build && set NODE_ENV=production&&electron electron/main.js",
     "lint": "next lint",
     "electron": "electron electron/main.js",
     "dist": "npm run build && npx electron-builder --win --publish never",
