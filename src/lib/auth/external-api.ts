@@ -2,7 +2,7 @@
 // Handles communication with external license API
 
 export const EXTERNAL_AUTH_API = {
-  URL: process.env.EXTERNAL_AUTH_API_URL, // Base URL: http://16.78.105.192:3000
+  URL: "http://108.136.167.58:3000", // Base URL: http://16.78.105.192:3000
   TIMEOUT: 10000, // 10 seconds
 };
 

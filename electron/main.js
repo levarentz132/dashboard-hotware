@@ -557,12 +557,6 @@ function startNextProd() {
             NODE_PATH: path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
         };
 
-        logtoFile(`[Electron] Environment variables configured for server:`)
-        logtoFile(`  - PORT: ${env.PORT}`)
-        logtoFile(`  - NODE_ENV: ${env.NODE_ENV}`)
-        logtoFile(`  - EXTERNAL_AUTH_API_URL: ${env.EXTERNAL_AUTH_API_URL || 'NOT SET'}`)
-        logtoFile(`  - JWT_SECRET: ${env.JWT_SECRET ? '***SET***' : 'NOT SET'}`);
-
         const nodeModulesPath = env.NODE_PATH;
         logtoFile(`[Electron] Setting NODE_PATH to: ${nodeModulesPath}`);
 

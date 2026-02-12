@@ -10,6 +10,9 @@ const nextConfig = {
   compress: true,
   productionBrowserSourceMaps: false,
 
+  // Allow Turbopack (Next.js 16 default bundler)
+  turbopack: {},
+
   // Image optimization
   images: {
     formats: ['image/avif', 'image/webp'],
