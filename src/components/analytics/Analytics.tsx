@@ -330,7 +330,7 @@ export default function Analytics() {
   // Format time
   const formatTime = (date: Date | null) => {
     if (!date) return "-";
-    return date.toLocaleTimeString("id-ID", {
+    return date.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -453,9 +453,9 @@ export default function Analytics() {
                 )}
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">Kontrol Daya</h3>
+                <h3 className="font-semibold text-gray-900">Power Control</h3>
                 <p className="text-sm text-gray-500">
-                  {powerLoading ? "Memproses..." : powerState ? "Device Aktif" : "Device Mati"}
+                  {powerLoading ? "Processing..." : powerState ? "Device Active" : "Device Off"}
                 </p>
               </div>
             </div>
@@ -487,7 +487,7 @@ export default function Analytics() {
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Thermometer className="w-6 h-6" />
-                <span>Suhu (Temperature)</span>
+                <span>Temperature</span>
               </div>
               <Badge className={tempStatus.color}>{tempStatus.status}</Badge>
             </CardTitle>
@@ -562,7 +562,7 @@ export default function Analytics() {
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Droplets className="w-6 h-6" />
-                <span>Kelembaban (Humidity)</span>
+                <span>Humidity</span>
               </div>
               <Badge className={humStatus.color}>{humStatus.status}</Badge>
             </CardTitle>
@@ -699,7 +699,7 @@ export default function Analytics() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
                   data={history.slice(-30).map((entry, index) => ({
-                    time: entry.timestamp.toLocaleTimeString("id-ID", {
+                    time: entry.timestamp.toLocaleTimeString("en-US", {
                       hour: "2-digit",
                       minute: "2-digit",
                       second: "2-digit",
@@ -764,18 +764,18 @@ export default function Analytics() {
                       boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
                     }}
                     formatter={(value: number, name: string) => {
-                      if (name === "temperature") return [`${value?.toFixed(1)}°C`, "Suhu"];
-                      if (name === "humidity") return [`${value?.toFixed(1)}%`, "Kelembaban"];
+                      if (name === "temperature") return [`${value?.toFixed(1)}°C`, "Temperature"];
+                      if (name === "humidity") return [`${value?.toFixed(1)}%`, "Humidity"];
                       return [value, name];
                     }}
-                    labelFormatter={(label) => `Waktu: ${label}`}
+                    labelFormatter={(label) => `Time: ${label}`}
                   />
                   <Legend
                     verticalAlign="top"
                     height={36}
                     formatter={(value) => {
-                      if (value === "temperature") return "Suhu (°C)";
-                      if (value === "humidity") return "Kelembaban (%)";
+                      if (value === "temperature") return "Temperature (°C)";
+                      if (value === "humidity") return "Humidity (%)";
                       return value;
                     }}
                   />

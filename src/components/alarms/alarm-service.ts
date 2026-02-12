@@ -99,7 +99,7 @@ export function formatTimestamp(timestampUsec: string): string {
   const ms = parseInt(timestampUsec) / 1000;
   if (isNaN(ms)) return timestampUsec;
   const date = new Date(ms);
-  return date.toLocaleString("id-ID", {
+  return date.toLocaleString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -120,10 +120,10 @@ export function formatRelativeTime(timestampUsec: string): string {
   const now = Date.now();
   const diff = now - ms;
 
-  if (diff < 60000) return "Baru saja";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} menit lalu`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} jam lalu`;
-  if (diff < 604800000) return `${Math.floor(diff / 86400000)} hari lalu`;
+  if (diff < 60000) return "Just now";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} minutes ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} hours ago`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)} days ago`;
   return formatTimestamp(timestampUsec);
 }
 

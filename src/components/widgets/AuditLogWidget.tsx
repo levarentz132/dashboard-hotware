@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
-  RefreshCw,
   AlertCircle,
   User,
   Clock,
@@ -15,12 +14,14 @@ import {
   Server,
   FileText,
 } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
+import { performAdminLogin } from "@/lib/auth-utils";
 
 interface CloudSystem {
   id: string;
@@ -82,11 +83,11 @@ const formatRelativeTime = (timestampSec: number): string => {
   const now = Date.now();
   const diff = now - timestampSec * 1000;
 
-  if (diff < 60000) return "Baru saja";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m lalu`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}j lalu`;
-  if (diff < 604800000) return `${Math.floor(diff / 86400000)}h lalu`;
-  return `${Math.floor(diff / 604800000)}mg lalu`;
+  if (diff < 60000) return "Just now";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  if (diff < 86400000 * 7) return `${Math.floor(diff / 86400000)}d ago`;
+  return `${Math.floor(diff / (86400000 * 7))}w ago`;
 };
 
 const getEventInfo = (eventType: string) => {
@@ -131,7 +132,11 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   // Fetch devices for name mapping
   const fetchDevices = useCallback(async (targetSystemId: string) => {
     try {
-      const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(targetSystemId)}`);
+      const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(targetSystemId)}`, {
+        headers: {
+          ...getElectronHeaders()
+        }
+      });
       if (response.ok) {
         const devices = await response.json();
         const map: Record<string, string> = {};
@@ -150,17 +155,20 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
     return deviceMap[resourceId] || resourceId;
   };
 
-  // Auto-login (disabled - using Dual-Login flow)
+  // Auto-login logic
   const attemptAutoLogin = useCallback(async (targetSystemId: string) => {
-    return false;
+    console.log(`[AuditLogWidget] Attempting silent login to ${targetSystemId}...`);
+    return await performAdminLogin(targetSystemId);
   }, []);
 
   // Fetch audit logs
   const fetchAuditLogs = useCallback(
     async (targetSystemId: string, retry = false) => {
       try {
-        // Get logs for today
+        // Get logs for the last 7 days for the widget
         const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - 7);
+        fromDate.setHours(0, 0, 0, 0);
         const fromDateFormatted = fromDate.toISOString();
 
         const response = await fetch(
@@ -170,7 +178,10 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
           {
             method: "GET",
             credentials: "include",
-            headers: { Accept: "application/json" },
+            headers: {
+              Accept: "application/json",
+              ...getElectronHeaders()
+            },
           },
         );
 
@@ -402,12 +413,12 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
                     >
                       {eventInfo.label}
                     </Badge>
-                    {log.authSession?.userHost && (
+                    {/* {log.authSession?.userHost && (
                       <span className="text-[9px] text-muted-foreground/70 truncate flex items-center gap-1">
                         <Monitor className="h-2 w-2" />
                         {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
                       </span>
-                    )}
+                    )} */}
                   </div>
 
                   {log.resources && log.resources.length > 0 && (

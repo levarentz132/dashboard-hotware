@@ -1,7 +1,7 @@
 "use client";
 
-import DraggableDashboard from "@/components/dashboard/DraggableDashboard";
+import ModernDashboard from "@/components/dashboard/ModernDashboard";
 
 export default function DashboardFullViewPage() {
-  return <DraggableDashboard />;
+  return <ModernDashboard />;
 }

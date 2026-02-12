@@ -69,7 +69,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
             </PopoverTrigger>
             <PopoverContent className="w-72 p-0" align="end">
               <div className="px-4 py-6 text-sm text-gray-500 text-center">
-                Tidak ada notifikasi baru.
+                No new notifications.
               </div>
             </PopoverContent>
           </Popover>

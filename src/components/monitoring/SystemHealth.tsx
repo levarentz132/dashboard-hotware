@@ -226,7 +226,7 @@ export default function SystemHealth() {
 
         {/* Status Cards Skeleton */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
+          {[...Array(3)].map((_, i) => (
             <div key={i} className="bg-white p-6 rounded-lg border">
               <div className="flex items-center space-x-3">
                 <Skeleton className="h-8 w-8 rounded-full" />
@@ -355,7 +355,7 @@ export default function SystemHealth() {
               </div>
             </div>
           </div>
-          <div className="bg-white p-6 rounded-lg border">
+          {/* <div className="bg-white p-6 rounded-lg border">
             <div className="flex items-center space-x-3">
               <Activity className="w-8 h-8 text-purple-600" />
               <div>
@@ -365,7 +365,7 @@ export default function SystemHealth() {
                 <div className="text-sm text-gray-600">Cameras Online</div>
               </div>
             </div>
-          </div>
+          </div> */}
         </div>
       )}
 

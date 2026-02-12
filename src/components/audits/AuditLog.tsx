@@ -112,6 +112,7 @@ export default function AuditLog() {
 
   const [date, setDate] = useState<DateRange | undefined>(() => {
     const from = new Date();
+    from.setHours(0, 0, 0, 0);
     return {
       from,
       to: undefined,
@@ -333,7 +334,7 @@ export default function AuditLog() {
   const formatTimestamp = (timestampSec: number): string => {
     if (!timestampSec) return "-";
     const date = new Date(timestampSec * 1000);
-    return date.toLocaleString("id-ID", {
+    return date.toLocaleString("en-US", {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -445,49 +446,11 @@ export default function AuditLog() {
         </div>
 
         <div className="flex items-center gap-2">
-          {!isCloudEmpty && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="flex items-center gap-2 h-10">
-                  <Cloud className="w-4 h-4" />
-                  <span className="truncate max-w-[150px]">{selectedSystem?.name || "Select System"}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-64" align="end">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700">Select Cloud System</p>
-                  {loadingSystems ? (
-                    <div className="flex items-center justify-center py-4">
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                    </div>
-                  ) : (
-                    <div className="max-h-60 overflow-y-auto space-y-1">
-                      {cloudSystems.map((system) => (
-                        <button
-                          key={system.id}
-                          onClick={() => setSelectedSystem(system)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
-                            ? "bg-blue-100 text-blue-800"
-                            : "hover:bg-gray-100 text-gray-700"
-                            }`}
-                          disabled={system.stateOfHealth !== "online"}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="truncate">{system.name}</span>
-                            <span
-                              className={`w-2 h-2 rounded-full ${system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
-                                }`}
-                            />
-                          </div>
-                          {system.accessRole === "owner" && <span className="text-xs text-purple-600">Owner</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
+          {!isCloudEmpty && selectedSystem && (
+            <div className="flex items-center gap-2 h-10 px-3 bg-gray-50 border rounded-lg text-sm text-gray-700">
+              <Cloud className="w-4 h-4 text-gray-500" />
+              <span className="truncate max-w-[150px] font-medium">{selectedSystem.name}</span>
+            </div>
           )}
 
           {/* Refresh Button - Styled like CameraInventory */}
@@ -893,12 +856,12 @@ export default function AuditLog() {
                                 <div className="flex items-center text-xs lg:text-sm">
                                   <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
                                   <div className="flex flex-col">
-                                    <span className="font-medium text-gray-900">{log.authSession?.userName || "-"}</span>
+                                    {/* <span className="font-medium text-gray-900">{log.authSession?.userName || "-"}</span>
                                     {log.authSession?.userHost && (
                                       <span className="text-[10px] text-gray-400">
                                         {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
                                       </span>
-                                    )}
+                                    )} */}
                                   </div>
                                 </div>
                               </td>

@@ -6,7 +6,7 @@
   "main": "electron/main.js",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3130",
+    "dev": "next dev -p 3132",
     "dev:electron": "electron electron/main.js",
     "build": "next build && node scripts/post-build.js",
     "start": "next start",

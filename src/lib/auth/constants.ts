@@ -45,21 +45,21 @@ export const PUBLIC_ROUTES = [
 ] as const;
 
 export const AUTH_MESSAGES = {
-  LOGIN_SUCCESS: "Login berhasil",
-  LOGIN_FAILED: "Username atau password salah",
-  LOGOUT_SUCCESS: "Logout berhasil",
-  REGISTER_SUCCESS: "Registrasi berhasil",
-  REGISTER_FAILED: "Registrasi gagal",
-  SESSION_EXPIRED: "Sesi telah berakhir, silakan login kembali",
-  UNAUTHORIZED: "Anda tidak memiliki akses ke halaman ini",
-  USER_EXISTS: "Username atau email sudah terdaftar",
-  INVALID_TOKEN: "Token tidak valid",
-  SERVER_ERROR: "Terjadi kesalahan server",
-  VALIDATION_ERROR: "Data tidak valid",
-  ACCOUNT_LOCKED: "Akun terkunci sementara karena terlalu banyak percobaan login",
-  ACCOUNT_INACTIVE: "Akun tidak aktif",
-  PASSWORD_TOO_SHORT: `Password minimal ${AUTH_CONFIG.MIN_PASSWORD_LENGTH} karakter`,
-  LICENSE_MISMATCH: "Lisensi ini sudah terikat dengan System ID lain",
+  LOGIN_SUCCESS: "Login successful",
+  LOGIN_FAILED: "Invalid username or password",
+  LOGOUT_SUCCESS: "Logout successful",
+  REGISTER_SUCCESS: "Registration successful",
+  REGISTER_FAILED: "Registration failed",
+  SESSION_EXPIRED: "Session expired, please login again",
+  UNAUTHORIZED: "You don't have access to this page",
+  USER_EXISTS: "Username or email already registered",
+  INVALID_TOKEN: "Invalid token",
+  SERVER_ERROR: "Internal server error",
+  VALIDATION_ERROR: "Invalid data",
+  ACCOUNT_LOCKED: "Account temporarily locked due to too many login attempts",
+  ACCOUNT_INACTIVE: "Account inactive",
+  PASSWORD_TOO_SHORT: `Password must be at least ${AUTH_CONFIG.MIN_PASSWORD_LENGTH} characters`,
+  LICENSE_MISMATCH: "This license is already bound to another System ID",
 } as const;
 
 export const ROLE_PERMISSIONS = {

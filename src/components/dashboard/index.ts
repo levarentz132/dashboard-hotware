@@ -17,4 +17,4 @@ export {
 } from "./dashboard-service";
 
 // Components
-export { default as DraggableDashboard, widgetRegistry, type WidgetType } from "./DraggableDashboard";
+export { default as ModernDashboard, widgetRegistry, type WidgetType } from "./ModernDashboard";

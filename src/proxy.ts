@@ -141,6 +141,5 @@ export const config = {
     "/",
     "/api/:path*",
     "/dashboard-full-view",
-    "/monitoring-cctv",
   ],
 };

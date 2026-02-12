@@ -2,15 +2,14 @@
 
 import { useAuth } from "@/contexts/auth-context";
 import { isAdmin } from "@/lib/auth";
-import { Lock } from "lucide-react";
+
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
-import { ReactGridLayout as GridLayout, type Layout as LayoutType } from "react-grid-layout/legacy";
+import { ReactGridLayout as GridLayout } from "react-grid-layout/legacy";
 import {
   GripVertical,
   X,
   Plus,
-  Save,
   RotateCcw,
   Settings,
   LayoutGrid,
@@ -23,8 +22,9 @@ import {
   Maximize,
   Minimize,
   ArrowLeft,
+  Cloud,
+  Lock,
 } from "lucide-react";
-import "react-grid-layout/css/styles.css";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -96,9 +96,7 @@ interface CloudSystem {
   accessRole: string;
 }
 
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Cloud, RefreshCw } from "lucide-react";
-import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
+import { getElectronHeaders } from "@/lib/config";
 
 // Define LayoutItem type for react-grid-layout
 interface LayoutItem {
@@ -116,12 +114,11 @@ interface LayoutItem {
   static?: boolean;
 }
 
-// Widget registry - tambahkan widget baru di sini
 export const widgetRegistry = {
   cameraOverview: {
     id: "cameraOverview",
     name: "Camera Overview",
-    description: "Overview lengkap semua kamera dengan summary, status, dan list",
+    description: "Complete overview of all cameras with summary, status, and list",
     component: CameraOverviewWidget,
     defaultSize: { w: 4, h: 5 },
     minSize: { w: 1, h: 2 },
@@ -129,7 +126,7 @@ export const widgetRegistry = {
   connectionStatus: {
     id: "connectionStatus",
     name: "Connection Status",
-    description: "Status koneksi ke server",
+    description: "Connection status to the server",
     component: ConnectionStatusWidget,
     defaultSize: { w: 3, h: 3 },
     minSize: { w: 2, h: 2 },
@@ -137,7 +134,7 @@ export const widgetRegistry = {
   storage: {
     id: "storage",
     name: "Storage Widget",
-    description: "Informasi penggunaan storage (total, used, free, online)",
+    description: "Storage usage information (total, used, free, online)",
     component: StorageSummaryWidget,
     defaultSize: { w: 3, h: 5 },
     minSize: { w: 1, h: 1 },
@@ -145,7 +142,7 @@ export const widgetRegistry = {
   systemStatus: {
     id: "systemStatus",
     name: "System Status",
-    description: "Status kesehatan sistem",
+    description: "System health status",
     component: SystemStatusWidget,
     defaultSize: { w: 3, h: 3 },
     minSize: { w: 2, h: 2 },
@@ -153,7 +150,7 @@ export const widgetRegistry = {
   apiStatus: {
     id: "apiStatus",
     name: "API Status",
-    description: "Status API dan endpoint",
+    description: "API and endpoint status",
     component: APIStatusWidget,
     defaultSize: { w: 3, h: 3 },
     minSize: { w: 0, h: 0 },
@@ -161,7 +158,7 @@ export const widgetRegistry = {
   alarmConsole: {
     id: "alarmConsole",
     name: "Alarm Console",
-    description: "Daftar alarm dan event terbaru",
+    description: "List of recent alarms and events",
     component: AlarmConsoleWidget,
     defaultSize: { w: 4, h: 5 },
     minSize: { w: 3, h: 4 },
@@ -169,7 +166,7 @@ export const widgetRegistry = {
   auditLog: {
     id: "auditLog",
     name: "Audit Log",
-    description: "Log aktivitas user dari cloud system",
+    description: "User activity logs from cloud systems",
     component: AuditLogWidget,
     defaultSize: { w: 4, h: 5 },
     minSize: { w: 3, h: 4 },
@@ -177,7 +174,7 @@ export const widgetRegistry = {
   serverMap: {
     id: "serverMap",
     name: "Server Map",
-    description: "Peta lokasi server dengan status online/offline",
+    description: "Server location map with online/offline status",
     component: ServerMapWidget,
     defaultSize: { w: 4, h: 5 },
     minSize: { w: 3, h: 4 },
@@ -195,7 +192,7 @@ interface DashboardWidget {
   h: number;
 }
 
-interface DraggableDashboardProps {
+interface ModernDashboardProps {
   userId?: string; // untuk save layout per user
 }
 
@@ -267,7 +264,7 @@ const MemoizedWidget = memo(
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Hapus widget</p>
+                <p>Delete widget</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -287,8 +284,8 @@ const MemoizedWidget = memo(
             {!hasViewPermission ? (
               <div className="flex flex-col items-center justify-center h-full text-gray-400 p-4 text-center">
                 <Lock className="w-8 h-8 mb-2 opacity-50" />
-                <p className="text-xs font-medium">Akses Terbatas</p>
-                <p className="text-[10px] opacity-70">Anda tidak memiliki izin untuk melihat modul ini</p>
+                <p className="text-xs font-medium">Limited Access</p>
+                <p className="text-[10px] opacity-70">You do not have permission to view this module</p>
               </div>
             ) : WidgetComponent ? (
               <WidgetComponent systemId={systemId} />
@@ -304,7 +301,7 @@ const MemoizedWidget = memo(
 
 MemoizedWidget.displayName = "MemoizedWidget";
 
-export default function DraggableDashboard({ userId = "default" }: DraggableDashboardProps) {
+export default function ModernDashboard({ userId = "default" }: ModernDashboardProps) {
   const router = useRouter();
   const { user } = useAuth();
   const isUserAdmin = isAdmin(user);
@@ -370,16 +367,15 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
           isOnline: s.stateOfHealth === "online",
         }));
 
-        // Sort
-        systems.sort((a: any, b: any) => {
-          if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-          if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-          return a.isOnline && !b.isOnline ? -1 : 1;
-        });
+        // Filter to only owner's server as requested
+        const ownerSystems = systems.filter((s: any) => s.accessRole === "owner");
 
-        setCloudSystems(systems);
-        if (systems.length > 0 && !selectedSystemId) {
-          const firstOnline = systems.find((s: any) => s.isOnline) || systems[0];
+        // If no owner system found, fallback to first online or first system
+        const displaySystems = ownerSystems.length > 0 ? ownerSystems : systems;
+
+        setCloudSystems(displaySystems);
+        if (displaySystems.length > 0 && !selectedSystemId) {
+          const firstOnline = displaySystems.find((s: any) => s.isOnline) || displaySystems[0];
           setSelectedSystemId(firstOnline.id);
         }
       }
@@ -536,16 +532,16 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
             setWidgets(validWidgets);
             // Auto-save to DB after import
             saveLayout(validWidgets);
-            alert(`Berhasil import ${validWidgets.length} widget dan disimpan ke database!`);
+            alert(`Imported ${validWidgets.length} widgets and saved to database!`);
           } else {
-            alert("File tidak berisi widget yang valid.");
+            alert("File does not contain valid widgets.");
           }
         } else {
-          alert("Format file tidak valid. Pastikan file adalah export dari dashboard ini.");
+          alert("Invalid file format. Make sure the file is an export from this dashboard.");
         }
       } catch (error) {
         console.error("Error importing layout:", error);
-        alert("Gagal membaca file. Pastikan file adalah JSON yang valid.");
+        alert("Failed to read file. Make sure the file is a valid JSON.");
       }
     };
     reader.readAsText(file);
@@ -582,7 +578,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
       i: `widget-${Date.now()}`,
       type,
       x: 0,
-      y: Infinity, // akan otomatis diletakkan di bawah
+      y: Infinity, // will be automatically placed at the bottom
       w: widgetConfig.defaultSize.w,
       h: widgetConfig.defaultSize.h,
     };
@@ -642,6 +638,13 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-gray-50/50 select-none">
+        {!isEditing && (
+          <style>{`
+            .react-resizable-handle { 
+              display: none !important; 
+            }
+          `}</style>
+        )}
         {/* Toolbar */}
         <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-2 sm:px-4 py-2 sm:py-3 shadow-sm">
           <div className="flex items-center justify-between max-w-full gap-2">
@@ -658,7 +661,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Kembali</p>
+                  <p>Back</p>
                 </TooltipContent>
               </Tooltip>
 
@@ -671,30 +674,23 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                   </Link>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Kembali ke Home</p>
+                  <p>Back to Home</p>
                 </TooltipContent>
               </Tooltip>
               <div className="h-6 w-px bg-gray-200 hidden sm:block" />
               <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 shrink-0" />
               <h1 className="text-base sm:text-xl font-semibold text-gray-900 truncate">Dashboard</h1>
 
-              <div className="flex items-center gap-2 ml-2">
-                <Select value={selectedSystemId} onValueChange={setSelectedSystemId} disabled={loadingCloud}>
-                  <SelectTrigger className="w-[150px] sm:w-[200px] bg-white text-gray-900 border-gray-200 h-9">
-                    <SelectValue placeholder="Pilih system" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {cloudSystems.map((sys) => (
-                      <SelectItem key={sys.id} value={sys.id}>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${sys.isOnline ? "bg-green-500" : "bg-red-500"}`} />
-                          <span className="truncate">{sys.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {loadingCloud && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
+              <div className="flex items-center gap-2 ml-2 shrink-0">
+                {!loadingCloud && cloudSystems.length > 0 && selectedSystemId && (
+                  <div className="flex items-center gap-2 h-8 sm:h-9 px-3 bg-white/50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 w-[13rem]">
+                    <Cloud className="w-3.5 h-3.5 sm:w-4 w-4 text-blue-500 shrink-0" />
+                    <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                      {cloudSystems.find(s => s.id === selectedSystemId)?.name || "Owner Server"}
+                    </span>
+                  </div>
+                )}
+                {loadingCloud && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
               </div>
 
               {isEditing && (
@@ -723,7 +719,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Export layout sebagai file JSON</p>
+                      <p>Export layout as JSON file</p>
                     </TooltipContent>
                   </Tooltip>
 
@@ -740,7 +736,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Import layout dari file JSON</p>
+                      <p>Import layout from JSON file</p>
                     </TooltipContent>
                   </Tooltip>
 
@@ -754,7 +750,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Tambahkan widget baru ke dashboard</p>
+                      <p>Add a new widget to the dashboard</p>
                     </TooltipContent>
                   </Tooltip>
 
@@ -778,12 +774,12 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                           <Database className="w-4 h-4" />
                         )}
                         <span className="hidden sm:inline">
-                          {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : "Save to DB"}
+                          {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : "Save"}
                         </span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Simpan layout ke database</p>
+                      <p>Save layout to database</p>
                     </TooltipContent>
                   </Tooltip>
 
@@ -800,7 +796,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Kembalikan ke layout default</p>
+                      <p>Reset to default layout</p>
                     </TooltipContent>
                   </Tooltip>
                   <div className="h-6 w-px bg-gray-200 hidden sm:block" />
@@ -823,7 +819,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>{isEditing ? "Batalkan perubahan" : "Kustomisasi dashboard"}</p>
+                    <p>{isEditing ? "Discard changes" : "Customize dashboard"}</p>
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -843,7 +839,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>{isFullscreen ? "Keluar layar penuh" : "Layar penuh"}</p>
+                  <p>{isFullscreen ? "Exit fullscreen" : "Fullscreen"}</p>
                 </TooltipContent>
               </Tooltip>
 
@@ -857,7 +853,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
         {isEditing && (
           <div className="bg-blue-50 border-b border-blue-200 px-2 sm:px-4 py-1.5 sm:py-2">
             <p className="text-[10px] sm:text-sm text-blue-700 text-center">
-              <strong className="hidden sm:inline">Edit Mode:</strong> Drag widget • Resize • Klik × hapus
+              <strong className="hidden sm:inline">Edit Mode:</strong> Drag widgets • Resize • Click × to delete
             </p>
           </div>
         )}
@@ -912,7 +908,7 @@ export default function DraggableDashboard({ userId = "default" }: DraggableDash
                 Add Widget
               </DialogTitle>
               <DialogDescription className="text-xs sm:text-sm">
-                Pilih widget yang ingin ditambahkan ke dashboard Anda.
+                Choose a widget to add to your dashboard.
               </DialogDescription>
             </DialogHeader>
 

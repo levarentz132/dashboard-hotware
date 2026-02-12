@@ -34,7 +34,7 @@ export function CloudLoginDialog({ open, onOpenChange, systemId, systemName, onL
         e.preventDefault();
 
         if (!username || !password) {
-            setError("Username dan password wajib diisi");
+            setError("Username and password are required");
             return;
         }
 
@@ -57,7 +57,7 @@ export function CloudLoginDialog({ open, onOpenChange, systemId, systemName, onL
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.error || "Login gagal");
+                throw new Error(data.error || "Login failed");
             }
 
             // Success - clear form and close dialog
@@ -67,7 +67,7 @@ export function CloudLoginDialog({ open, onOpenChange, systemId, systemName, onL
             onLoginSuccess();
         } catch (err) {
             console.error("Login error:", err);
-            setError(err instanceof Error ? err.message : "Login gagal. Cek username dan password.");
+            setError(err instanceof Error ? err.message : "Login failed. Check username and password.");
         } finally {
             setLoading(false);
         }
@@ -88,10 +88,10 @@ export function CloudLoginDialog({ open, onOpenChange, systemId, systemName, onL
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Cloud className="h-5 w-5 text-blue-500" />
-                        Login ke Cloud System
+                        Login to Cloud System
                     </DialogTitle>
                     <DialogDescription>
-                        Masukkan kredensial untuk mengakses <strong>{systemName}</strong>
+                        Enter credentials to access <strong>{systemName}</strong>
                     </DialogDescription>
                 </DialogHeader>
 
@@ -142,12 +142,12 @@ export function CloudLoginDialog({ open, onOpenChange, systemId, systemName, onL
                             </div>
                         </div>
 
-                        <p className="text-xs text-gray-500">Gunakan kredensial NX Cloud atau akun lokal sistem {systemName}</p>
+                        <p className="text-xs text-gray-500">Use NX Cloud credentials or local system account for {systemName}</p>
                     </div>
 
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={handleClose} disabled={loading}>
-                            Batal
+                            Cancel
                         </Button>
                         <Button type="submit" disabled={loading} className="gap-2">
                             {loading ? (
@@ -165,6 +165,6 @@ export function CloudLoginDialog({ open, onOpenChange, systemId, systemName, onL
                     </DialogFooter>
                 </form>
             </DialogContent>
-        </Dialog>
+        </Dialog >
     );
 }

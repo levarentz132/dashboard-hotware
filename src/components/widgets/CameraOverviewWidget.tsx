@@ -113,7 +113,7 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
           {/* Total count */}
           <div className="text-center py-1 sm:py-2">
             <div className="text-2xl sm:text-4xl font-bold text-foreground">{totalCameras}</div>
-            <div className="text-xs sm:text-sm text-muted-foreground">Total Kamera</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">Total Cameras</div>
           </div>
 
           {/* Online percentage */}
@@ -148,7 +148,7 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
                 <Activity className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
               </div>
               <div className="text-base sm:text-xl font-bold text-foreground">{otherCameras}</div>
-              <div className="text-[10px] sm:text-xs text-muted-foreground">Lainnya</div>
+              <div className="text-[10px] sm:text-xs text-muted-foreground">Others</div>
             </div>
           </div>
         </TabsContent>
@@ -178,7 +178,7 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
               {sortedCameras.slice(0, 10).map((camera) => {
                 const isOffline = camera.status?.toLowerCase() === "offline";
                 return (
-                  <Link href="/monitoring-cctv" key={camera.id}>
+                  <Link href="/?section=cameras" key={camera.id}>
                     <div
                       className={`flex items-center justify-between p-1.5 sm:p-2 rounded-lg border transition-colors cursor-pointer ${isOffline ? "border-destructive/50 bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent"
                         }`}
@@ -212,7 +212,7 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
               })}
               {cameras.length > 10 && (
                 <div className="text-center py-1.5 sm:py-2">
-                  <Link href="/monitoring-cctv">
+                  <Link href="/?section=cameras">
                     <span className="text-[10px] sm:text-xs text-primary hover:underline">
                       +{cameras.length - 10} more cameras
                     </span>

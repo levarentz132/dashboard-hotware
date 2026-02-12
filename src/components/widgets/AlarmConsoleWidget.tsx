@@ -58,11 +58,11 @@ const formatRelativeTime = (timestampUsec: string): string => {
   const now = Date.now();
   const diff = now - ms;
 
-  if (diff < 60000) return "Baru saja";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m lalu`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}j lalu`;
-  if (diff < 604800000) return `${Math.floor(diff / 86400000)}h lalu`;
-  return `${Math.floor(diff / 604800000)}mg lalu`;
+  if (diff < 60000) return "Just now";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+  return `${Math.floor(diff / 604800000)}w ago`;
 };
 
 const getEventTypeLabel = (eventType: string): string => {
