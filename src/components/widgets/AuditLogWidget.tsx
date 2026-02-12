@@ -159,9 +159,8 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   const fetchAuditLogs = useCallback(
     async (targetSystemId: string, retry = false) => {
       try {
-        // Get logs from last 7 days
+        // Get logs for today
         const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - 7);
         const fromDateFormatted = fromDate.toISOString();
 
         const response = await fetch(

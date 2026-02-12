@@ -112,7 +112,6 @@ export default function AuditLog() {
 
   const [date, setDate] = useState<DateRange | undefined>(() => {
     const from = new Date();
-    from.setDate(from.getDate() - 7);
     return {
       from,
       to: undefined,
@@ -411,8 +410,7 @@ export default function AuditLog() {
 
   // Active filter count
   const defaultFrom = new Date();
-  defaultFrom.setDate(defaultFrom.getDate() - 7);
-  // Check if date matches default (from is 7 days ago, to is undefined or same day)
+  // Check if date matches default (from is today, to is undefined or same day)
   const isDateChanged = !date?.from ||
     date.from.toDateString() !== defaultFrom.toDateString() ||
     !!date.to;
@@ -427,10 +425,9 @@ export default function AuditLog() {
   const clearFilters = () => {
     setFilterEventType("all");
     setFilterUser("all");
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const today = new Date();
     setDate({
-      from: sevenDaysAgo,
+      from: today,
       to: undefined
     });
     setSearchTerm("");
@@ -710,10 +707,9 @@ export default function AuditLog() {
                         Date: {format(date.from, "LLL dd, y")}
                         {date.to ? ` - ${format(date.to, "LLL dd, y")}` : ""}
                         <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => {
-                          const sevenDaysAgo = new Date();
-                          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                          const today = new Date();
                           setDate({
-                            from: sevenDaysAgo,
+                            from: today,
                             to: undefined
                           });
                         }} />
