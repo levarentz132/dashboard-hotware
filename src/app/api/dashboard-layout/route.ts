@@ -23,7 +23,12 @@ export async function GET(request: NextRequest) {
     if (token) {
       const data = await getExternalDashboardLayout(token);
       if (data.success) {
-        // If external API successfully replied (even with layout: null), we use its answer
+        // Sync to local storage for future offline fallback
+        const name = data.layout?.layout_name || "Default";
+        if (data.layout) {
+          await upsertLayoutByName(userId, name, data.layout.layout_data || data.layout.layout_json, true);
+        }
+
         return NextResponse.json({
           success: true,
           layout: data.layout,
@@ -64,49 +69,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Layout data is required" }, { status: 400 });
     }
 
+    // Local Sync (Always update local so fallback is always fresh)
+    const name = layout_name || `Layout ${new Date().toLocaleString("id-ID")}`;
+    const { layout: localLayout, isNew: localIsNew } = await upsertLayoutByName(user_id, name, actualLayoutData, set_active);
+
     // External API Proxy
     if (token) {
       console.log(`[Dashboard Layout API] Proxying save to external API`);
 
       const payload = {
-        layout_name: layout_name || `Layout ${new Date().toLocaleString("id-ID")}`,
+        layout_name: name,
         layout_data: actualLayoutData,
         set_active,
         ...(layout_id ? { layout_id } : {})
       };
 
-      console.log(`[Dashboard Layout API] Calling External API with payload:`, JSON.stringify({
-        ...payload,
-        layout_data_length: actualLayoutData.length
-      }));
-
       const data = await saveExternalDashboardLayout(token, payload);
-
-      console.log(`[Dashboard Layout API] External API Response:`, data);
 
       if (data.success) {
         return NextResponse.json({
           success: true,
-          message: data.message || "Dashboard layout saved successfully",
+          message: data.message || "Dashboard layout saved (Cloud + Local)",
           layout_id: data.layout_id,
         });
-      } else if (data.message === "Layout data is required") {
-        console.warn("[Dashboard Layout API] External API error with body:", JSON.stringify({
-          layout_name,
-          layout_data_length: actualLayoutData.length,
-          set_active
-        }));
       }
     }
 
-    // Fallback to local storage (Still uses userId as key)
-    const name = layout_name || `Layout ${new Date().toLocaleString("id-ID")}`;
-    const { layout, isNew } = await upsertLayoutByName(user_id, name, actualLayoutData, set_active);
-
+    // Return local successful response if cloud was skipped or failed
     return NextResponse.json({
       success: true,
-      message: isNew ? "Dashboard layout created successfully" : "Dashboard layout updated successfully",
-      layout_id: layout.id,
+      message: localIsNew ? "Dashboard layout created (Local only)" : "Dashboard layout updated (Local only)",
+      layout_id: localLayout.id,
     });
   } catch (error) {
     console.error("[Dashboard Layout API] Error saving:", error);
