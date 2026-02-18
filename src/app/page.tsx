@@ -133,7 +133,7 @@ function PageContent() {
             <div className="max-w-5xl w-full text-center">
               {/* Welcome Text */}
               <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-gray-800 mb-3 sm:mb-4">
-                Welcome Back!
+                Welcome Back!!!
               </h1>
               <p className="text-sm sm:text-base md:text-lg text-gray-500 mb-8 sm:mb-10 md:mb-12 max-w-2xl mx-auto px-4">
                 Monitor and manage security easily through an integrated monitoring dashboard

@@ -11,6 +11,28 @@ let mainWindow;
 let setupWindow;
 let cloudToken = null;
 let currentPort = 3130;
+let isInstallingUpdate = false;
+
+const { exec } = require('child_process');
+
+function killProcessTree(pid) {
+    return new Promise((resolve) => {
+        if (!pid) return resolve();
+
+        if (process.platform === 'win32') {
+            exec(`taskkill /PID ${pid} /T /F`, () => {
+                resolve();
+            });
+        } else {
+            try {
+                process.kill(-pid, 'SIGKILL');
+            } catch (e) {
+                try { process.kill(pid, 'SIGKILL'); } catch { }
+            }
+            resolve();
+        }
+    });
+}
 
 const LOG_PATH = path.join(app.getPath('userData'), 'main.log');
 
@@ -31,7 +53,6 @@ logtoFile(`Resources Path: ${process.resourcesPath}`);
 logtoFile(`Is Packaged: ${app.isPackaged}`);
 
 autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
 
 const isPackaged = app.isPackaged;
 
@@ -144,6 +165,8 @@ function createSetupWindow() {
         autoHideMenuBar: true
     });
 
+    setupWindow.setFullScreen(true);
+
     const setupHtmlPath = isPackaged
         ? path.join(process.resourcesPath, 'app.asar', 'electron', 'setup.html')
         : path.join(__dirname, 'setup.html');
@@ -163,6 +186,8 @@ function createMainWindow() {
             contextIsolation: true,
         }
     });
+
+    mainWindow.setFullScreen(true);
 
     const url = `http://localhost:${currentPort}`;
     console.log(`[Electron] Loading URL: ${url}`);
@@ -444,7 +469,6 @@ function launchServer(command, args, cwd, customEnv) {
 
     nextProcess = spawn(command, args, {
         cwd,
-        shell: true,
         stdio: 'inherit',
         env: customEnv
     });
@@ -502,7 +526,8 @@ function launchNodeScript(scriptPath, env) {
         nextProcess = fork(scriptPath, [], {
             env: { ...process.env, ...env },
             cwd: path.dirname(scriptPath),
-            stdio: ['ignore', 'pipe', 'pipe', 'ipc']
+            stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+            detached: true
         });
 
         nextProcess.stdout.on('data', d => logtoFile(`[Next.js stdout] ${d.toString().trim()}`));
@@ -593,55 +618,23 @@ function startNextProd() {
             }
         }
 
-        // Inherit all environment variables (including those from .env.local)
-        // and override with production-specific settings
+        const serverDir = path.dirname(serverPath);
+        const nodeModulesPath = path.join(serverDir, 'node_modules');
+
         const env = {
             ...process.env,
             PORT: currentPort,
             NODE_ENV: 'production',
             HOSTNAME: 'localhost',
-            // Point to the root unpacked node_modules where next is located
-            NODE_PATH: path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
+            NODE_PATH: nodeModulesPath
         };
 
-        const nodeModulesPath = env.NODE_PATH;
         logtoFile(`[Electron] Setting NODE_PATH to: ${nodeModulesPath}`);
 
         if (fs.existsSync(nodeModulesPath)) {
-            try {
-                const nextPath = path.join(nodeModulesPath, 'next');
-                if (fs.existsSync(nextPath)) {
-                    logtoFile(`[Electron] Verified 'next' module exists at: ${nextPath}`);
-                } else {
-                    logtoFile(`[Electron] WARNING: 'next' module NOT FOUND in node_modules!`);
-                }
-
-                const styledJsxPath = path.join(nodeModulesPath, 'styled-jsx');
-                if (fs.existsSync(styledJsxPath)) {
-                    logtoFile(`[Electron] Verified 'styled-jsx' module exists at: ${styledJsxPath}`);
-                } else {
-                    logtoFile(`[Electron] WARNING: 'styled-jsx' module NOT FOUND in node_modules!`);
-                }
-
-                const sharpPath = path.join(nodeModulesPath, 'sharp');
-                if (fs.existsSync(sharpPath)) {
-                    logtoFile(`[Electron] Verified 'sharp' module exists at: ${sharpPath}`);
-                } else {
-                    logtoFile(`[Electron] Note: 'sharp' module not found (optional, used for image optimization).`);
-                }
-
-                if (!fs.existsSync(nextPath) || !fs.existsSync(styledJsxPath)) {
-                    logtoFile(`[Electron] Listing node_modules to debug:`);
-                    try {
-                        const files = fs.readdirSync(nodeModulesPath);
-                        logtoFile(`Files in node_modules: ${files.join(', ')}`);
-                    } catch (e) { logtoFile(`Failed to list node_modules: ${e.message}`); }
-                }
-            } catch (e) {
-                logtoFile(`[Electron] Error checking verify 'next': ${e.message}`);
-            }
+            logtoFile('[Electron] Verified standalone node_modules exists.');
         } else {
-            logtoFile(`[Electron] CRITICAL: node_modules path does not exist: ${nodeModulesPath}`);
+            logtoFile(`[Electron] WARNING: Standalone node_modules NOT FOUND at ${nodeModulesPath}`);
         }
 
         launchNodeScript(serverPath, env);
@@ -662,9 +655,12 @@ function startNextProd() {
 }
 
 function stopNextServer() {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
         isServerStopping = true;
-        if (healthCheckInterval) clearInterval(healthCheckInterval);
+        if (healthCheckInterval) {
+            clearInterval(healthCheckInterval);
+            healthCheckInterval = null;
+        }
 
         if (!nextProcess) {
             resolve();
@@ -683,16 +679,18 @@ function stopNextServer() {
         nextProcess.once('exit', exitHandler);
 
         // Kill it
-        nextProcess.kill();
+        await killProcessTree(nextProcess.pid);
 
         // Force kill fallback if it doesn't exit in 3s
         setTimeout(() => {
             if (nextProcess) {
                 logtoFile('[Electron] Force killing child process...');
+
                 try {
                     nextProcess.removeListener('exit', exitHandler);
-                    nextProcess.kill('SIGKILL');
-                } catch (e) { /* ignore */ }
+                    killProcessTree(nextProcess.pid);
+                } catch (e) { }
+
                 nextProcess = null;
                 resolve();
             }
@@ -701,12 +699,16 @@ function stopNextServer() {
 }
 
 function startHealthCheck() {
-    if (healthCheckInterval) clearInterval(healthCheckInterval);
+    if (healthCheckInterval) {
+        clearInterval(healthCheckInterval);
+        healthCheckInterval = null;
+    }
 
     console.log('[Electron] Starting health check monitor...');
     healthCheckInterval = setInterval(async () => {
+        if (isInstallingUpdate) return;
         if (isServerStopping) return;
-        if (!nextProcess) return; // Wait for process to exist
+        if (!nextProcess) return;
 
         // Simple fetch check
         try {
@@ -729,7 +731,7 @@ function startHealthCheck() {
             if (nextProcess && !isServerStopping) {
                 console.log('[Health] Server appears unresponsive. Restarting...');
                 // Kill process, let exit handler restart it
-                nextProcess.kill();
+                killProcessTree(nextProcess.pid);
             }
         }
     }, 15000); // Check every 15 seconds
@@ -820,35 +822,26 @@ autoUpdater.on('download-progress', (progressObj) => {
     if (win) win.webContents.send('download-progress', progressObj);
 });
 
-autoUpdater.on('update-downloaded', (info) => {
+autoUpdater.on('update-downloaded', async (info) => {
     logtoFile(`[AutoUpdater] Update downloaded: ${info.version}`);
+
     const win = mainWindow || setupWindow;
 
-    if (win) {
-        win.webContents.send('update-downloaded', info);
+    const { response } = await dialog.showMessageBox(win, {
+        type: 'info',
+        title: 'Update Ready',
+        message: `Version ${info.version} has been downloaded. Restart to apply update?`,
+        buttons: ['Restart', 'Later'],
+        defaultId: 0
+    });
 
-        dialog.showMessageBox(win, {
-            type: 'info',
-            title: 'Update Ready',
-            message: `Version ${info.version} has been downloaded. Restart the application to apply the update?`,
-            buttons: ['Restart', 'Later'],
-            defaultId: 0
-        }).then(({ response }) => {
-            if (response === 0) {
-                logtoFile('[AutoUpdater] User chose to restart and install.');
+    if (response === 0) {
+        isInstallingUpdate = true;
 
-                // Gracefully stop server first to release file locks
-                stopNextServer().then(() => {
-                    logtoFile('[AutoUpdater] Server stopped. calling quitAndInstall in 2s...');
-                    // Additional buffer for OS to release file locks
-                    setTimeout(() => {
-                        // Run silent install (true) and force run after (true)
-                        autoUpdater.quitAndInstall(true, true);
-                    }, 2000);
-                });
-            } else {
-                logtoFile('[AutoUpdater] User chose to install later.');
-            }
+        await stopNextServer();
+
+        process.nextTick(() => {
+            autoUpdater.quitAndInstall(false, true);
         });
     }
 });
@@ -862,19 +855,23 @@ autoUpdater.on('error', (err) => {
 let isAppQuitting = false;
 
 app.on('before-quit', async (e) => {
+    if (isInstallingUpdate) {
+        logtoFile('[Electron] Update install quit. Skipping cleanup.');
+        return;
+    }
+
     if (isAppQuitting) return;
 
-    // Prevent default quit to allow async cleanup
     e.preventDefault();
     isAppQuitting = true;
 
     logtoFile('[Electron] Intercepted quit for cleanup...');
 
-    // Stop server and wait for it to die
     await stopNextServer();
 
     logtoFile('[Electron] Cleanup done. Quitting now.');
-    app.quit();
+
+    app.exit(0);
 });
 
 app.on('window-all-closed', () => {

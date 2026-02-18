@@ -1,6 +1,6 @@
 {
   "name": "hotware-dashboard",
-  "version": "1.0.2",
+  "version": "1.0.1",
   "description": "Hotware Dashboard",
   "author": "Hotware",
   "main": "electron/main.js",
@@ -43,12 +43,8 @@
     },
     "files": [
       "electron/**/*",
-      ".next/**",
-      "package.json",
-      "next.config.js",
-      "tailwind.config.js",
-      "postcss.config.js",
-      "node_modules/**"
+      ".next/standalone/**",
+      "package.json"
     ],
     "extraMetadata": {
       "main": "electron/main.js"
@@ -57,17 +53,6 @@
       "smartUnpack": true
     },
     "asarUnpack": [
-      "node_modules/bcryptjs/**",
-      "node_modules/crypto/**",
-      "node_modules/dotenv/**",
-      "node_modules/child_process/**",
-      "node_modules/next/**",
-      "node_modules/react/**",
-      "node_modules/react-dom/**",
-      "node_modules/styled-jsx/**",
-      "node_modules/@swc/**",
-      "node_modules/@next/**",
-      "node_modules/sharp/**",
       ".next/standalone/**"
     ],
     "publish": [
@@ -80,6 +65,11 @@
     ]
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^16.4.5",
+    "electron-updater": "^6.7.3"
+  },
+  "devDependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
@@ -104,14 +94,18 @@
     "@types/js-cookie": "^3.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
+    "@types/leaflet": "^1.9.21",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.0.1",
-    "bcryptjs": "^3.0.3",
+    "baseline-browser-mapping": "^2.9.19",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^2.30.0",
-    "dotenv": "^16.4.5",
-    "electron-updater": "^6.7.3",
+    "electron": "^40.2.1",
+    "electron-builder": "^26.7.0",
+    "eslint": "^9.39.2",
     "eslint-config-next": "15.0.1",
     "framer-motion": "^10.16.4",
     "hls.js": "^1.6.15",
@@ -139,19 +133,6 @@
     "typescript": "^5",
     "zod": "^4.1.13",
     "zustand": "^4.4.6"
-  },
-  "devDependencies": {
-    "@types/leaflet": "^1.9.21",
-    "@types/react": "^19.2.10",
-    "@types/react-dom": "^19.2.3",
-    "baseline-browser-mapping": "^2.9.19",
-    "electron": "^40.2.1",
-    "electron-builder": "^26.7.0",
-    "eslint": "^9.39.2",
-    "eslint-config-next": "15.0.1",
-    "postcss": "^8",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5"
   },
   "overrides": {
     "react": "^19.2.4",

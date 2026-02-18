@@ -32,7 +32,7 @@ export const AUTH_CONFIG = {
 export const AUTH_ROUTES = {
   LOGIN: "/login",
   LOGOUT: "/logout",
-  DASHBOARD: "/dashboard",
+  DASHBOARD: "/",
   API_LOGIN: "/auth/login",
   API_LOGOUT: "/auth/logout",
   API_SESSION: "/auth/session",

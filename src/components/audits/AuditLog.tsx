@@ -856,12 +856,12 @@ export default function AuditLog() {
                                 <div className="flex items-center text-xs lg:text-sm">
                                   <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
                                   <div className="flex flex-col">
-                                    {/* <span className="font-medium text-gray-900">{log.authSession?.userName || "-"}</span>
+                                    <span className="font-medium text-gray-900">{log.authSession?.userName || "System"}</span>
                                     {log.authSession?.userHost && (
                                       <span className="text-[10px] text-gray-400">
                                         {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
                                       </span>
-                                    )} */}
+                                    )}
                                   </div>
                                 </div>
                               </td>
@@ -905,7 +905,7 @@ export default function AuditLog() {
                           <div className="flex flex-col text-sm">
                             <div className="flex items-center">
                               <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
-                              <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "-"}</span>
+                              <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "System"}</span>
                             </div>
                             {log.authSession?.userHost && (
                               <span className="text-[9px] text-gray-400 ml-5">

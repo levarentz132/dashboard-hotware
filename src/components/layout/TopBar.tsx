@@ -22,7 +22,6 @@ interface TopBarProps {
 
 export default function TopBar({ onMenuClick }: TopBarProps) {
   const { connected, loading: isSystemLoading } = useSystemInfo();
-  const [isMaximized, setIsMaximized] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // robust check for electron environment
   const isElectron = typeof window !== 'undefined' && (window as any).electron;
@@ -44,27 +43,13 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
 
   // Sync isFullscreen state with document events (for Esc key)
   useEffect(() => {
+    setIsFullscreen(!!document.fullscreenElement);
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
-
-  const handleMinimize = () => {
-    if (isElectron) (window as any).electron.window.minimize();
-  };
-
-  const handleMaximize = () => {
-    if (isElectron) {
-      (window as any).electron.window.maximize();
-      setIsMaximized(!isMaximized);
-    }
-  };
-
-  const handleClose = () => {
-    if (isElectron) (window as any).electron.window.close();
-  };
 
   return (
     <header className="bg-white shadow-sm border-b px-3 sm:px-6 h-16 flex items-center select-none drag-region shrink-0">
@@ -109,41 +94,26 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               </PopoverContent>
             </Popover>
 
-            <div className="h-6 w-px bg-gray-200 hidden sm:block" />
-
-            {/* Fullscreen Toggle */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={toggleFullscreen}
-                  className="gap-1 sm:gap-2 px-2 sm:px-3"
-                >
-                  {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={24}>
-                <p>{isFullscreen ? "Exit fullscreen" : "Enter fullscreen mode"}</p>
-              </TooltipContent>
-            </Tooltip>
+            {/* Fullscreen Toggle Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleFullscreen}
+              className="gap-1 sm:gap-2 px-2 sm:px-3 no-drag ml-1 overflow-hidden"
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize className="w-4 h-4" />
+                  <span className="hidden sm:inline">Exit Full</span>
+                </>
+              ) : (
+                <>
+                  <Maximize className="w-4 h-4" />
+                  <span className="hidden sm:inline">Full Screen</span>
+                </>
+              )}
+            </Button>
           </TooltipProvider>
-
-          {/* Window Controls (Electron Only) */}
-          {isElectron && (
-            <div className="flex items-center gap-1 ml-2 border-l pl-2 border-gray-200">
-              <button onClick={handleMinimize} className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors">
-                <Minus className="w-4 h-4" />
-              </button>
-              <button onClick={handleMaximize} className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors">
-                <Square className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={handleClose} className="p-2 hover:bg-red-100 rounded-md text-gray-500 hover:text-red-600 transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </header>

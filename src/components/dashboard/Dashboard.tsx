@@ -342,6 +342,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
+  const isElectron = typeof window !== 'undefined' && (window as any).electron;
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -361,6 +362,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
 
   // Sync isFullscreen state with document events (for Esc key)
   useEffect(() => {
+    setIsFullscreen(!!document.fullscreenElement);
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
@@ -414,15 +416,13 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
       setIsLoading(true);
       try {
         const result = await loadDashboardLayout(effectiveUserId);
-        if (result.widgets.length > 0) {
-          setWidgets(result.widgets);
+        setWidgets(result.widgets || []);
+        if (result.layout_id) {
           setCurrentLayoutId(result.layout_id);
-        } else {
-          setWidgets(defaultWidgets);
         }
       } catch (error) {
         console.error("Error loading layout:", error);
-        setWidgets(defaultWidgets);
+        setWidgets([]);
       } finally {
         setIsLoading(false);
       }
@@ -794,7 +794,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                       variant={isEditing ? "destructive" : "outline"}
                       size="sm"
                       onClick={handleToggleEdit}
-                      className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
+                      className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center"
                     >
                       {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
                       <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
@@ -806,48 +806,31 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                 </Tooltip>
               )}
 
-              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
-
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={toggleFullscreen}
-                    className="gap-1 sm:gap-2 px-2 sm:px-3"
+                    className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center ml-1 overflow-hidden"
                   >
-                    {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-                    <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
+                    {isFullscreen ? (
+                      <>
+                        <Minimize className="w-4 h-4" />
+                        <span className="hidden sm:inline">Exit Full</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize className="w-4 h-4" />
+                        <span className="hidden sm:inline">Full Screen</span>
+                      </>
+                    )}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={24}>
-                  <p>{isFullscreen ? "Exit fullscreen" : "Enter fullscreen mode"}</p>
+                  <p>{isFullscreen ? "Exit Full Screen" : "Enter Full Screen"}</p>
                 </TooltipContent>
               </Tooltip>
-
-              {/* Window Controls (Electron Only) - Consistent with TopBar */}
-              {typeof window !== 'undefined' && (window as any).electron && (
-                <div className="flex items-center gap-1 ml-2 border-l pl-2 border-gray-200">
-                  <button
-                    onClick={() => (window as any).electron.window.minimize()}
-                    className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => (window as any).electron.window.maximize()}
-                    className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors"
-                  >
-                    <Square className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => (window as any).electron.window.close()}
-                    className="p-2 hover:bg-red-100 rounded-md text-gray-500 hover:text-red-600 transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
 
               {/* Hidden file input for import */}
               <input ref={fileInputRef} type="file" accept=".json" onChange={importLayout} className="hidden" />
