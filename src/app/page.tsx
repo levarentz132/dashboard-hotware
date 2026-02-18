@@ -147,25 +147,6 @@ function PageContent() {
                 Enter Dashboard
                 <ArrowRight className="group-hover:translate-x-1 transition-transform" size={20} />
               </Link>
-
-              {/* Feature Icons */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mt-12 sm:mt-14 md:mt-16 max-w-4xl mx-auto px-4">
-                <div className="bg-gray-50 p-5 sm:p-6 rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all">
-                  <Eye className="text-blue-600 mx-auto mb-3" size={28} />
-                  <h3 className="text-gray-800 font-semibold mb-2 text-base sm:text-lg">Live Monitoring</h3>
-                  <p className="text-gray-600 text-sm">Real-time monitoring</p>
-                </div>
-                <div className="bg-gray-50 p-5 sm:p-6 rounded-xl border border-gray-200 hover:border-green-300 hover:shadow-md transition-all">
-                  <Shield className="text-green-600 mx-auto mb-3" size={28} />
-                  <h3 className="text-gray-800 font-semibold mb-2 text-base sm:text-lg">Guaranteed Security</h3>
-                  <p className="text-gray-600 text-sm">Encrypted system</p>
-                </div>
-                <div className="bg-gray-50 p-5 sm:p-6 rounded-xl border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all">
-                  <Camera className="text-purple-600 mx-auto mb-3" size={28} />
-                  <h3 className="text-gray-800 font-semibold mb-2 text-base sm:text-lg">Multi Camera</h3>
-                  <p className="text-gray-600 text-sm">Access all locations</p>
-                </div>
-              </div>
             </div>
           </div>
         );
