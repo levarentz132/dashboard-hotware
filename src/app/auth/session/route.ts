@@ -60,8 +60,11 @@ export async function GET(request: NextRequest) {
     if (!session.valid) {
       // Access token invalid/expired - try refresh once
       if (refreshToken) {
+        console.log("[Session API] Access token invalid/expired. Attempting refresh...");
         const refreshed = await refreshAccessToken(refreshToken);
+
         if (refreshed.success && refreshed.accessToken) {
+          console.log("[Session API] Refresh successful. Rotating tokens.");
           const refreshedSession = await validateSession(refreshed.accessToken);
           if (refreshedSession.valid && refreshedSession.user) {
             // Also enrich the refreshed session user
@@ -86,7 +89,7 @@ export async function GET(request: NextRequest) {
 
             response.cookies.set(AUTH_CONFIG.COOKIE_NAME, refreshed.accessToken, {
               httpOnly: true,
-              secure: process.env.NODE_ENV === "production",
+              secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
               sameSite: "lax",
               maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
               path: "/",
@@ -95,7 +98,7 @@ export async function GET(request: NextRequest) {
             if (refreshed.refreshToken) {
               response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, refreshed.refreshToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
+                secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
                 sameSite: "lax",
                 maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
                 path: "/",
@@ -145,7 +148,7 @@ export async function GET(request: NextRequest) {
     if (rotatedAccessToken) {
       response.cookies.set(AUTH_CONFIG.COOKIE_NAME, rotatedAccessToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
         path: "/",
@@ -154,7 +157,7 @@ export async function GET(request: NextRequest) {
     if (rotatedRefreshToken) {
       response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, rotatedRefreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
         path: "/",

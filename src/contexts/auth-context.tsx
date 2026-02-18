@@ -157,6 +157,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           if (data.user?.system_id) {
             nxAPI.setSystemId(data.user.system_id);
           }
+          // Force sidebar to be collapsed when entering the app
+          if (typeof window !== 'undefined') {
+            localStorage.setItem("sidebar-collapsed", "true");
+          }
           setState({
             user: data.user,
             isAuthenticated: true,

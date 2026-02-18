@@ -13,5 +13,10 @@ contextBridge.exposeInMainWorld('electron', {
     save: (data) => ipcRenderer.invoke('setup:save', data),
     getConfig: () => ipcRenderer.invoke('setup:get-config'),
     launch: () => ipcRenderer.send('setup:launch')
+  },
+  window: {
+    minimize: () => ipcRenderer.send('window:minimize'),
+    maximize: () => ipcRenderer.send('window:maximize'),
+    close: () => ipcRenderer.send('window:close')
   }
 });

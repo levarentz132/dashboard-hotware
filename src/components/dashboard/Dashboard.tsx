@@ -22,8 +22,10 @@ import {
   Maximize,
   Minimize,
   ArrowLeft,
-  Cloud,
   Lock,
+  Minus,
+  Square,
+  Menu,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -47,6 +49,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import Sidebar from "@/components/layout/Sidebar";
 
 // Widget Loading Placeholder
 const WidgetLoading = () => (
@@ -325,6 +328,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -340,6 +344,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
       }
     }
   };
+
 
   // Sync isFullscreen state with document events (for Esc key)
   useEffect(() => {
@@ -646,52 +651,20 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
           `}</style>
         )}
         {/* Toolbar */}
-        <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-2 sm:px-4 py-2 sm:py-3 shadow-sm">
-          <div className="flex items-center justify-between max-w-full gap-2">
+        <div className="sticky top-0 z-[110] bg-white border-b border-gray-200 px-2 sm:px-4 h-16 flex items-center shadow-sm shrink-0">
+          <div className="flex items-center justify-between w-full gap-2">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 sm:h-9 sm:w-9"
-                    onClick={() => router.back()}
-                  >
-                    <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Back</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link href="/">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9">
-                      <Home className="w-4 h-4 sm:w-5 sm:h-5" />
-                    </Button>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Back to Home</p>
-                </TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 sm:h-9 sm:w-9"
+                onClick={() => setSidebarOverlayOpen(!sidebarOverlayOpen)}
+              >
+                {sidebarOverlayOpen ? <X className="w-4 h-4 sm:w-5 sm:h-5" /> : <Menu className="w-4 h-4 sm:w-5 sm:h-5" />}
+              </Button>
               <div className="h-6 w-px bg-gray-200 hidden sm:block" />
               <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 shrink-0" />
               <h1 className="text-base sm:text-xl font-semibold text-gray-900 truncate">Dashboard</h1>
-
-              <div className="flex items-center gap-2 ml-2 shrink-0">
-                {!loadingCloud && cloudSystems.length > 0 && selectedSystemId && (
-                  <div className="flex items-center gap-2 h-8 sm:h-9 px-3 bg-white/50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 w-[13rem]">
-                    <Cloud className="w-3.5 h-3.5 sm:w-4 w-4 text-blue-500 shrink-0" />
-                    <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
-                      {cloudSystems.find(s => s.id === selectedSystemId)?.name || "Owner Server"}
-                    </span>
-                  </div>
-                )}
-                {loadingCloud && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
-              </div>
 
               {isEditing && (
                 <Badge
@@ -703,7 +676,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
               )}
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0 ml-auto">
               {isEditing && (
                 <>
                   <Tooltip>
@@ -806,42 +779,52 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
               <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
               {canCustomize && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={isEditing ? "destructive" : "outline"}
-                      size="sm"
-                      onClick={handleToggleEdit}
-                      className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
-                    >
-                      {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
-                      <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{isEditing ? "Discard changes" : "Customize dashboard"}</p>
-                  </TooltipContent>
-                </Tooltip>
+                <Button
+                  variant={isEditing ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={handleToggleEdit}
+                  className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
+                >
+                  {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
+                </Button>
               )}
 
               <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={toggleFullscreen}
-                    className="gap-1 sm:gap-2 px-2 sm:px-3"
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={toggleFullscreen}
+                className="gap-1 sm:gap-2 px-2 sm:px-3"
+              >
+                {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
+              </Button>
+
+              {/* Window Controls (Electron Only) - Consistent with TopBar */}
+              {typeof window !== 'undefined' && (window as any).electron && (
+                <div className="flex items-center gap-1 ml-2 border-l pl-2 border-gray-200">
+                  <button
+                    onClick={() => (window as any).electron.window.minimize()}
+                    className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors"
                   >
-                    {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-                    <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{isFullscreen ? "Exit fullscreen" : "Fullscreen"}</p>
-                </TooltipContent>
-              </Tooltip>
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => (window as any).electron.window.maximize()}
+                    className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors"
+                  >
+                    <Square className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => (window as any).electron.window.close()}
+                    className="p-2 hover:bg-red-100 rounded-md text-gray-500 hover:text-red-600 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
               {/* Hidden file input for import */}
               <input ref={fileInputRef} type="file" accept=".json" onChange={importLayout} className="hidden" />
@@ -976,6 +959,46 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Sidebar Overlay */}
+      {sidebarOverlayOpen && (
+        <div className="fixed inset-0 top-16 z-[100]">
+          <div
+            className="fixed inset-0 top-16"
+            onClick={() => setSidebarOverlayOpen(false)}
+          />
+          <Sidebar
+            activeSection="dashboard"
+            hideHeader={true}
+            className="!absolute !top-0 !bottom-0 !left-0 z-[101] !h-auto"
+            onSectionChange={(section) => {
+              setSidebarOverlayOpen(false);
+              if (section !== 'dashboard') {
+                // Force sidebar to be collapsed when moving from dashboard to normal pages
+                localStorage.setItem("sidebar-collapsed", "true");
+                router.push(`/?section=${section}`);
+              }
+            }}
+            isOpen={true}
+            onClose={() => setSidebarOverlayOpen(false)}
+          />
+          <style>{`
+            .top-16 {
+              animation: sidebarDropIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            }
+            @keyframes sidebarDropIn {
+              from {
+                opacity: 0;
+                transform: translateY(-20px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+          `}</style>
+        </div>
+      )}
     </TooltipProvider>
   );
 }

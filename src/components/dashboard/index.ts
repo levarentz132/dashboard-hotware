@@ -17,4 +17,4 @@ export {
 } from "./dashboard-service";
 
 // Components
-export { default as ModernDashboard, widgetRegistry, type WidgetType } from "./ModernDashboard";
+export { default as ModernDashboard, widgetRegistry, type WidgetType } from "./Dashboard";

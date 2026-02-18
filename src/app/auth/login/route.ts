@@ -257,7 +257,7 @@ export async function POST(request: NextRequest) {
     // 1. Establish Dashboard Session
     response.cookies.set(AUTH_CONFIG.COOKIE_NAME, accessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
       sameSite: "lax",
       maxAge: externalData.expires_in || AUTH_CONFIG.COOKIE_MAX_AGE,
       path: "/",
@@ -266,7 +266,7 @@ export async function POST(request: NextRequest) {
     if (refreshToken) {
       response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
         path: "/",
@@ -333,7 +333,7 @@ export async function POST(request: NextRequest) {
                 path: "/",
                 maxAge: 60 * 60 * 24 * 3, // 3 days
                 httpOnly: false,
-                secure: process.env.NODE_ENV === "production",
+                secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
                 sameSite: "lax",
               });
               console.log(`[Dual-Login] ✓ Relay session established for ${system_id} with token: ${relayToken.substring(0, 8)}...`);

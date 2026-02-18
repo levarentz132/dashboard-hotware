@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
-import ModernDashboard from "@/components/dashboard/ModernDashboard";
+import ModernDashboard from "@/components/dashboard/Dashboard";
 import CameraInventory from "@/components/cameras/CameraInventory";
 import ServerOptions from "@/components/servers/ServerOptions";
 import SystemHealth from "@/components/monitoring/SystemHealth";
@@ -87,7 +87,7 @@ function PageContent() {
   const renderContent = () => {
     switch (activeSection) {
       case "dashboard":
-        return <Link href="/dashboard-full-view" />;
+        return <Link href="/dashboard" />;
       case "cameras":
         return <CameraInventory />;
       case "servers":
@@ -141,7 +141,7 @@ function PageContent() {
 
               {/* CTA Button */}
               <Link
-                href="/dashboard-full-view"
+                href="/dashboard"
                 className="group bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-xl text-base sm:text-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 inline-flex items-center gap-2 sm:gap-3"
               >
                 Enter Dashboard

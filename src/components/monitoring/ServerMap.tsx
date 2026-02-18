@@ -248,7 +248,7 @@ export default function ServerMap({
                   click: () => onServerClick?.(server),
                 }}
               >
-                <Popup className="server-popup">
+                <Popup className="server-popup" closeButton={false}>
                   <div className="min-w-[220px] p-1">
                     {/* Popup Header */}
                     <div className="flex items-center gap-3 pb-3 mb-3 border-b">

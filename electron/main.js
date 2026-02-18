@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
@@ -28,6 +29,9 @@ logtoFile('-----------------------------------');
 logtoFile(`App starting. User Data: ${app.getPath('userData')}`);
 logtoFile(`Resources Path: ${process.resourcesPath}`);
 logtoFile(`Is Packaged: ${app.isPackaged}`);
+
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
 
 const isPackaged = app.isPackaged;
 
@@ -107,10 +111,30 @@ if (fs.existsSync(CONFIG_PATH)) {
     }
 }
 
+// Ensure JWT_SECRET exists for session persistence
+if (!process.env.JWT_SECRET) {
+    const crypto = require('crypto');
+    // Generate a secure, persistent secret
+    const secret = crypto.randomBytes(32).toString('hex');
+    process.env.JWT_SECRET = secret;
+
+    try {
+        // Append to .env.local if file exists, or create it
+        const content = fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '';
+        if (!content.includes('JWT_SECRET=')) {
+            fs.appendFileSync(CONFIG_PATH, `\nJWT_SECRET=${secret}\n`);
+            logtoFile('[Electron] Generated and persisted new JWT_SECRET');
+        }
+    } catch (e) {
+        logtoFile(`[Electron] Failed to persist JWT_SECRET: ${e.message}`);
+    }
+}
+
 function createSetupWindow() {
     setupWindow = new BrowserWindow({
         width: 800,
         height: 600,
+        fullscreen: true,
         backgroundColor: '#0c0c0c',
         webPreferences: {
             preload: getPreloadPath(),
@@ -131,6 +155,7 @@ function createMainWindow() {
     mainWindow = new BrowserWindow({
         width: 1920,
         height: 1080,
+        fullscreen: true,
         autoHideMenuBar: true,
         webPreferences: {
             preload: getPreloadPath(),
@@ -176,6 +201,28 @@ ipcMain.handle('setup:get-config', async () => {
         NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED,
         NX_CLOUD_TOKEN: process.env.NX_CLOUD_TOKEN
     };
+});
+
+// Window Controls
+ipcMain.on('window:minimize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.minimize();
+});
+
+ipcMain.on('window:maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+        if (win.isMaximized()) {
+            win.unmaximize();
+        } else {
+            win.maximize();
+        }
+    }
+});
+
+ipcMain.on('window:close', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.close();
 });
 
 // Decrypt password on-demand (server-side only, never exposed to renderer)
@@ -615,14 +662,42 @@ function startNextProd() {
 }
 
 function stopNextServer() {
-    isServerStopping = true;
-    if (healthCheckInterval) clearInterval(healthCheckInterval);
+    return new Promise((resolve) => {
+        isServerStopping = true;
+        if (healthCheckInterval) clearInterval(healthCheckInterval);
 
-    if (nextProcess) {
+        if (!nextProcess) {
+            resolve();
+            return;
+        }
+
         console.log('[Electron] Stopping Next.js server...');
+
+        // Listen for exit
+        const exitHandler = () => {
+            logtoFile('[Electron] Child process exited.');
+            nextProcess = null;
+            resolve();
+        };
+
+        nextProcess.once('exit', exitHandler);
+
+        // Kill it
         nextProcess.kill();
-        nextProcess = null;
-    }
+
+        // Force kill fallback if it doesn't exit in 3s
+        setTimeout(() => {
+            if (nextProcess) {
+                logtoFile('[Electron] Force killing child process...');
+                try {
+                    nextProcess.removeListener('exit', exitHandler);
+                    nextProcess.kill('SIGKILL');
+                } catch (e) { /* ignore */ }
+                nextProcess = null;
+                resolve();
+            }
+        }, 3000);
+    });
 }
 
 function startHealthCheck() {
@@ -724,10 +799,82 @@ app.whenReady().then(async () => {
 
     // Start monitoring only after initial successful launch
     startHealthCheck();
+
+    autoUpdater.checkForUpdates();
 });
 
-app.on('before-quit', () => {
-    stopNextServer();
+autoUpdater.on('update-available', (info) => {
+    logtoFile(`[AutoUpdater] Update available: Version ${info.version}`);
+    const win = mainWindow || setupWindow;
+    if (win) win.webContents.send('update-available', info);
+});
+
+autoUpdater.on('update-not-available', (info) => {
+    logtoFile('[AutoUpdater] No Update available.');
+    const win = mainWindow || setupWindow;
+    if (win) win.webContents.send('update-not-available', info);
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+    const win = mainWindow || setupWindow;
+    if (win) win.webContents.send('download-progress', progressObj);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+    logtoFile(`[AutoUpdater] Update downloaded: ${info.version}`);
+    const win = mainWindow || setupWindow;
+
+    if (win) {
+        win.webContents.send('update-downloaded', info);
+
+        dialog.showMessageBox(win, {
+            type: 'info',
+            title: 'Update Ready',
+            message: `Version ${info.version} has been downloaded. Restart the application to apply the update?`,
+            buttons: ['Restart', 'Later'],
+            defaultId: 0
+        }).then(({ response }) => {
+            if (response === 0) {
+                logtoFile('[AutoUpdater] User chose to restart and install.');
+
+                // Gracefully stop server first to release file locks
+                stopNextServer().then(() => {
+                    logtoFile('[AutoUpdater] Server stopped. calling quitAndInstall in 2s...');
+                    // Additional buffer for OS to release file locks
+                    setTimeout(() => {
+                        // Run silent install (true) and force run after (true)
+                        autoUpdater.quitAndInstall(true, true);
+                    }, 2000);
+                });
+            } else {
+                logtoFile('[AutoUpdater] User chose to install later.');
+            }
+        });
+    }
+});
+
+autoUpdater.on('error', (err) => {
+    logtoFile(`[AutoUpdater] Error: ${err.message}`);
+    const win = mainWindow || setupWindow;
+    if (win) win.webContents.send('update-error', err.message);
+});
+
+let isAppQuitting = false;
+
+app.on('before-quit', async (e) => {
+    if (isAppQuitting) return;
+
+    // Prevent default quit to allow async cleanup
+    e.preventDefault();
+    isAppQuitting = true;
+
+    logtoFile('[Electron] Intercepted quit for cleanup...');
+
+    // Stop server and wait for it to die
+    await stopNextServer();
+
+    logtoFile('[Electron] Cleanup done. Quitting now.');
+    app.quit();
 });
 
 app.on('window-all-closed', () => {

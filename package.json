@@ -1,18 +1,19 @@
 {
   "name": "hotware-dashboard",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Hotware Dashboard",
   "author": "Hotware",
   "main": "electron/main.js",
   "private": true,
+  "repository": "https://github.com/darrengunawan15/testing",
   "scripts": {
-    "dev": "next dev -p 3132",
+    "dev": "next dev -p 3135",
     "dev:electron": "electron electron/main.js",
     "build": "next build && node scripts/post-build.js",
     "start": "next start",
     "lint": "next lint",
     "electron": "electron electron/main.js",
-    "dist": "npm run build && npx electron-builder --win --publish never",
+    "dist": "npm run build && npx electron-builder --win --publish always",
     "setup": "node scripts/setup.js"
   },
   "build": {
@@ -34,6 +35,7 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
@@ -67,6 +69,14 @@
       "node_modules/@next/**",
       "node_modules/sharp/**",
       ".next/standalone/**"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "releaseType": "release",
+        "owner": "darrengunawan15",
+        "repo": "testing"
+      }
     ]
   },
   "dependencies": {

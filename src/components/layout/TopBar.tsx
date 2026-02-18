@@ -1,50 +1,78 @@
 "use client";
 
-import { useState } from "react";
-import { Bell, User, Settings, Menu, LogOut, Loader2, RefreshCw } from "lucide-react";
-import { useAuth } from "@/contexts/auth-context";
-import { isAdmin } from "@/lib/auth";
+import { useState, useEffect } from "react";
+import { Bell, Menu, Minus, Square, X, RefreshCw, Maximize, Minimize } from "lucide-react";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
 
 interface TopBarProps {
   onMenuClick?: () => void;
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  admin: "Administrator",
-  user: "User",
-};
-
 export default function TopBar({ onMenuClick }: TopBarProps) {
-  const { user, logout, isLoading: isAuthLoading } = useAuth();
   const { connected, loading: isSystemLoading } = useSystemInfo();
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // robust check for electron environment
+  const isElectron = typeof window !== 'undefined' && (window as any).electron;
 
-  const handleLogout = async () => {
-    await logout();
+  // Toggle fullscreen
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+      setIsFullscreen(true);
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    }
+  };
+
+  // Sync isFullscreen state with document events (for Esc key)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const handleMinimize = () => {
+    if (isElectron) (window as any).electron.window.minimize();
+  };
+
+  const handleMaximize = () => {
+    if (isElectron) {
+      (window as any).electron.window.maximize();
+      setIsMaximized(!isMaximized);
+    }
+  };
+
+  const handleClose = () => {
+    if (isElectron) (window as any).electron.window.close();
   };
 
   return (
-    <header className="bg-white shadow-sm border-b px-3 sm:px-6 py-3 sm:py-4">
-      <div className="flex items-center justify-between gap-2 sm:gap-4">
-        {/* Mobile Menu Button */}
+    <header className="bg-white shadow-sm border-b px-3 sm:px-6 h-16 flex items-center select-none drag-region shrink-0">
+      <div className="flex items-center justify-between gap-2 sm:gap-4 w-full">
+        {/* Mobile Menu Button - No drag on button */}
         <button
           onClick={onMenuClick}
-          className="lg:hidden p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg"
+          className="lg:hidden p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg no-drag"
         >
           <Menu className="w-5 h-5" />
         </button>
 
         {/* Right Side Actions */}
-        <div className="flex items-center gap-1 sm:gap-3 ml-auto">
+        <div className="flex items-center gap-1 sm:gap-3 ml-auto no-drag">
           {/* System Status - Hidden on mobile */}
           <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 px-2 group cursor-help">
             {isSystemLoading ? (
@@ -74,49 +102,33 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
             </PopoverContent>
           </Popover>
 
-          {/* Settings - Hidden on small mobile */}
-          <button className="hidden xs:block p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg">
-            <Settings className="w-5 h-5" />
-          </button>
+          <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
-          {/* User Profile with Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 pl-2 border-l border-gray-200 hover:bg-gray-50 rounded-lg p-1 transition-colors">
-                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <User className="w-4 h-4 text-white" />
-                </div>
-                <span className="hidden md:block text-sm font-medium text-gray-700">
-                  {user?.username ?? "User"}
-                </span>
+          {/* Fullscreen Toggle */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleFullscreen}
+            className="gap-1 sm:gap-2 px-2 sm:px-3"
+          >
+            {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+            <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
+          </Button>
+
+          {/* Window Controls (Electron Only) */}
+          {isElectron && (
+            <div className="flex items-center gap-1 ml-2 border-l pl-2 border-gray-200">
+              <button onClick={handleMinimize} className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors">
+                <Minus className="w-4 h-4" />
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel>
-                <div className="flex flex-col">
-                  <span className="font-medium">{user?.username ?? "User"}</span>
-                  <span className="text-xs text-gray-500">
-                    {isAdmin(user)
-                      ? "Administrator"
-                      : user?.role
-                        ? typeof user.role === "string"
-                          ? ROLE_LABELS[user.role.toLowerCase()] ?? user.role
-                          : user.role.name
-                        : "Role not set"}
-                  </span>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleLogout}
-                disabled={isAuthLoading}
-                className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
-              >
-                {isAuthLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
-                {isAuthLoading ? "Logging out..." : "Logout"}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <button onClick={handleMaximize} className="p-2 hover:bg-gray-100 rounded-md text-gray-500 hover:text-gray-900 transition-colors">
+                <Square className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleClose} className="p-2 hover:bg-red-100 rounded-md text-gray-500 hover:text-red-600 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

@@ -244,7 +244,7 @@ export default function ServerMapWidget({ systemId }: { systemId?: string }) {
                 position={[Number(server.latitude), Number(server.longitude)]}
                 icon={createCustomIcon(server.isOnline)}
               >
-                <Popup>
+                <Popup closeButton={false}>
                   <div className="min-w-[180px] p-1">
                     <div className="flex items-center gap-2 pb-2 mb-2 border-b">
                       <div className={`p-1.5 rounded-md ${server.isOnline ? "bg-green-100" : "bg-red-100"}`}>
@@ -253,9 +253,8 @@ export default function ServerMapWidget({ systemId }: { systemId?: string }) {
                       <div className="flex-1 min-w-0">
                         <h4 className="font-semibold text-sm text-gray-900 truncate">{server.name}</h4>
                         <span
-                          className={`inline-flex items-center gap-1 text-[10px] font-medium ${
-                            server.isOnline ? "text-green-600" : "text-red-500"
-                          }`}
+                          className={`inline-flex items-center gap-1 text-[10px] font-medium ${server.isOnline ? "text-green-600" : "text-red-500"
+                            }`}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${server.isOnline ? "bg-green-500" : "bg-red-500"}`}
