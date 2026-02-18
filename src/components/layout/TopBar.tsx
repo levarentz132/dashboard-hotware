@@ -4,6 +4,12 @@ import { useState, useEffect } from "react";
 import { Bell, Menu, Minus, Square, X, RefreshCw, Maximize, Minimize } from "lucide-react";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -72,48 +78,57 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
         </button>
 
         {/* Right Side Actions */}
-        <div className="flex items-center gap-1 sm:gap-3 ml-auto no-drag">
-          {/* System Status - Hidden on mobile */}
-          <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 px-2 group cursor-help">
-            {isSystemLoading ? (
-              <RefreshCw className="w-3 h-3 animate-spin text-blue-500" />
-            ) : (
-              <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse'}`}></div>
-            )}
-            <span className="hidden lg:inline font-medium">
-              {isSystemLoading ? 'Checking...' : connected ? 'System Online' : 'System Offline'}
-            </span>
-          </div>
+        <div className="flex items-center gap-2 sm:gap-3 ml-auto no-drag">
+          <TooltipProvider delayDuration={0}>
+            {/* System Status - Hidden on mobile */}
+            <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 px-2 group cursor-help">
+              {isSystemLoading ? (
+                <RefreshCw className="w-3 h-3 animate-spin text-blue-500" />
+              ) : (
+                <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse'}`}></div>
+              )}
+              <span className="hidden lg:inline font-medium">
+                {isSystemLoading ? 'Checking...' : connected ? 'System Online' : 'System Offline'}
+              </span>
+            </div>
 
-          {/* Notifications */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <button className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg relative">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center text-[10px] sm:text-xs">
-                  3
-                </span>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 p-0" align="end">
-              <div className="px-4 py-6 text-sm text-gray-500 text-center">
-                No new notifications.
-              </div>
-            </PopoverContent>
-          </Popover>
+            {/* Notifications */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg relative">
+                  <Bell className="w-5 h-5" />
+                  <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center text-[10px] sm:text-xs">
+                    3
+                  </span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0" align="end">
+                <div className="px-4 py-6 text-sm text-gray-500 text-center">
+                  No new notifications.
+                </div>
+              </PopoverContent>
+            </Popover>
 
-          <div className="h-6 w-px bg-gray-200 hidden sm:block" />
+            <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
-          {/* Fullscreen Toggle */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={toggleFullscreen}
-            className="gap-1 sm:gap-2 px-2 sm:px-3"
-          >
-            {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-            <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
-          </Button>
+            {/* Fullscreen Toggle */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleFullscreen}
+                  className="gap-1 sm:gap-2 px-2 sm:px-3"
+                >
+                  {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={24}>
+                <p>{isFullscreen ? "Exit fullscreen" : "Enter fullscreen mode"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
 
           {/* Window Controls (Electron Only) */}
           {isElectron && (

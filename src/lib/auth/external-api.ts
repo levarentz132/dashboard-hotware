@@ -351,3 +351,97 @@ export async function callExternalChangePassword(
     }),
   });
 }
+
+/**
+ * Get dashboard layout from external API
+ */
+export async function getExternalDashboardLayout(
+  token: string
+): Promise<{ success: boolean; layout?: any; message?: string }> {
+  const data = await apiFetch("/dashboard/layout", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  // Normalize response: Map layout_json from SQL to layout_data for frontend
+  if (data?.success && data.layout && data.layout.layout_json && !data.layout.layout_data) {
+    data.layout.layout_data = data.layout.layout_json;
+  }
+
+  return data;
+}
+
+/**
+ * Create/Save dashboard layout to external API (Unified Upsert)
+ */
+export async function saveExternalDashboardLayout(
+  token: string,
+  layoutData: {
+    layout_name: string;
+    layout_data?: any;
+    layout_json?: any;
+    set_active?: boolean;
+    layout_id?: number | string;
+  }
+): Promise<{ success: boolean; message: string; layout_id?: number }> {
+  // Map to both keys to be safe, removing user_id as token handles it
+  const payload = {
+    layout_name: layoutData.layout_name || "Default Layout",
+    layout_data: layoutData.layout_data ?? layoutData.layout_json,
+    layout_json: layoutData.layout_data ?? layoutData.layout_json,
+    set_active: layoutData.set_active ?? true,
+    layout_id: layoutData.layout_id
+  };
+
+  console.log(`[External API] Request: POST /dashboard/layout`, JSON.stringify({
+    layout_name: payload.layout_name,
+    has_layout_data: !!payload.layout_data,
+    json_length: Array.isArray(payload.layout_data) ? payload.layout_data.length : 0
+  }));
+
+  return await apiFetch("/dashboard/layout", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Update dashboard layout on external API (Proxies to save)
+ */
+export async function updateExternalDashboardLayout(
+  token: string,
+  layoutId: number | string,
+  layoutData: {
+    user_id?: string;
+    layout_name?: string;
+    layout_data?: any;
+    set_active?: boolean;
+  }
+): Promise<{ success: boolean; message: string }> {
+  // Use POST for updates as requested
+  return await saveExternalDashboardLayout(token, {
+    ...layoutData,
+    layout_id: layoutId,
+    layout_name: layoutData.layout_name || "Default Layout",
+  } as any);
+}
+
+/**
+ * Delete dashboard layout from external API
+ */
+export async function deleteExternalDashboardLayout(
+  token: string,
+  layoutId: number | string
+): Promise<{ success: boolean; message: string }> {
+  return await apiFetch(`/dashboard/layout?layout_id=${layoutId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}

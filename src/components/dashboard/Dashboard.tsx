@@ -50,6 +50,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import Sidebar from "@/components/layout/Sidebar";
+import {
+  loadDashboardLayout,
+  saveDashboardLayout,
+  deleteDashboardLayout,
+  updateDashboardLayout
+} from "./dashboard-service";
 
 // Widget Loading Placeholder
 const WidgetLoading = () => (
@@ -202,8 +208,13 @@ interface ModernDashboardProps {
 const COLS = 12;
 const ROW_HEIGHT = 80;
 
-// Default layout - empty, user can add widgets as needed
-const defaultWidgets: DashboardWidget[] = [];
+// Default layout - some basic widgets to get started
+const defaultWidgets: DashboardWidget[] = [
+  { i: "camera-1", type: "cameraOverview", x: 0, y: 0, w: 4, h: 5 },
+  { i: "alarm-1", type: "alarmConsole", x: 4, y: 0, w: 4, h: 5 },
+  { i: "audit-1", type: "auditLog", x: 8, y: 0, w: 4, h: 5 },
+  { i: "storage-1", type: "storage", x: 0, y: 5, w: 3, h: 5 },
+];
 
 // Memoized Widget Component to prevent unnecessary re-renders
 const MemoizedWidget = memo(
@@ -307,6 +318,7 @@ MemoizedWidget.displayName = "MemoizedWidget";
 export default function ModernDashboard({ userId = "default" }: ModernDashboardProps) {
   const router = useRouter();
   const { user } = useAuth();
+  const effectiveUserId = userId !== "default" ? userId : (user?.id?.toString() || "default");
   const isUserAdmin = isAdmin(user);
   const canCustomize = isUserAdmin || user?.privileges?.find(p => p.module === "dashboard")?.can_edit === true;
 
@@ -320,6 +332,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [originalWidgets, setOriginalWidgets] = useState<DashboardWidget[]>([]);
+  const [currentLayoutId, setCurrentLayoutId] = useState<number | undefined>(undefined);
 
   // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
@@ -400,14 +413,10 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     const loadLayout = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch(`/api/dashboard-layout?user_id=${encodeURIComponent(userId)}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.layout?.layout_data) {
-            setWidgets(data.layout.layout_data);
-          } else {
-            setWidgets(defaultWidgets);
-          }
+        const result = await loadDashboardLayout(effectiveUserId);
+        if (result.widgets.length > 0) {
+          setWidgets(result.widgets);
+          setCurrentLayoutId(result.layout_id);
         } else {
           setWidgets(defaultWidgets);
         }
@@ -420,7 +429,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     };
 
     loadLayout();
-  }, [userId]);
+  }, [effectiveUserId]);
 
   // Handle container width for react-grid-layout
   useEffect(() => {
@@ -455,21 +464,18 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
       setIsSaving(true);
       setSaveStatus("saving");
       try {
-        const response = await fetch("/api/dashboard-layout", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            user_id: userId,
-            layout_name: "Default Layout",
-            layout_data: dataToSave,
-            set_active: true,
-          }),
-        });
+        const result = await saveDashboardLayout(
+          effectiveUserId,
+          dataToSave,
+          "Default Layout",
+          currentLayoutId
+        );
 
-        if (response.ok) {
+        if (result.success) {
           setSaveStatus("saved");
+          if (result.layout_id) {
+            setCurrentLayoutId(result.layout_id);
+          }
           setTimeout(() => setSaveStatus("idle"), 2000);
         } else {
           setSaveStatus("error");
@@ -483,7 +489,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
         setIsSaving(false);
       }
     },
-    [widgets, userId],
+    [widgets, effectiveUserId, currentLayoutId],
   );
 
   // Export layout as JSON file
@@ -491,7 +497,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     const exportData = {
       version: "1.0",
       exportedAt: new Date().toISOString(),
-      userId,
+      userId: effectiveUserId,
       widgets,
     };
 
@@ -501,12 +507,12 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `dashboard-layout-${userId}-${new Date().toISOString().split("T")[0]}.json`;
+    link.download = `dashboard-layout-${effectiveUserId}-${new Date().toISOString().split("T")[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [widgets, userId]);
+  }, [widgets, effectiveUserId]);
 
   // Import layout from JSON file
   const importLayout = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -620,8 +626,13 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
   };
 
   // Reset to default layout
-  const resetLayout = () => {
+  const resetLayout = async () => {
+    if (currentLayoutId) {
+      await deleteDashboardLayout(currentLayoutId);
+      setCurrentLayoutId(undefined);
+    }
     setWidgets(defaultWidgets);
+    setShowResetConfirm(false);
   };
 
   // Convert widgets to react-grid-layout format
@@ -676,7 +687,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
               )}
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-2 shrink-0 ml-auto">
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
               {isEditing && (
                 <>
                   <Tooltip>
@@ -691,7 +702,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                         <span className="hidden sm:inline">Export</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={24}>
                       <p>Export layout as JSON file</p>
                     </TooltipContent>
                   </Tooltip>
@@ -708,7 +719,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                         <span className="hidden sm:inline">Import</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={24}>
                       <p>Import layout from JSON file</p>
                     </TooltipContent>
                   </Tooltip>
@@ -717,12 +728,12 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button onClick={() => setShowAddWidget(true)} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3">
+                      <Button onClick={() => setShowAddWidget(true)} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center">
                         <Plus className="w-4 h-4" />
                         <span className="hidden sm:inline">Add Widget</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={24}>
                       <p>Add a new widget to the dashboard</p>
                     </TooltipContent>
                   </Tooltip>
@@ -737,7 +748,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                           await saveLayout();
                           setIsEditing(false);
                         }}
-                        className="gap-1 sm:gap-2 px-2 sm:px-3 bg-green-600 hover:bg-green-700"
+                        className="gap-1 sm:gap-2 px-2 sm:px-3 bg-green-600 hover:bg-green-700 w-[120px] justify-center"
                       >
                         {saveStatus === "saving" ? (
                           <Loader2 className="w-4 h-4 animate-spin" />
@@ -751,7 +762,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                         </span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={24}>
                       <p>Save layout to database</p>
                     </TooltipContent>
                   </Tooltip>
@@ -762,13 +773,13 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                         variant="outline"
                         onClick={() => setShowResetConfirm(true)}
                         size="sm"
-                        className="gap-1 sm:gap-2 px-2 sm:px-3"
+                        className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center"
                       >
                         <RotateCcw className="w-4 h-4" />
                         <span className="hidden sm:inline">Reset</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={24}>
                       <p>Reset to default layout</p>
                     </TooltipContent>
                   </Tooltip>
@@ -776,31 +787,43 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                 </>
               )}
 
-              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
-
               {canCustomize && (
-                <Button
-                  variant={isEditing ? "destructive" : "outline"}
-                  size="sm"
-                  onClick={handleToggleEdit}
-                  className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
-                >
-                  {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={isEditing ? "destructive" : "outline"}
+                      size="sm"
+                      onClick={handleToggleEdit}
+                      className="gap-1 sm:gap-2 px-2 sm:px-3 w-[110px] justify-center"
+                    >
+                      {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
+                      <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={24}>
+                    <p>{isEditing ? "Discard changes" : "Customize dashboard layout"}</p>
+                  </TooltipContent>
+                </Tooltip>
               )}
 
               <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={toggleFullscreen}
-                className="gap-1 sm:gap-2 px-2 sm:px-3"
-              >
-                {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-                <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleFullscreen}
+                    className="gap-1 sm:gap-2 px-2 sm:px-3"
+                  >
+                    {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                    <span className="hidden sm:inline">{isFullscreen ? "Minimize" : "Fullscreen"}</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={24}>
+                  <p>{isFullscreen ? "Exit fullscreen" : "Enter fullscreen mode"}</p>
+                </TooltipContent>
+              </Tooltip>
 
               {/* Window Controls (Electron Only) - Consistent with TopBar */}
               {typeof window !== 'undefined' && (window as any).electron && (
@@ -969,8 +992,6 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
           />
           <Sidebar
             activeSection="dashboard"
-            hideHeader={true}
-            className="!absolute !top-0 !bottom-0 !left-0 z-[101] !h-auto"
             onSectionChange={(section) => {
               setSidebarOverlayOpen(false);
               if (section !== 'dashboard') {
@@ -979,6 +1000,9 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                 router.push(`/?section=${section}`);
               }
             }}
+            hideHeader={true}
+            className="shadow-2xl h-full"
+            disableCollapse={true}
             isOpen={true}
             onClose={() => setSidebarOverlayOpen(false)}
           />

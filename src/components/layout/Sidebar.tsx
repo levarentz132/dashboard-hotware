@@ -47,6 +47,7 @@ interface SidebarProps {
   onClose?: () => void;
   hideHeader?: boolean;
   className?: string;
+  disableCollapse?: boolean;
 }
 
 interface NavItem {
@@ -69,14 +70,23 @@ const navigationItems: NavItem[] = [
   { id: "subaccounts", label: "Role Management", icon: UserPlus, module: "user_management" },
 ];
 
-export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose, hideHeader = false, className }: SidebarProps) {
+export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose, hideHeader = false, className, disableCollapse = false }: SidebarProps) {
   const router = useRouter();
   const { user, logout, isLoading: isAuthLoading } = useAuth();
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(disableCollapse ? false : true);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Sync collapsed state with prop
+  useEffect(() => {
+    if (disableCollapse) {
+      setIsCollapsed(false);
+    }
+  }, [disableCollapse]);
 
   // Load and save sidebar collapsed state to localStorage
   useEffect(() => {
+    if (disableCollapse) return;
+
     const isInitialLoad = !sessionStorage.getItem("app-session-started");
     const saved = localStorage.getItem("sidebar-collapsed");
 
@@ -100,9 +110,10 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [disableCollapse]);
 
   const toggleCollapse = (e?: React.MouseEvent) => {
+    if (disableCollapse) return;
     if (e) e.stopPropagation();
     const newState = !isCollapsed;
     setIsCollapsed(newState);
@@ -110,6 +121,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
   };
 
   const handleSidebarClick = () => {
+    if (disableCollapse) return;
     if (isCollapsed) {
       setIsCollapsed(false);
       localStorage.setItem("sidebar-collapsed", "false");
@@ -223,12 +235,14 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
             )}
 
             {/* Collapse Button (Desktop) */}
-            <button
-              onClick={toggleCollapse}
-              className="hidden lg:flex p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors no-drag"
-            >
-              {isCollapsed ? <Menu className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-            </button>
+            {!disableCollapse && (
+              <button
+                onClick={toggleCollapse}
+                className="hidden lg:flex p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors no-drag"
+              >
+                {isCollapsed ? <Menu className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+              </button>
+            )}
 
             {/* Close button for mobile */}
             <button

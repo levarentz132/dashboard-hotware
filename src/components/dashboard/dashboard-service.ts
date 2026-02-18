@@ -11,14 +11,17 @@ import type { DashboardWidget, DashboardLayout, ExportedLayout } from "./types";
 /**
  * Load dashboard layout from database
  */
-export async function loadDashboardLayout(userId: string): Promise<{ widgets: DashboardWidget[]; error?: string }> {
+export async function loadDashboardLayout(userId: string): Promise<{ widgets: DashboardWidget[]; layout_id?: number; error?: string }> {
   try {
     const response = await fetch(`/api/dashboard-layout?user_id=${encodeURIComponent(userId)}`);
+    const data = await response.json();
 
-    if (response.ok) {
-      const data = await response.json();
+    if (response.ok && data.success) {
       if (data.layout?.layout_data) {
-        return { widgets: data.layout.layout_data };
+        return {
+          widgets: data.layout.layout_data,
+          layout_id: data.layout.id || data.layout.layout_id
+        };
       }
     }
 
@@ -30,13 +33,14 @@ export async function loadDashboardLayout(userId: string): Promise<{ widgets: Da
 }
 
 /**
- * Save dashboard layout to database
+ * Save dashboard layout to database (Unified Upsert)
  */
 export async function saveDashboardLayout(
   userId: string,
   widgets: DashboardWidget[],
-  layoutName: string = "Default Layout"
-): Promise<{ success: boolean; error?: string }> {
+  layoutName: string = "Default Layout",
+  layoutId?: number
+): Promise<{ success: boolean; error?: string; layout_id?: number }> {
   try {
     const response = await fetch("/api/dashboard-layout", {
       method: "POST",
@@ -48,17 +52,60 @@ export async function saveDashboardLayout(
         layout_name: layoutName,
         layout_data: widgets,
         set_active: true,
+        layout_id: layoutId, // Pass id for updates
       }),
     });
 
-    if (response.ok) {
-      return { success: true };
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true, layout_id: data.layout_id };
     }
 
-    return { success: false, error: "Failed to save layout" };
+    return { success: false, error: data.error || "Failed to save layout" };
   } catch (error) {
     console.error("Error saving layout:", error);
     return { success: false, error: "Failed to save layout" };
+  }
+}
+
+/**
+ * Update existing dashboard layout (Convenience wrapper for save)
+ */
+export async function updateDashboardLayout(
+  layoutId: number,
+  userId: string,
+  updates: {
+    layout_name?: string;
+    layout_data?: DashboardWidget[];
+    set_active?: boolean;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  return saveDashboardLayout(
+    userId,
+    updates.layout_data || [],
+    updates.layout_name || "Default Layout",
+    layoutId
+  );
+}
+
+/**
+ * Delete dashboard layout
+ */
+export async function deleteDashboardLayout(layoutId: number): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`/api/dashboard-layout?layout_id=${layoutId}`, {
+      method: "DELETE",
+    });
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      return { success: true };
+    }
+
+    return { success: false, error: data.error || "Failed to delete layout" };
+  } catch (error) {
+    console.error("Error deleting layout:", error);
+    return { success: false, error: "Failed to delete layout" };
   }
 }
 
