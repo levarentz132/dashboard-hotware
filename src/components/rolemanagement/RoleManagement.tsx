@@ -79,14 +79,14 @@ interface SubAccount {
 
 // Available modules for privileges
 const AVAILABLE_MODULES = [
-  { id: "dashboard", label: "Dashboard", description: "Lihat dan kelola dashboard" },
-  { id: "camera_inventory", label: "Camera Inventory", description: "Kelola kamera dan perangkat" },
-  { id: "health", label: "System Health", description: "Monitor kesehatan sistem" },
-  { id: "alarm_console", label: "Alarm Console", description: "Kelola alarm dan notifikasi" },
-  { id: "user_logs", label: "User Logs", description: "Lihat log aktivitas pengguna" },
-  { id: "analytics", label: "Analytics", description: "Lihat analitik dan laporan" },
-  { id: "storage", label: "Storage", description: "Kelola penyimpanan" },
-  { id: "users", label: "User Management", description: "Kelola pengguna NX System" },
+  { id: "dashboard", label: "Dashboard", description: "View and manage dashboard" },
+  { id: "camera_inventory", label: "Camera Inventory", description: "Manage cameras and devices" },
+  { id: "health", label: "System Health", description: "Monitor system health" },
+  { id: "alarm_console", label: "Alarm Console", description: "Manage alarms and notifications" },
+  { id: "user_logs", label: "User Logs", description: "View user activity logs" },
+  { id: "analytics", label: "Analytics", description: "View analytics and reports" },
+  { id: "storage", label: "Storage", description: "Manage storage" },
+  { id: "users", label: "User Management", description: "Manage NX System users" },
 ];
 
 // Default privileges (all view, no edit)
@@ -149,12 +149,12 @@ export default function SubAccountManagement() {
           setOrgId(Number(id));
         } else {
           console.error("[RoleManagement] No organization found in API response structure:", data);
-          setError("Gagal mendapatkan data organisasi dari server.");
+          setError("Failed to get organization data from server.");
           setLoading(false);
         }
       } catch (err) {
         console.error("[RoleManagement] Error fetching organization data:", err);
-        setError("Gagal terhubung ke server untuk mendapatkan data organisasi.");
+        setError("Failed to connect to server to get organization data.");
         setLoading(false);
       }
     };
@@ -206,11 +206,11 @@ export default function SubAccountManagement() {
       if (data.success) {
         setSubAccounts(data.users || data.data || []);
       } else {
-        setError(data.message || "Gagal mengambil data sub-akun");
+        setError(data.message || "Failed to fetch sub-accounts");
       }
     } catch (err) {
       console.error("Error fetching sub-accounts:", err);
-      setError("Gagal terhubung ke server");
+      setError("Failed to connect to server");
     } finally {
       setLoading(false);
     }
@@ -227,10 +227,10 @@ export default function SubAccountManagement() {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Shield className="w-16 h-16 text-slate-300 mb-4" />
-        <h3 className="text-xl font-semibold text-slate-900">Akses Terbatas</h3>
+        <h3 className="text-xl font-semibold text-slate-900">Limited Access</h3>
         <p className="text-slate-500 max-w-md mt-2">
-          Hanya administrator yang dapat mengelola akun pengguna dan perizinan.
-          Silakan hubungi admin sistem Anda untuk bantuan.
+          Only administrators can manage user accounts and permissions.
+          Please contact your system admin for assistance.
         </p>
       </div>
     );
@@ -288,11 +288,11 @@ export default function SubAccountManagement() {
         setFormError(null);
         setShowEditModal(true);
       } else {
-        setError(data.message || "Gagal mengambil detail pengguna");
+        setError(data.message || "Failed to fetch user details");
       }
     } catch (err) {
       console.error("Error fetching user details:", err);
-      setError("Gagal terhubung ke server untuk mengambil detail pengguna");
+      setError("Failed to connect to server to fetch user details");
     } finally {
       setLoading(false);
     }
@@ -378,11 +378,11 @@ export default function SubAccountManagement() {
         resetForm();
         fetchSubAccounts();
       } else {
-        setFormError(data.message || "Gagal membuat pengguna baru");
+        setFormError(data.message || "Failed to create new user");
       }
     } catch (err) {
       console.error("Error creating user:", err);
-      setFormError("Gagal terhubung ke server");
+      setFormError("Failed to connect to server");
     } finally {
       setSaving(false);
     }
@@ -429,11 +429,11 @@ export default function SubAccountManagement() {
         resetForm();
         fetchSubAccounts();
       } else {
-        setFormError(data.message || "Gagal memperbarui pengguna");
+        setFormError(data.message || "Failed to update user");
       }
     } catch (err) {
       console.error("Error updating user:", err);
-      setFormError("Gagal terhubung ke server");
+      setFormError("Failed to connect to server");
     } finally {
       setSaving(false);
     }
@@ -477,11 +477,11 @@ export default function SubAccountManagement() {
       if (data.success) {
         fetchSubAccounts();
       } else {
-        setError(data.message || "Gagal mengubah status pengguna");
+        setError(data.message || "Failed to change user status");
       }
     } catch (err) {
       console.error("Error toggling status:", err);
-      setError("Gagal terhubung ke server");
+      setError("Failed to connect to server");
     }
   };
 
@@ -546,11 +546,11 @@ export default function SubAccountManagement() {
         setSelectedAccount(null);
         fetchSubAccounts();
       } else {
-        setError(data.message || "Gagal menghapus sub-akun");
+        setError(data.message || "Failed to delete sub-account");
       }
     } catch (err) {
       console.error("Error deleting sub-account:", err);
-      setError("Gagal terhubung ke server");
+      setError("Failed to connect to server");
     }
   };
 
@@ -564,7 +564,7 @@ export default function SubAccountManagement() {
   // Format date
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString("id-ID", {
+    return new Date(dateStr).toLocaleDateString("en-US", {
       day: "numeric",
       month: "short",
       year: "numeric",
@@ -585,7 +585,7 @@ export default function SubAccountManagement() {
 
       {/* Basic Info */}
       <div className="space-y-4">
-        <h4 className="font-medium text-gray-900">Informasi Akun</h4>
+        <h4 className="font-medium text-gray-900">Account Information</h4>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -635,7 +635,7 @@ export default function SubAccountManagement() {
                   type={showPassword ? "text" : "password"}
                   value={formData.password}
                   onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                  placeholder="Masukkan password"
+                  placeholder="Enter password"
                   className="h-11 pr-10 border-slate-200 focus-visible:ring-blue-600"
                 />
                 <button
@@ -656,7 +656,7 @@ export default function SubAccountManagement() {
         <div className="space-y-4 pt-4 border-t">
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-blue-600" />
-            <h4 className="font-medium text-gray-900">Hak Akses</h4>
+            <h4 className="font-medium text-gray-900">Access Permissions</h4>
           </div>
 
           <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -802,7 +802,7 @@ export default function SubAccountManagement() {
             <div className="text-center py-12 text-gray-500">
               <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>No members found</p>
-              <p className="text-sm">Click "Tambah Pengguna" to create a new one</p>
+              <p className="text-sm">Click "Add User" to create a new one</p>
             </div>
           ) : (
             <Table className="border-collapse table-fixed w-full">
@@ -902,17 +902,17 @@ export default function SubAccountManagement() {
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Tambah Pengguna Baru</DialogTitle>
-            <DialogDescription>Buat akun pengguna baru dan atur hak aksesnya</DialogDescription>
+            <DialogTitle>Add New User</DialogTitle>
+            <DialogDescription>Create a new user account and set their access permissions</DialogDescription>
           </DialogHeader>
           {renderForm(false)}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-              Batal
+              Cancel
             </Button>
             <Button onClick={handleCreate} disabled={saving}>
               {saving && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
-              Simpan
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -922,17 +922,17 @@ export default function SubAccountManagement() {
       <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Edit Pengguna</DialogTitle>
-            <DialogDescription>Perbarui informasi dan hak akses untuk {selectedAccount?.username}</DialogDescription>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>Update information and access permissions for {selectedAccount?.username}</DialogDescription>
           </DialogHeader>
           {renderForm(true)}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditModal(false)}>
-              Batal
+              Cancel
             </Button>
             <Button onClick={handleUpdate} disabled={saving}>
               {saving && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
-              Simpan Perubahan
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1026,16 +1026,16 @@ export default function SubAccountManagement() {
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Hapus Pengguna?</AlertDialogTitle>
+            <AlertDialogTitle>Delete User?</AlertDialogTitle>
             <AlertDialogDescription>
-              Anda yakin ingin menghapus akun <strong>{selectedAccount?.username}</strong>? Tindakan ini tidak dapat
-              dibatalkan.
+              Are you sure you want to delete user <strong>{selectedAccount?.username}</strong>? This action cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-              Hapus
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
