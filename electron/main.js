@@ -13,6 +13,22 @@ let cloudToken = null;
 let currentPort = 3130;
 let isInstallingUpdate = false;
 
+// Single Instance Lock
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', (event, commandLine, workingDirectory) => {
+        // Someone tried to run a second instance, we should focus our window.
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+        }
+    });
+}
+
+const VERSION_CACHE_PATH = path.join(app.getPath('userData'), 'version_cache.json');
+
 const { exec } = require('child_process');
 
 function killProcessTree(pid) {
@@ -53,6 +69,11 @@ logtoFile(`Resources Path: ${process.resourcesPath}`);
 logtoFile(`Is Packaged: ${app.isPackaged}`);
 
 autoUpdater.autoDownload = true;
+autoUpdater.logger = {
+    info: (msg) => logtoFile(`[AutoUpdater Info] ${msg}`),
+    warn: (msg) => logtoFile(`[AutoUpdater Warn] ${msg}`),
+    error: (msg) => logtoFile(`[AutoUpdater Error] ${msg}`),
+};
 
 const isPackaged = app.isPackaged;
 
@@ -231,18 +252,27 @@ ipcMain.handle('setup:get-config', async () => {
 // Window Controls
 ipcMain.on('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) win.minimize();
+    if (win) {
+        // If in fullscreen, exit it first to ensure it restores to windowed mode
+        if (win.isFullScreen()) {
+            win.setFullScreen(false);
+        }
+        win.minimize();
+    }
 });
 
-ipcMain.on('window:maximize', (event) => {
+ipcMain.on('window:toggle-fullscreen', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) {
-        if (win.isMaximized()) {
-            win.unmaximize();
-        } else {
-            win.maximize();
-        }
+        const isFS = win.isFullScreen();
+        win.setFullScreen(!isFS);
+        event.reply('window:fullscreen-changed', !isFS);
     }
+});
+
+ipcMain.handle('window:get-fullscreen', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return win ? win.isFullScreen() : false;
 });
 
 ipcMain.on('window:close', (event) => {
@@ -799,6 +829,30 @@ app.whenReady().then(async () => {
         createSetupWindow();
     }
 
+    // Check if we just updated
+    try {
+        const currentVersion = app.getVersion();
+        let lastVersion = null;
+        if (fs.existsSync(VERSION_CACHE_PATH)) {
+            const cache = JSON.parse(fs.readFileSync(VERSION_CACHE_PATH, 'utf8'));
+            lastVersion = cache.version;
+        }
+
+        if (lastVersion && lastVersion !== currentVersion) {
+            logtoFile(`[App] Update detected: ${lastVersion} -> ${currentVersion}`);
+            const { Notification } = require('electron');
+            if (Notification.isSupported()) {
+                new Notification({
+                    title: 'Update Successful',
+                    body: `Hotware Dashboard has been updated to version ${currentVersion}.`,
+                }).show();
+            }
+        }
+        fs.writeFileSync(VERSION_CACHE_PATH, JSON.stringify({ version: currentVersion }));
+    } catch (e) {
+        logtoFile(`[App] Failed to check for update success: ${e.message}`);
+    }
+
     // Start monitoring only after initial successful launch
     startHealthCheck();
 
@@ -807,6 +861,16 @@ app.whenReady().then(async () => {
 
 autoUpdater.on('update-available', (info) => {
     logtoFile(`[AutoUpdater] Update available: Version ${info.version}`);
+
+    // Show system notification
+    const { Notification } = require('electron');
+    if (Notification.isSupported()) {
+        new Notification({
+            title: 'Update Available',
+            body: `Version ${info.version} is available and will be downloaded in the background.`,
+        }).show();
+    }
+
     const win = mainWindow || setupWindow;
     if (win) win.webContents.send('update-available', info);
 });
@@ -819,37 +883,99 @@ autoUpdater.on('update-not-available', (info) => {
 
 autoUpdater.on('download-progress', (progressObj) => {
     const win = mainWindow || setupWindow;
-    if (win) win.webContents.send('download-progress', progressObj);
+    if (win) {
+        win.webContents.send('download-progress', progressObj);
+        // Taskbar progress removed here as per user request to not track download
+    }
 });
 
 autoUpdater.on('update-downloaded', async (info) => {
     logtoFile(`[AutoUpdater] Update downloaded: ${info.version}`);
+
+    // Clear taskbar progress
+    const topWin = mainWindow || setupWindow;
+    if (topWin) topWin.setProgressBar(-1);
+    const { Notification } = require('electron');
+    if (Notification.isSupported()) {
+        const notification = new Notification({
+            title: 'Update Ready',
+            body: `Version ${info.version} is ready to install.`,
+            silent: false
+        });
+        notification.show();
+        notification.on('click', () => {
+            if (mainWindow) {
+                mainWindow.show();
+                mainWindow.focus();
+            }
+        });
+    }
 
     const win = mainWindow || setupWindow;
 
     const { response } = await dialog.showMessageBox(win, {
         type: 'info',
         title: 'Update Ready',
-        message: `Version ${info.version} has been downloaded. Restart to apply update?`,
-        buttons: ['Restart', 'Later'],
-        defaultId: 0
+        message: `Version ${info.version} has been downloaded and is ready to install.`,
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0,
+        cancelId: 1
     });
 
     if (response === 0) {
+        logtoFile('[AutoUpdater] User chose to restart now. Preparing for installation...');
         isInstallingUpdate = true;
 
+        // Show indeterminate progress in taskbar
+        if (win) {
+            win.setProgressBar(2); // Indeterminate mode on Windows
+            win.webContents.send('update:installing');
+        }
+
+        // Force stop server immediately
         await stopNextServer();
 
-        process.nextTick(() => {
-            autoUpdater.quitAndInstall(false, true);
-        });
+        // Close all windows to release file locks
+        if (mainWindow) {
+            mainWindow.removeAllListeners('close');
+            mainWindow.destroy();
+        }
+        if (setupWindow) {
+            setupWindow.removeAllListeners('close');
+            setupWindow.destroy();
+        }
+
+        logtoFile('[AutoUpdater] Calling quitAndInstall (silent: false, isForceRunAfter: true)...');
+
+        // Give it a tiny bit of time for OS to release file handles
+        setTimeout(() => {
+            try {
+                autoUpdater.quitAndInstall(false, true);
+
+                // Extra safety: if the app is still alive after 2s, force exit
+                setTimeout(() => {
+                    if (app) {
+                        logtoFile('[AutoUpdater] App still alive after quitAndInstall, forcing exit.');
+                        app.exit(0);
+                    }
+                }, 2000);
+            } catch (e) {
+                logtoFile(`[AutoUpdater] Error during quitAndInstall: ${e.message}`);
+                app.exit(0);
+            }
+        }, 1500);
     }
 });
 
 autoUpdater.on('error', (err) => {
     logtoFile(`[AutoUpdater] Error: ${err.message}`);
+
+    // Clear taskbar progress on error
     const win = mainWindow || setupWindow;
-    if (win) win.webContents.send('update-error', err.message);
+    if (win) {
+        win.setProgressBar(-1);
+        win.webContents.send('update-error', err.message);
+    }
 });
 
 let isAppQuitting = false;

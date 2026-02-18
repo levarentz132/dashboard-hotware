@@ -27,7 +27,12 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
   const isElectron = typeof window !== 'undefined' && (window as any).electron;
 
   // Toggle fullscreen
-  const toggleFullscreen = () => {
+  const toggleFullscreen = async () => {
+    if (isElectron && (window as any).electron.window.toggleFullscreen) {
+      (window as any).electron.window.toggleFullscreen();
+      return;
+    }
+
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch((err) => {
         console.error(`Error attempting to enable fullscreen: ${err.message}`);
@@ -41,18 +46,35 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
     }
   };
 
-  // Sync isFullscreen state with document events (for Esc key)
+  // Sync isFullscreen state
   useEffect(() => {
-    setIsFullscreen(!!document.fullscreenElement);
+    // Initial check
+    if (isElectron && (window as any).electron.window.getFullscreen) {
+      (window as any).electron.window.getFullscreen().then(setIsFullscreen);
+    } else {
+      setIsFullscreen(!!document.fullscreenElement);
+    }
+
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
+
+    let removeElectronListener: (() => void) | undefined;
+    if (isElectron && (window as any).electron.window.onFullscreenChange) {
+      removeElectronListener = (window as any).electron.window.onFullscreenChange((val: boolean) => {
+        setIsFullscreen(val);
+      });
+    }
+
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      if (removeElectronListener) removeElectronListener();
+    };
+  }, [isElectron]);
 
   return (
-    <header className="bg-white shadow-sm border-b px-3 sm:px-6 h-16 flex items-center select-none drag-region shrink-0">
+    <header className="bg-white shadow-sm border-b px-3 sm:px-6 h-16 flex items-center select-none drag-region shrink-0 relative">
       <div className="flex items-center justify-between gap-2 sm:gap-4 w-full">
         {/* Mobile Menu Button - No drag on button */}
         <button
@@ -70,11 +92,13 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               {isSystemLoading ? (
                 <RefreshCw className="w-3 h-3 animate-spin text-blue-500" />
               ) : (
-                <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse'}`}></div>
+                <>
+                  <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse'}`}></div>
+                  <span className="hidden lg:inline font-medium">
+                    {isSystemLoading ? 'Checking...' : connected ? 'System Online' : 'System Offline'}
+                  </span>
+                </>
               )}
-              <span className="hidden lg:inline font-medium">
-                {isSystemLoading ? 'Checking...' : connected ? 'System Online' : 'System Offline'}
-              </span>
             </div>
 
             {/* Notifications */}
@@ -104,7 +128,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               {isFullscreen ? (
                 <>
                   <Minimize className="w-4 h-4" />
-                  <span className="hidden sm:inline">Exit Full</span>
+                  <span className="hidden sm:inline">Minimize</span>
                 </>
               ) : (
                 <>

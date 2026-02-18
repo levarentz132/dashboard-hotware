@@ -17,6 +17,23 @@ contextBridge.exposeInMainWorld('electron', {
   window: {
     minimize: () => ipcRenderer.send('window:minimize'),
     maximize: () => ipcRenderer.send('window:maximize'),
-    close: () => ipcRenderer.send('window:close')
+    close: () => ipcRenderer.send('window:close'),
+    toggleFullscreen: () => ipcRenderer.send('window:toggle-fullscreen'),
+    getFullscreen: () => ipcRenderer.invoke('window:get-fullscreen'),
+    onFullscreenChange: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on('window:fullscreen-changed', listener);
+      return () => ipcRenderer.removeListener('window:fullscreen-changed', listener);
+    },
+    onDownloadProgress: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on('download-progress', listener);
+      return () => ipcRenderer.removeListener('download-progress', listener);
+    },
+    onInstalling: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on('update:installing', listener);
+      return () => ipcRenderer.removeListener('update:installing', listener);
+    }
   }
 });

@@ -17,7 +17,7 @@
     "setup": "node scripts/setup.js"
   },
   "build": {
-    "appId": "com.hotware.dashboard",
+    "appId": "hotware.dashboard",
     "productName": "Hotware Dashboard",
     "directories": {
       "output": "dist",
@@ -34,12 +34,14 @@
       ]
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Hotware Dashboard"
+      "shortcutName": "Hotware Dashboard",
+      "allowElevation": true,
+      "runAfterFinish": true
     },
     "files": [
       "electron/**/*",
