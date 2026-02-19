@@ -84,6 +84,19 @@ function getPreloadPath() {
     return path.join(__dirname, 'preload.js');
 }
 
+function getNodePath() {
+    if (isPackaged) {
+        // Look for bundled node.exe in node-bin folder within resources
+        const bundledNode = path.join(process.resourcesPath, 'node-bin', 'node.exe');
+        if (fs.existsSync(bundledNode)) {
+            logtoFile(`[Electron] Using bundled Node.js: ${bundledNode}`);
+            return bundledNode;
+        }
+        logtoFile(`[Electron] Bundled Node.js NOT found at ${bundledNode}, falling back to Electron's Node`);
+    }
+    return null; // Return null to use default (Electron's Node)
+}
+
 function listDirRecursive(dir, depth = 0, maxDepth = 3) {
     if (depth > maxDepth) return;
     try {
@@ -552,13 +565,21 @@ function launchNodeScript(scriptPath, env) {
     isServerStopping = false;
 
     try {
-        // Use fork to run the server script with Electron's internal Node
-        nextProcess = fork(scriptPath, [], {
+        const nodePath = getNodePath();
+        const spawnOptions = {
             env: { ...process.env, ...env },
             cwd: path.dirname(scriptPath),
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
             detached: true
-        });
+        };
+
+        if (nodePath) {
+            spawnOptions.execPath = nodePath;
+        }
+
+        // Use fork to run the server script
+        // If nodePath is provided, it uses that executable, otherwise it uses Electron's internal Node
+        nextProcess = fork(scriptPath, [], spawnOptions);
 
         nextProcess.stdout.on('data', d => logtoFile(`[Next.js stdout] ${d.toString().trim()}`));
         nextProcess.stderr.on('data', d => logtoFile(`[Next.js stderr] ${d.toString().trim()}`));

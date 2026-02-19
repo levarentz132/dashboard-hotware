@@ -1,6 +1,6 @@
 {
   "name": "hotware-dashboard",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "Hotware Dashboard",
   "author": "Hotware",
   "main": "electron/main.js",
@@ -56,6 +56,15 @@
     },
     "asarUnpack": [
       ".next/standalone/**"
+    ],
+    "extraResources": [
+      {
+        "from": "node-bin",
+        "to": "node-bin",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "publish": [
       {
