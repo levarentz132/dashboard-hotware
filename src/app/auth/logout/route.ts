@@ -6,19 +6,20 @@ import { NextResponse, NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "@/lib/auth/constants";
 import { callExternalLogoutAPI } from "@/lib/auth/external-api";
+import { isSecureContext } from "@/lib/config";
 
 function clearAuthCookies(response: NextResponse) {
   // Delete cookies by setting empty value with same attributes and maxAge 0
   response.cookies.set(AUTH_CONFIG.COOKIE_NAME, "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureContext(),
     sameSite: "lax",
     maxAge: 0,
     path: "/",
   });
   response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureContext(),
     sameSite: "lax",
     maxAge: 0,
     path: "/",

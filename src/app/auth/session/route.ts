@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { refreshAccessToken, validateSession } from "@/lib/auth";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "@/lib/auth/constants";
+import { isSecureContext } from "@/lib/config";
 
 export async function GET(request: NextRequest) {
   try {
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest) {
 
             response.cookies.set(AUTH_CONFIG.COOKIE_NAME, refreshed.accessToken, {
               httpOnly: true,
-              secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
+              secure: isSecureContext(),
               sameSite: "lax",
               maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
               path: "/",
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
             if (refreshed.refreshToken) {
               response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, refreshed.refreshToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
+                secure: isSecureContext(),
                 sameSite: "lax",
                 maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
                 path: "/",
@@ -122,14 +123,14 @@ export async function GET(request: NextRequest) {
       // Clear invalid cookies
       response.cookies.set(AUTH_CONFIG.COOKIE_NAME, "", {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: isSecureContext(),
         sameSite: "lax",
         maxAge: 0,
         path: "/",
       });
       response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, "", {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: isSecureContext(),
         sameSite: "lax",
         maxAge: 0,
         path: "/",
@@ -148,7 +149,7 @@ export async function GET(request: NextRequest) {
     if (rotatedAccessToken) {
       response.cookies.set(AUTH_CONFIG.COOKIE_NAME, rotatedAccessToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
+        secure: isSecureContext(),
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
         path: "/",
@@ -157,7 +158,7 @@ export async function GET(request: NextRequest) {
     if (rotatedRefreshToken) {
       response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, rotatedRefreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production" && process.env.HOSTNAME !== "localhost",
+        secure: isSecureContext(),
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
         path: "/",

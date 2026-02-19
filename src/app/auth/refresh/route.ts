@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_CONFIG } from "@/lib/auth/constants";
 import { callExternalRefreshAPI } from "@/lib/auth/external-api";
+import { isSecureContext } from "@/lib/config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
     // Set HTTP-only cookie for access token (short-lived)
     response.cookies.set(AUTH_CONFIG.COOKIE_NAME, data.access_token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isSecureContext(),
       sameSite: "lax",
       maxAge: data.expires_in || AUTH_CONFIG.COOKIE_MAX_AGE,
       path: "/",
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (data.refresh_token) {
       response.cookies.set(AUTH_CONFIG.COOKIE_REFRESH_NAME, data.refresh_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: isSecureContext(),
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
         path: "/",

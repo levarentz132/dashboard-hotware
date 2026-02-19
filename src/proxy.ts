@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { AUTH_CONFIG } from "@/lib/auth/constants";
 import { verifyToken, refreshAccessToken } from "@/lib/auth/auth-service";
+import { isSecureContext } from "@/lib/config";
 
 const AUTH_COOKIE_NAME = AUTH_CONFIG.COOKIE_NAME;
 const REFRESH_COOKIE_NAME = AUTH_CONFIG.COOKIE_REFRESH_NAME;
@@ -81,7 +82,7 @@ export async function proxy(request: NextRequest) {
     // Clear invalid cookie
     response.cookies.set(AUTH_COOKIE_NAME, "", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isSecureContext(),
       sameSite: "lax",
       maxAge: 0,
       path: "/",
@@ -108,7 +109,7 @@ async function tryRefresh(request: NextRequest): Promise<NextResponse | null> {
       // Update access token cookie
       response.cookies.set(AUTH_COOKIE_NAME, result.accessToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: isSecureContext(),
         sameSite: "lax",
         maxAge: AUTH_CONFIG.COOKIE_MAX_AGE,
         path: "/",
@@ -118,7 +119,7 @@ async function tryRefresh(request: NextRequest): Promise<NextResponse | null> {
       if (result.refreshToken) {
         response.cookies.set(REFRESH_COOKIE_NAME, result.refreshToken, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
+          secure: isSecureContext(),
           sameSite: "lax",
           maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
           path: "/",

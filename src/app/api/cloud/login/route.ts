@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDynamicConfig } from "@/lib/config";
+import { getDynamicConfig, isSecureContext } from "@/lib/config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -84,7 +84,7 @@ async function performRelayLogin(systemId: string, username: string, password: s
     path: "/",
     maxAge: 60 * 60 * 24 * 3, // 3 days
     httpOnly: false,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureContext(),
     sameSite: "lax",
   });
 

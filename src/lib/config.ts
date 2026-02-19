@@ -24,6 +24,26 @@ export function getElectronHeaders(): Record<string, string> {
   };
 }
 
+export function isSecureContext(): boolean {
+  // Always false in development
+  if (process.env.NODE_ENV !== "production") return false;
+
+  // Check environment variable (set in Electron main process)
+  const envHostname = process.env.HOSTNAME?.toLowerCase();
+  if (envHostname === "localhost" || envHostname === "127.0.0.1") return false;
+
+  // Check client-side window object
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname.toLowerCase();
+    return !(hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".local"));
+  }
+
+  // If we are on the server and HOSTNAME is not set, we default to secure=true 
+  // ONLY if it doesn't look like we are in a local environment.
+  // Note: Electron main.js should always set HOSTNAME=localhost
+  return true;
+}
+
 /**
  * Internal helper for server-side decryption (Electron parity)
  */
