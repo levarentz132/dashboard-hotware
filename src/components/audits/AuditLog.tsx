@@ -110,14 +110,7 @@ export default function AuditLog() {
   const [filterEventType, setFilterEventType] = useState<string>("all");
   const [filterUser, setFilterUser] = useState<string>("all");
 
-  const [date, setDate] = useState<DateRange | undefined>(() => {
-    const from = new Date();
-    from.setHours(0, 0, 0, 0);
-    return {
-      from,
-      to: undefined,
-    };
-  });
+  const [date, setDate] = useState<DateRange | undefined>(undefined);
 
   const [showFilters, setShowFilters] = useState(false);
 
@@ -259,20 +252,25 @@ export default function AuditLog() {
       setError(null);
 
       try {
-        if (!date?.from) return;
+        let queryParams = `systemId=${encodeURIComponent(system.id)}`;
 
-        // Format dates
-        // from: start of the selected from day
-        const fromDateFormatted = new Date(date.from);
-        fromDateFormatted.setHours(0, 0, 0, 0);
+        if (date?.from) {
+          // Format dates
+          // from: start of the selected from day
+          const fromDateFormatted = new Date(date.from);
+          fromDateFormatted.setHours(0, 0, 0, 0);
 
-        // to: end of the selected to day, OR end of the from day if only from is selected
-        const toDateTarget = date.to || date.from;
-        const toDateFormatted = new Date(toDateTarget);
-        toDateFormatted.setHours(23, 59, 59, 999);
+          // to: end of the selected to day, OR end of the from day if only from is selected
+          const toDateTarget = date.to || date.from;
+          const toDateFormatted = new Date(toDateTarget);
+          toDateFormatted.setHours(23, 59, 59, 999);
 
-        let queryParams = `systemId=${encodeURIComponent(system.id)}&from=${encodeURIComponent(fromDateFormatted.toISOString())}`;
-        queryParams += `&to=${encodeURIComponent(toDateFormatted.toISOString())}`;
+          queryParams += `&from=${encodeURIComponent(fromDateFormatted.toISOString())}`;
+          queryParams += `&to=${encodeURIComponent(toDateFormatted.toISOString())}`;
+        } else {
+          // No date selected, fetch most recent logs with a reasonable limit
+          queryParams += `&limit=200`;
+        }
 
         const response = await fetch(`/api/cloud/audit-log?${queryParams}`);
 
@@ -410,11 +408,8 @@ export default function AuditLog() {
   const displayedLogs = sortedLogs.slice(0, displayCount);
 
   // Active filter count
-  const defaultFrom = new Date();
-  // Check if date matches default (from is today, to is undefined or same day)
-  const isDateChanged = !date?.from ||
-    date.from.toDateString() !== defaultFrom.toDateString() ||
-    !!date.to;
+  // Check if a specific date range is active
+  const isDateChanged = !!date?.from;
 
   const activeFilterCount = [
     filterEventType !== "all",
@@ -426,11 +421,7 @@ export default function AuditLog() {
   const clearFilters = () => {
     setFilterEventType("all");
     setFilterUser("all");
-    const today = new Date();
-    setDate({
-      from: today,
-      to: undefined
-    });
+    setDate(undefined);
     setSearchTerm("");
   };
 

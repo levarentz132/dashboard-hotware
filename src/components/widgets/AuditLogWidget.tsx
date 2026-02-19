@@ -165,16 +165,9 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   const fetchAuditLogs = useCallback(
     async (targetSystemId: string, retry = false) => {
       try {
-        // Get logs for the current day for the widget
-        const fromDate = new Date();
-        // fromDate.setDate(fromDate.getDate() - 7); // specific to today only for performance
-        fromDate.setHours(0, 0, 0, 0);
-        const fromDateFormatted = fromDate.toISOString();
-
+        // Fetch most recent logs (e.g., 50) without a hard date limit to show the actual latest activity
         const response = await fetch(
-          `/api/cloud/audit-log?systemId=${encodeURIComponent(targetSystemId)}&from=${encodeURIComponent(
-            fromDateFormatted,
-          )}`,
+          `/api/cloud/audit-log?systemId=${encodeURIComponent(targetSystemId)}&limit=50`,
           {
             method: "GET",
             credentials: "include",
