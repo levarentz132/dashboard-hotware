@@ -892,80 +892,35 @@ autoUpdater.on('download-progress', (progressObj) => {
 autoUpdater.on('update-downloaded', async (info) => {
     logtoFile(`[AutoUpdater] Update downloaded: ${info.version}`);
 
-    // Clear taskbar progress
-    const topWin = mainWindow || setupWindow;
-    if (topWin) topWin.setProgressBar(-1);
-    const { Notification } = require('electron');
-    if (Notification.isSupported()) {
-        const notification = new Notification({
-            title: 'Update Ready',
-            body: `Version ${info.version} is ready to install.`,
-            silent: false
-        });
-        notification.show();
-        notification.on('click', () => {
-            if (mainWindow) {
-                mainWindow.show();
-                mainWindow.focus();
-            }
-        });
-    }
-
     const win = mainWindow || setupWindow;
 
     const { response } = await dialog.showMessageBox(win, {
         type: 'info',
         title: 'Update Ready',
-        message: `Version ${info.version} has been downloaded and is ready to install.`,
+        message: `Version ${info.version} is ready to install.`,
         buttons: ['Restart Now', 'Later'],
         defaultId: 0,
         cancelId: 1
     });
 
     if (response === 0) {
-        logtoFile('[AutoUpdater] User chose to restart now. Preparing for installation...');
         isInstallingUpdate = true;
 
-        // Show indeterminate progress in taskbar
         if (win) {
-            win.setProgressBar(2); // Indeterminate mode on Windows
+            win.setProgressBar(2); // Windows indeterminate progress
             win.webContents.send('update:installing');
         }
 
-        // Force stop server immediately
+        // Stop your Next.js server
         await stopNextServer();
 
-        // Close all windows to release file locks
-        if (mainWindow) {
-            mainWindow.removeAllListeners('close');
-            mainWindow.destroy();
-        }
-        if (setupWindow) {
-            setupWindow.removeAllListeners('close');
-            setupWindow.destroy();
-        }
-
-        logtoFile('[AutoUpdater] Calling quitAndInstall (silent: false, isForceRunAfter: true)...');
-
-        // Give it a tiny bit of time for OS to release file handles
+        // Give UI 1 second to render installing screen
         setTimeout(() => {
-            try {
-                autoUpdater.quitAndInstall(false, true);
-
-                // Extra safety: if the app is still alive after 2s, force exit
-                setTimeout(() => {
-                    if (app) {
-                        logtoFile('[AutoUpdater] App still alive after quitAndInstall, forcing exit.');
-                        app.exit(0);
-                    }
-                }, 2000);
-            } catch (e) {
-                logtoFile(`[AutoUpdater] Error during quitAndInstall: ${e.message}`);
-                app.exit(0);
-            }
-        }, 1500);
+            autoUpdater.quitAndInstall();
+        }, 1000);
     }
 });
+
 
 autoUpdater.on('error', (err) => {
     logtoFile(`[AutoUpdater] Error: ${err.message}`);
@@ -982,7 +937,7 @@ let isAppQuitting = false;
 
 app.on('before-quit', async (e) => {
     if (isInstallingUpdate) {
-        logtoFile('[Electron] Update install quit. Skipping cleanup.');
+        logtoFile('[Electron] Skipping cleanup for update.');
         return;
     }
 
@@ -992,10 +947,7 @@ app.on('before-quit', async (e) => {
     isAppQuitting = true;
 
     logtoFile('[Electron] Intercepted quit for cleanup...');
-
     await stopNextServer();
-
-    logtoFile('[Electron] Cleanup done. Quitting now.');
 
     app.exit(0);
 });
