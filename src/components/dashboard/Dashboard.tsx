@@ -541,9 +541,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
 
           if (validWidgets.length > 0) {
             setWidgets(validWidgets);
-            // Auto-save to DB after import
-            saveLayout(validWidgets);
-            alert(`Imported ${validWidgets.length} widgets and saved to database!`);
+            alert(`Imported ${validWidgets.length} widgets.`);
           } else {
             alert("File does not contain valid widgets.");
           }
