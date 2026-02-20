@@ -356,9 +356,11 @@ export async function callExternalChangePassword(
  * Get dashboard layout from external API
  */
 export async function getExternalDashboardLayout(
-  token: string
+  token: string,
+  device?: string
 ): Promise<{ success: boolean; layout?: any; message?: string }> {
-  const data = await apiFetch("/dashboard/layout", {
+  const query = device ? `?device=${encodeURIComponent(device)}` : "";
+  const data = await apiFetch(`/dashboard/layout${query}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -384,24 +386,33 @@ export async function saveExternalDashboardLayout(
     layout_json?: any;
     set_active?: boolean;
     layout_id?: number | string;
+    device_type?: string;
   }
 ): Promise<{ success: boolean; message: string; layout_id?: number }> {
-  // Map to both keys to be safe, removing user_id as token handles it
-  const payload = {
+  const deviceType = layoutData.device_type ?? "desktop";
+  const layoutJson = layoutData.layout_data ?? layoutData.layout_json;
+
+  // Structured as separate params: device_type => column, layout_data => column
+  const payload: Record<string, any> = {
+    device_type: deviceType,
+    layout_data: layoutJson,
     layout_name: layoutData.layout_name || "Default Layout",
-    layout_data: layoutData.layout_data ?? layoutData.layout_json,
-    layout_json: layoutData.layout_data ?? layoutData.layout_json,
     set_active: layoutData.set_active ?? true,
-    layout_id: layoutData.layout_id
   };
 
+  // Only include layout_id if present
+  if (layoutData.layout_id) {
+    payload.layout_id = layoutData.layout_id;
+  }
+
   console.log(`[External API] Request: POST /dashboard/layout`, JSON.stringify({
+    device_type: payload.device_type,
     layout_name: payload.layout_name,
     has_layout_data: !!payload.layout_data,
-    json_length: Array.isArray(payload.layout_data) ? payload.layout_data.length : 0
+    json_length: Array.isArray(payload.layout_data) ? payload.layout_data.length : 0,
   }));
 
-  return await apiFetch("/dashboard/layout", {
+  return await apiFetch(`/dashboard/layout`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -436,9 +447,14 @@ export async function updateExternalDashboardLayout(
  */
 export async function deleteExternalDashboardLayout(
   token: string,
-  layoutId: number | string
+  layoutId?: number | string,
+  device?: string
 ): Promise<{ success: boolean; message: string }> {
-  return await apiFetch(`/dashboard/layout?layout_id=${layoutId}`, {
+  const queryParams = new URLSearchParams();
+  if (layoutId) queryParams.append("layout_id", layoutId.toString());
+  if (device) queryParams.append("device", device);
+
+  return await apiFetch(`/dashboard/layout?${queryParams.toString()}`, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,

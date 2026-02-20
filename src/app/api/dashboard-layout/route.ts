@@ -18,10 +18,11 @@ export async function GET(request: NextRequest) {
   try {
     const token = request.cookies.get(AUTH_CONFIG.COOKIE_NAME)?.value;
     const searchParams = request.nextUrl.searchParams;
+    const device = searchParams.get("device");
     const userId = searchParams.get("user_id") || "default";
 
     if (token) {
-      const data = await getExternalDashboardLayout(token);
+      const data = await getExternalDashboardLayout(token, device || undefined);
       if (data.success) {
         // Sync to local storage for future offline fallback
         const name = data.layout?.layout_name || "Default";
@@ -60,7 +61,8 @@ export async function POST(request: NextRequest) {
       layout_data,
       layout_json, // Add layout_json support
       set_active = true,
-      layout_id
+      layout_id,
+      device_type // Add device_type support
     } = body;
 
     const actualLayoutData = layout_data || layout_json;
@@ -75,13 +77,14 @@ export async function POST(request: NextRequest) {
 
     // External API Proxy
     if (token) {
-      console.log(`[Dashboard Layout API] Proxying save to external API`);
+      console.log(`[Dashboard Layout API] Proxying save to external API, device_type=${device_type}`);
 
       const payload = {
         layout_name: name,
         layout_data: actualLayoutData,
         set_active,
-        ...(layout_id ? { layout_id } : {})
+        ...(layout_id ? { layout_id } : {}),
+        device_type
       };
 
       const data = await saveExternalDashboardLayout(token, payload);
@@ -119,22 +122,25 @@ export async function DELETE(request: NextRequest) {
     const token = request.cookies.get(AUTH_CONFIG.COOKIE_NAME)?.value;
     const searchParams = request.nextUrl.searchParams;
     const layoutId = searchParams.get("layout_id");
+    const device = searchParams.get("device");
 
-    if (!layoutId) {
-      return NextResponse.json({ success: false, error: "Layout ID is required" }, { status: 400 });
+    if (!layoutId && !device) {
+      return NextResponse.json({ success: false, error: "Layout ID or device is required" }, { status: 400 });
     }
 
     if (token) {
-      const data = await deleteExternalDashboardLayout(token, layoutId);
+      const data = await deleteExternalDashboardLayout(token, layoutId || "", device || undefined);
       if (data.success) {
         return NextResponse.json({ success: true, message: "Dashboard layout deleted successfully" });
       }
     }
 
-    // Fallback to local storage
-    const deleted = await deleteLayout(parseInt(layoutId));
-    if (!deleted) {
-      return NextResponse.json({ success: false, error: "Layout not found" }, { status: 404 });
+    // Fallback to local storage (only if layoutId is provided)
+    if (layoutId) {
+      const deleted = await deleteLayout(parseInt(layoutId));
+      if (!deleted) {
+        return NextResponse.json({ success: false, error: "Layout not found" }, { status: 404 });
+      }
     }
 
     return NextResponse.json({ success: true, message: "Dashboard layout deleted successfully" });

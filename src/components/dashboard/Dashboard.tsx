@@ -344,6 +344,18 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
   const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
   const isElectron = typeof window !== 'undefined' && (window as any).electron;
 
+  // Detect device type based on screen width
+  const [deviceType, setDeviceType] = useState<"desktop" | "mobile" | undefined>(undefined);
+  useEffect(() => {
+    const checkDevice = () => {
+      setDeviceType(window.innerWidth < 768 ? "mobile" : "desktop");
+    };
+    checkDevice();
+    // Only re-check on resize to handle orientation changes
+    window.addEventListener("resize", checkDevice);
+    return () => window.removeEventListener("resize", checkDevice);
+  }, []);
+
   // Toggle fullscreen
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -410,12 +422,14 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     fetchSystems();
   }, [fetchSystems]);
 
-  // Load layout from database on mount
+  // Load layout from database on mount (wait for device type to be determined)
   useEffect(() => {
+    if (!deviceType) return; // Wait until device type is detected on client
+
     const loadLayout = async () => {
       setIsLoading(true);
       try {
-        const result = await loadDashboardLayout(effectiveUserId);
+        const result = await loadDashboardLayout(effectiveUserId, deviceType);
         setWidgets(result.widgets || []);
         if (result.layout_id) {
           setCurrentLayoutId(result.layout_id);
@@ -429,7 +443,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     };
 
     loadLayout();
-  }, [effectiveUserId]);
+  }, [effectiveUserId, deviceType]);
 
   // Handle container width for react-grid-layout
   useEffect(() => {
@@ -468,7 +482,8 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
           effectiveUserId,
           dataToSave,
           "Default Layout",
-          currentLayoutId
+          currentLayoutId,
+          deviceType
         );
 
         if (result.success) {
@@ -489,7 +504,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
         setIsSaving(false);
       }
     },
-    [widgets, effectiveUserId, currentLayoutId],
+    [widgets, effectiveUserId, currentLayoutId, deviceType],
   );
 
   // Export layout as JSON file
@@ -626,7 +641,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
   // Reset to default layout
   const resetLayout = async () => {
     if (currentLayoutId) {
-      await deleteDashboardLayout(currentLayoutId);
+      await deleteDashboardLayout(currentLayoutId, deviceType);
       setCurrentLayoutId(undefined);
     }
     setWidgets(defaultWidgets);

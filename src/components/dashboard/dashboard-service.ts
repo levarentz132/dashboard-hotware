@@ -11,9 +11,12 @@ import type { DashboardWidget, DashboardLayout, ExportedLayout } from "./types";
 /**
  * Load dashboard layout from database
  */
-export async function loadDashboardLayout(userId: string): Promise<{ widgets: DashboardWidget[]; layout_id?: number; error?: string }> {
+export async function loadDashboardLayout(userId: string, deviceType?: string): Promise<{ widgets: DashboardWidget[]; layout_id?: number; error?: string }> {
   try {
-    const response = await fetch(`/api/dashboard-layout?user_id=${encodeURIComponent(userId)}`);
+    const params = new URLSearchParams({ user_id: userId });
+    if (deviceType) params.append("device", deviceType);
+
+    const response = await fetch(`/api/dashboard-layout?${params.toString()}`);
     const data = await response.json();
 
     if (response.ok && data.success) {
@@ -39,7 +42,8 @@ export async function saveDashboardLayout(
   userId: string,
   widgets: DashboardWidget[],
   layoutName: string = "Default Layout",
-  layoutId?: number
+  layoutId?: number,
+  deviceType?: string
 ): Promise<{ success: boolean; error?: string; layout_id?: number }> {
   try {
     const response = await fetch("/api/dashboard-layout", {
@@ -53,6 +57,7 @@ export async function saveDashboardLayout(
         layout_data: widgets,
         set_active: true,
         layout_id: layoutId, // Pass id for updates
+        device_type: (() => { console.log("[dashboard-service] saveDashboardLayout deviceType:", deviceType); return deviceType || "desktop"; })(),
       }),
     });
 
@@ -91,9 +96,13 @@ export async function updateDashboardLayout(
 /**
  * Delete dashboard layout
  */
-export async function deleteDashboardLayout(layoutId: number): Promise<{ success: boolean; error?: string }> {
+export async function deleteDashboardLayout(layoutId?: number, deviceType?: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(`/api/dashboard-layout?layout_id=${layoutId}`, {
+    const params = new URLSearchParams();
+    if (layoutId) params.append("layout_id", layoutId.toString());
+    if (deviceType) params.append("device", deviceType);
+
+    const response = await fetch(`/api/dashboard-layout?${params.toString()}`, {
       method: "DELETE",
     });
     const data = await response.json();
