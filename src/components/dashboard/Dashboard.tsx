@@ -598,12 +598,13 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
   // Add new widget
   const addWidget = (type: WidgetType) => {
     const widgetConfig = widgetRegistry[type];
+    const isMobile = deviceType === "mobile";
     const newWidget: DashboardWidget = {
       i: `widget-${Date.now()}`,
       type,
       x: 0,
       y: Infinity, // will be automatically placed at the bottom
-      w: widgetConfig.defaultSize.w,
+      w: isMobile ? COLS : widgetConfig.defaultSize.w,
       h: widgetConfig.defaultSize.h,
     };
     setWidgets([...widgets, newWidget]);
@@ -644,7 +645,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
       await deleteDashboardLayout(currentLayoutId, deviceType);
       setCurrentLayoutId(undefined);
     }
-    setWidgets(defaultWidgets);
+    setWidgets([]);
     setShowResetConfirm(false);
   };
 
@@ -675,175 +676,153 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
           `}</style>
         )}
         {/* Toolbar */}
-        <div className="sticky top-0 z-[110] bg-white border-b border-gray-200 px-2 sm:px-4 h-16 flex items-center shadow-sm shrink-0">
-          <div className="flex items-center justify-between w-full gap-2">
+        <div className="sticky top-0 z-[110] bg-white border-b border-gray-200 px-3 sm:px-6 h-16 flex items-center shadow-sm shrink-0">
+          <div className="flex items-center justify-between gap-2 sm:gap-4 w-full">
+            {/* Left side - Menu button + Dashboard title (title hidden on mobile, matching normal TopBar) */}
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 sm:h-9 sm:w-9"
+              <button
                 onClick={() => setSidebarOverlayOpen(!sidebarOverlayOpen)}
+                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg shrink-0"
               >
-                {sidebarOverlayOpen ? <X className="w-4 h-4 sm:w-5 sm:h-5" /> : <Menu className="w-4 h-4 sm:w-5 sm:h-5" />}
-              </Button>
-              <div className="h-6 w-px bg-gray-200 hidden sm:block" />
-              <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 shrink-0" />
-              <h1 className="text-base sm:text-xl font-semibold text-gray-900 truncate">Dashboard</h1>
+                {sidebarOverlayOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
 
-              {isEditing && (
-                <Badge
-                  variant="secondary"
-                  className="bg-blue-100 text-blue-700 text-[10px] sm:text-xs hidden sm:inline-flex ml-2"
-                >
-                  Edit Mode
-                </Badge>
-              )}
+              {/* Dashboard icon + title - hidden on mobile */}
+              <div className="hidden sm:flex items-center gap-2">
+                <div className="h-6 w-px bg-gray-200" />
+                <LayoutGrid className="w-6 h-6 text-blue-600 shrink-0" />
+                <h1 className="text-xl font-semibold text-gray-900 truncate">Dashboard</h1>
+                {isEditing && (
+                  <Badge
+                    variant="secondary"
+                    className="bg-blue-100 text-blue-700 text-xs ml-2"
+                  >
+                    Edit Mode
+                  </Badge>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
+            {/* Right side - Actions (replaces notifications/system status area on mobile) */}
+            <div className="flex items-center gap-2 sm:gap-3 ml-auto">
               {isEditing && (
                 <>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={exportLayout}
-                        className="gap-1 sm:gap-2 px-2 sm:px-3"
-                      >
-                        <Upload className="w-4 h-4" />
-                        <span className="hidden sm:inline">Export</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={24}>
-                      <p>Export layout as JSON file</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  {/* Desktop buttons with labels - hidden on mobile */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportLayout}
+                    className="hidden sm:inline-flex gap-2 px-3"
+                  >
+                    <Upload className="w-4 h-4" />
+                    Export
+                  </Button>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="gap-1 sm:gap-2 px-2 sm:px-3"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span className="hidden sm:inline">Import</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={24}>
-                      <p>Import layout from JSON file</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="hidden sm:inline-flex gap-2 px-3"
+                  >
+                    <Download className="w-4 h-4" />
+                    Import
+                  </Button>
 
                   <div className="h-6 w-px bg-gray-200 hidden sm:block" />
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={() => setShowAddWidget(true)} size="sm" className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center">
-                        <Plus className="w-4 h-4" />
-                        <span className="hidden sm:inline">Add Widget</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={24}>
-                      <p>Add a new widget to the dashboard</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <Button
+                    onClick={() => setShowAddWidget(true)}
+                    size="sm"
+                    className="hidden sm:inline-flex gap-2 px-3"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Widget
+                  </Button>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="default"
-                        size="sm"
-                        disabled={isSaving}
-                        onClick={async () => {
-                          await saveLayout();
-                          setIsEditing(false);
-                        }}
-                        className="gap-1 sm:gap-2 px-2 sm:px-3 bg-green-600 hover:bg-green-700 w-[120px] justify-center"
-                      >
-                        {saveStatus === "saving" ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : saveStatus === "saved" ? (
-                          <Check className="w-4 h-4" />
-                        ) : (
-                          <Database className="w-4 h-4" />
-                        )}
-                        <span className="hidden sm:inline">
-                          {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : "Save"}
-                        </span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={24}>
-                      <p>Save layout to database</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={isSaving}
+                    onClick={async () => {
+                      await saveLayout();
+                      setIsEditing(false);
+                    }}
+                    className="hidden sm:inline-flex gap-2 px-3 bg-green-600 hover:bg-green-700"
+                  >
+                    {saveStatus === "saving" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : saveStatus === "saved" ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      <Database className="w-4 h-4" />
+                    )}
+                    {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved!" : "Save"}
+                  </Button>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowResetConfirm(true)}
-                        size="sm"
-                        className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        <span className="hidden sm:inline">Reset</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={24}>
-                      <p>Reset to default layout</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowResetConfirm(true)}
+                    size="sm"
+                    className="hidden sm:inline-flex gap-2 px-3"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Reset
+                  </Button>
+
                   <div className="h-6 w-px bg-gray-200 hidden sm:block" />
                 </>
               )}
 
               {canCustomize && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={isEditing ? "destructive" : "outline"}
-                      size="sm"
-                      onClick={handleToggleEdit}
-                      className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center"
-                    >
-                      {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
-                      <span className="hidden sm:inline">{isEditing ? "Cancel" : "Customize"}</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={24}>
-                    <p>{isEditing ? "Discard changes" : "Customize dashboard layout"}</p>
-                  </TooltipContent>
-                </Tooltip>
+                <>
+                  {/* Mobile: icon button to enter/cancel edit mode */}
+                  <Button
+                    variant={isEditing ? "destructive" : "outline"}
+                    size="icon"
+                    onClick={handleToggleEdit}
+                    className="h-8 w-8 sm:hidden"
+                  >
+                    {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
+                  </Button>
+                  {/* Desktop: styled button with label */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={isEditing ? "destructive" : "outline"}
+                        size="sm"
+                        onClick={handleToggleEdit}
+                        className="hidden sm:inline-flex gap-2 px-3"
+                      >
+                        {isEditing ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
+                        {isEditing ? "Cancel" : "Customize"}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={24}>
+                      <p>{isEditing ? "Discard changes" : "Customize dashboard layout"}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </>
               )}
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={toggleFullscreen}
-                    className="gap-1 sm:gap-2 px-2 sm:px-3 w-[120px] justify-center ml-1 overflow-hidden"
-                  >
-                    {isFullscreen ? (
-                      <>
-                        <Minimize className="w-4 h-4" />
-                        <span className="hidden sm:inline">Exit Full</span>
-                      </>
-                    ) : (
-                      <>
-                        <Maximize className="w-4 h-4" />
-                        <span className="hidden sm:inline">Full Screen</span>
-                      </>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={24}>
-                  <p>{isFullscreen ? "Exit Full Screen" : "Enter Full Screen"}</p>
-                </TooltipContent>
-              </Tooltip>
+              {/* Fullscreen - matches TopBar style */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={toggleFullscreen}
+                className="gap-1 sm:gap-2 px-2 sm:px-3 ml-1 overflow-hidden"
+              >
+                {isFullscreen ? (
+                  <>
+                    <Minimize className="w-4 h-4" />
+                    <span className="hidden sm:inline">Minimize</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize className="w-4 h-4" />
+                    <span className="hidden sm:inline">Full Screen</span>
+                  </>
+                )}
+              </Button>
 
               {/* Hidden file input for import */}
               <input ref={fileInputRef} type="file" accept=".json" onChange={importLayout} className="hidden" />
@@ -851,14 +830,16 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
           </div>
         </div>
 
-        {/* Edit Mode Indicator */}
+        {/* Edit Mode Indicator - desktop only */}
         {isEditing && (
-          <div className="bg-blue-50 border-b border-blue-200 px-2 sm:px-4 py-1.5 sm:py-2">
-            <p className="text-[10px] sm:text-sm text-blue-700 text-center">
-              <strong className="hidden sm:inline">Edit Mode:</strong> Drag widgets • Resize • Click × to delete
+          <div className="hidden sm:block bg-blue-50 border-b border-blue-200 px-4 py-2">
+            <p className="text-sm text-blue-700 text-center">
+              <strong>Edit Mode:</strong> Drag widgets • Resize • Click × to delete
             </p>
           </div>
         )}
+
+
 
         {/* Loading State */}
         {isLoading && (
@@ -898,12 +879,17 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                 </div>
               ))}
             </GridLayout>
+
+            {/* Mobile Edit Mode Spacer - ensures last widgets can be scrolled above the bottom bar */}
+            {isEditing && deviceType === "mobile" && (
+              <div className="h-[30vh]" />
+            )}
           </div>
         )}
 
         {/* Add Widget Dialog */}
         <Dialog open={showAddWidget} onOpenChange={setShowAddWidget}>
-          <DialogContent className="max-w-[90vw] sm:max-w-lg">
+          <DialogContent className="max-w-[92vw] sm:max-w-lg mx-auto rounded-xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
@@ -914,21 +900,23 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
               </DialogDescription>
             </DialogHeader>
 
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 pt-2 sm:pt-4 max-h-[60vh] sm:max-h-[400px] overflow-auto">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 pt-2 sm:pt-4 max-h-[65vh] sm:max-h-[400px] overflow-auto">
               {Object.entries(widgetRegistry).map(([key, widget]) => (
                 <Card
                   key={key}
-                  className="cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all duration-200 hover:shadow-md"
+                  className="cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 active:bg-blue-100 transition-all duration-200 hover:shadow-md"
                   onClick={() => addWidget(key as WidgetType)}
                 >
-                  <CardContent className="flex flex-col items-center gap-1.5 sm:gap-2 p-2 sm:p-4">
-                    <div className="w-8 h-8 sm:w-12 sm:h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                      <LayoutGrid className="w-4 h-4 sm:w-6 sm:h-6 text-blue-600" />
+                  <CardContent className="flex flex-row sm:flex-col items-center gap-3 sm:gap-2 p-3 sm:p-4">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                      <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
                     </div>
-                    <span className="text-xs sm:text-sm font-medium text-gray-900 text-center">{widget.name}</span>
-                    <span className="text-[10px] sm:text-xs text-gray-500 text-center line-clamp-2">
-                      {widget.description}
-                    </span>
+                    <div className="flex flex-col sm:items-center gap-0.5">
+                      <span className="text-sm font-medium text-gray-900">{widget.name}</span>
+                      <span className="text-xs text-gray-500 sm:text-center line-clamp-2">
+                        {widget.description}
+                      </span>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -1015,6 +1003,82 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                 opacity: 1;
                 transform: translateY(0);
               }
+            }
+          `}</style>
+        </div>
+      )}
+      {/* Mobile Bottom Edit Bar - slides up from bottom */}
+      {isEditing && (
+        <div className="fixed bottom-0 left-0 right-0 z-[9999] sm:hidden">
+          <div className="bg-white border-t border-gray-200 shadow-[0_-4px_16px_rgba(0,0,0,0.15)] px-3 pb-8 pt-2 animate-slideUp">
+            <div className="flex items-center justify-around gap-1 max-w-md mx-auto">
+              <button
+                onClick={() => setShowAddWidget(true)}
+                className="flex flex-col items-center gap-1 px-2 py-1 text-blue-600 rounded-lg active:bg-blue-100/50 min-w-0 flex-1 transition-colors"
+              >
+                <Plus className="w-6 h-6" />
+                <span className="text-[10px] font-semibold">Add</span>
+              </button>
+              <button
+                onClick={async () => {
+                  await saveLayout();
+                  setIsEditing(false);
+                }}
+                disabled={isSaving}
+                className="flex flex-col items-center gap-1 px-2 py-1 text-green-600 rounded-lg active:bg-green-100/50 min-w-0 flex-1 transition-colors"
+              >
+                {saveStatus === "saving" ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : saveStatus === "saved" ? (
+                  <Check className="w-6 h-6" />
+                ) : (
+                  <Database className="w-6 h-6" />
+                )}
+                <span className="text-[10px] font-semibold">
+                  {saveStatus === "saving" ? "Saving" : saveStatus === "saved" ? "Saved!" : "Save"}
+                </span>
+              </button>
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                className="flex flex-col items-center gap-1 px-2 py-1 text-gray-600 rounded-lg active:bg-gray-100/50 min-w-0 flex-1 transition-colors"
+              >
+                <RotateCcw className="w-6 h-6" />
+                <span className="text-[10px] font-semibold">Reset</span>
+              </button>
+              <button
+                onClick={exportLayout}
+                className="flex flex-col items-center gap-1 px-2 py-1 text-gray-600 rounded-lg active:bg-gray-100/50 min-w-0 flex-1 transition-colors"
+              >
+                <Upload className="w-6 h-6" />
+                <span className="text-[10px] font-semibold">Export</span>
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex flex-col items-center gap-1 px-2 py-1 text-gray-600 rounded-lg active:bg-gray-100/50 min-w-0 flex-1 transition-colors"
+              >
+                <Download className="w-6 h-6" />
+                <span className="text-[10px] font-semibold">Import</span>
+              </button>
+              <button
+                onClick={handleToggleEdit}
+                className="flex flex-col items-center gap-1 px-2 py-1 text-red-600 rounded-lg active:bg-red-100/50 min-w-0 flex-1 transition-colors"
+              >
+                <X className="w-6 h-6" />
+                <span className="text-[10px] font-semibold">Cancel</span>
+              </button>
+            </div>
+          </div>
+          <style>{`
+            @keyframes slideUp {
+              from {
+                transform: translateY(100%);
+              }
+              to {
+                transform: translateY(0);
+              }
+            }
+            .animate-slideUp {
+              animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
             }
           `}</style>
         </div>
