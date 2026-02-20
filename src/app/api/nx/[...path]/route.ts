@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchFromCloudApi, postToCloudApi, putToCloudApi, deleteFromCloudApi, validateSystemId } from "@/lib/cloud-api";
+import { fetchFromCloudApi, postToCloudApi, putToCloudApi, patchToCloudApi, deleteFromCloudApi, validateSystemId } from "@/lib/cloud-api";
 
 export async function GET(request: NextRequest) {
   return handleRequest(request, "GET");
@@ -28,7 +28,9 @@ async function handleRequest(request: NextRequest, method: string) {
 
   // Most NX Witness REST v3 APIs require the /rest/v3 prefix.
   // We add it here if it's missing to ensure compatibility with cloud relay and local v3 API.
-  const endpoint = path.startsWith("/rest/v3") ? path : `/rest/v3${path}`;
+  // We also normalize the path by removing curly braces from UUIDs if present.
+  let endpoint = path.startsWith("/rest/v3") ? path : `/rest/v3${path}`;
+  endpoint = endpoint.replace(/[{}]/g, "");
 
   // If no systemId, return error (local check has been removed)
   if (!systemId) {
@@ -58,7 +60,10 @@ async function handleRequest(request: NextRequest, method: string) {
       body,
     };
 
-    if (method === "PUT" || method === "PATCH") {
+    if (method === "PATCH") {
+      return patchToCloudApi(request, options);
+    }
+    if (method === "PUT") {
       return putToCloudApi(request, options);
     }
     return postToCloudApi(request, options);

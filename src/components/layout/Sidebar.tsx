@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
-import { Privilege, isAdmin } from "@/lib/auth";
+import { Privilege, isAdmin, getDisplayRole } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -296,7 +296,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
                 {!isCollapsed && (
                   <div className="flex-1 min-w-0 text-left">
                     <p className="text-sm font-semibold text-gray-900 truncate">{user?.username || "Guest User"}</p>
-                    <p className="text-xs text-gray-500 truncate capitalize">{typeof user?.role === 'object' && user?.role !== null && 'name' in user.role ? user.role.name : user?.role || "User"}</p>
+                    <p className="text-xs text-gray-500 truncate capitalize">{getDisplayRole(user?.role)}</p>
                   </div>
                 )}
               </button>
@@ -305,7 +305,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none">{user?.username || "Guest User"}</p>
-                  <p className="text-xs leading-none text-muted-foreground">{typeof user?.role === 'object' && user?.role !== null && 'name' in user.role ? user.role.name : user?.role || "User"}</p>
+                  <p className="text-xs leading-none text-muted-foreground">{getDisplayRole(user?.role)}</p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />

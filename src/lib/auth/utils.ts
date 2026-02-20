@@ -8,20 +8,23 @@ export function isAdmin(user: UserPublic | null | undefined): boolean {
     if (!user) return false;
 
     const role = user.role;
-
     if (!role) return false;
 
-    // Handle string role
-    if (typeof role === 'string') {
-        const roleName = role.toLowerCase();
-        return roleName === 'admin' || roleName === 'security admin';
-    }
+    const roleName = (typeof role === 'string' ? role : role.name).toLowerCase();
+    // Both 'admin' and 'security admin' are treated as administrators
+    return roleName === 'admin' || roleName === 'security admin';
+}
 
-    // Handle object role
-    if (typeof role === 'object' && role !== null) {
-        const roleName = role.name.toLowerCase();
-        return roleName === 'admin' || roleName === 'security admin';
-    }
+/**
+ * Get the standardized role name for display.
+ * Maps 'security admin' to 'Admin'.
+ */
+export function getDisplayRole(role: string | Role | null | undefined): string {
+    if (!role) return "User";
 
-    return false;
+    const roleName = (typeof role === 'string' ? role : role.name);
+    if (roleName.toLowerCase() === 'security admin') return 'Admin';
+    if (roleName.toLowerCase() === 'admin') return 'Admin';
+
+    return roleName;
 }

@@ -260,6 +260,16 @@ export async function putToCloudApi<T>(
 }
 
 /**
+ * Generic cloud API PATCH handler
+ */
+export async function patchToCloudApi<T>(
+  request: NextRequest,
+  options: CloudApiOptions & { body: unknown }
+): Promise<NextResponse<T | CloudApiError>> {
+  return requestCloudApi<T>(request, { ...options, method: "PATCH" });
+}
+
+/**
  * Generic cloud API DELETE handler
  */
 export async function deleteFromCloudApi<T>(

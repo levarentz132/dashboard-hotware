@@ -82,8 +82,14 @@ export async function fetchUserGroups(systemId?: string): Promise<{ groups: NxUs
 /**
  * Create a new user
  */
-export async function createUser(formData: UserFormData, systemId?: string): Promise<{ success: boolean; error?: string }> {
+export async function createUser(formData: any, systemId?: string): Promise<{ success: boolean; error?: string }> {
   try {
+    // Normalize group IDs if present
+    const normalizedData = { ...formData };
+    if (Array.isArray(normalizedData.groupIds)) {
+      normalizedData.groupIds = normalizedData.groupIds.map((id: string) => id.replace(/[{}]|%7B|%7D/gi, ""));
+    }
+
     const url = systemId ? `/api/nx/users?systemId=${encodeURIComponent(systemId)}` : "/api/nx/users";
     const response = await fetch(url, {
       method: "POST",
@@ -91,12 +97,12 @@ export async function createUser(formData: UserFormData, systemId?: string): Pro
         "Content-Type": "application/json",
         ...getElectronHeaders()
       },
-      body: JSON.stringify(formData),
+      body: JSON.stringify(normalizedData),
     });
 
     if (!response.ok) {
       const data = await response.json();
-      return { success: false, error: data.error || "Failed to create user" };
+      return { success: false, error: data.error || data.message || "Failed to create user" };
     }
 
     return { success: true };
@@ -113,25 +119,36 @@ export async function createUser(formData: UserFormData, systemId?: string): Pro
  */
 export async function updateUser(
   userId: string,
-  formData: Partial<UserFormData>,
+  formData: any,
   systemId?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // Normalize IDs to strip curly braces if present (VMS REST v3 expects plain UUIDs)
+    // We handle both literal { } and encoded %7B %7D
+    const normalizedUserId = userId.replace(/[{}]|%7B|%7D/gi, "");
+
+    // Normalize group IDs if present
+    const normalizedData = { ...formData };
+    if (Array.isArray(normalizedData.groupIds)) {
+      normalizedData.groupIds = normalizedData.groupIds.map((id: string) => id.replace(/[{}]|%7B|%7D/gi, ""));
+    }
+
     const url = systemId
-      ? `/api/nx/users/${userId}?systemId=${encodeURIComponent(systemId)}`
-      : `/api/nx/users/${userId}`;
+      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(systemId)}`
+      : `/api/nx/users/${normalizedUserId}`;
+
     const response = await fetch(url, {
-      method: "PUT",
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         ...getElectronHeaders()
       },
-      body: JSON.stringify(formData),
+      body: JSON.stringify(normalizedData),
     });
 
     if (!response.ok) {
       const data = await response.json();
-      return { success: false, error: data.error || "Failed to update user" };
+      return { success: false, error: data.error || data.message || "Failed to update user" };
     }
 
     return { success: true };
@@ -148,9 +165,12 @@ export async function updateUser(
  */
 export async function deleteUser(userId: string, systemId?: string): Promise<{ success: boolean; error?: string }> {
   try {
+    // Normalize ID to strip curly braces
+    const normalizedUserId = userId.replace(/[{}]|%7B|%7D/gi, "");
+
     const url = systemId
-      ? `/api/nx/users/${userId}?systemId=${encodeURIComponent(systemId)}`
-      : `/api/nx/users/${userId}`;
+      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(systemId)}`
+      : `/api/nx/users/${normalizedUserId}`;
     const response = await fetch(url, {
       method: "DELETE",
       headers: {
@@ -160,7 +180,7 @@ export async function deleteUser(userId: string, systemId?: string): Promise<{ s
 
     if (!response.ok) {
       const data = await response.json();
-      return { success: false, error: data.error || "Failed to delete user" };
+      return { success: false, error: data.error || data.message || "Failed to delete user" };
     }
 
     return { success: true };

@@ -608,17 +608,28 @@ export default function UserManagement() {
 
     setIsSubmitting(true);
     try {
-      const body: any = {
-        isEnabled: formData.isEnabled,
-        groupIds: formData.groupIds,
-      };
+      const body: any = {};
+
+      // Basic fields
+      if (formData.isEnabled !== selectedUser.isEnabled) body.isEnabled = formData.isEnabled;
+
+      // Compare and normalize groupIds
+      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+      const currentGroups = (selectedUser.groupIds || []).map(normalizeId).sort().join(",");
+      const newGroups = (formData.groupIds || []).map(normalizeId).sort().join(",");
+
+      if (currentGroups !== newGroups) {
+        body.groupIds = formData.groupIds.map(normalizeId);
+      }
 
       if (formData.type === "cloud") {
-        body.email = formData.email;
+        if (formData.email !== selectedUser.email) {
+          body.email = formData.email;
+        }
       } else {
-        body.name = formData.name;
-        body.fullName = formData.fullName || undefined;
-        body.email = formData.email || undefined;
+        if (formData.name !== selectedUser.name) body.name = formData.name;
+        if (formData.fullName !== (selectedUser.fullName || "")) body.fullName = formData.fullName;
+        if (formData.email !== (selectedUser.email || "")) body.email = formData.email;
 
         if (formData.password) {
           body.password = formData.password;
@@ -633,6 +644,14 @@ export default function UserManagement() {
               : undefined,
           };
         }
+      }
+
+      // If nothing actually changed, just close and return
+      if (Object.keys(body).length === 0) {
+        setShowEditDialog(false);
+        setSelectedUser(null);
+        resetForm();
+        return;
       }
 
       const result = await serviceUpdateUser(selectedUser.id, body, systemId);
@@ -771,7 +790,8 @@ export default function UserManagement() {
               value={formData.email}
               onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
               placeholder="user@example.com"
-              className={formErrors.email ? "border-red-500" : ""}
+              disabled={showEditDialog}
+              className={cn(formErrors.email ? "border-red-500" : "", showEditDialog && "bg-muted opacity-80")}
             />
             {formErrors.email && <p className="text-xs text-red-500">{formErrors.email}</p>}
           </div>
@@ -810,6 +830,8 @@ export default function UserManagement() {
                 value={formData.email}
                 onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
                 placeholder="user@example.com"
+                disabled={showEditDialog}
+                className={cn(showEditDialog && "bg-muted opacity-80")}
               />
             </div>
 
@@ -993,32 +1015,34 @@ export default function UserManagement() {
         {/* Permissions / Group Selection */}
         <div className="space-y-2">
           <Label>Permissions (Groups)</Label>
-          <ScrollArea className="h-40 border rounded-lg p-3">
+          <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
             {groups.length === 0 ? (
               <p className="text-sm text-muted-foreground">No groups available</p>
             ) : (
-              <div className="space-y-2">
-                {groups.map((group) => (
-                  <div key={group.id} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`group-${group.id}`}
-                      checked={formData.groupIds.includes(group.id)}
-                      onChange={() => handleGroupToggle(group.id)}
-                      className="h-4 w-4 rounded border-gray-300"
-                    />
-                    <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
-                      <div className="flex items-center gap-2">
-                        <Shield className="h-3 w-3 text-muted-foreground" />
-                        {group.name}
-                      </div>
-                      {group.description && <p className="text-xs text-muted-foreground">{group.description}</p>}
-                    </Label>
-                  </div>
-                ))}
+              <div className="grid grid-cols-1 gap-2">
+                {groups
+                  .filter((g) => !g.name.toLowerCase().includes("administrator"))
+                  .map((group) => (
+                    <div key={group.id} className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id={`group-${group.id}`}
+                        checked={formData.groupIds.includes(group.id)}
+                        onChange={() => handleGroupToggle(group.id)}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
+                        <div className="flex items-center gap-2">
+                          <Shield className="h-3 w-3 text-muted-foreground" />
+                          {group.name}
+                        </div>
+                        {group.description && <p className="text-xs text-muted-foreground">{group.description}</p>}
+                      </Label>
+                    </div>
+                  ))}
               </div>
             )}
-          </ScrollArea>
+          </div>
         </div>
 
         {/* Submit Error */}

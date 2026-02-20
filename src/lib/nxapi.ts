@@ -461,25 +461,36 @@ class NxWitnessAPI {
   }
 
   async getUserById(id: string): Promise<any> {
-    return await this.apiRequest<any>(`/users/${id}`);
+    const normalizedId = id.replace(/[{}]/g, "");
+    return await this.apiRequest<any>(`/users/${normalizedId}`);
   }
 
   async createUser(userData: any): Promise<any> {
+    const normalizedData = { ...userData };
+    if (Array.isArray(normalizedData.groupIds)) {
+      normalizedData.groupIds = normalizedData.groupIds.map((id: string) => id.replace(/[{}]/g, ""));
+    }
     return await this.apiRequest<any>("/users", {
       method: "POST",
-      body: JSON.stringify(userData),
+      body: JSON.stringify(normalizedData),
     });
   }
 
   async updateUser(id: string, userData: any): Promise<any> {
-    return await this.apiRequest<any>(`/users/${id}`, {
+    const normalizedId = id.replace(/[{}]/g, "");
+    const normalizedData = { ...userData };
+    if (Array.isArray(normalizedData.groupIds)) {
+      normalizedData.groupIds = normalizedData.groupIds.map((gid: string) => gid.replace(/[{}]/g, ""));
+    }
+    return await this.apiRequest<any>(`/users/${normalizedId}`, {
       method: "PATCH",
-      body: JSON.stringify(userData),
+      body: JSON.stringify(normalizedData),
     });
   }
 
   async deleteUser(id: string): Promise<boolean> {
-    await this.apiRequest<any>(`/users/${id}`, {
+    const normalizedId = id.replace(/[{}]/g, "");
+    await this.apiRequest<any>(`/users/${normalizedId}`, {
       method: "DELETE",
     });
     return true;
