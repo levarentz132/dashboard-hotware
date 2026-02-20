@@ -14,6 +14,7 @@ import Analytics from "@/components/analytics/Analytics";
 import NotificationSystem from "@/components/ui/NotificationSystem";
 import ConnectionTest from "@/components/debug/ConnectionTest";
 import StorageManagement from "@/components/storage/StorageManagement";
+import Automation from "@/components/automation/Automation";
 import AuditLog from "@/components/audits/AuditLog";
 import UserManagement from "@/components/users/UserManagement";
 import SubAccountManagement from "@/components/rolemanagement/RoleManagement";
@@ -32,6 +33,7 @@ const SECTION_MODULE_MAP: Record<string, string> = {
   storage: "storage",
   users: "user_management",
   subaccounts: "user_management",
+  automation: "automation",
 };
 
 function PageContent() {
@@ -102,6 +104,8 @@ function PageContent() {
         return <Analytics />;
       case "storage":
         return <StorageManagement />;
+      case "automation":
+        return <Automation />;
       case "debug":
         return <ConnectionTest />;
       case "users":

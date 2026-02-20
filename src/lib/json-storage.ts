@@ -474,3 +474,74 @@ export async function deleteUser(userId: number): Promise<boolean> {
   }
   return false;
 }
+
+// ==================== Automation Storage ====================
+
+export interface DeviceData {
+  id: string;
+  name: string;
+  type: 'temperature' | 'humidity' | 'light' | 'fan' | 'other';
+  value?: string | number;
+  unit?: string;
+  status?: 'online' | 'offline';
+  battery?: number;
+  room: string;
+  humidity?: number;
+  wind?: number;
+  co2?: number;
+  temperature?: number;
+  api_url?: string;
+}
+
+export interface AutomationStore {
+  rooms: string[];
+  devices: DeviceData[];
+  api_token?: string;
+}
+
+const AUTOMATION_FILE = "automation_data.json";
+
+const defaultAutomationStore: AutomationStore = {
+  rooms: ["Living Room", "Conference Room", "Dining Room", "Board Room"],
+  devices: [
+    { id: "1", name: "Living Room Temp", type: 'temperature', value: 24.5, unit: "°C", status: 'online', battery: 85, room: "Living Room", humidity: 45, wind: 12, co2: 420, temperature: 24.5 },
+    { id: "2", name: "Main Humidity", type: 'humidity', value: 45, unit: "%", status: 'online', battery: 92, room: "Living Room", humidity: 45, wind: 8, co2: 410, temperature: 23.8 },
+    { id: "3", name: "Ceiling Light", type: 'light', value: "ON", status: 'online', room: "Living Room", humidity: 42, wind: 0, co2: 380, temperature: 22.5 },
+    { id: "4", name: "Conference Temp", type: 'temperature', value: 22.1, unit: "°C", status: 'online', battery: 78, room: "Conference Room", humidity: 48, wind: 15, co2: 450, temperature: 22.1 },
+    { id: "5", name: "AC Unit", type: 'fan', value: "Cooling", status: 'online', room: "Conference Room", humidity: 40, wind: 25, co2: 430, temperature: 21.5 },
+    { id: "6", name: "Wall Fan", type: 'fan', value: "OFF", status: 'offline', room: "Dining Room", humidity: 50, wind: 0, co2: 400, temperature: 26.0 },
+  ],
+};
+
+export async function getAutomationStore(): Promise<AutomationStore> {
+  return readJsonFile(AUTOMATION_FILE, defaultAutomationStore);
+}
+
+export async function saveAutomationStore(store: AutomationStore): Promise<void> {
+  return writeJsonFile(AUTOMATION_FILE, store);
+}
+
+// Add Room
+export async function addRoom(roomName: string): Promise<boolean> {
+  const store = await getAutomationStore();
+  if (store.rooms.includes(roomName)) return false;
+  store.rooms.push(roomName);
+  await saveAutomationStore(store);
+  return true;
+}
+
+// Add Device
+export async function addDevice(device: any): Promise<any> {
+  const store = await getAutomationStore();
+  const newDevice = {
+    id: `device-${Date.now()}`,
+    name: device.name,
+    type: device.type,
+    room: device.room,
+    api_url: device.api_url,
+    unit: device.unit,
+  };
+  store.devices.push(newDevice as any);
+  await saveAutomationStore(store);
+  return newDevice;
+}

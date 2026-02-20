@@ -587,7 +587,7 @@ export default function SubAccountManagement() {
       <div className="space-y-4">
         <h4 className="font-medium text-gray-900">Account Information</h4>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="username">Username *</Label>
             <Input
@@ -612,7 +612,7 @@ export default function SubAccountManagement() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="role">Role *</Label>
             <select
@@ -659,8 +659,8 @@ export default function SubAccountManagement() {
             <h4 className="font-medium text-gray-900">Access Permissions</h4>
           </div>
 
-          <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-            <Table>
+          <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm overflow-x-auto">
+            <Table className="min-w-[500px] sm:min-w-full">
               <TableHeader className="bg-slate-100">
                 <TableRow>
                   <TableHead className="w-[40%]">Module</TableHead>
@@ -805,95 +805,97 @@ export default function SubAccountManagement() {
               <p className="text-sm">Click "Add User" to create a new one</p>
             </div>
           ) : (
-            <Table className="border-collapse table-fixed w-full">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[20%]">Username</TableHead>
-                  <TableHead className="w-[20%]">Email</TableHead>
-                  <TableHead className="w-[20%]">Role</TableHead>
-                  <TableHead className="w-[20%]">Status</TableHead>
-                  <TableHead className="w-[20%]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredAccounts.map((account) => (
-                  <TableRow key={account.id}>
-                    <TableCell className="font-medium text-slate-900">
-                      {account.username}
-                    </TableCell>
-                    <TableCell className="text-slate-500">
-                      {account.email}
-                    </TableCell>
-                    <TableCell className="text-slate-600">
-                      {account.role || "User"}
-                    </TableCell>
-                    <TableCell>
-                      {account.is_active ? (
-                        <Badge
-                          variant="outline"
-                          className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all"
-                        >
-                          Active
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all"
-                        >
-                          Inactive
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {canEditMembers ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenChangePassword(account)}>
-                              <Lock className="h-4 w-4 mr-2" />
-                              Change Password
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleOpenEdit(account)}>
-                              <Pencil className="h-4 w-4 mr-2" />
-                              Edit Permissions
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleToggleStatus(account)}>
-                              {account.is_active ? (
-                                <>
-                                  <Pause className="h-4 w-4 mr-2" />
-                                  Deactivate
-                                </>
-                              ) : (
-                                <>
-                                  <Play className="h-4 w-4 mr-2" />
-                                  Activate
-                                </>
-                              )}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => handleOpenDelete(account)}
-                              className="text-red-600 focus:text-red-600"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : (
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </TableCell>
+            <div className="rounded-md border overflow-x-auto overflow-y-hidden">
+              <Table className="border-collapse min-w-[800px] sm:min-w-full">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[20%] min-w-[150px]">Username</TableHead>
+                    <TableHead className="w-[30%] min-w-[200px]">Email</TableHead>
+                    <TableHead className="w-[15%] min-w-[100px]">Role</TableHead>
+                    <TableHead className="w-[20%] min-w-[120px]">Status</TableHead>
+                    <TableHead className="w-[15%] min-w-[100px]">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredAccounts.map((account) => (
+                    <TableRow key={account.id}>
+                      <TableCell className="font-medium text-slate-900 break-words">
+                        {account.username}
+                      </TableCell>
+                      <TableCell className="text-slate-500 break-all">
+                        {account.email}
+                      </TableCell>
+                      <TableCell className="text-slate-600 capitalize">
+                        {account.role || "User"}
+                      </TableCell>
+                      <TableCell>
+                        {account.is_active ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all border-green-200"
+                          >
+                            Active
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all border-red-200"
+                          >
+                            Inactive
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {canEditMembers ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-[180px]">
+                              <DropdownMenuItem onClick={() => handleOpenChangePassword(account)}>
+                                <Lock className="h-4 w-4 mr-2" />
+                                Change Password
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleOpenEdit(account)}>
+                                <Pencil className="h-4 w-4 mr-2" />
+                                Edit Permissions
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleToggleStatus(account)}>
+                                {account.is_active ? (
+                                  <>
+                                    <Pause className="h-4 w-4 mr-2" />
+                                    Deactivate
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="h-4 w-4 mr-2" />
+                                    Activate
+                                  </>
+                                )}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => handleOpenDelete(account)}
+                                className="text-red-600 focus:text-red-600"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : (
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>

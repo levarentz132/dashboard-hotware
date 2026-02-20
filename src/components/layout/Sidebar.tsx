@@ -19,7 +19,8 @@ import {
   ChevronLeft,
   LogOut,
   User,
-  Loader2
+  Loader2,
+  Cpu
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
@@ -66,6 +67,7 @@ const navigationItems: NavItem[] = [
   { id: "audits", label: "User Logs", icon: Users, module: "user_logs" },
   { id: "analytics", label: "Analytics", icon: BarChart3, module: "analytics" },
   { id: "storage", label: "Storage", icon: Database, module: "storage" },
+  // { id: "automation", label: "Automation", icon: Cpu, module: "automation" },
   { id: "users", label: "User Management", icon: Users, module: "user_management" },
   { id: "subaccounts", label: "Role Management", icon: UserPlus, module: "user_management" },
 ];
@@ -102,7 +104,13 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     // Handle clicks outside to collapse
     const handleClickOutside = (event: MouseEvent) => {
       // Don't collapse if clicking a toggle button or something that should stay open
-      if (sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
+      // Also ignore clicks inside Radix UI portals (like the dropdown menu)
+      const target = event.target as HTMLElement;
+      if (
+        sidebarRef.current &&
+        !sidebarRef.current.contains(target as Node) &&
+        !target.closest('[data-radix-popper-content-wrapper]')
+      ) {
         setIsCollapsed(true);
         localStorage.setItem("sidebar-collapsed", "true");
       }
@@ -293,7 +301,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
                 )}
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side={isCollapsed ? "right" : "top"} align={isCollapsed ? "end" : "start"} className="w-56" sideOffset={10}>
+            <DropdownMenuContent onClick={(e) => e.stopPropagation()} side={isCollapsed ? "right" : "top"} align={isCollapsed ? "end" : "start"} className="w-56 z-[9999] bg-white" sideOffset={10}>
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none">{user?.username || "Guest User"}</p>
