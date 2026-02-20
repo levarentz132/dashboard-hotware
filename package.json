@@ -1,13 +1,13 @@
 {
   "name": "hotware-dashboard",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Hotware Dashboard",
   "author": "Hotware",
   "main": "electron/main.js",
   "private": true,
   "repository": "https://github.com/darrengunawan15/testing",
   "scripts": {
-    "dev": "next dev -p 3131",
+    "dev": "next dev -p 3130",
     "dev:electron": "electron electron/main.js",
     "build": "next build && node scripts/post-build.js",
     "start": "next start",
