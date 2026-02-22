@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDynamicConfig } from "./config";
+import { fetchWithDigestAuth } from "./digest-auth";
 
 /**
  * Common interface for cloud API request options
@@ -185,8 +186,53 @@ export function validateSystemId(request: NextRequest): { systemId: string | nul
 }
 
 /**
+ * Get cloud credentials from config
+ */
+export function getCloudCredentials(request: NextRequest): { username: string | null; password: string | null } {
+  const dynamicConfig = getDynamicConfig(request);
+  
+  // Try to get from dynamic config (Electron headers)
+  let username = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_USERNAME;
+  let password = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
+  
+  // Fallback to environment variables
+  if (!username) {
+    username = process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME;
+  }
+  
+  // Try encrypted cloud password
+  if (!password) {
+    const encryptedCloudPassword = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED 
+      || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED;
+    
+    if (encryptedCloudPassword) {
+      password = decryptPassword(encryptedCloudPassword);
+      if (password) {
+        console.log(`[Cloud API] Successfully decrypted cloud password`);
+      }
+    }
+  }
+  
+  // Fallback to plain password
+  if (!password) {
+    password = process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
+  }
+  
+  return { username: username || null, password: password || null };
+}
+
+/**
+ * Check if endpoint requires digest authentication
+ * For now, we use digest auth for /devices endpoint
+ */
+function shouldUseDigestAuth(endpoint: string): boolean {
+  return endpoint.includes('/devices');
+}
+
+/**
  * Generic cloud API fetch handler
  * Handles common patterns: auth, error handling, response parsing
+ * Uses digest authentication for /devices endpoint with cloud credentials
  */
 export async function fetchFromCloudApi<T>(
   request: NextRequest,
@@ -196,6 +242,49 @@ export async function fetchFromCloudApi<T>(
 
   try {
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
+    
+    // Check if we should use digest auth for this endpoint
+    const useDigestAuth = shouldUseDigestAuth(endpoint);
+    
+    if (useDigestAuth) {
+      const { username, password } = getCloudCredentials(request);
+      
+      if (username && password) {
+        console.log(`[Cloud API] Using digest authentication for ${endpoint} with cloud credentials (${username})`);
+        
+        const response = await fetchWithDigestAuth(cloudUrl, username, password, {
+          method: "GET",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+          },
+        });
+
+        // Handle auth errors
+        if (response.status === 401 || response.status === 403) {
+          console.error(`[Cloud API] Digest auth failed for ${endpoint}`);
+          return createAuthErrorResponse(systemId, systemName);
+        }
+
+        // Handle other errors
+        if (!response.ok) {
+          console.error(`[Cloud API] Request failed with status ${response.status}`);
+          return createFetchErrorResponse(
+            `Failed to fetch from ${systemName || systemId}`,
+            systemId,
+            systemName,
+            response.status
+          );
+        }
+
+        const data = await response.json();
+        return NextResponse.json(data);
+      } else {
+        console.warn(`[Cloud API] Digest auth requested but cloud credentials not available (user: ${username}, pass: ${!!password})`);
+      }
+    }
+    
+    // Fallback to standard authentication
     const headers = buildCloudHeaders(request, systemId);
 
     let response = await fetch(cloudUrl, {
@@ -281,6 +370,7 @@ export async function deleteFromCloudApi<T>(
 
 /**
  * Internal generic request handler
+ * Supports digest authentication for /devices endpoint
  */
 async function requestCloudApi<T>(
   request: NextRequest,
@@ -290,6 +380,60 @@ async function requestCloudApi<T>(
 
   try {
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
+    
+    // Check if we should use digest auth for this endpoint
+    const useDigestAuth = shouldUseDigestAuth(endpoint);
+    
+    if (useDigestAuth) {
+      const { username, password } = getCloudCredentials(request);
+      
+      if (username && password) {
+        console.log(`[Cloud API] Using digest authentication for ${method} ${endpoint} with cloud credentials (${username})`);
+        
+        const response = await fetchWithDigestAuth(cloudUrl, username, password, {
+          method,
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+
+        // Handle auth errors
+        if (response.status === 401 || response.status === 403) {
+          console.error(`[Cloud API] Digest auth failed for ${method} ${endpoint}`);
+          return createAuthErrorResponse(systemId, systemName);
+        }
+
+        // Handle other errors
+        if (!response.ok) {
+          console.error(`[Cloud API] ${method} request failed with status ${response.status}`);
+          return createFetchErrorResponse(
+            `Failed to ${method} to ${systemName || systemId}`,
+            systemId,
+            systemName,
+            response.status
+          );
+        }
+
+        // Some DELETE requests might not return JSON
+        if (response.status === 204) {
+          return NextResponse.json({ success: true } as unknown as T);
+        }
+
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await response.json();
+          return NextResponse.json(data);
+        }
+
+        return NextResponse.json({ success: true } as unknown as T);
+      } else {
+        console.warn(`[Cloud API] Digest auth requested but cloud credentials not available (user: ${username}, pass: ${!!password})`);
+      }
+    }
+    
+    // Fallback to standard authentication
     const headers = buildCloudHeaders(request, systemId);
 
     let response = await fetch(cloudUrl, {

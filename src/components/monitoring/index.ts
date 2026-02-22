@@ -17,3 +17,4 @@ export {
 // Components
 export { default as ServerMap, type ServerMarkerData } from "./ServerMap";
 export { default as SystemHealth } from "./SystemHealth";
+export { GlobalDeviceMonitor } from "./GlobalDeviceMonitor";
