@@ -44,7 +44,8 @@ import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
-import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
+import { getElectronHeaders } from "@/lib/config";
+import Cookies from "js-cookie";
 
 type ViewMode = "local" | "cloud";
 
@@ -116,7 +117,7 @@ export default function StorageManagement() {
   const canEditStorage = isUserAdmin || localUser?.privileges?.find(p => p.module === "storage")?.can_edit === true;
 
   // View mode state
-  const [viewMode, setViewMode] = useState<ViewMode>("cloud");
+  const [viewMode, setViewMode] = useState<ViewMode>("local");
 
   // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
@@ -150,7 +151,7 @@ export default function StorageManagement() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Fetch cloud systems
+  // Fetch cloud systems — non-blocking, failures are silently ignored
   const fetchCloudSystems = useCallback(async () => {
     setLoadingSystems(true);
     try {
@@ -164,8 +165,8 @@ export default function StorageManagement() {
         },
       });
 
+      // Silently fail on any non-OK response (e.g. 401 when not logged into cloud)
       if (!response.ok) {
-        setError("Failed to fetch cloud systems");
         return;
       }
 
@@ -188,9 +189,8 @@ export default function StorageManagement() {
       if (firstOnline) {
         setSelectedSystem(firstOnline);
       }
-    } catch (err) {
-      console.error("Error fetching cloud systems:", err);
-      setError("Failed to connect to cloud");
+    } catch {
+      // Cloud is optional — silently ignore all errors
     } finally {
       setLoadingSystems(false);
     }
@@ -284,75 +284,81 @@ export default function StorageManagement() {
     [attemptAutoLogin],
   );
 
-  // Fetch local storages from cloud system
+  // Fetch local storages directly from the NX server (Local First)
   const fetchLocalStorages = useCallback(async () => {
-    // If we have a selected system, use its ID. Otherwise, try to use the first cloud system.
-    const systemId = selectedSystem?.id || (cloudSystems.length > 0 ? cloudSystems[0].id : null);
+    const localUserStr = Cookies.get("local_nx_user");
+    if (!localUserStr) return;
 
-    if (!systemId) {
-      console.log("No system ID available for fetching storages");
+    let localUserInfo: any;
+    try {
+      localUserInfo = JSON.parse(localUserStr);
+    } catch {
       return;
     }
+
+    const token = localUserInfo?.token;
+    if (!token) return;
 
     setLoadingLocal(true);
     setLocalError(null);
 
     try {
-      const response = await fetch(`/api/nx/storages?systemId=${encodeURIComponent(systemId)}`, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          ...getElectronHeaders()
-        }
+      // 1. Fetch storage config from v3
+      const v3Response = await fetch("/nx/rest/v3/servers/this/storages", {
+        headers: { "x-runtime-guid": token, Accept: "application/json" },
       });
-      const data = await response.json();
 
-      // Check for error response
-      if (!response.ok || data.error) {
-        console.error("Storage API error:", data);
-        throw new Error(data.error || data.details || "Failed to fetch storages");
+      if (!v3Response.ok) throw new Error("Failed to fetch local storages (v3)");
+      const storagesV3 = await v3Response.json();
+
+      // 2. Fetch live usage stats from v4
+      const v4Response = await fetch("/nx/rest/v4/servers/this/storages/*/status", {
+        headers: { "x-runtime-guid": token, Accept: "application/json" },
+      });
+
+      let statusData: any[] = [];
+      if (v4Response.ok) {
+        statusData = await v4Response.json();
       }
 
+      const cleanId = (id: string) => id.toLowerCase().replace(/[{}]/g, "");
 
-      console.log("Local storage data received:", data);
+      const mappedStorages: Storage[] = (Array.isArray(storagesV3) ? storagesV3 : []).map((item: any) => {
+        // Match v4 status by storageId
+        const statusInfo = Array.isArray(statusData)
+          ? statusData.find((s: any) => cleanId(s.storageId) === cleanId(item.id))
+          : null;
 
-      // Map the response to Storage interface
-      // NX Witness API v3 may return different field names
-      const mappedStorages: Storage[] = (Array.isArray(data) ? data : []).map((item: Record<string, unknown>) => {
-        // Log each item for debugging
-        console.log("Mapping storage item:", item);
-
-        // Get space values - try multiple possible field names
-        const totalSpace = item.totalSpace || item.totalSpaceB || item.spaceLimit || item.spaceLimitB || 0;
-        const freeSpace = item.freeSpace || item.freeSpaceB || 0;
-        const reservedSpace = item.reservedSpace || item.reservedSpaceB || item.spaceLimitB || 0;
+        const totalSpace = String(statusInfo?.totalSpace ?? item.totalSpace ?? item.totalSpaceB ?? 0);
+        const freeSpace = String(statusInfo?.freeSpace ?? item.freeSpace ?? item.freeSpaceB ?? 0);
+        const reservedSpace = String(item.spaceLimitB ?? item.reservedSpaceB ?? 0);
 
         return {
-          id: (item.id as string) || "",
-          serverId: (item.serverId as string) || (item.parentId as string) || "",
-          name: (item.name as string) || (item.url as string) || "Unknown",
-          path: (item.url as string) || (item.path as string) || "",
-          type: (item.storageType as string) || (item.type as string) || "local",
-          spaceLimitB: Number(reservedSpace) || 0,
-          isUsedForWriting: (item.isUsedForWriting as boolean) ?? false,
-          isBackup: (item.isBackup as boolean) ?? false,
-          status: (item.isOnline as boolean) ? "Online" : "Offline",
+          id: item.id || "",
+          serverId: item.serverId || item.parentId || "",
+          name: item.name || item.url || "Unknown",
+          path: item.url || item.path || "",
+          type: item.storageType || item.type || "local",
+          spaceLimitB: Number(item.spaceLimitB || item.reservedSpaceB || 0),
+          isUsedForWriting: !!item.isUsedForWriting,
+          isBackup: !!item.isBackup,
+          status: (statusInfo?.isOnline ?? item.isOnline) ? "Online" : "Offline",
           statusInfo: {
-            url: (item.url as string) || (item.path as string) || "",
-            storageId: (item.id as string) || "",
-            totalSpace: String(totalSpace),
-            freeSpace: String(freeSpace),
-            reservedSpace: String(reservedSpace),
-            isExternal: (item.isExternal as boolean) ?? false,
-            isWritable: (item.isWritable as boolean) ?? true,
-            isUsedForWriting: (item.isUsedForWriting as boolean) ?? false,
-            isBackup: (item.isBackup as boolean) ?? false,
-            isOnline: (item.isOnline as boolean) ?? false,
-            storageType: (item.storageType as string) || (item.type as string) || "local",
-            runtimeFlags: (item.runtimeFlags as string) || "",
-            persistentFlags: (item.persistentFlags as string) || "",
-            serverId: (item.serverId as string) || (item.parentId as string) || "",
-            name: (item.name as string) || (item.url as string) || "Unknown",
+            url: item.url || item.path || "",
+            storageId: item.id || "",
+            totalSpace,
+            freeSpace,
+            reservedSpace,
+            isExternal: !!(statusInfo?.isExternal ?? item.isExternal),
+            isWritable: !!(statusInfo?.isWritable ?? item.isWritable ?? true),
+            isUsedForWriting: !!(statusInfo?.isUsedForWriting ?? item.isUsedForWriting),
+            isBackup: !!(statusInfo?.isBackup ?? item.isBackup),
+            isOnline: !!(statusInfo?.isOnline ?? item.isOnline),
+            storageType: statusInfo?.storageType || item.storageType || item.type || "local",
+            runtimeFlags: statusInfo?.runtimeFlags || "",
+            persistentFlags: statusInfo?.persistentFlags || "",
+            serverId: item.serverId || item.parentId || "",
+            name: statusInfo?.name || item.name || item.url || "Unknown",
           },
         };
       });
@@ -360,25 +366,18 @@ export default function StorageManagement() {
       setLocalStorages(mappedStorages);
       setLocalError(null);
     } catch (err) {
-      console.error("Error fetching local storages:", err);
-      setLocalError(
-        err instanceof Error
-          ? err.message
-          : "Failed to fetch local storages. Make sure the local server is running on localhost:7001",
-      );
+      console.error("[Storage] Local fetch failed:", err);
+      setLocalError(err instanceof Error ? err.message : "Failed to fetch local storages");
     } finally {
       setLoadingLocal(false);
     }
   }, []);
 
-  // Initial load
+  // Initial load - always fetch local data immediately, then cloud
   useEffect(() => {
-    if (viewMode === "cloud") {
-      fetchCloudSystems();
-    } else {
-      fetchLocalStorages();
-    }
-  }, [viewMode, fetchCloudSystems, fetchLocalStorages]);
+    fetchLocalStorages();
+    fetchCloudSystems();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch storages when system changes (cloud mode)
   useEffect(() => {
@@ -644,10 +643,7 @@ export default function StorageManagement() {
     }
   };
 
-  const isCloudEmpty = viewMode === "cloud" && cloudSystems.length === 0;
-  const showNoCloudAlert = isCloudEmpty && !loadingSystems;
-  const isLocalEmpty = viewMode === "local" && localStorages.length === 0;
-  const showNoLocalAlert = isLocalEmpty && !loadingLocal;
+  const showNoCloudAlert = viewMode === "cloud" && cloudSystems.length === 0 && !loadingSystems;
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -661,7 +657,7 @@ export default function StorageManagement() {
 
 
           {/* System Selector - only for cloud mode */}
-          {viewMode === "cloud" && !isCloudEmpty && (
+          {viewMode === "cloud" && cloudSystems.length > 0 && (
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="flex items-center gap-2 h-10">
@@ -729,27 +725,12 @@ export default function StorageManagement() {
       {/* View Mode Tabs - Keep outside so user can always switch */}
 
 
-      {/* View Alerts Below Tabs */}
-      {showNoCloudAlert && viewMode === "cloud" && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
-          <div className="flex items-center">
-            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
-            <div>
-              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
-              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Main Content */}
+      <>
 
-
-
-      {/* Main Content Fragment - Hide subsequent UI sections when appropriate */}
-      {((viewMode === "cloud" && !isCloudEmpty) || (viewMode === "local" && !isLocalEmpty)) && (
-        <>
-
-          {/* Auth Required - only for cloud mode */}
-          {viewMode === "cloud" && requiresAuth && !showLoginForm && (
+        {/* Auth Required - only for cloud mode */}
+        {
+          viewMode === "cloud" && requiresAuth && !showLoginForm && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -765,10 +746,12 @@ export default function StorageManagement() {
                 </Button>
               </div>
             </div>
-          )}
+          )
+        }
 
-          {/* Login Form - only for cloud mode */}
-          {viewMode === "cloud" && showLoginForm && (
+        {/* Login Form - only for cloud mode */}
+        {
+          viewMode === "cloud" && showLoginForm && (
             <div className="bg-white border rounded-lg p-4">
               <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
               <div className="space-y-3 max-w-md">
@@ -824,10 +807,12 @@ export default function StorageManagement() {
                 </div>
               </div>
             </div>
-          )}
+          )
+        }
 
-          {/* Stats Overview - show for local mode or when cloud mode is authenticated */}
-          {(viewMode === "local" || (viewMode === "cloud" && !requiresAuth)) && (
+        {/* Stats Overview - show for local mode or when cloud mode is authenticated */}
+        {
+          (viewMode === "local" || (viewMode === "cloud" && !requiresAuth)) && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <Card>
                 <CardHeader className="pb-6">
@@ -860,10 +845,12 @@ export default function StorageManagement() {
                 </CardHeader>
               </Card>
             </div>
-          )}
+          )
+        }
 
-          {/* Storage List */}
-          {viewMode === "local" ? (
+        {/* Storage List */}
+        {
+          viewMode === "local" ? (
             // Local Storage List
             <div className="space-y-4">
               {loadingLocal ? (
@@ -1124,10 +1111,12 @@ export default function StorageManagement() {
                 )}
               </div>
             )
-          )}
+          )
+        }
 
-          {/* Create Storage Modal - only for cloud mode */}
-          {viewMode === "cloud" && (
+        {/* Create Storage Modal - only for cloud mode */}
+        {
+          viewMode === "cloud" && (
             <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
               <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
@@ -1223,10 +1212,12 @@ export default function StorageManagement() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-          )}
+          )
+        }
 
-          {/* Edit Storage Modal - only for cloud mode */}
-          {viewMode === "cloud" && (
+        {/* Edit Storage Modal - only for cloud mode */}
+        {
+          viewMode === "cloud" && (
             <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
               <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
@@ -1322,10 +1313,12 @@ export default function StorageManagement() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-          )}
+          )
+        }
 
-          {/* Delete Confirmation Dialog - only for cloud mode */}
-          {viewMode === "cloud" && (
+        {/* Delete Confirmation Dialog - only for cloud mode */}
+        {
+          viewMode === "cloud" && (
             <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
               <AlertDialogContent>
                 <AlertDialogHeader>
@@ -1354,9 +1347,9 @@ export default function StorageManagement() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-          )}
-        </>
-      )}
+          )
+        }
+      </>
     </div>
   );
 }
