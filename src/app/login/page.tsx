@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle } from "lucide-react";
 import { NxAuthentication } from "@/components/auth/nx-authentication";
+import Cookies from "js-cookie";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -41,17 +42,17 @@ export default function LoginPage() {
   const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
   const checkLocalSession = () => {
-    const stored = localStorage.getItem("local_nx_user");
+    const stored = Cookies.get("local_nx_user");
     return !!stored;
   };
 
   const handleMainSubmit = async (data: LoginFormData) => {
-    const cloudStored = localStorage.getItem("nx_cloud_session");
+    const cloudStored = Cookies.get("nx_cloud_session");
     const hasCloudLogin = !!cloudStored;
 
     // 1. Determine base IDs from storage or sessions
-    let storedSystemId = localStorage.getItem("nx_system_id") || "";
-    let storedServerId = localStorage.getItem("nx_server_id") || "";
+    let storedSystemId = Cookies.get("nx_system_id") || "";
+    let storedServerId = Cookies.get("nx_server_id") || "";
 
     // Fallback parsing from sessions if dedicated keys are missing
     if (!storedSystemId && cloudStored) {

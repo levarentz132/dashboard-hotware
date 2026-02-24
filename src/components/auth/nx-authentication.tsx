@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import Cookies from "js-cookie";
 
 const LOCAL_NX_URL = "/nx/rest/v4/login/sessions";
 
@@ -77,7 +78,7 @@ export function NxAuthentication() {
 
         await new Promise(resolve => setTimeout(resolve, 600));
 
-        const stored = localStorage.getItem("local_nx_user");
+        const stored = Cookies.get("local_nx_user");
         if (stored) {
             try {
                 const user = JSON.parse(stored);
@@ -85,7 +86,7 @@ export function NxAuthentication() {
             } catch (e) {
                 console.error("Failed to parse stored local nx user", e);
                 setSession(null);
-                localStorage.removeItem("local_nx_user");
+                Cookies.remove("local_nx_user");
             }
         } else {
             setSession(null);
@@ -96,7 +97,7 @@ export function NxAuthentication() {
 
     // Check session on mount
     useEffect(() => {
-        const stored = typeof window !== 'undefined' ? localStorage.getItem("local_nx_user") : null;
+        const stored = Cookies.get("local_nx_user");
         if (stored) {
             try {
                 setSession(JSON.parse(stored));
@@ -144,7 +145,7 @@ export function NxAuthentication() {
                 const ownerSystemId = ownerSystem?.id;
 
                 if (ownerSystemId) {
-                    localStorage.setItem("nx_system_id", ownerSystemId);
+                    Cookies.set("nx_system_id", ownerSystemId, { expires: 365, path: '/' });
                 }
 
                 const firstSystem = ownerSystem || systemsList[0];
@@ -158,7 +159,7 @@ export function NxAuthentication() {
                 };
 
                 setCloudSession(cloudData);
-                localStorage.setItem("nx_cloud_session", JSON.stringify(cloudData));
+                Cookies.set("nx_cloud_session", JSON.stringify(cloudData), { expires: 365, path: '/' });
             }
         } catch (err) {
         } finally {
@@ -168,7 +169,7 @@ export function NxAuthentication() {
 
     // Cloud OAuth callback
     useEffect(() => {
-        const storedCloud = localStorage.getItem("nx_cloud_session");
+        const storedCloud = Cookies.get("nx_cloud_session");
         if (storedCloud) {
             try { setCloudSession(JSON.parse(storedCloud)); } catch (e) { }
         }
@@ -250,7 +251,7 @@ export function NxAuthentication() {
                         if (serversList.length > 0) {
                             const serverId = serversList[0].id;
                             user.serverId = serverId;
-                            localStorage.setItem("nx_server_id", serverId);
+                            Cookies.set("nx_server_id", serverId, { expires: 365, path: '/' });
                         } else {
                         }
                     }
@@ -258,7 +259,7 @@ export function NxAuthentication() {
                 }
 
                 setSession(user);
-                localStorage.setItem("local_nx_user", JSON.stringify(user));
+                Cookies.set("local_nx_user", JSON.stringify(user), { expires: 28, path: '/' });
                 setIsModalOpen(false);
                 setCredentials({ username: "", password: "" });
             } else {
@@ -275,16 +276,16 @@ export function NxAuthentication() {
     const handleLocalLogout = (e?: React.MouseEvent) => {
         e?.stopPropagation();
         setSession(null);
-        localStorage.removeItem("local_nx_user");
-        localStorage.removeItem("nx_server_id");
+        Cookies.remove("local_nx_user", { path: '/' });
+        Cookies.remove("nx_server_id", { path: '/' });
         setPendingLogout(null);
     };
 
     const handleCloudLogout = (e?: React.MouseEvent) => {
         e?.stopPropagation();
         setCloudSession(null);
-        localStorage.removeItem("nx_cloud_session");
-        localStorage.removeItem("nx_system_id");
+        Cookies.remove("nx_cloud_session", { path: '/' });
+        Cookies.remove("nx_system_id", { path: '/' });
         setPendingLogout(null);
     };
 
@@ -292,10 +293,10 @@ export function NxAuthentication() {
     const handleLogout = () => {
         setSession(null);
         setCloudSession(null);
-        localStorage.removeItem("local_nx_user");
-        localStorage.removeItem("nx_cloud_session");
-        localStorage.removeItem("nx_system_id");
-        localStorage.removeItem("nx_server_id");
+        Cookies.remove("local_nx_user", { path: '/' });
+        Cookies.remove("nx_cloud_session", { path: '/' });
+        Cookies.remove("nx_system_id", { path: '/' });
+        Cookies.remove("nx_server_id", { path: '/' });
         setPendingLogout(null);
     };
 

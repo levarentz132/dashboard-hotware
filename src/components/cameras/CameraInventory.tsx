@@ -31,6 +31,7 @@ import { Badge } from "../ui/badge";
 import { useAuth } from "@/contexts/auth-context";
 import { isAdmin } from "@/lib/auth";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
+import Cookies from "js-cookie";
 
 interface CloudSystem {
   id: string;
@@ -119,27 +120,27 @@ export default function CameraInventory() {
 
   // Fetching Logic
   const fetchLocalCameras = useCallback(async () => {
-    const localUserStr = localStorage.getItem("local_nx_user");
-    const localServerId = localStorage.getItem("nx_server_id");
+    const localUserStr = Cookies.get("local_nx_user");
+    const localServerId = Cookies.get("nx_server_id");
     if (!localUserStr) return null;
 
     try {
       const localUser = JSON.parse(localUserStr);
-      const sid = localStorage.getItem("nx_system_id") || localServerId || localUser.serverId || "local";
+      const sid = Cookies.get("nx_system_id") || localServerId || localUser.serverId || "local";
 
-      // Try to get actual system name
-      let actualSystemName = "";
+      // Try to get actual server name
+      let actualServerName = "";
       try {
-        const infoResp = await fetch("/nx/rest/v4/system/info", {
+        const infoResp = await fetch("/nx/rest/v4/servers/this", {
           headers: { "x-runtime-guid": localUser.token }
         });
         if (infoResp.ok) {
           const info = await infoResp.json();
-          actualSystemName = info.name || info.systemName || "";
+          actualServerName = info.name || info.systemName || "";
         }
       } catch (e) { }
 
-      const displayName = actualSystemName ? `Local Server (${actualSystemName})` : "Local Server";
+      const displayName = actualServerName ? `Local Server (${actualServerName})` : "Local Server";
 
       const response = await fetch("/nx/rest/v4/devices", {
         method: "GET",

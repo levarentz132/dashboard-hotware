@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
+import Cookies from "js-cookie";
 
 /**
  * State interface for async data fetching hooks
@@ -141,8 +142,8 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
     return cloudSystemsCache.data;
   }
 
-  // Get cloud token from localStorage if available
-  const cloudSessionStr = localStorage.getItem("nx_cloud_session");
+  // Get cloud token from Cookies if available
+  const cloudSessionStr = Cookies.get("nx_cloud_session");
   let cloudToken = "";
   if (cloudSessionStr) {
     try {

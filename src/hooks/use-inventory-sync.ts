@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchCloudSystems, CloudSystem } from "./use-async-data";
+import Cookies from "js-cookie";
 
 export interface SyncData<T> {
     systemId: string;
@@ -53,8 +54,8 @@ export function useInventorySync<T>(
             setError(null);
 
             // Check login states
-            const localUserStr = localStorage.getItem("local_nx_user");
-            const cloudSessionStr = localStorage.getItem("nx_cloud_session");
+            const localUserStr = Cookies.get("local_nx_user");
+            const cloudSessionStr = Cookies.get("nx_cloud_session");
 
             const hasLocalLogin = !!localUserStr;
             const hasCloudLogin = !!cloudSessionStr;
