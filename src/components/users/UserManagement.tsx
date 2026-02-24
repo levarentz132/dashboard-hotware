@@ -38,6 +38,7 @@ import {
   secondsToTimeUnit,
 } from "./user-service";
 import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
+import Cookies from "js-cookie";
 import { performAdminLogin } from "@/lib/auth-utils";
 import { cn } from "@/lib/utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
@@ -255,6 +256,70 @@ export default function UserManagement() {
   const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
   const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
 
+  // Local (NX proxy) users & groups state
+  const [localUsers, setLocalUsers] = useState<NxUser[]>([]);
+  const [localGroups, setLocalGroups] = useState<NxUserGroup[]>([]);
+  const [loadingLocal, setLoadingLocal] = useState(false);
+
+  // Fetch local users directly from the NX server (Local First)
+  const fetchLocalUsers = useCallback(async () => {
+    const localUserStr = Cookies.get("local_nx_user");
+    if (!localUserStr) return;
+
+    let localUserInfo: any;
+    try {
+      localUserInfo = JSON.parse(localUserStr);
+    } catch {
+      return;
+    }
+
+    const token = localUserInfo?.token;
+    if (!token) return;
+
+    setLoadingLocal(true);
+    try {
+      // Fetch users and userGroups in parallel (v3 so IDs match)
+      const [usersRes, groupsRes] = await Promise.all([
+        fetch("/nx/rest/v3/users", {
+          headers: { "x-runtime-guid": token, Accept: "application/json" },
+        }),
+        fetch("/nx/rest/v3/userGroups", {
+          headers: { "x-runtime-guid": token, Accept: "application/json" },
+        }),
+      ]);
+
+      if (usersRes.ok) {
+        const data = await usersRes.json();
+        const mapped: NxUser[] = (Array.isArray(data) ? data : []).map((u: any) => ({
+          id: u.id || "",
+          name: u.name || u.username || "",
+          fullName: u.fullName || u.name || "",
+          email: u.email || "",
+          type: u.type || "local",
+          groupIds: u.groupIds || u.roleIds || [],
+          isEnabled: u.isEnabled !== false,
+          temporaryToken: u.temporaryToken,
+        }));
+        setLocalUsers(mapped);
+      }
+
+      if (groupsRes.ok) {
+        const data = await groupsRes.json();
+        const mapped: NxUserGroup[] = (Array.isArray(data) ? data : []).map((r: any) => ({
+          id: r.id || "",
+          name: r.name || "",
+          description: r.description || "",
+          permissions: r.permissions || [],
+        }));
+        setLocalGroups(mapped);
+      }
+    } catch {
+      // Local fetch is best-effort, silently ignore errors
+    } finally {
+      setLoadingLocal(false);
+    }
+  }, []);
+
   // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
     setLoadingCloud(true);
@@ -296,9 +361,11 @@ export default function UserManagement() {
     }
   }, []);
 
+  // Initial load: fetch local data immediately, cloud in background
   useEffect(() => {
+    fetchLocalUsers();
     fetchCloudSystems();
-  }, [fetchCloudSystems]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select first online system if none selected
   useEffect(() => {
@@ -375,8 +442,16 @@ export default function UserManagement() {
   // Token copy state
   const [copiedToken, setCopiedToken] = useState(false);
 
-  // Filter users based on search term and type
-  const filteredUsers = users.filter((user) => {
+  // Combined loading and error states
+  const loading = usersLoading || groupsLoading || (loadingLocal && localUsers.length === 0);
+  const error = usersError || groupsError;
+
+  // Effective data: prefer cloud when a system is selected, fall back to local
+  const effectiveUsers = selectedSystemId ? users : localUsers;
+  const effectiveGroups = selectedSystemId ? groups : localGroups;
+
+  // Filter users based on search term and type (use effective data)
+  const filteredUsers = effectiveUsers.filter((user) => {
     const matchesSearch =
       user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (user.email && user.email.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -384,16 +459,20 @@ export default function UserManagement() {
     return matchesSearch && matchesType;
   });
 
-  // Get group name by ID
+  // Get group name by ID (from effective groups)
   const getGroupName = (groupId: string): string => {
-    const group = groups.find((g) => g.id === groupId);
+    const group = effectiveGroups.find((g) => g.id === groupId);
     return group ? group.name : groupId.substring(0, 8) + "...";
   };
 
-  // Handle refresh
+  // Handle refresh — refreshes both local and cloud
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([refetchUsers(), refetchGroups()]);
+    await Promise.all([
+      fetchLocalUsers(),
+      refetchUsers(),
+      refetchGroups(),
+    ]);
     setIsRefreshing(false);
   };
 
@@ -436,13 +515,13 @@ export default function UserManagement() {
     return config[type] || { label: type, className: "bg-gray-100 text-gray-800 transition-all" };
   };
 
-  // Count users by type
+  // Count users by type (from effective data)
   const userStats = {
-    total: users.length,
-    local: users.filter((u) => u.type === "local").length,
-    temporaryLocal: users.filter((u) => u.type === "temporaryLocal").length,
-    ldap: users.filter((u) => u.type === "ldap").length,
-    cloud: users.filter((u) => u.type === "cloud").length,
+    total: effectiveUsers.length,
+    local: effectiveUsers.filter((u) => u.type === "local").length,
+    temporaryLocal: effectiveUsers.filter((u) => u.type === "temporaryLocal").length,
+    ldap: effectiveUsers.filter((u) => u.type === "ldap").length,
+    cloud: effectiveUsers.filter((u) => u.type === "cloud").length,
   };
 
   // Reset form
@@ -723,8 +802,7 @@ export default function UserManagement() {
     return Math.floor(new Date(value).getTime() / 1000);
   };
 
-  const loading = usersLoading || groupsLoading;
-  const error = usersError || groupsError;
+
 
   // Render form based on user type
   const renderFormFields = () => {
@@ -1055,8 +1133,7 @@ export default function UserManagement() {
     );
   };
 
-  const isCloudEmpty = cloudSystems.length === 0;
-  const showNoCloudAlert = isCloudEmpty && !loadingCloud;
+  const showNoCloudAlert = false; // Cloud failures are non-blocking
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -1068,7 +1145,7 @@ export default function UserManagement() {
 
         <div className="flex items-center gap-2">
           {/* Cloud System Selector - only if systems exist */}
-          {!isCloudEmpty && (
+          {cloudSystems.length > 0 && (
             <Select value={selectedSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
               <SelectTrigger className="w-full sm:w-[220px] h-10">
                 <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
@@ -1088,7 +1165,7 @@ export default function UserManagement() {
             </Select>
           )}
 
-          {!isCloudEmpty && canEditUsers && (
+          {cloudSystems.length > 0 && canEditUsers && (
             <Button onClick={handleOpenCreate} className="gap-2 h-10 px-4" size="default">
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">Add User</span>
@@ -1098,11 +1175,7 @@ export default function UserManagement() {
           {/* Refresh Button - Styled like CameraInventory */}
           <button
             onClick={() => {
-              if (isCloudEmpty) {
-                fetchCloudSystems();
-              } else {
-                handleRefresh();
-              }
+              handleRefresh();
             }}
             disabled={isRefreshing || loadingCloud}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
@@ -1115,445 +1188,432 @@ export default function UserManagement() {
         </div>
       </div>
 
-      {/* Cloud Systems Error */}
-      {showNoCloudAlert && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
-          <div className="flex items-center">
-            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
-            <div>
-              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
-              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
-            </div>
-          </div>
+      {/* Cloud Systems Warning - non-blocking, only shown when explicitly in cloud tab with no systems */}
+
+      <>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
+          <Card>
+            <CardHeader className="p-3 sm:p-4 pb-2">
+              <CardDescription className="text-xs sm:text-sm">Total Users</CardDescription>
+              <CardTitle className="text-xl sm:text-2xl">{userStats.total}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="p-3 sm:p-4 pb-2">
+              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
+                <Users className="h-3 w-3" /> Local
+              </CardDescription>
+              <CardTitle className="text-xl sm:text-2xl text-blue-600">{userStats.local}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="p-3 sm:p-4 pb-2">
+              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
+                <Clock className="h-3 w-3" /> Temporary
+              </CardDescription>
+              <CardTitle className="text-xl sm:text-2xl text-yellow-600">{userStats.temporaryLocal}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="p-3 sm:p-4 pb-2">
+              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
+                <Shield className="h-3 w-3" /> LDAP
+              </CardDescription>
+              <CardTitle className="text-xl sm:text-2xl text-purple-600">{userStats.ldap}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card className="col-span-2 sm:col-span-1">
+            <CardHeader className="p-3 sm:p-4 pb-2">
+              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
+                <Cloud className="h-3 w-3" /> Cloud
+              </CardDescription>
+              <CardTitle className="text-xl sm:text-2xl text-green-600">{userStats.cloud}</CardTitle>
+            </CardHeader>
+          </Card>
         </div>
-      )}
 
-      {!isCloudEmpty && (
-        <>
-          {/* Stats Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
-            <Card>
-              <CardHeader className="p-3 sm:p-4 pb-2">
-                <CardDescription className="text-xs sm:text-sm">Total Users</CardDescription>
-                <CardTitle className="text-xl sm:text-2xl">{userStats.total}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader className="p-3 sm:p-4 pb-2">
-                <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                  <Users className="h-3 w-3" /> Local
-                </CardDescription>
-                <CardTitle className="text-xl sm:text-2xl text-blue-600">{userStats.local}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader className="p-3 sm:p-4 pb-2">
-                <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                  <Clock className="h-3 w-3" /> Temporary
-                </CardDescription>
-                <CardTitle className="text-xl sm:text-2xl text-yellow-600">{userStats.temporaryLocal}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader className="p-3 sm:p-4 pb-2">
-                <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                  <Shield className="h-3 w-3" /> LDAP
-                </CardDescription>
-                <CardTitle className="text-xl sm:text-2xl text-purple-600">{userStats.ldap}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="col-span-2 sm:col-span-1">
-              <CardHeader className="p-3 sm:p-4 pb-2">
-                <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                  <Cloud className="h-3 w-3" /> Cloud
-                </CardDescription>
-                <CardTitle className="text-xl sm:text-2xl text-green-600">{userStats.cloud}</CardTitle>
-              </CardHeader>
-            </Card>
-          </div>
+        {/* Search and Filter */}
+        <Card className="mb-4">
+          <CardContent className="p-3 sm:p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+              <div className="relative flex-1 select-none">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search users..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-10 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text h-10"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
 
-          {/* Search and Filter */}
-          <Card className="mb-4">
-            <CardContent className="p-3 sm:p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <div className="relative flex-1 select-none">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder="Search users..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-10 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text h-10"
-                  />
-                  {searchTerm && (
-                    <button
-                      onClick={() => setSearchTerm("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={`gap-2 flex-1 sm:flex-none select-none w-[110px] justify-center h-10 ${filterType !== "all" ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : ""
-                          }`}
-                      >
-                        <Filter className="h-4 w-4 shrink-0" />
-                        <span>Filter</span>
-                        {filterType !== "all" && (
-                          <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0">
-                            1
-                          </Badge>
-                        )}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem onClick={() => setFilterType("all")}>All Types</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterType("local")}>
-                        <Users className="h-4 w-4 mr-2" /> Local
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterType("temporaryLocal")}>
-                        <Clock className="h-4 w-4 mr-2" /> Temporary
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterType("ldap")}>
-                        <Shield className="h-4 w-4 mr-2" /> LDAP
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterType("cloud")}>
-                        <Cloud className="h-4 w-4 mr-2" /> Cloud
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  {filterType !== "all" && (
+              <div className="flex gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-gray-400 hover:text-gray-600 h-10"
-                      onClick={() => setFilterType("all")}
+                      variant="outline"
+                      className={`gap-2 flex-1 sm:flex-none select-none w-[110px] justify-center h-10 ${filterType !== "all" ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : ""
+                        }`}
                     >
-                      <X className="h-4 w-4" />
+                      <Filter className="h-4 w-4 shrink-0" />
+                      <span>Filter</span>
+                      {filterType !== "all" && (
+                        <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0">
+                          1
+                        </Badge>
+                      )}
                     </Button>
-                  )}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onClick={() => setFilterType("all")}>All Types</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setFilterType("local")}>
+                      <Users className="h-4 w-4 mr-2" /> Local
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setFilterType("temporaryLocal")}>
+                      <Clock className="h-4 w-4 mr-2" /> Temporary
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setFilterType("ldap")}>
+                      <Shield className="h-4 w-4 mr-2" /> LDAP
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setFilterType("cloud")}>
+                      <Cloud className="h-4 w-4 mr-2" /> Cloud
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {filterType !== "all" && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 text-gray-400 hover:text-gray-600 h-10"
+                    onClick={() => setFilterType("all")}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Error State */}
+        {error && (
+          <div className="flex items-center gap-2 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
+            <AlertCircle className="h-5 w-5" />
+            <span>{error}</span>
+            <Button variant="outline" size="sm" onClick={handleRefresh} className="ml-auto">
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-muted-foreground">Loading users...</span>
+          </div>
+        )}
+
+        {/* Users Table */}
+        {!loading && !error && (
+          <Card>
+            <CardHeader className="p-3 sm:p-6">
+              <CardTitle className="text-lg sm:text-xl">Users ({filteredUsers.length})</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
+                List of all users with access to the VMS system
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0 sm:p-6 sm:pt-0">
+              {filteredUsers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-muted-foreground">
+                  <Users className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-50" />
+                  <p className="text-sm sm:text-base">No users found</p>
+                  {searchTerm && <p className="text-xs sm:text-sm mt-1">Try adjusting your search or filter criteria</p>}
                 </div>
+              ) : (
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[40px] sm:w-[50px] text-xs sm:text-sm">#</TableHead>
+                        <TableHead className="text-xs sm:text-sm min-w-[120px]">Name</TableHead>
+                        <TableHead className="text-xs sm:text-sm hidden md:table-cell">Email</TableHead>
+                        <TableHead className="text-xs sm:text-sm">Type</TableHead>
+                        <TableHead className="text-xs sm:text-sm hidden sm:table-cell">Status</TableHead>
+                        <TableHead className="text-xs sm:text-sm hidden lg:table-cell">Groups</TableHead>
+                        <TableHead className="w-[60px] sm:w-[80px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredUsers.map((user, index) => {
+                        const typeBadge = getUserTypeBadge(user.type);
+                        return (
+                          <TableRow key={user.id}>
+                            <TableCell className="font-medium text-muted-foreground text-xs sm:text-sm">
+                              {index + 1}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div className="p-1 sm:p-1.5 rounded-full bg-muted flex-shrink-0">
+                                  {getUserTypeIcon(user.type)}
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="font-medium text-xs sm:text-sm truncate block">{user.name}</span>
+                                  {user.fullName && (
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                      {user.fullName}
+                                    </p>
+                                  )}
+                                  {/* Show email on mobile */}
+                                  {user.email && (
+                                    <p className="text-[10px] text-muted-foreground truncate md:hidden">{user.email}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell">
+                              {user.email ? (
+                                <div className="flex items-center gap-1 text-muted-foreground">
+                                  <Mail className="h-3 w-3 flex-shrink-0" />
+                                  <span className="text-xs sm:text-sm truncate">{user.email}</span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs sm:text-sm">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`${typeBadge.className} text-[10px] sm:text-xs`}>
+                                {typeBadge.label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="hidden sm:table-cell">
+                              {user.isEnabled !== false ? (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all"
+                                >
+                                  Enabled
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all"
+                                >
+                                  Disabled
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell">
+                              {user.groupIds && user.groupIds.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {user.groupIds.slice(0, 2).map((groupId) => (
+                                    <Badge key={groupId} variant="outline" className="text-[10px] sm:text-xs">
+                                      {getGroupName(groupId)}
+                                    </Badge>
+                                  ))}
+                                  {user.groupIds.length > 2 && (
+                                    <Badge variant="outline" className="text-[10px] sm:text-xs">
+                                      +{user.groupIds.length - 2}
+                                    </Badge>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs sm:text-sm">No groups</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {canEditUsers ? (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleOpenEdit(user)} disabled={user.type === "ldap"}>
+                                      <Pencil className="h-4 w-4 mr-2" />
+                                      Edit
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleOpenDelete(user)}
+                                      className="text-red-600 focus:text-red-600"
+                                      disabled={user.type === "ldap"}
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Delete
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              ) : (
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* User Groups Section */}
+        {!loading && !error && groups.length > 0 && (
+          <Card>
+            <CardHeader className="p-3 sm:p-6">
+              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                <Shield className="h-4 w-4 sm:h-5 sm:w-5" />
+                User Groups ({groups.length})
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
+                Available user groups for permission management
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+                {groups.map((group) => (
+                  <div
+                    key={group.id}
+                    className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="p-2 rounded-full bg-primary/10">
+                      <Shield className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{group.name}</p>
+                      {group.description && <p className="text-xs text-muted-foreground truncate">{group.description}</p>}
+                    </div>
+                    <Badge variant="secondary" className="text-xs">
+                      {users.filter((u) => u.groupIds?.includes(group.id)).length} users
+                    </Badge>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
+        )}
 
-          {/* Error State */}
-          {error && (
-            <div className="flex items-center gap-2 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
-              <AlertCircle className="h-5 w-5" />
-              <span>{error}</span>
-              <Button variant="outline" size="sm" onClick={handleRefresh} className="ml-auto">
-                Retry
+        {/* Create User Dialog */}
+        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+          <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+                Create New User
+              </DialogTitle>
+              <DialogDescription className="text-xs sm:text-sm">Add a new user to the VMS system</DialogDescription>
+            </DialogHeader>
+            {renderFormFields()}
+            <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => setShowCreateDialog(false)}
+                disabled={isSubmitting}
+                className="w-full sm:w-auto"
+                size="sm"
+              >
+                Cancel
               </Button>
-            </div>
-          )}
-
-          {/* Loading State */}
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-muted-foreground">Loading users...</span>
-            </div>
-          )}
-
-          {/* Users Table */}
-          {!loading && !error && (
-            <Card>
-              <CardHeader className="p-3 sm:p-6">
-                <CardTitle className="text-lg sm:text-xl">Users ({filteredUsers.length})</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  List of all users with access to the VMS system
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0 sm:p-6 sm:pt-0">
-                {filteredUsers.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-muted-foreground">
-                    <Users className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-50" />
-                    <p className="text-sm sm:text-base">No users found</p>
-                    {searchTerm && <p className="text-xs sm:text-sm mt-1">Try adjusting your search or filter criteria</p>}
-                  </div>
+              <Button onClick={handleCreate} disabled={isSubmitting} className="w-full sm:w-auto" size="sm">
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
                 ) : (
-                  <div className="rounded-md border overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[40px] sm:w-[50px] text-xs sm:text-sm">#</TableHead>
-                          <TableHead className="text-xs sm:text-sm min-w-[120px]">Name</TableHead>
-                          <TableHead className="text-xs sm:text-sm hidden md:table-cell">Email</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Type</TableHead>
-                          <TableHead className="text-xs sm:text-sm hidden sm:table-cell">Status</TableHead>
-                          <TableHead className="text-xs sm:text-sm hidden lg:table-cell">Groups</TableHead>
-                          <TableHead className="w-[60px] sm:w-[80px]">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredUsers.map((user, index) => {
-                          const typeBadge = getUserTypeBadge(user.type);
-                          return (
-                            <TableRow key={user.id}>
-                              <TableCell className="font-medium text-muted-foreground text-xs sm:text-sm">
-                                {index + 1}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <div className="p-1 sm:p-1.5 rounded-full bg-muted flex-shrink-0">
-                                    {getUserTypeIcon(user.type)}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <span className="font-medium text-xs sm:text-sm truncate block">{user.name}</span>
-                                    {user.fullName && (
-                                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
-                                        {user.fullName}
-                                      </p>
-                                    )}
-                                    {/* Show email on mobile */}
-                                    {user.email && (
-                                      <p className="text-[10px] text-muted-foreground truncate md:hidden">{user.email}</p>
-                                    )}
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell">
-                                {user.email ? (
-                                  <div className="flex items-center gap-1 text-muted-foreground">
-                                    <Mail className="h-3 w-3 flex-shrink-0" />
-                                    <span className="text-xs sm:text-sm truncate">{user.email}</span>
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground text-xs sm:text-sm">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={`${typeBadge.className} text-[10px] sm:text-xs`}>
-                                  {typeBadge.label}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="hidden sm:table-cell">
-                                {user.isEnabled !== false ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all"
-                                  >
-                                    Enabled
-                                  </Badge>
-                                ) : (
-                                  <Badge
-                                    variant="outline"
-                                    className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all"
-                                  >
-                                    Disabled
-                                  </Badge>
-                                )}
-                              </TableCell>
-                              <TableCell className="hidden lg:table-cell">
-                                {user.groupIds && user.groupIds.length > 0 ? (
-                                  <div className="flex flex-wrap gap-1">
-                                    {user.groupIds.slice(0, 2).map((groupId) => (
-                                      <Badge key={groupId} variant="outline" className="text-[10px] sm:text-xs">
-                                        {getGroupName(groupId)}
-                                      </Badge>
-                                    ))}
-                                    {user.groupIds.length > 2 && (
-                                      <Badge variant="outline" className="text-[10px] sm:text-xs">
-                                        +{user.groupIds.length - 2}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground text-xs sm:text-sm">No groups</span>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                {canEditUsers ? (
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                        <MoreHorizontal className="h-4 w-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem onClick={() => handleOpenEdit(user)} disabled={user.type === "ldap"}>
-                                        <Pencil className="h-4 w-4 mr-2" />
-                                        Edit
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
-                                        onClick={() => handleOpenDelete(user)}
-                                        className="text-red-600 focus:text-red-600"
-                                        disabled={user.type === "ldap"}
-                                      >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                ) : (
-                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
+                  "Create User"
                 )}
-              </CardContent>
-            </Card>
-          )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-          {/* User Groups Section */}
-          {!loading && !error && groups.length > 0 && (
-            <Card>
-              <CardHeader className="p-3 sm:p-6">
-                <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                  <Shield className="h-4 w-4 sm:h-5 sm:w-5" />
-                  User Groups ({groups.length})
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Available user groups for permission management
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                  {groups.map((group) => (
-                    <div
-                      key={group.id}
-                      className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="p-2 rounded-full bg-primary/10">
-                        <Shield className="h-4 w-4 text-primary" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">{group.name}</p>
-                        {group.description && <p className="text-xs text-muted-foreground truncate">{group.description}</p>}
-                      </div>
-                      <Badge variant="secondary" className="text-xs">
-                        {users.filter((u) => u.groupIds?.includes(group.id)).length} users
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+        {/* Edit User Dialog */}
+        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+          <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                <Pencil className="h-4 w-4 sm:h-5 sm:w-5" />
+                Edit User
+              </DialogTitle>
+              <DialogDescription className="text-xs sm:text-sm">
+                Modify user details for {selectedUser?.name}
+              </DialogDescription>
+            </DialogHeader>
+            {renderFormFields()}
+            <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => setShowEditDialog(false)}
+                disabled={isSubmitting}
+                className="w-full sm:w-auto"
+                size="sm"
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleUpdate} disabled={isSubmitting} className="w-full sm:w-auto" size="sm">
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Changes"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-          {/* Create User Dialog */}
-          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-            <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6 custom-scrollbar">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                  <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
-                  Create New User
-                </DialogTitle>
-                <DialogDescription className="text-xs sm:text-sm">Add a new user to the VMS system</DialogDescription>
-              </DialogHeader>
-              {renderFormFields()}
-              <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowCreateDialog(false)}
-                  disabled={isSubmitting}
-                  className="w-full sm:w-auto"
-                  size="sm"
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleCreate} disabled={isSubmitting} className="w-full sm:w-auto" size="sm">
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    "Create User"
-                  )}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete User</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete user <strong>{selectedUser?.name}</strong>? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDelete} disabled={isSubmitting} className="bg-red-600 hover:bg-red-700">
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
-          {/* Edit User Dialog */}
-          <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-            <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6 custom-scrollbar">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                  <Pencil className="h-4 w-4 sm:h-5 sm:w-5" />
-                  Edit User
-                </DialogTitle>
-                <DialogDescription className="text-xs sm:text-sm">
-                  Modify user details for {selectedUser?.name}
-                </DialogDescription>
-              </DialogHeader>
-              {renderFormFields()}
-              <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowEditDialog(false)}
-                  disabled={isSubmitting}
-                  className="w-full sm:w-auto"
-                  size="sm"
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleUpdate} disabled={isSubmitting} className="w-full sm:w-auto" size="sm">
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    "Save Changes"
-                  )}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* Delete Confirmation Dialog */}
-          <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete User</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Are you sure you want to delete user <strong>{selectedUser?.name}</strong>? This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete} disabled={isSubmitting} className="bg-red-600 hover:bg-red-700">
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Deleting...
-                    </>
-                  ) : (
-                    "Delete"
-                  )}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-
-          {/* Cloud Login Dialog */}
-          <CloudLoginDialog
-            open={showLoginDialog}
-            onOpenChange={setShowLoginDialog}
-            systemId={loginSystemId}
-            systemName={loginSystemName}
-            onLoginSuccess={refetchUsers}
-          />
-        </>
-      )}
+        {/* Cloud Login Dialog */}
+        <CloudLoginDialog
+          open={showLoginDialog}
+          onOpenChange={setShowLoginDialog}
+          systemId={loginSystemId}
+          systemName={loginSystemName}
+          onLoginSuccess={refetchUsers}
+        />
+      </>
     </div>
   );
 }
