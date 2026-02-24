@@ -14,7 +14,7 @@ const REFRESH_COOKIE_NAME = AUTH_CONFIG.COOKIE_REFRESH_NAME;
 const publicRoutes = ["/login"];
 
 // API routes that don't require authentication
-const publicApiRoutes = ["/auth/login", "/auth/logout", "/auth/session", "/auth/refresh"];
+const publicApiRoutes = ["/auth/login", "/auth/logout", "/auth/session", "/auth/refresh", "/nx"];
 
 // Static assets and Next.js internals to skip
 const skipPaths = ["/_next", "/favicon.ico", "/images"];
@@ -43,7 +43,7 @@ export async function proxy(request: NextRequest) {
   if (!token) {
     // Allow Electron-verified requests to bypass JWT check for specific API routes
     const isElectronAuth = request.headers.get('x-electron-cloud-password');
-    const isProxyRoute = pathname.startsWith('/api/nx') || pathname.startsWith('/api/cloud');
+    const isProxyRoute = pathname.startsWith('/nx') || pathname.startsWith('/api/nx') || pathname.startsWith('/api/cloud');
 
     if (isElectronAuth && isProxyRoute) {
       return NextResponse.next();

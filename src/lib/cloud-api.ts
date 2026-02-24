@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDynamicConfig } from "./config";
-import { fetchWithDigestAuth } from "./digest-auth";
 
 /**
  * Common interface for cloud API request options
@@ -35,34 +34,6 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
  * Build headers for cloud API request
  * Includes authorization token if available in cookies
  */
-// Server-side decryption for Electron encrypted passwords
-function decryptPassword(encryptedData: string): string | null {
-  try {
-    const crypto = require('crypto');
-    const os = require('os');
-
-    // Derive same key as Electron main process
-    const machineId = os.hostname() + os.platform() + os.arch();
-    const key = crypto.createHash('sha256').update(machineId).digest();
-
-    const parts = encryptedData.split(':');
-    const iv = Buffer.from(parts[0], 'hex');
-    const authTag = Buffer.from(parts[1], 'hex');
-    const encrypted = parts[2];
-
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
-  } catch (error) {
-    console.error('[Decryption] Failed:', error);
-    return null;
-  }
-}
-
 export function buildCloudHeaders(request: NextRequest, systemId: string): Record<string, string> {
   let systemToken = request.cookies.get(`nx-cloud-${systemId}`)?.value;
 
@@ -80,40 +51,9 @@ export function buildCloudHeaders(request: NextRequest, systemId: string): Recor
   };
 
   if (systemToken && systemToken !== 'undefined') {
-    headers["Authorization"] = `Bearer ${systemToken}`;
-    console.log(`[Cloud API] Using Bearer token for ${systemId}`);
-  } else {
-    // Fallback: Use VMS Basic Auth
-    const vmsUser = process.env.NEXT_PUBLIC_NX_USERNAME || request.headers.get('x-electron-username');
-    let vmsPass: string | null = null;
-
-    // Priority 1: Decrypt Electron encrypted password
-    const vmsEncrypted = process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || request.headers.get('x-electron-vms-password-encrypted');
-    if (vmsEncrypted) {
-      console.log(`[Cloud API] Found encrypted password, attempting decryption for ${systemId}`);
-      vmsPass = decryptPassword(vmsEncrypted);
-      if (vmsPass) {
-        console.log(`[Cloud API] Successfully decrypted VMS password for ${systemId}`);
-      } else {
-        console.warn(`[Cloud API] Decryption failed for ${systemId}, falling back to plain-text`);
-      }
-    }
-
-    // Priority 2: Use plain-text from dev environment
-    if (!vmsPass) {
-      vmsPass = process.env.NEXT_PUBLIC_NX_PASSWORD || request.headers.get('x-electron-vms-password');
-      if (vmsPass) {
-        console.log(`[Cloud API] Using plain-text VMS password for ${systemId} (length: ${vmsPass.length})`);
-      }
-    }
-
-    if (vmsUser && vmsPass) {
-      const creds = Buffer.from(`${vmsUser}:${vmsPass}`).toString('base64');
-      headers["Authorization"] = `Basic ${creds}`;
-      console.log(`[Cloud API] ✓ VMS Basic Auth configured for ${systemId} (user: ${vmsUser})`);
-    } else {
-      console.error(`[Cloud API] ✗ No authentication available for ${systemId} - user: ${vmsUser}, pass: ${!!vmsPass}`);
-    }
+    headers["Authorization"] = systemToken.toLowerCase().startsWith('bearer ')
+      ? systemToken
+      : `Bearer ${systemToken}`;
   }
 
   return headers;
@@ -186,53 +126,8 @@ export function validateSystemId(request: NextRequest): { systemId: string | nul
 }
 
 /**
- * Get cloud credentials from config
- */
-export function getCloudCredentials(request: NextRequest): { username: string | null; password: string | null } {
-  const dynamicConfig = getDynamicConfig(request);
-  
-  // Try to get from dynamic config (Electron headers)
-  let username = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_USERNAME;
-  let password = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
-  
-  // Fallback to environment variables
-  if (!username) {
-    username = process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME;
-  }
-  
-  // Try encrypted cloud password
-  if (!password) {
-    const encryptedCloudPassword = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED 
-      || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED;
-    
-    if (encryptedCloudPassword) {
-      password = decryptPassword(encryptedCloudPassword);
-      if (password) {
-        console.log(`[Cloud API] Successfully decrypted cloud password`);
-      }
-    }
-  }
-  
-  // Fallback to plain password
-  if (!password) {
-    password = process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
-  }
-  
-  return { username: username || null, password: password || null };
-}
-
-/**
- * Check if endpoint requires digest authentication
- * For now, we use digest auth for /devices endpoint
- */
-function shouldUseDigestAuth(endpoint: string): boolean {
-  return endpoint.includes('/devices');
-}
-
-/**
  * Generic cloud API fetch handler
  * Handles common patterns: auth, error handling, response parsing
- * Uses digest authentication for /devices endpoint with cloud credentials
  */
 export async function fetchFromCloudApi<T>(
   request: NextRequest,
@@ -242,67 +137,31 @@ export async function fetchFromCloudApi<T>(
 
   try {
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
-    
-    // Check if we should use digest auth for this endpoint
-    const useDigestAuth = shouldUseDigestAuth(endpoint);
-    
-    if (useDigestAuth) {
-      const { username, password } = getCloudCredentials(request);
-      
-      if (username && password) {
-        console.log(`[Cloud API] Using digest authentication for ${endpoint} with cloud credentials (${username})`);
-        
-        const response = await fetchWithDigestAuth(cloudUrl, username, password, {
-          method: "GET",
-          headers: {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-          },
-        });
-
-        // Handle auth errors
-        if (response.status === 401 || response.status === 403) {
-          console.error(`[Cloud API] Digest auth failed for ${endpoint}`);
-          return createAuthErrorResponse(systemId, systemName);
-        }
-
-        // Handle other errors
-        if (!response.ok) {
-          console.error(`[Cloud API] Request failed with status ${response.status}`);
-          return createFetchErrorResponse(
-            `Failed to fetch from ${systemName || systemId}`,
-            systemId,
-            systemName,
-            response.status
-          );
-        }
-
-        const data = await response.json();
-        return NextResponse.json(data);
-      } else {
-        console.warn(`[Cloud API] Digest auth requested but cloud credentials not available (user: ${username}, pass: ${!!password})`);
-      }
-    }
-    
-    // Fallback to standard authentication
     const headers = buildCloudHeaders(request, systemId);
 
     let response = await fetch(cloudUrl, {
       method: "GET",
       headers,
-      redirect: "manual", // Handle manually to preserve headers
+      redirect: "manual",
     });
 
     // Handle temporary redirects (301, 302, 307, 308)
     if ([301, 302, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (location) {
-        console.log(`[Cloud API] Following redirect to: ${location}`);
         response = await fetch(location, {
           method: "GET",
           headers,
         });
       }
+    }
+
+    // Handle 304 Not Modified
+    if (response.status === 304) {
+      return new NextResponse(null, {
+        status: 304,
+        headers,
+      });
     }
 
     // Handle auth errors
@@ -370,7 +229,6 @@ export async function deleteFromCloudApi<T>(
 
 /**
  * Internal generic request handler
- * Supports digest authentication for /devices endpoint
  */
 async function requestCloudApi<T>(
   request: NextRequest,
@@ -380,60 +238,6 @@ async function requestCloudApi<T>(
 
   try {
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
-    
-    // Check if we should use digest auth for this endpoint
-    const useDigestAuth = shouldUseDigestAuth(endpoint);
-    
-    if (useDigestAuth) {
-      const { username, password } = getCloudCredentials(request);
-      
-      if (username && password) {
-        console.log(`[Cloud API] Using digest authentication for ${method} ${endpoint} with cloud credentials (${username})`);
-        
-        const response = await fetchWithDigestAuth(cloudUrl, username, password, {
-          method,
-          headers: {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-          },
-          body: body ? JSON.stringify(body) : undefined,
-        });
-
-        // Handle auth errors
-        if (response.status === 401 || response.status === 403) {
-          console.error(`[Cloud API] Digest auth failed for ${method} ${endpoint}`);
-          return createAuthErrorResponse(systemId, systemName);
-        }
-
-        // Handle other errors
-        if (!response.ok) {
-          console.error(`[Cloud API] ${method} request failed with status ${response.status}`);
-          return createFetchErrorResponse(
-            `Failed to ${method} to ${systemName || systemId}`,
-            systemId,
-            systemName,
-            response.status
-          );
-        }
-
-        // Some DELETE requests might not return JSON
-        if (response.status === 204) {
-          return NextResponse.json({ success: true } as unknown as T);
-        }
-
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-          const data = await response.json();
-          return NextResponse.json(data);
-        }
-
-        return NextResponse.json({ success: true } as unknown as T);
-      } else {
-        console.warn(`[Cloud API] Digest auth requested but cloud credentials not available (user: ${username}, pass: ${!!password})`);
-      }
-    }
-    
-    // Fallback to standard authentication
     const headers = buildCloudHeaders(request, systemId);
 
     let response = await fetch(cloudUrl, {
@@ -452,6 +256,14 @@ async function requestCloudApi<T>(
           body: body ? JSON.stringify(body) : undefined,
         });
       }
+    }
+
+    // Handle 304 Not Modified
+    if (response.status === 304) {
+      return new NextResponse(null, {
+        status: 304,
+        headers,
+      });
     }
 
     if (response.status === 401 || response.status === 403) {

@@ -1,4 +1,5 @@
 require('dotenv').config({ path: '.env.local' });
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // App Router is enabled by default in Next.js 15
@@ -33,6 +34,6 @@ const nextConfig = {
       },
     ];
   },
-}
+};
 
 module.exports = nextConfig

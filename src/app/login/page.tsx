@@ -11,8 +11,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle } from "lucide-react";
+import { NxAuthentication } from "@/components/auth/nx-authentication";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -38,21 +38,68 @@ export default function LoginPage() {
     await login(data);
   };
 
-  // Only show error if we have an explicit auth error OR a validation error AFTER submission
   const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
+  const checkLocalSession = () => {
+    const stored = localStorage.getItem("local_nx_user");
+    return !!stored;
+  };
+
+  const handleMainSubmit = async (data: LoginFormData) => {
+    const cloudStored = localStorage.getItem("nx_cloud_session");
+    const localStored = localStorage.getItem("local_nx_user");
+    const dedicatedCloudId = localStorage.getItem("nx_system_id");
+    const dedicatedLocalId = localStorage.getItem("nx_server_id");
+
+    let cloudSystemId = dedicatedCloudId || "";
+    let localServerId = dedicatedLocalId || "";
+
+    // Fallback if dedicated keys are missing but sessions exist
+    if (!cloudSystemId && cloudStored) {
+      try {
+        const cloud = JSON.parse(cloudStored);
+        cloudSystemId = cloud.ownerSystemId || "";
+      } catch (e) {
+        console.error("Failed to parse cloud session", e);
+      }
+    }
+
+    if (!localServerId && localStored) {
+      try {
+        const local = JSON.parse(localStored);
+        localServerId = local.serverId || "";
+      } catch (e) {
+        console.error("Failed to parse local session", e);
+      }
+    }
+
+    // Choose identification for license login: priority to Cloud Owner System ID
+    // If no cloud system, use current local server ID
+    const system_id = cloudSystemId || localServerId;
+
+    if (!localStored) {
+      clearError();
+      alert("Please connect to NX before logging in.");
+      return;
+    }
+
+    await login({ ...data, system_id });
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6">
-      <div className="w-full max-w-md">
-        {/* Form Card */}
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6 relative overflow-hidden">      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-100/30 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-100/30 rounded-full blur-[120px] pointer-events-none" />
+
+      <NxAuthentication />
+
+      <div className="w-full max-w-md relative z-10 transition-all duration-500 animate-in fade-in slide-in-from-bottom-5">
         <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8">
           <div className="text-center mb-8">
             <h2 className="text-2xl font-bold text-slate-800">Welcome</h2>
             <p className="text-slate-500 mt-2">Sign in to your account to continue</p>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            {/* Error Alert */}
+          <form onSubmit={handleSubmit(handleMainSubmit)} className="space-y-5">
             {showErrorMessage && (
               <div className="flex items-center p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 animate-in fade-in slide-in-from-top-1 duration-200">
                 <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
@@ -62,7 +109,6 @@ export default function LoginPage() {
               </div>
             )}
 
-            {/* Username Field */}
             <div className="space-y-2">
               <Label htmlFor="username" className="text-slate-700 font-medium">
                 Username
@@ -89,7 +135,6 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Password Field */}
             <div className="space-y-2">
               <Label htmlFor="password" className="text-slate-700 font-medium">
                 Password
@@ -118,7 +163,6 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Submit Button */}
             <Button
               type="submit"
               className="w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all duration-200"
@@ -138,7 +182,6 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {/* Help Text */}
           <div className="mt-6 pt-6 border-t border-slate-100">
             <p className="text-sm text-slate-500 text-center">
               Need help? <span className="text-blue-600 font-medium">Contact Administrator</span>
@@ -146,7 +189,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Footer */}
         <p className="text-center text-slate-400 text-sm mt-8">© 2026 Hotware Technology</p>
       </div>
     </div>

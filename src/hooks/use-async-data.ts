@@ -141,11 +141,22 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
     return cloudSystemsCache.data;
   }
 
+  // Get cloud token from localStorage if available
+  const cloudSessionStr = localStorage.getItem("nx_cloud_session");
+  let cloudToken = "";
+  if (cloudSessionStr) {
+    try {
+      const session = JSON.parse(cloudSessionStr);
+      cloudToken = session.accessToken || "";
+    } catch (e) { }
+  }
+
   const response = await fetch("/api/cloud/systems", {
     method: "GET",
     credentials: "include",
     headers: {
-      ...getElectronHeaders()
+      ...getElectronHeaders(),
+      ...(cloudToken ? { "X-Electron-Cloud-Token": cloudToken } : {}),
     }
   });
 

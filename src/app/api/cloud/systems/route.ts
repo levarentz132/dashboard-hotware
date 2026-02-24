@@ -3,7 +3,7 @@ import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
 
 export async function GET(request: NextRequest) {
     try {
-        const response = await fetch(`${CLOUD_CONFIG.baseURL}/cdb/systems`, {
+        const response = await fetch(`${CLOUD_CONFIG.baseURL}/api/systems/`, {
             method: "GET",
             headers: {
                 "Accept": "application/json",
@@ -18,7 +18,9 @@ export async function GET(request: NextRequest) {
         }
 
         const data = await response.json();
-        return NextResponse.json(data);
+        // If it's an array, wrap it in systems key for compatibility with use-async-data.ts
+        const result = Array.isArray(data) ? { systems: data } : data;
+        return NextResponse.json(result);
     } catch (error: any) {
         console.error("[API Cloud Systems] Error:", error);
         return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });

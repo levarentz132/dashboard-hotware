@@ -195,7 +195,7 @@ export const CLOUD_CONFIG = {
   // Enable auto-login when token is configured
   autoLoginEnabled: true,
   // Base URL for NX Cloud API
-  baseURL: "https://meta.nxvms.com",
+  baseURL: "https://nxvms.com",
 };
 
 // Generate Auth header for NX Cloud API
@@ -205,48 +205,14 @@ export function getCloudAuthHeader(request?: Request | NextRequest): string {
   }
 
   const dynamicConfig = getDynamicConfig(request);
-  const username = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_USERNAME || process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME;
-  let password: string | null = null;
 
-  // PRIORITY 1: Attempt to get real password from Electron (Decryption)
-  const encryptedPassword = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED;
-  if (encryptedPassword) {
-    password = decryptPassword(encryptedPassword);
-    if (password) {
-      console.log(`[Cloud Auth] ✓ Using decrypted password for ${username}`);
-    }
-  }
-
-  // PRIORITY 2: Use plain-text password from headers/env (if not a hash)
-  if (!password) {
-    const rawPassword = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
-    if (rawPassword && rawPassword.length > 0) {
-      // Skip bcrypt hashes (length 60 is standard for bcrypt)
-      if (rawPassword.length !== 60 && !rawPassword.startsWith('$2')) {
-        password = rawPassword;
-        console.log(`[Cloud Auth] Using raw password for ${username}`);
-      } else {
-        console.log(`[Cloud Auth] Skipping bcrypt hash for ${username}`);
-      }
-    }
-  }
-
-  // PRIORITY 3: If we have a username and password, use Basic Auth (Highest reliability)
-  if (username && password) {
-    const credentials = `${username}:${password}`;
-    const base64Credentials = Buffer.from(credentials).toString("base64");
-    console.log(`[Cloud Auth] ✓ Generated Basic Auth header for ${username}`);
-    return `Basic ${base64Credentials}`;
-  }
-
-  // PRIORITY 4: Fallback to Cloud Token (Bearer)
+  // Use Cloud Token (Bearer) - This is the primary and now ONLY authentication method
   const token = dynamicConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN;
   if (token && token !== 'undefined' && token.length > 20) {
-    console.log(`[Cloud Auth] ✓ Using Bearer token for ${username || 'detected'}`);
+    if (token.toLowerCase().startsWith('bearer ')) return token;
     return `Bearer ${token}`;
   }
 
-  console.error(`[Cloud Auth] ✗ No credentials available for cloud auth (user: ${!!username}, pass: ${!!password}, token: ${!!token})`);
   return "";
 }
 

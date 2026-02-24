@@ -18,6 +18,11 @@ let cachedPublicKeyRaw: string | null = null;
  */
 async function getPublicKey() {
   try {
+    // 1. Return cached key if available and we've already imported it successfully
+    if (cachedPublicKey && cachedPublicKeyRaw) {
+      return cachedPublicKey;
+    }
+
     const publicKeyPEM = await getExternalPublicKey();
 
     if (!publicKeyPEM || typeof publicKeyPEM !== 'string') {
@@ -26,12 +31,7 @@ async function getPublicKey() {
 
     const trimmedKey = publicKeyPEM.trim();
 
-    // Debug log for troubleshooting (first 50 chars)
-    if (!trimmedKey.startsWith("-----BEGIN PUBLIC KEY-----")) {
-      console.warn(`[Auth Service] Public key missing SPKI header. Starts with: ${trimmedKey.substring(0, 50)}...`);
-    }
-
-    // Only re-import if the key has changed
+    // 2. Double-check if raw key is same as cached (in case we didn't have cachedPublicKey for some reason)
     if (cachedPublicKeyRaw === trimmedKey && cachedPublicKey) {
       return cachedPublicKey;
     }
@@ -45,8 +45,7 @@ async function getPublicKey() {
     return publicKey;
   } catch (error) {
     console.error("[Auth Service] Error importing public key:", error);
-    // FALLBACK: If we have a JWT_SECRET, we return it but it will only work for HS256
-    // RS256 will still fail verification, which is safer than using a wrong key
+    // FALLBACK
     return new TextEncoder().encode(AUTH_CONFIG.JWT_SECRET || "fallback-secret");
   }
 }

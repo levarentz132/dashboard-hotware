@@ -14,21 +14,15 @@ import {
   ChevronDown,
   ChevronRight,
   Filter,
-  LogIn,
-  Eye,
-  EyeOff,
   X,
-  Shield,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useCameras } from "@/hooks/useNxAPI-camera";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import { fetchCloudSystems as getCachedCloudSystems } from "@/hooks/use-async-data";
-import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
-import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import { performAdminLogin } from "@/lib/auth-utils";
-import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
+import nxAPI from "@/lib/nxapi";
+import { getElectronHeaders } from "@/lib/config";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -36,6 +30,7 @@ import { Card, CardContent } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { useAuth } from "@/contexts/auth-context";
 import { isAdmin } from "@/lib/auth";
+import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 
 interface CloudSystem {
   id: string;
@@ -88,139 +83,93 @@ export default function CameraInventory() {
 
   const systemId = selectedSystemId;
 
-  // API hooks
-  const { cameras, loading: loadingCameras, error: camerasError, refetch } = useCameras(systemId);
-  const { connected, testConnection } = useSystemInfo(systemId);
-  const { servers, loading: loadingServers, error: serversError } = useServers(systemId);
-
-  const loading = loadingCameras || loadingServers;
-  const error = camerasError || serversError;
-
   // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
-  const [loadingCloud, setLoadingCloud] = useState(false);
-  const [camerasBySystem, setCamerasBySystem] = useState<CamerasBySystem[]>([]);
   const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
-  const [requiresAuth, setRequiresAuth] = useState(false);
-  const loginAttemptedRef = useRef<Set<string>>(new Set());
-  const [showLoginDialog, setShowLoginDialog] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
+  const autoExpandedRef = useRef<Set<string>>(new Set());
 
-  const isLoadingContent = loading || (viewMode === "cloud" && loadingCloud);
-
-  // Admin login function for cloud systems
-  const attemptAdminLogin = useCallback(
-    async (targetSystemId: string, systemName: string): Promise<boolean> => {
-      // Check if we already attempted for this system in this session
-      if (loginAttemptedRef.current.has(targetSystemId)) {
-        return false;
-      }
-
-      console.log(`[CameraInventory] Attempting Admin login to ${systemName}...`);
-      loginAttemptedRef.current.add(targetSystemId);
-
-      const success = await performAdminLogin(targetSystemId);
-
-      if (success) {
-        console.log(`[CameraInventory] Admin login success for ${systemName}`);
-        setIsLoggedIn((prev) => new Set(prev).add(targetSystemId));
-        // Refresh data
-        refetch();
-        return true;
-      } else {
-        return false;
-      }
-    },
-    [refetch],
-  );
-
-  // Set default system and handle auth
-  useEffect(() => {
-    const getSystems = async () => {
-      try {
-        let currentSystems = cloudSystems;
-        if (currentSystems.length === 0) {
-          setLoadingCloud(true);
-          currentSystems = await getCachedCloudSystems();
-          setCloudSystems(currentSystems);
-        }
-
-        // Use provided systemId or default to first online
-        const targetId =
-          systemId ||
-          (currentSystems.length > 0
-            ? (currentSystems.find((s) => s.stateOfHealth === "online") || currentSystems[0]).id
-            : "");
-
-        if (targetId && !selectedSystemId) {
-          setSelectedSystemId(targetId);
-        }
-
-        if (targetId && !isLoggedIn.has(targetId) && !loginAttemptedRef.current.has(targetId)) {
-          const system = currentSystems.find((s) => s.id === targetId);
-          const systemName = system?.name || targetId;
-          const success = await attemptAdminLogin(targetId, systemName);
-          if (!success && !isLoggedIn.has(targetId)) {
-            setRequiresAuth(true);
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching systems:", err);
-      } finally {
-        setLoadingCloud(false);
-      }
-    };
-    getSystems();
-  }, [selectedSystemId, systemId, attemptAdminLogin, isLoggedIn.has(selectedSystemId), cloudSystems.length]);
-
-  // Get status description
+  // Status Badge Logic
   const getStatusDescription = (status: string): string => {
     const statusLower = status?.toLowerCase();
     switch (statusLower) {
-      case "offline":
-        return "The Device is inaccessible.";
-      case "unauthorized":
-        return "The Device does not have correct credentials in the database.";
-      case "recording":
-        return "The Camera is online and recording the video stream.";
-      case "online":
-        return "The Device is online and accessible.";
-      case "notdefined":
-        return "The Device status is unknown. It may show up while Servers synchronize status information.";
-      case "incompatible":
-        return "The Server is incompatible (different System name or incompatible protocol version).";
-      case "mismatchedcertificate":
-        return "Server's DB certificate doesn't match the SSL handshake certificate.";
-      default:
-        return "Status unknown";
+      case "offline": return "The Device is inaccessible.";
+      case "unauthorized": return "The Device does not have correct credentials in the database.";
+      case "recording": return "The Camera is online and recording the video stream.";
+      case "online": return "The Device is online and accessible.";
+      case "notdefined": return "The Device status is unknown.";
+      case "incompatible": return "The Server is incompatible.";
+      case "mismatchedcertificate": return "Server's DB certificate doesn't match the SSL handshake certificate.";
+      default: return "Status unknown";
     }
   };
 
-  // Get status color based on status type
   const getStatusBadgeStyle = (status: string): string => {
     const statusLower = status?.toLowerCase();
     switch (statusLower) {
       case "online":
-      case "recording":
-        return "bg-green-100 text-green-800 border-green-200";
-      case "offline":
-        return "bg-red-100 text-red-800 border-red-200";
-      case "unauthorized":
-        return "bg-orange-100 text-orange-800 border-orange-200";
-      case "notdefined":
-        return "bg-gray-100 text-gray-800 border-gray-200";
+      case "recording": return "bg-green-100 text-green-800 border-green-200";
+      case "offline": return "bg-red-100 text-red-800 border-red-200";
+      case "unauthorized": return "bg-orange-100 text-orange-800 border-orange-200";
+      case "notdefined": return "bg-gray-100 text-gray-800 border-gray-200";
       case "incompatible":
-      case "mismatchedcertificate":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      default:
-        return "bg-gray-100 text-gray-600 border-gray-200";
+      case "mismatchedcertificate": return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      default: return "bg-gray-100 text-gray-600 border-gray-200";
     }
   };
 
-  // Fetch cameras from a specific cloud system
-  const fetchCloudCameras = useCallback(async (system: CloudSystem): Promise<CameraDevice[]> => {
-    if (system.stateOfHealth !== "online") return [];
+  // Fetching Logic
+  const fetchLocalCameras = useCallback(async () => {
+    const localUserStr = localStorage.getItem("local_nx_user");
+    const localServerId = localStorage.getItem("nx_server_id");
+    if (!localUserStr) return null;
 
+    try {
+      const localUser = JSON.parse(localUserStr);
+      const sid = localStorage.getItem("nx_system_id") || localServerId || localUser.serverId || "local";
+
+      // Try to get actual system name
+      let actualSystemName = "";
+      try {
+        const infoResp = await fetch("/nx/rest/v4/system/info", {
+          headers: { "x-runtime-guid": localUser.token }
+        });
+        if (infoResp.ok) {
+          const info = await infoResp.json();
+          actualSystemName = info.name || info.systemName || "";
+        }
+      } catch (e) { }
+
+      const displayName = actualSystemName ? `Local Server (${actualSystemName})` : "Local Server";
+
+      const response = await fetch("/nx/rest/v4/devices", {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "x-runtime-guid": localUser.token
+        }
+      });
+
+      if (!response.ok) return null;
+      const devices = await response.json();
+      const cams = (Array.isArray(devices) ? devices : []).map((d: any) => ({
+        ...d,
+        systemId: sid,
+        systemName: displayName
+      }));
+
+      return {
+        systemId: sid,
+        systemName: displayName,
+        items: cams,
+        stateOfHealth: "online"
+      };
+    } catch (e) {
+      console.error("Local fetch failed:", e);
+      return null;
+    }
+  }, []);
+
+  const fetchCloudCamerasForSystem = useCallback(async (system: CloudSystem) => {
     try {
       const response = await fetch(
         `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
@@ -235,11 +184,8 @@ export default function CameraInventory() {
       );
 
       if (!response.ok) return [];
-
       const devices = await response.json();
-      const cameraDevices = Array.isArray(devices) ? devices : [];
-
-      return cameraDevices.map((device: any) => ({
+      return (Array.isArray(devices) ? devices : []).map((device: any) => ({
         ...device,
         systemId: system.id,
         systemName: system.name,
@@ -250,79 +196,97 @@ export default function CameraInventory() {
     }
   }, []);
 
-  const fetchAllCloudCameras = useCallback(async () => {
-    try {
-      setLoadingCloud(true);
-      const systems = await getCachedCloudSystems();
-      setCloudSystems(systems);
+  // Memoize sync options
+  const syncOptions = useMemo(() => ({
+    onUpdate: (data: SyncData<CameraDevice>[]) => {
+      setExpandedSystems((prev: Set<string>) => {
+        const next = new Set(prev);
+        let changed = false;
 
-      const cloudPromises = systems.map(async (system) => {
-        const cameras = await fetchCloudCameras(system);
-        return {
-          systemId: system.id,
-          systemName: system.name,
-          cameras,
-          stateOfHealth: system.stateOfHealth,
-        };
-      });
-
-      const results = await Promise.all(cloudPromises);
-      setCamerasBySystem(results);
-
-      // Auto-expand the first system if nothing is expanded yet
-      if (results.length > 0) {
-        setExpandedSystems((prev) => {
-          if (prev.size === 0) {
-            return new Set([results[0].systemId]);
+        data.forEach(sys => {
+          if (sys.items.length > 0 && !autoExpandedRef.current.has(sys.systemId)) {
+            next.add(sys.systemId);
+            autoExpandedRef.current.add(sys.systemId);
+            changed = true;
           }
-          return prev;
         });
-      }
-    } catch (err) {
-      console.error("Error fetching all cloud cameras:", err);
-    } finally {
-      setLoadingCloud(false);
+
+        return changed ? next : prev;
+      });
     }
-  }, [fetchCloudCameras]);
+  }), []);
+
+  // Use the new sync hook
+  const {
+    dataBySystem,
+    loading: loadingSync,
+    loadingCloud: loadingCloudSync,
+    refetch: refetchSync
+  } = useInventorySync<CameraDevice>(
+    fetchLocalCameras,
+    fetchCloudCamerasForSystem,
+    syncOptions
+  );
+
+  // Detail View Hooks
+  const { cameras, loading: loadingCameras, error: camerasError, refetch: refetchSingle } = useCameras(systemId);
+  const { servers, loading: loadingServers, error: serversError } = useServers(systemId);
+  const { testConnection, connected } = useSystemInfo(systemId || "");
+
+  const loading = loadingSync;
+  const loadingCloud = loadingCloudSync;
+  const error = camerasError || serversError;
+  const isLoadingContent = loading;
+
+  const camerasBySystem = useMemo(() => {
+    return dataBySystem.map(sys => ({
+      systemId: sys.systemId,
+      systemName: sys.systemName,
+      cameras: sys.items,
+      stateOfHealth: sys.stateOfHealth
+    }));
+  }, [dataBySystem]);
+
+  // Handle system selection and cloud systems list
+  useEffect(() => {
+    const updateCloudSystems = async () => {
+      try {
+        const systems = await getCachedCloudSystems();
+        setCloudSystems(systems);
+
+        if (!selectedSystemId && systems.length > 0) {
+          const target = systems.find((s) => s.stateOfHealth === "online") || systems[0];
+          setSelectedSystemId(target.id);
+        }
+      } catch (err) {
+        console.error("Error fetching cloud systems list:", err);
+      }
+    };
+    updateCloudSystems();
+  }, [selectedSystemId]);
 
   // Toggle system expansion
-  const toggleSystemExpansion = (systemId: string) => {
-    setExpandedSystems((prev) => {
+  const toggleSystemExpansion = (sid: string) => {
+    setExpandedSystems((prev: Set<string>) => {
       const newSet = new Set(prev);
-      if (newSet.has(systemId)) {
-        newSet.delete(systemId);
-      } else {
-        newSet.add(systemId);
-      }
+      if (newSet.has(sid)) newSet.delete(sid);
+      else newSet.add(sid);
       return newSet;
     });
   };
 
-  // Cloud-only system handling
-  useEffect(() => {
-    if (viewMode === "cloud") {
-      fetchAllCloudCameras();
-    } else if (systemId) {
-      refetch();
-    }
-  }, [systemId, refetch, viewMode, fetchAllCloudCameras]);
-
-
-  // Auto-retry connection when component mounts
-  useEffect(() => {
-    if (!connected && !loading) {
-      testConnection();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const getStatusIcon = (status: string) => {
+    return status?.toLowerCase() === "online" ? (
+      <Wifi className="w-4 h-4 text-green-600" />
+    ) : (
+      <WifiOff className="w-4 h-4 text-red-600" />
+    );
+  };
 
 
   const displayCameras = useMemo(() => {
-    if (viewMode === "cloud") {
-      return camerasBySystem.flatMap((sys) => sys.cameras);
-    }
-    return (cameras as CameraDevice[]) || [];
-  }, [viewMode, camerasBySystem, cameras]);
+    return camerasBySystem.flatMap((sys) => sys.cameras);
+  }, [camerasBySystem]);
 
   // Get unique vendors for filter
   const uniqueVendors = Array.from(new Set(displayCameras.map((c) => c.vendor).filter(Boolean))).sort() as string[];
@@ -361,17 +325,10 @@ export default function CameraInventory() {
   ).length;
 
 
-  const getStatusIcon = (status: string) => {
-    return status?.toLowerCase() === "online" ? (
-      <Wifi className="w-4 h-4 text-green-600" />
-    ) : (
-      <WifiOff className="w-4 h-4 text-red-600" />
-    );
-  };
 
-
-  const isCloudEmpty = viewMode === "cloud" && cloudSystems.length === 0;
-  const showNoCloudAlert = isCloudEmpty && !loadingCloud;
+  const isDashboardEmpty = (viewMode === "cloud")
+    ? (camerasBySystem.length === 0 && !loadingSync)
+    : (displayCameras.length === 0 && !loading);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -380,10 +337,10 @@ export default function CameraInventory() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Camera Inventory</h1>
-          {error && !isCloudEmpty && <AlertCircle className="w-4 h-4 text-red-500 ml-2" />}
+          {error && !isDashboardEmpty && <AlertCircle className="w-4 h-4 text-red-500 ml-2" />}
         </div>
         <div className="flex items-center gap-2">
-          {!isCloudEmpty && (
+          {!isDashboardEmpty && (
             <div className="flex items-center bg-white rounded-lg border p-1">
               <button
                 onClick={() => setViewMode("cloud")}
@@ -413,9 +370,9 @@ export default function CameraInventory() {
           <button
             onClick={() => {
               if (viewMode === "cloud") {
-                fetchAllCloudCameras();
+                refetchSync();
               } else {
-                refetch();
+                refetchSingle();
               }
               testConnection();
             }}
@@ -431,33 +388,10 @@ export default function CameraInventory() {
       </div>
 
       {/* Cloud Systems Error - Now positioned below title */}
-      {showNoCloudAlert && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
-          <div className="flex items-center">
-            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
-            <div>
-              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
-              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {!isCloudEmpty && (
+      {!isDashboardEmpty && (
         <>
 
-          <CloudLoginDialog
-            open={showLoginDialog}
-            onOpenChange={setShowLoginDialog}
-            systemId={selectedSystemId}
-            systemName={cloudSystems.find((s) => s.id === selectedSystemId)?.name || selectedSystemId}
-            onLoginSuccess={() => {
-              setIsLoggedIn((prev) => new Set(prev).add(selectedSystemId));
-              setRequiresAuth(false);
-              refetch();
-              testConnection();
-            }}
-          />
 
           {/* Stats Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
@@ -612,7 +546,7 @@ export default function CameraInventory() {
                 <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
                 <span className="text-gray-600">Loading cameras...</span>
               </div>
-            ) : viewMode !== "cloud" && servers.length === 0 ? (
+            ) : viewMode !== "cloud" && displayCameras.length === 0 ? (
               <div className="flex items-center justify-center p-12 text-center">
                 <div className="space-y-4">
                   <Camera className="w-12 h-12 text-gray-300 mx-auto" />
@@ -620,7 +554,7 @@ export default function CameraInventory() {
                   <p className="text-sm text-gray-500 max-w-xs mx-auto">
                     Your system is connected but no cameras are currently detected.
                   </p>
-                  <Button onClick={() => refetch()} variant="outline">
+                  <Button onClick={() => refetchSingle()} variant="outline">
                     <RefreshCw className="w-4 h-4 mr-2" /> Refresh
                   </Button>
                 </div>
@@ -631,7 +565,7 @@ export default function CameraInventory() {
                   <Camera className="w-12 h-12 text-gray-300 mx-auto" />
                   <p>No camera detected in this system.</p>
                   <div className="flex gap-3 justify-center">
-                    <Button onClick={() => refetch()} variant="outline">
+                    <Button onClick={() => refetchSingle()} variant="outline">
                       <RefreshCw className="w-4 h-4 mr-2" /> Refresh
                     </Button>
                   </div>
@@ -948,24 +882,6 @@ export default function CameraInventory() {
           </div>
         </>
       )}
-
-      {/* Temporarily hidden as requested
-      {requiresAuth && !isCloudEmpty && (
-        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white p-6 rounded-xl shadow-xl border max-w-sm w-full text-center">
-            <Shield className="w-12 h-12 text-blue-600 mx-auto mb-4" />
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Admin Login Required</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              To manage cameras and inventory, you need to log in with system administrator credentials.
-            </p>
-            <Button onClick={() => setShowLoginDialog(true)} className="w-full bg-blue-600 hover:bg-blue-700">
-              <LogIn className="w-4 h-4 mr-2" />
-              Login Admin
-            </Button>
-          </div>
-        </div>
-      )}
-      */}
     </div>
   );
 }
