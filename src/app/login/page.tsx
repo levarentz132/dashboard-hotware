@@ -47,43 +47,47 @@ export default function LoginPage() {
 
   const handleMainSubmit = async (data: LoginFormData) => {
     const cloudStored = localStorage.getItem("nx_cloud_session");
-    const localStored = localStorage.getItem("local_nx_user");
-    const dedicatedCloudId = localStorage.getItem("nx_system_id");
-    const dedicatedLocalId = localStorage.getItem("nx_server_id");
+    const hasCloudLogin = !!cloudStored;
 
-    let cloudSystemId = dedicatedCloudId || "";
-    let localServerId = dedicatedLocalId || "";
+    // 1. Determine base IDs from storage or sessions
+    let storedSystemId = localStorage.getItem("nx_system_id") || "";
+    let storedServerId = localStorage.getItem("nx_server_id") || "";
 
-    // Fallback if dedicated keys are missing but sessions exist
-    if (!cloudSystemId && cloudStored) {
+    // Fallback parsing from sessions if dedicated keys are missing
+    if (!storedSystemId && cloudStored) {
       try {
         const cloud = JSON.parse(cloudStored);
-        cloudSystemId = cloud.ownerSystemId || "";
-      } catch (e) {
-        console.error("Failed to parse cloud session", e);
+        storedSystemId = cloud.ownerSystemId || "";
+      } catch (e) { }
+    }
+
+    // 2. Apply Rule: "if nx cloud is not connected then it is local"
+    // If not cloud connected, any available ID is effectively a server_id
+    if (!hasCloudLogin) {
+      if (!storedServerId && storedSystemId) {
+        storedServerId = storedSystemId;
+        storedSystemId = "";
       }
     }
 
-    if (!localServerId && localStored) {
-      try {
-        const local = JSON.parse(localStored);
-        localServerId = local.serverId || "";
-      } catch (e) {
-        console.error("Failed to parse local session", e);
-      }
-    }
+    // 3. Resolve final IDs (taken directly from nx authentication storage)
+    let system_id = hasCloudLogin ? storedSystemId : "";
+    let server_id = storedServerId;
 
-    // Choose identification for license login: priority to Cloud Owner System ID
-    // If no cloud system, use current local server ID
-    const system_id = cloudSystemId || localServerId;
-
-    if (!localStored) {
+    if (!system_id && !server_id) {
       clearError();
-      alert("Please connect to NX before logging in.");
+      alert("Please provide a System ID or Server ID, or connect to NX first.");
       return;
     }
 
-    await login({ ...data, system_id });
+    console.log(`[Form Submission] Mode: ${hasCloudLogin ? 'Cloud' : 'Local'}, System: ${system_id || 'None'}, Server: ${server_id || 'None'}`);
+
+    await login({
+      username: data.username,
+      password: data.password,
+      system_id,
+      server_id
+    });
   };
 
   return (

@@ -85,8 +85,8 @@ export default function CameraInventory() {
 
   // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
-  const [expandedSystems, setExpandedSystems] = useState<Set<string>>(new Set());
-  const autoExpandedRef = useRef<Set<string>>(new Set());
+  // Systems expansion state
+  const [collapsedSystems, setCollapsedSystems] = useState<Set<string>>(new Set());
 
   // Status Badge Logic
   const getStatusDescription = (status: string): string => {
@@ -149,7 +149,7 @@ export default function CameraInventory() {
         }
       });
 
-      if (!response.ok) return null;
+      if (response.status >= 400) return null;
       const devices = await response.json();
       const cams = (Array.isArray(devices) ? devices : []).map((d: any) => ({
         ...d,
@@ -183,7 +183,7 @@ export default function CameraInventory() {
         },
       );
 
-      if (!response.ok) return [];
+      if (response.status >= 400) return [];
       const devices = await response.json();
       return (Array.isArray(devices) ? devices : []).map((device: any) => ({
         ...device,
@@ -198,22 +198,7 @@ export default function CameraInventory() {
 
   // Memoize sync options
   const syncOptions = useMemo(() => ({
-    onUpdate: (data: SyncData<CameraDevice>[]) => {
-      setExpandedSystems((prev: Set<string>) => {
-        const next = new Set(prev);
-        let changed = false;
-
-        data.forEach(sys => {
-          if (sys.items.length > 0 && !autoExpandedRef.current.has(sys.systemId)) {
-            next.add(sys.systemId);
-            autoExpandedRef.current.add(sys.systemId);
-            changed = true;
-          }
-        });
-
-        return changed ? next : prev;
-      });
-    }
+    // onUpdate removed to consolidate expansion logic in useEffect below
   }), []);
 
   // Use the new sync hook
@@ -227,6 +212,8 @@ export default function CameraInventory() {
     fetchCloudCamerasForSystem,
     syncOptions
   );
+
+  // Consolidate expansion logic into computed state during render
 
   // Detail View Hooks
   const { cameras, loading: loadingCameras, error: camerasError, refetch: refetchSingle } = useCameras(systemId);
@@ -265,9 +252,9 @@ export default function CameraInventory() {
     updateCloudSystems();
   }, [selectedSystemId]);
 
-  // Toggle system expansion
+  // Toggle system expansion (we now track what is CLOSED)
   const toggleSystemExpansion = (sid: string) => {
-    setExpandedSystems((prev: Set<string>) => {
+    setCollapsedSystems((prev: Set<string>) => {
       const newSet = new Set(prev);
       if (newSet.has(sid)) newSet.delete(sid);
       else newSet.add(sid);
@@ -591,7 +578,8 @@ export default function CameraInventory() {
                 ) : (
                   <div className="space-y-4">
                     {camerasBySystem.map((systemData) => {
-                      const isExpanded = expandedSystems.has(systemData.systemId);
+                      const hasCameras = systemData.cameras.length > 0;
+                      const isExpanded = hasCameras && !collapsedSystems.has(systemData.systemId);
                       const isOnline = systemData.stateOfHealth === "online";
 
                       // Filter cameras for this system

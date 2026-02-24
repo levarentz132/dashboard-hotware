@@ -10,6 +10,7 @@ export interface ExternalAuthRequest {
   username: string;
   password: string;
   system_id?: string; // Optional: validate user belongs to this system
+  server_id?: string; // Optional: validate user belongs to this local server
   access_role?: string; // Optional: specify role context (e.g. 'owner') when logging in with system_id
 }
 

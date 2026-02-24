@@ -31,7 +31,7 @@ async function handleRequest(request: NextRequest, method: string) {
 
         request.headers.forEach((value, key) => {
             const lowerKey = key.toLowerCase();
-            if (!['host', 'connection', 'content-length', 'content-encoding', 'transfer-encoding', 'accept-encoding', 'cookie'].includes(lowerKey)) {
+            if (!['host', 'connection', 'content-length', 'content-encoding', 'transfer-encoding', 'accept-encoding', 'cookie', 'if-none-match', 'if-modified-since'].includes(lowerKey)) {
                 headers[lowerKey] = value;
             }
         });

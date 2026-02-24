@@ -81,6 +81,7 @@ export interface LoginCredentials {
   username: string;
   password: string;
   system_id?: string;
+  server_id?: string;
 }
 
 export interface RegisterData {

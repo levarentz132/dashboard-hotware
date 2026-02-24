@@ -45,6 +45,7 @@ const loginSchema = z.object({
   username: z.string().min(1, "Username harus diisi"),
   password: z.string().min(1, "Password harus diisi"),
   system_id: z.string().optional(),
+  server_id: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let { username, password, system_id } = validation.data;
+    let { username, password, system_id, server_id } = validation.data;
     const dynamicConfig = getDynamicConfig(request);
 
     // Prioritize system_id from Electron headers if missing from body
@@ -73,7 +74,13 @@ export async function POST(request: NextRequest) {
       console.log(`[Login] Using system_id from Electron header: ${system_id}`);
     }
 
-    console.log(`[Login Attempt] User: ${username}, Provided SystemID: ${system_id || "None"}`);
+    if (!server_id && dynamicConfig?.NEXT_PUBLIC_NX_SERVER_ID) {
+      server_id = (dynamicConfig as any).NEXT_PUBLIC_NX_SERVER_ID;
+      console.log(`[Login] Using server_id from Electron header: ${server_id}`);
+    }
+
+    const identificationId = system_id || server_id;
+    console.log(`[Login Attempt] User: ${username}, SystemID: ${system_id || "None"}, ServerID: ${server_id || "None"}`);
 
     // If system_id is not provided, try to detect it from cloud systems
     if (!system_id) {
@@ -113,6 +120,7 @@ export async function POST(request: NextRequest) {
         username,
         password,
         system_id,
+        server_id,
         access_role,
       });
     }
@@ -157,9 +165,9 @@ export async function POST(request: NextRequest) {
 
     // If the server didn't explicitly return the system_id in the user object, 
     // but the login succeeded and we provided a system_id, trust that it's now associated.
-    if (userData && !userData.system_id && system_id && (externalData.success || externalData.access_token)) {
-      userData.system_id = system_id;
-      console.log(`[Login] Using requested system_id: ${system_id}`);
+    if (userData && !userData.system_id && identificationId && (externalData.success || externalData.access_token)) {
+      userData.system_id = identificationId;
+      console.log(`[Login] Using requested ID: ${identificationId}`);
     }
 
     // Map license status to role for backward compatibility
@@ -275,7 +283,7 @@ export async function POST(request: NextRequest) {
 
     // 2. Establish VMS Relay Session (Dual-Login)
     // Use VMS credentials from environment to establish relay session
-    if (system_id) {
+    if (identificationId) {
       try {
         // Get VMS credentials from environment (plain-text for dev, decrypt for Electron)
         const vmsUsername = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
@@ -317,8 +325,11 @@ export async function POST(request: NextRequest) {
         }
 
         if (vmsUsername && vmsPassword) {
-          const relayLoginUrl = `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`;
-          console.log(`[Dual-Login] Attempting relay login for ${system_id} with VMS user: ${vmsUsername}, password length: ${vmsPassword.length}`);
+          const relayLoginUrl = system_id
+            ? `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`
+            : `https://localhost:7001/rest/v3/login/sessions`; // Fallback for local
+
+          console.log(`[Dual-Login] Attempting relay login for ${identificationId} with VMS user: ${vmsUsername}`);
 
           const relayResponse = await fetch(relayLoginUrl, {
             method: "POST",
