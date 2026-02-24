@@ -10,9 +10,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "System ID is required" }, { status: 400 });
   }
 
-  if (!serverId) {
-    return NextResponse.json({ error: "Server ID is required" }, { status: 400 });
-  }
+  // Determine endpoint: system-wide or server-specific
+  const endpoint = serverId
+    ? `/rest/v3/servers/${serverId}/events`
+    : `/rest/v3/events`;
 
   // Build query parameters for events
   const queryParams = new URLSearchParams();

@@ -45,6 +45,8 @@ import { cn } from "@/lib/utils";
 import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
+import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
+import Cookies from "js-cookie";
 
 // ============================================
 // INTERFACE DEFINITIONS
@@ -69,7 +71,7 @@ interface CloudServer {
 interface ServerOption {
   id: string;
   name: string;
-  type: "local" | "cloud";
+  type: "local" | "cloud" | "all";
   status?: string;
   accessRole?: string;
 }
@@ -128,6 +130,7 @@ interface EventLog {
   aggregationCount: number;
   flags: number;
   compareString: string;
+  systemId?: string;
 }
 
 // ============================================
@@ -631,14 +634,98 @@ function EventSkeleton() {
 
 export default function AlarmConsole() {
 
-  const [selectedCloudSystemId, setSelectedCloudSystemId] = useState<string>("");
-  const [selectedCloudServerId, setSelectedCloudServerId] = useState<string>("");
-  const { servers, loading: loadingServers } = useServers(selectedCloudSystemId);
+  const [selectedCloudSystemId, setSelectedCloudSystemId] = useState<string>("all");
+  const [selectedCloudServerId, setSelectedCloudServerId] = useState<string>("all");
+  const { servers, loading: loadingServers } = useServers(selectedCloudSystemId !== "all" ? selectedCloudSystemId : undefined);
   const { cameras } = useCameras(selectedCloudSystemId);
   const [events, setEvents] = useState<EventLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
+
+  // Use the new sync hook for local-first strategy
+  const fetchLocalAlarms = useCallback(async (): Promise<SyncData<EventLog> | null> => {
+    const localUserStr = Cookies.get("local_nx_user");
+    if (!localUserStr) return null;
+
+    try {
+      const localUser = JSON.parse(localUserStr);
+      const sid = Cookies.get("nx_server_id") || localUser.serverId || "local";
+
+      // Use local proxy with specific 'this' server endpoint
+      const response = await fetch("/nx/rest/v3/servers/this/events", {
+        headers: {
+          "x-runtime-guid": localUser.token,
+          "Accept": "application/json"
+        }
+      });
+
+      if (!response.ok) return null;
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : [];
+
+      return {
+        systemId: sid,
+        systemName: "Local Server",
+        items,
+        stateOfHealth: "online"
+      };
+    } catch (e) {
+      console.error("[AlarmConsole] Local fetch failed:", e);
+      return null;
+    }
+  }, []);
+
+  const fetchCloudAlarmsForSystem = useCallback(async (system: CloudSystem): Promise<EventLog[]> => {
+    try {
+      const response = await fetch(`/api/cloud/events?systemId=${encodeURIComponent(system.id)}`, {
+        headers: {
+          Accept: "application/json",
+          ...getElectronHeaders(),
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        if (errorData.requiresAuth) {
+          setRequiresAuth(true);
+          setLoginSystemId(system.id);
+          setLoginSystemName(system.name);
+        }
+        return [];
+      }
+
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.error(`[AlarmConsole] Cloud fetch failed for ${system.name}:`, e);
+      return [];
+    }
+  }, []);
+
+  const {
+    dataBySystem,
+    loading: syncLoading,
+    loadingCloud: syncLoadingCloud,
+    refetch: refetchSync
+  } = useInventorySync<EventLog>(
+    fetchLocalAlarms,
+    fetchCloudAlarmsForSystem
+  );
+
+  // Update events when sync data changes
+  useEffect(() => {
+    const allEvents = dataBySystem.flatMap(s =>
+      s.items.map(item => ({ ...item, systemId: s.systemId }))
+    );
+    // Sort all events by timestamp
+    const sortedEvents = allEvents.sort((a, b) => {
+      const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
+      const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
+      return timeB - timeA;
+    });
+    setEvents(sortedEvents);
+  }, [dataBySystem]);
 
   // Cloud systems state
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
@@ -848,14 +935,44 @@ export default function AlarmConsole() {
 
   // Cloud system selector state
   const serverOptions: ServerOption[] = useMemo(() => {
-    return cloudSystems.map((system) => ({
-      id: system.id,
-      name: system.name,
-      type: "cloud",
-      status: system.stateOfHealth,
-      accessRole: system.accessRole,
-    }));
-  }, [cloudSystems]);
+    const options: ServerOption[] = [
+      { id: "all", name: "All systems", type: "all", status: "online", accessRole: "" }
+    ];
+
+    const normalizeId = (id: string) => id.toLowerCase().replace(/[{}]/g, "");
+
+    // Add local if present in dataBySystem
+    const localSystem = dataBySystem.find(s => s.systemName === "Local Server");
+    if (localSystem) {
+      options.push({
+        id: localSystem.systemId,
+        name: "Local Server",
+        type: "local",
+        status: "online",
+        accessRole: "owner"
+      });
+    }
+
+    cloudSystems.forEach((system) => {
+      const systemId = normalizeId(system.id);
+      // Avoid duplicate local
+      if (localSystem && normalizeId(localSystem.systemId) === systemId) return;
+
+      options.push({
+        id: system.id,
+        name: system.name,
+        type: "cloud",
+        status: system.stateOfHealth,
+        accessRole: system.accessRole,
+      });
+    });
+
+    return options;
+  }, [cloudSystems, dataBySystem]);
+
+  const selectedSystemType = useMemo(() => {
+    return serverOptions.find(o => o.id === selectedCloudSystemId)?.type || "all";
+  }, [serverOptions, selectedCloudSystemId]);
 
   // Set default system
   useEffect(() => {
@@ -869,15 +986,18 @@ export default function AlarmConsole() {
   // Handle system selection change
   const handleSystemChange = (value: string) => {
     setSelectedCloudSystemId(value);
-    setEvents([]); // Clear events when switching systems
+    setSelectedCloudServerId("all"); // Reset server selection when system changes
     setError(null);
-    fetchCloudServers(value);
+    if (value !== "all") {
+      fetchCloudServers(value);
+    } else {
+      setCloudServers([]);
+    }
   };
 
   // Handle cloud server selection
   const handleCloudServerChange = (serverId: string) => {
     setSelectedCloudServerId(serverId);
-    setEvents([]); // Clear events when switching servers
   };
 
   // Extract actual ID from selectedServerId (format: "type:id")
@@ -938,75 +1058,18 @@ export default function AlarmConsole() {
     setShowLoginDialog(true);
   }, [selectedCloudSystemId, getCurrentCloudSystemName]);
 
-  // Fetch events
-  const fetchEvents = useCallback(async () => {
-    if (!selectedCloudSystemId || !selectedCloudServerId) return;
+  // fetchEvents removed in favor of useInventorySync
 
-    setLoading(true);
-    setError(null);
-    setRequiresAuth(false);
-
-    try {
-      // For cloud systems, use systemId and serverId
-      const params = new URLSearchParams({
-        systemId: selectedCloudSystemId,
-        serverId: selectedCloudServerId,
-      });
-      const response = await fetch(`/api/cloud/events?${params.toString()}`, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        if (errorData.requiresAuth) {
-          setRequiresAuth(true);
-          throw new Error(`Login required to access this cloud system.`);
-        }
-        throw new Error(`Failed to fetch events: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      const sortedEvents = Array.isArray(data)
-        ? data.sort((a: EventLog, b: EventLog) => {
-          const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
-          const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
-          return timeB - timeA;
-        })
-        : [];
-
-      setRequiresAuth(false);
-      setEvents(sortedEvents);
-    } catch (err) {
-      console.error("Error fetching events:", err);
-      setError(err instanceof Error ? err.message : "Failed to fetch events");
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedCloudSystemId, selectedCloudServerId]);
-
-  // Fetch on server change
+  // Auto-refresh using sync hook
   useEffect(() => {
-    if (selectedCloudSystemId && selectedCloudServerId) {
-      fetchEvents();
-    }
-  }, [selectedCloudSystemId, selectedCloudServerId, fetchEvents]);
+    if (!autoRefresh) return;
 
-  // Auto-refresh
-  useEffect(() => {
-    if (!autoRefresh || !selectedCloudSystemId || !selectedCloudServerId) return;
-
-    const interval = setInterval(fetchEvents, refreshInterval * 1000);
+    const interval = setInterval(refetchSync, refreshInterval * 1000);
     return () => clearInterval(interval);
   }, [
     autoRefresh,
     refreshInterval,
-    selectedCloudSystemId,
-    selectedCloudServerId,
-    fetchEvents,
+    refetchSync,
   ]);
 
   // Toggle expansion
@@ -1025,6 +1088,16 @@ export default function AlarmConsole() {
   // Filter events
   const filteredEvents = useMemo(() => {
     return events.filter((event) => {
+      // System & Server filters
+      const normalizeId = (id: string) => id.toLowerCase().replace(/[{}]/g, "");
+      const matchesSystem = selectedCloudSystemId === "all" ||
+        (event.systemId && normalizeId(event.systemId) === normalizeId(selectedCloudSystemId));
+
+      const matchesServer = selectedCloudServerId === "all" ||
+        (event.eventParams?.sourceServerId && normalizeId(event.eventParams.sourceServerId) === normalizeId(selectedCloudServerId));
+
+      if (!matchesSystem || !matchesServer) return false;
+
       const matchesEventType = filterEventType === "all" || event.eventParams?.eventType === filterEventType;
       const matchesLevel = filterLevel === "all" || event.eventParams?.metadata?.level === filterLevel;
       const matchesActionType = filterActionType === "all" || event.actionType === filterActionType;
@@ -1208,20 +1281,47 @@ export default function AlarmConsole() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Server Selector - only if systems exist */}
-          {!isCloudEmpty && (
-            <Select value={selectedCloudSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
-              <SelectTrigger className="w-full sm:w-[220px] h-10">
-                <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
-                <SelectValue placeholder="Pilih system..." />
+          {/* Server Selector */}
+          <Select value={selectedCloudSystemId} onValueChange={handleSystemChange} disabled={syncLoading}>
+            <SelectTrigger className="w-full sm:w-[220px] h-10">
+              <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
+              <SelectValue placeholder="Pilih system..." />
+            </SelectTrigger>
+            <SelectContent>
+              {serverOptions.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  <div className="flex items-center gap-2">
+                    <span className={cn("w-2 h-2 rounded-full", option.status === "online" ? "bg-blue-500" : "bg-gray-400")} />
+                    <span>{option.name}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Cloud Server Selector - only if a specific cloud system is selected */}
+          {selectedSystemType === "cloud" && (
+            <Select
+              value={selectedCloudServerId}
+              onValueChange={handleCloudServerChange}
+              disabled={loadingServers || servers.length === 0}
+            >
+              <SelectTrigger className="w-full sm:w-[200px] h-10">
+                <Server className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
+                <SelectValue placeholder={loadingServers ? "Memuat server..." : "Semua Server"} />
               </SelectTrigger>
               <SelectContent>
-                {cloudSystems.map((system) => (
-                  <SelectItem key={system.id} value={system.id}>
+                <SelectItem value="all">Semua Server</SelectItem>
+                {servers.map((server) => (
+                  <SelectItem key={server.id} value={server.id}>
                     <div className="flex items-center gap-2">
-                      <span className={cn("w-2 h-2 rounded-full", system.isOnline ? "bg-blue-500" : "bg-gray-400")} />
-                      <span>{system.name}</span>
-                      {!system.isOnline && <span className="text-xs text-gray-400">(offline)</span>}
+                      <span
+                        className={cn(
+                          "w-2 h-2 rounded-full",
+                          server.status === "Online" ? "bg-green-500" : "bg-gray-400",
+                        )}
+                      />
+                      <span>{server.name || server.id}</span>
                     </div>
                   </SelectItem>
                 ))}
@@ -1229,43 +1329,8 @@ export default function AlarmConsole() {
             </Select>
           )}
 
-          {/* Cloud Server Selector - shown when cloud system is selected */}
-          {!isCloudEmpty && selectedCloudSystemId && (
-            <Select
-              value={selectedCloudServerId}
-              onValueChange={handleCloudServerChange}
-              disabled={loadingCloudServers || cloudServers.length === 0}
-            >
-              <SelectTrigger className="w-full sm:w-[200px] h-10">
-                <Server className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
-                <SelectValue placeholder={loadingCloudServers ? "Memuat server..." : "Pilih server..."} />
-              </SelectTrigger>
-              <SelectContent>
-                {cloudServers.length > 0 ? (
-                  cloudServers.map((server) => (
-                    <SelectItem key={server.id} value={server.id}>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "w-2 h-2 rounded-full",
-                            server.status === "Online" ? "bg-green-500" : "bg-gray-400",
-                          )}
-                        />
-                        <span>{server.name || server.id}</span>
-                      </div>
-                    </SelectItem>
-                  ))
-                ) : (
-                  <div className="px-2 py-4 text-sm text-gray-500 text-center">
-                    {loadingCloudServers ? "Memuat server..." : "Tidak ada server dalam sistem ini"}
-                  </div>
-                )}
-              </SelectContent>
-            </Select>
-          )}
-
           {/* Cloud Logout Button */}
-          {!isCloudEmpty && selectedCloudSystemId && isLoggedIn.has(selectedCloudSystemId) && (
+          {!isCloudEmpty && selectedCloudSystemId !== "all" && isLoggedIn.has(selectedCloudSystemId) && (
             <Button
               variant="ghost"
               size="default"
@@ -1278,44 +1343,42 @@ export default function AlarmConsole() {
             </Button>
           )}
 
-          {/* Refresh Button - Styled like CameraInventory */}
+          {/* Refresh Button */}
           <button
             onClick={() => {
-              if (isCloudEmpty) {
-                fetchCloudSystems();
-              } else {
-                fetchEvents();
-              }
+              refetchSync();
+              fetchCloudSystems();
             }}
             disabled={
-              loading ||
+              syncLoading ||
               loadingCloud ||
-              (!isCloudEmpty && (!selectedCloudSystemId || !selectedCloudServerId))
+              (!isCloudEmpty && (!selectedCloudSystemId && dataBySystem.length === 0))
             }
             className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
           >
             <RefreshCw
-              className={`w-4 h-4 ${loading || loadingCloud ? "animate-spin" : ""}`}
+              className={`w-4 h-4 ${syncLoading || loadingCloud ? "animate-spin" : ""}`}
             />
             <span className="font-medium">Refresh</span>
           </button>
         </div>
       </div>
 
-      {/* Cloud Systems Error */}
-      {showNoCloudAlert && (
+      {/* Cloud Systems Alert - only show if cloud is empty AND we don't even have local data */}
+      {showNoCloudAlert && dataBySystem.length === 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
           <div className="flex items-center">
             <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
             <div>
-              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
-              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
+              <h3 className="font-medium text-yellow-800">No Systems Found</h3>
+              <p className="text-sm text-yellow-700">Unable to fetch any system data. Check your connection or login status.</p>
             </div>
           </div>
         </div>
       )}
 
-      {!isCloudEmpty && (
+      {/* Show content if we have ANY data (local or cloud) */}
+      {(dataBySystem.length > 0 || !isCloudEmpty) && (
         <>
 
           {/* Stats Cards */}
