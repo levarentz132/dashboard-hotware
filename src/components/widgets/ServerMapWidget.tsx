@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import L from "leaflet";
 import Link from "next/link";
 import { useCloudSystems, type CloudSystem } from "@/hooks/use-async-data";
-import { getElectronHeaders } from "@/lib/config";
 
 // Dynamic import untuk react-leaflet (client-side only)
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
@@ -75,9 +74,6 @@ export default function ServerMapWidget({ systemId }: { systemId?: string }) {
   const [locationLoading, setLocationLoading] = useState(true);
   const [mapStyle, setMapStyle] = useState<keyof typeof MAP_TILES>("default");
 
-  const [systemDetails, setSystemDetails] = useState<Map<string, any>>(new Map());
-  const [loadingDetails, setLoadingDetails] = useState(false);
-
   // Fetch server locations
   const fetchServerLocations = useCallback(async () => {
     try {
@@ -98,65 +94,30 @@ export default function ServerMapWidget({ systemId }: { systemId?: string }) {
     }
   }, []);
 
-  // Fetch extra details for online systems (like version)
-  const fetchAllSystemDetails = useCallback(async () => {
-    const onlineSystems = cloudSystems.filter(s => s.stateOfHealth === "online");
-    if (onlineSystems.length === 0) return;
-
-    setLoadingDetails(true);
-    const newDetails = new Map(systemDetails);
-
-    await Promise.all(
-      onlineSystems.map(async (system) => {
-        try {
-          const response = await fetch(`/api/nx/system/info?systemId=${encodeURIComponent(system.id)}`, {
-            headers: { ...getElectronHeaders() }
-          });
-          if (response.ok) {
-            const info = await response.json();
-            newDetails.set(system.id, info);
-          }
-        } catch (e) {
-          console.error(`Failed to fetch details for ${system.id}:`, e);
-        }
-      })
-    );
-
-    setSystemDetails(newDetails);
-    setLoadingDetails(false);
-  }, [cloudSystems]);
-
-  // Initial fetches
+  // Initial fetch for locations
   useEffect(() => {
     fetchServerLocations();
   }, [fetchServerLocations]);
 
-  useEffect(() => {
-    if (cloudSystems.length > 0) {
-      fetchAllSystemDetails();
-    }
-  }, [cloudSystems, fetchAllSystemDetails]);
-
-  const loading = cloudLoading || locationLoading || (loadingDetails && systemDetails.size === 0);
+  const loading = cloudLoading || locationLoading;
   const error = cloudError;
 
   // Prepare server data for map
   const serverMapData: ServerMarkerData[] = useMemo(() => {
     return cloudSystems.map((system) => {
       const location = serverLocations.get(system.name);
-      const details = systemDetails.get(system.id);
       return {
         id: system.id,
         name: system.name,
         isOnline: system.stateOfHealth === "online",
         latitude: Number(location?.latitude) || 0,
         longitude: Number(location?.longitude) || 0,
-        version: details?.version || system.version,
+        version: system.version,
         ownerFullName: system.ownerFullName,
         accessRole: system.accessRole,
       };
     });
-  }, [cloudSystems, serverLocations, systemDetails]);
+  }, [cloudSystems, serverLocations]);
 
   // Filter servers with valid location
   const serversWithLocation = useMemo(

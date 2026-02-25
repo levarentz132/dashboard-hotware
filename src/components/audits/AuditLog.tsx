@@ -36,7 +36,8 @@ import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getElectronHeaders } from "@/lib/config";
+import { getElectronHeaders, API_CONFIG } from "@/lib/config";
+import Cookies from "js-cookie";
 
 interface AuthSession {
   id: string;
@@ -88,9 +89,44 @@ const EVENT_TYPE_INFO: Record<string, { label: string; color: string; icon: stri
 };
 
 export default function AuditLog() {
-  // Cloud systems state
-  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
-  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(null);
+  // Helper: read cloud OAuth token from cookie and build headers for API proxy calls.
+  // Sending the token as X-Electron-Cloud-Token is the most reliable path because
+  // getDynamicConfig() on the server reads this header directly (path 1),
+  // avoiding the fragile cookie-string regex fallback (path 2).
+  const getCloudHeaders = useCallback((): Record<string, string> => {
+    const cloudSessionStr = Cookies.get("nx_cloud_session");
+    let cloudToken = "";
+    if (cloudSessionStr) {
+      try {
+        const session = JSON.parse(cloudSessionStr);
+        cloudToken = session.accessToken || "";
+      } catch (e) { /* malformed cookie */ }
+    }
+    const headers = {
+      ...getElectronHeaders(),
+      ...(cloudToken ? { "X-Electron-Cloud-Token": cloudToken } : {}),
+    };
+
+    return headers;
+  }, []);
+  // Cloud systems state - Initialized with local system (Local-First)
+  // Using 127.0.0.1:7001 ensures the proxy targets the local server directly via HTTPS
+  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([
+    {
+      id: "127.0.0.1:7001",
+      name: "Local System",
+      stateOfHealth: "online",
+      accessRole: "owner"
+    }
+  ]);
+
+  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>({
+    id: "127.0.0.1:7001",
+    name: "Local System",
+    stateOfHealth: "online",
+    accessRole: "owner"
+  });
+
   const [loadingSystems, setLoadingSystems] = useState(false);
 
   // Device name mapping
@@ -119,7 +155,11 @@ export default function AuditLog() {
 
   // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
-    setLoadingSystems(true);
+    // We already have the local system, so we don't need to block if we have systems
+    if (cloudSystems.length <= 1) {
+      setLoadingSystems(true);
+    }
+
     try {
       const response = await fetch("/api/cloud/systems", {
         method: "GET",
@@ -127,46 +167,52 @@ export default function AuditLog() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          ...getElectronHeaders(),
+          ...getCloudHeaders(),
         },
       });
 
-      if (!response.ok) {
-        setError("Failed to fetch cloud systems");
-        return;
-      }
+      if (response.ok) {
+        const data = await response.json();
+        const fetchedSystems: CloudSystem[] = Array.isArray(data) ? data : (data.systems || []);
 
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
+        setCloudSystems(prev => {
+          // Merge: Start with fetched systems
+          let systems = [...fetchedSystems];
 
-      // Sort: owner first, then online systems
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-        return 0;
-      });
+          // Ensure local system (127.0.0.1:7001) is always there
+          const localEntry = prev.find(s => s.id === "127.0.0.1:7001") || prev[0];
+          if (!systems.find(s => s.id === "127.0.0.1:7001" || s.name === "Local System")) {
+            systems.unshift(localEntry);
+          }
 
-      setCloudSystems(systems);
+          // Sort: owner first, then online systems
+          systems.sort((a, b) => {
+            if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
+            if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
+            if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
+            if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
+            return 0;
+          });
 
-      // Auto-select first online system
-      const firstOnline = systems.find((s) => s.stateOfHealth === "online");
-      if (firstOnline) {
-        setSelectedSystem(firstOnline);
+          return systems;
+        });
+      } else {
+        console.warn("Cloud systems fetch returned error. Continuing with existing systems.");
       }
     } catch (err) {
-      console.error("Error fetching cloud systems:", err);
-      setError("Failed to connect to cloud");
+      console.error("Error fetching cloud systems (ignored):", err);
     } finally {
       setLoadingSystems(false);
     }
-  }, []);
+  }, [getCloudHeaders, cloudSystems.length]);
 
   // Fetch devices for name mapping
   const fetchDevices = useCallback(async (systemId: string) => {
     try {
-      const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(systemId)}`);
+      const response = await fetch(`/api/cloud/devices?systemId=${encodeURIComponent(systemId)}`, {
+        credentials: "include",
+        headers: getCloudHeaders(),
+      });
       if (response.ok) {
         const devices: CloudDevice[] = await response.json();
         const map: Record<string, string> = {};
@@ -180,7 +226,7 @@ export default function AuditLog() {
     } catch (err) {
       console.error("Error fetching devices:", err);
     }
-  }, []);
+  }, [getCloudHeaders]);
 
   // removed attemptAdminLogin and handleLogin logic
 
@@ -213,7 +259,10 @@ export default function AuditLog() {
           queryParams += `&limit=200`;
         }
 
-        const response = await fetch(`/api/cloud/audit-log?${queryParams}`);
+        const response = await fetch(`/api/cloud/audit-log?${queryParams}`, {
+          credentials: "include",
+          headers: getCloudHeaders(),
+        });
 
         if (!response.ok) {
           throw new Error(response.status === 401 ? "Unauthorized access" : "Failed to fetch audit logs");
@@ -229,7 +278,7 @@ export default function AuditLog() {
         setLoading(false);
       }
     },
-    [date],
+    [date, getCloudHeaders],
   );
 
   // Initial load
@@ -348,7 +397,6 @@ export default function AuditLog() {
   };
 
   const isCloudEmpty = cloudSystems.length === 0;
-  const showNoCloudAlert = isCloudEmpty && !loadingSystems;
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -393,384 +441,369 @@ export default function AuditLog() {
         </div>
       )}
 
-      {/* Cloud Systems Error - Now positioned below title */}
-      {showNoCloudAlert && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
-          <div className="flex items-center">
-            <AlertCircle className="w-6 h-6 text-yellow-600 mr-3" />
-            <div>
-              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
-              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
-            </div>
-          </div>
-        </div>
-      )}
+      <>
 
-      {!isCloudEmpty && (
-        <>
+        {/* Filters */}
+        <Card className="mb-4">
+          <CardContent className="p-3 sm:p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+              <div className="relative flex-1 select-none">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search events, users, resources..."
+                  className="w-full pl-10 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text bg-white h-10"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
 
-          {/* Filters */}
-          <Card className="mb-4">
-            <CardContent className="p-3 sm:p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <div className="relative flex-1 select-none">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder="Search events, users, resources..."
-                    className="w-full pl-10 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text bg-white h-10"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                  {searchTerm && (
-                    <button
-                      onClick={() => setSearchTerm("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+              <div className="flex gap-2">
+                <Popover open={showFilters} onOpenChange={setShowFilters}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={`gap-2 flex-1 sm:flex-none select-none min-w-[110px] w-auto justify-between h-10 px-3 ${hasActiveFilters ? "border-blue-500 bg-blue-50 text-blue-700 font-medium hover:bg-blue-100 hover:text-blue-800" : ""}`}
                     >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <Popover open={showFilters} onOpenChange={setShowFilters}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={`gap-2 flex-1 sm:flex-none select-none min-w-[110px] w-auto justify-between h-10 px-3 ${hasActiveFilters ? "border-blue-500 bg-blue-50 text-blue-700 font-medium hover:bg-blue-100 hover:text-blue-800" : ""}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Filter className="h-4 w-4 shrink-0" />
-                          <span>Filter</span>
-                          {hasActiveFilters && (
-                            <Badge variant="secondary" className="h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0 hover:bg-blue-700">
-                              {activeFilterCount}
-                            </Badge>
-                          )}
-                        </div>
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-72" align="end">
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-gray-900">Filters</h4>
-                          {hasActiveFilters && (
-                            <button
-                              onClick={clearFilters}
-                              className="text-xs text-blue-600 hover:text-blue-800"
-                            >
-                              Clear all
-                            </button>
-                          )}
-                        </div>
-
-                        <Separator />
-
-                        <div className="space-y-3">
-                          {/* Event Type Filter */}
-                          <div>
-                            <label className="block text-xs font-medium text-gray-500 mb-1">Event Type</label>
-                            <Select value={filterEventType} onValueChange={setFilterEventType}>
-                              <SelectTrigger className="w-full bg-white">
-                                <SelectValue placeholder="All Event Types" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All Event Types</SelectItem>
-                                {uniqueEventTypes.map((type) => (
-                                  <SelectItem key={type} value={type}>
-                                    {getEventInfo(type).label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {/* User Filter */}
-                          <div>
-                            <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">User</label>
-                            <Select value={filterUser} onValueChange={setFilterUser}>
-                              <SelectTrigger className="w-full bg-white">
-                                <SelectValue placeholder="All Users" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All Users</SelectItem>
-                                {uniqueUsers.map((user) => (
-                                  <SelectItem key={user} value={user}>
-                                    {user}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {/* Date Range Filter */}
-                          <div>
-                            <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">Date Range</label>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  id="date"
-                                  variant={"outline"}
-                                  className={cn(
-                                    "w-full justify-start text-left font-normal",
-                                    !date && "text-muted-foreground"
-                                  )}
-                                >
-                                  <CalendarIcon className="mr-2 h-4 w-4" />
-                                  {date?.from ? (
-                                    date.to ? (
-                                      <>
-                                        {format(date.from, "LLL dd, y")} -{" "}
-                                        {format(date.to, "LLL dd, y")}
-                                      </>
-                                    ) : (
-                                      format(date.from, "LLL dd, y")
-                                    )
-                                  ) : (
-                                    <span>Pick a date</span>
-                                  )}
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-auto p-0" align="end">
-                                <Calendar
-                                  initialFocus
-                                  mode="range"
-                                  defaultMonth={date?.from}
-                                  selected={date}
-                                  onSelect={setDate}
-                                  numberOfMonths={2}
-                                />
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                        </div>
-
-                        <Button onClick={() => setShowFilters(false)} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
-                          Apply Filters
-                        </Button>
+                      <div className="flex items-center gap-2">
+                        <Filter className="h-4 w-4 shrink-0" />
+                        <span>Filter</span>
+                        {hasActiveFilters && (
+                          <Badge variant="secondary" className="h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0 hover:bg-blue-700">
+                            {activeFilterCount}
+                          </Badge>
+                        )}
+                      </div>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72" align="end">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-semibold text-gray-900">Filters</h4>
                         {hasActiveFilters && (
                           <button
                             onClick={clearFilters}
-                            className="w-full text-xs text-blue-600 hover:underline mt-2 text-center"
+                            className="text-xs text-blue-600 hover:text-blue-800"
                           >
-                            Clear all filters
+                            Clear all
                           </button>
                         )}
                       </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
 
-              {hasActiveFilters && (
-                <>
-                  <Separator className="my-2" />
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {filterEventType !== "all" && (
-                      <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
-                        Type: {getEventInfo(filterEventType).label}
-                        <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterEventType("all")} />
-                      </Badge>
-                    )}
-                    {filterUser !== "all" && (
-                      <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
-                        User: {filterUser}
-                        <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterUser("all")} />
-                      </Badge>
-                    )}
-                    {isDateChanged && date?.from && (
-                      <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
-                        Date: {format(date.from, "LLL dd, y")}
-                        {date.to ? ` - ${format(date.to, "LLL dd, y")}` : ""}
-                        <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => {
-                          const today = new Date();
-                          setDate({
-                            from: today,
-                            to: undefined
-                          });
-                        }} />
-                      </Badge>
-                    )}
-                    <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline px-2">Clear all</button>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                      <Separator />
 
-          {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-white p-3 rounded-lg border">
-              <div className="text-2xl font-bold text-gray-900">{filteredLogs.length}</div>
-              <div className="text-xs text-gray-500">Total Events</div>
-            </div>
-            <div className="bg-white p-3 rounded-lg border">
-              <div className="text-2xl font-bold text-blue-600">{uniqueUsers.length}</div>
-              <div className="text-xs text-gray-500">Active Users</div>
-            </div>
-            <div className="bg-white p-3 rounded-lg border">
-              <div className="text-2xl font-bold text-green-600">
-                {filteredLogs.filter((l) => l.eventType === "AR_Login").length}
-              </div>
-              <div className="text-xs text-gray-500">Login Events</div>
-            </div>
-            <div className="bg-white p-3 rounded-lg border">
-              <div className="text-2xl font-bold text-purple-600">{uniqueEventTypes.length}</div>
-              <div className="text-xs text-gray-500">Event Types</div>
-            </div>
-          </div>
+                      <div className="space-y-3">
+                        {/* Event Type Filter */}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Event Type</label>
+                          <Select value={filterEventType} onValueChange={setFilterEventType}>
+                            <SelectTrigger className="w-full bg-white">
+                              <SelectValue placeholder="All Event Types" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Event Types</SelectItem>
+                              {uniqueEventTypes.map((type) => (
+                                <SelectItem key={type} value={type}>
+                                  {getEventInfo(type).label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-          {/* Audit Log Table */}
-          <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-            {loading ? (
-              <div className="flex items-center justify-center p-8">
-                <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-                <span className="text-gray-600">Loading audit logs...</span>
-              </div>
-            ) : error ? (
-              <div className="flex items-center justify-center p-8 text-red-600">
-                <AlertCircle className="w-6 h-6 mr-2" />
-                <span>{error}</span>
-              </div>
-            ) : !selectedSystem ? (
-              <div className="flex items-center justify-center p-8 text-gray-500">
-                <Cloud className="w-6 h-6 mr-2" />
-                <span>Select a cloud system to view audit logs</span>
-              </div>
-            ) : displayedLogs.length === 0 ? (
-              <div className="flex items-center justify-center p-8 text-gray-500">
-                <Activity className="w-6 h-6 mr-2" />
-                <span>No audit logs found</span>
-              </div>
-            ) : (
-              <>
-                {/* Desktop Table */}
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Time
-                        </th>
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Event
-                        </th>
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          User
-                        </th>
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Resources
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {displayedLogs.map((log, index) => {
-                        const eventInfo = getEventInfo(log.eventType);
-                        return (
-                          <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-gray-50">
-                            <td className="px-3 py-2.5 whitespace-nowrap">
-                              <div className="flex items-center text-xs lg:text-sm text-gray-600">
-                                <Clock className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
-                                {formatTimestamp(log.createdTimeSec)}
-                              </div>
-                            </td>
-                            <td className="px-3 py-2.5 whitespace-nowrap">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${eventInfo.color}`}
+                        {/* User Filter */}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">User</label>
+                          <Select value={filterUser} onValueChange={setFilterUser}>
+                            <SelectTrigger className="w-full bg-white">
+                              <SelectValue placeholder="All Users" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Users</SelectItem>
+                              {uniqueUsers.map((user) => (
+                                <SelectItem key={user} value={user}>
+                                  {user}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Date Range Filter */}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">Date Range</label>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                id="date"
+                                variant={"outline"}
+                                className={cn(
+                                  "w-full justify-start text-left font-normal",
+                                  !date && "text-muted-foreground"
+                                )}
                               >
-                                {getEventIcon(eventInfo.icon)}
-                                <span className="hidden lg:inline">{eventInfo.label}</span>
-                              </span>
-                            </td>
-                            <td className="px-3 py-2.5 whitespace-nowrap">
-                              <div className="flex items-center text-xs lg:text-sm">
-                                <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
-                                <div className="flex flex-col">
-                                  <span className="font-medium text-gray-900">{log.authSession?.userName || "System"}</span>
-                                  {log.authSession?.userHost && (
-                                    <span className="text-[10px] text-gray-400">
-                                      {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
-                                {log.resources && log.resources.length > 0
-                                  ? log.resources
-                                    .slice(0, 2)
-                                    .map((r) => getResourceName(r))
-                                    .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
-                                  : ""}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobile Cards */}
-                <div className="md:hidden space-y-2 p-2">
-                  {displayedLogs.map((log, index) => {
-                    const eventInfo = getEventInfo(log.eventType);
-                    return (
-                      <div
-                        key={`${log.createdTimeSec}-${index}`}
-                        className="bg-gray-50 border rounded-lg p-2.5 space-y-1.5"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${eventInfo.color}`}
-                          >
-                            {getEventIcon(eventInfo.icon)}
-                            {eventInfo.label}
-                          </span>
-                          <span className="text-[10px] text-gray-500 whitespace-nowrap">
-                            {formatTimestamp(log.createdTimeSec)}
-                          </span>
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {date?.from ? (
+                                  date.to ? (
+                                    <>
+                                      {format(date.from, "LLL dd, y")} -{" "}
+                                      {format(date.to, "LLL dd, y")}
+                                    </>
+                                  ) : (
+                                    format(date.from, "LLL dd, y")
+                                  )
+                                ) : (
+                                  <span>Pick a date</span>
+                                )}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="end">
+                              <Calendar
+                                initialFocus
+                                mode="range"
+                                defaultMonth={date?.from}
+                                selected={date}
+                                onSelect={setDate}
+                                numberOfMonths={2}
+                              />
+                            </PopoverContent>
+                          </Popover>
                         </div>
-                        <div className="flex flex-col text-sm">
-                          <div className="flex items-center">
-                            <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
-                            <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "System"}</span>
-                          </div>
-                          {log.authSession?.userHost && (
-                            <span className="text-[9px] text-gray-400 ml-5">
-                              {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
-                            </span>
-                          )}
-                        </div>
-                        {log.resources && log.resources.length > 0 && (
-                          <div className="text-[10px] text-gray-500 truncate">
-                            <span className="font-medium">Resources:</span>{" "}
-                            {log.resources
-                              .slice(0, 2)
-                              .map((r) => getResourceName(r))
-                              .join(", ")}
-                            {log.resources.length > 2 && ` +${log.resources.length - 2} more`}
-                          </div>
-                        )}
                       </div>
-                    );
-                  })}
-                </div>
 
-                {/* Load More */}
-                {sortedLogs.length > displayCount && (
-                  <div className="p-3 border-t text-center">
-                    <Button variant="outline" size="sm" onClick={() => setDisplayCount((prev) => prev + 20)}>
-                      Load More ({sortedLogs.length - displayCount} remaining)
-                    </Button>
-                  </div>
-                )}
+                      <Button onClick={() => setShowFilters(false)} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                        Apply Filters
+                      </Button>
+                      {hasActiveFilters && (
+                        <button
+                          onClick={clearFilters}
+                          className="w-full text-xs text-blue-600 hover:underline mt-2 text-center"
+                        >
+                          Clear all filters
+                        </button>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+
+            {hasActiveFilters && (
+              <>
+                <Separator className="my-2" />
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {filterEventType !== "all" && (
+                    <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                      Type: {getEventInfo(filterEventType).label}
+                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterEventType("all")} />
+                    </Badge>
+                  )}
+                  {filterUser !== "all" && (
+                    <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                      User: {filterUser}
+                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterUser("all")} />
+                    </Badge>
+                  )}
+                  {isDateChanged && date?.from && (
+                    <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                      Date: {format(date.from, "LLL dd, y")}
+                      {date.to ? ` - ${format(date.to, "LLL dd, y")}` : ""}
+                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => {
+                        const today = new Date();
+                        setDate({
+                          from: today,
+                          to: undefined
+                        });
+                      }} />
+                    </Badge>
+                  )}
+                  <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline px-2">Clear all</button>
+                </div>
               </>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-white p-3 rounded-lg border">
+            <div className="text-2xl font-bold text-gray-900">{filteredLogs.length}</div>
+            <div className="text-xs text-gray-500">Total Events</div>
           </div>
-        </>
-      )}
+          <div className="bg-white p-3 rounded-lg border">
+            <div className="text-2xl font-bold text-blue-600">{uniqueUsers.length}</div>
+            <div className="text-xs text-gray-500">Active Users</div>
+          </div>
+          <div className="bg-white p-3 rounded-lg border">
+            <div className="text-2xl font-bold text-green-600">
+              {filteredLogs.filter((l) => l.eventType === "AR_Login").length}
+            </div>
+            <div className="text-xs text-gray-500">Login Events</div>
+          </div>
+          <div className="bg-white p-3 rounded-lg border">
+            <div className="text-2xl font-bold text-purple-600">{uniqueEventTypes.length}</div>
+            <div className="text-xs text-gray-500">Event Types</div>
+          </div>
+        </div>
+
+        {/* Audit Log Table */}
+        <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+          {loading ? (
+            <div className="flex items-center justify-center p-8">
+              <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+              <span className="text-gray-600">Loading audit logs...</span>
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center p-8 text-red-600">
+              <AlertCircle className="w-6 h-6 mr-2" />
+              <span>{error}</span>
+            </div>
+          ) : !selectedSystem ? (
+            <div className="flex items-center justify-center p-8 text-gray-500">
+              <Activity className="w-6 h-6 mr-2" />
+              <span>Select a system to view audit logs</span>
+            </div>
+          ) : displayedLogs.length === 0 ? (
+            <div className="flex items-center justify-center p-8 text-gray-500">
+              <Activity className="w-6 h-6 mr-2" />
+              <span>No audit logs found</span>
+            </div>
+          ) : (
+            <>
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Time
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Event
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        User
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Resources
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {displayedLogs.map((log, index) => {
+                      const eventInfo = getEventInfo(log.eventType);
+                      return (
+                        <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-gray-50">
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <div className="flex items-center text-xs lg:text-sm text-gray-600">
+                              <Clock className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                              {formatTimestamp(log.createdTimeSec)}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${eventInfo.color}`}
+                            >
+                              {getEventIcon(eventInfo.icon)}
+                              <span className="hidden lg:inline">{eventInfo.label}</span>
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <div className="flex items-center text-xs lg:text-sm">
+                              <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                              <div className="flex flex-col">
+                                <span className="font-medium text-gray-900">{log.authSession?.userName || "System"}</span>
+                                {log.authSession?.userHost && (
+                                  <span className="text-[10px] text-gray-400">
+                                    {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
+                              {log.resources && log.resources.length > 0
+                                ? log.resources
+                                  .slice(0, 2)
+                                  .map((r) => getResourceName(r))
+                                  .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
+                                : ""}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Cards */}
+              <div className="md:hidden space-y-2 p-2">
+                {displayedLogs.map((log, index) => {
+                  const eventInfo = getEventInfo(log.eventType);
+                  return (
+                    <div
+                      key={`${log.createdTimeSec}-${index}`}
+                      className="bg-gray-50 border rounded-lg p-2.5 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${eventInfo.color}`}
+                        >
+                          {getEventIcon(eventInfo.icon)}
+                          {eventInfo.label}
+                        </span>
+                        <span className="text-[10px] text-gray-500 whitespace-nowrap">
+                          {formatTimestamp(log.createdTimeSec)}
+                        </span>
+                      </div>
+                      <div className="flex flex-col text-sm">
+                        <div className="flex items-center">
+                          <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
+                          <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "System"}</span>
+                        </div>
+                        {log.authSession?.userHost && (
+                          <span className="text-[9px] text-gray-400 ml-5">
+                            {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                          </span>
+                        )}
+                      </div>
+                      {log.resources && log.resources.length > 0 && (
+                        <div className="text-[10px] text-gray-500 truncate">
+                          <span className="font-medium">Resources:</span>{" "}
+                          {log.resources
+                            .slice(0, 2)
+                            .map((r) => getResourceName(r))
+                            .join(", ")}
+                          {log.resources.length > 2 && ` +${log.resources.length - 2} more`}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Load More */}
+              {sortedLogs.length > displayCount && (
+                <div className="p-3 border-t text-center">
+                  <Button variant="outline" size="sm" onClick={() => setDisplayCount((prev) => prev + 20)}>
+                    Load More ({sortedLogs.length - displayCount} remaining)
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </>
     </div>
   );
 }

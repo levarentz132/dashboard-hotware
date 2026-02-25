@@ -198,12 +198,9 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   );
 
   useEffect(() => {
-    if (systemId) {
-      loadData(systemId);
-    } else {
-      setLoading(false);
-      setAuditLogs([]);
-    }
+    // Local-First: Default to local system if no systemId is provided
+    const targetId = systemId || "127.0.0.1:7001";
+    loadData(targetId);
   }, [systemId, loadData]);
 
   // Stats
@@ -226,9 +223,8 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   }, [auditLogs]);
 
   const handleRefresh = () => {
-    if (systemId) {
-      loadData(systemId);
-    }
+    const targetId = systemId || "127.0.0.1:7001";
+    loadData(targetId);
   };
 
   if (loading) {
