@@ -120,6 +120,7 @@ export function NxAuthentication() {
 
     const exchangeCloudCode = useCallback(async (code: string) => {
         setIsLoading(true);
+        setError(null);
         try {
             const data = {
                 code,
@@ -131,49 +132,85 @@ export function NxAuthentication() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error_description || errData.error || "Failed to exchange code for tokens");
+            }
+
             const tokens = await response.json();
 
             if (tokens.access_token) {
                 const systemsResp = await fetch(`${CLOUD_HOST}/api/systems/`, {
                     headers: { 'Authorization': `Bearer ${tokens.access_token}` }
                 });
-                const systems = await systemsResp.json();
-                const systemsList = Array.isArray(systems) ? systems : [];
+
+                let systemsList: CloudSystem[] = [];
+                if (systemsResp.ok) {
+                    const systems = await systemsResp.json();
+                    systemsList = Array.isArray(systems) ? systems : (systems.items || []);
+                }
 
                 // Find owner system
-                const ownerSystem = systemsList.find((s: any) => s.accessRole === 'owner' || s.accessRole === 'Owner');
-                const ownerSystemId = ownerSystem?.id;
+                const ownerSystem = systemsList.find((s: any) =>
+                    s.accessRole?.toLowerCase() === 'owner' ||
+                    s.accessRole?.toLowerCase() === 'administrator'
+                );
+                const ownerSystemId = ownerSystem?.id || (systemsList.length > 0 ? systemsList[0].id : undefined);
 
                 if (ownerSystemId) {
                     Cookies.set("nx_system_id", ownerSystemId, { expires: 365, path: '/' });
                 }
 
                 const firstSystem = ownerSystem || systemsList[0];
+                const email = firstSystem?.ownerAccountEmail || tokens.user_email;
 
                 const cloudData: CloudSession = {
                     accessToken: tokens.access_token,
                     refreshToken: tokens.refresh_token,
                     systems: systemsList,
-                    email: firstSystem?.ownerAccountEmail,
+                    email: email,
                     ownerSystemId: ownerSystemId
                 };
 
                 setCloudSession(cloudData);
-                Cookies.set("nx_cloud_session", JSON.stringify(cloudData), { expires: 365, path: '/' });
+
+                // IMPORTANT: Only store essential data in cookie to avoid 4KB limit
+                // Systems list can be huge, so we exclude it from the cookie.
+                const persistentData = {
+                    accessToken: tokens.access_token,
+                    refreshToken: tokens.refresh_token,
+                    email: email,
+                    ownerSystemId: ownerSystemId
+                };
+                Cookies.set("nx_cloud_session", JSON.stringify(persistentData), { expires: 365, path: '/' });
+                console.log("[NxCloud] Session saved to cookie (minimal)");
             }
-        } catch (err) {
+        } catch (err: any) {
+            console.error("[NxCloud] OAuth exchange error:", err);
+            setError(err.message || "Cloud authentication failed");
         } finally {
             setIsLoading(false);
         }
     }, [CLOUD_HOST]);
 
-    // Cloud OAuth callback
+    // Cloud OAuth callback and hydration
     useEffect(() => {
+        // 1. Initial hydration from cookie
         const storedCloud = Cookies.get("nx_cloud_session");
-        if (storedCloud) {
-            try { setCloudSession(JSON.parse(storedCloud)); } catch (e) { }
+        if (storedCloud && !cloudSession) {
+            try {
+                const parsed = JSON.parse(storedCloud);
+                setCloudSession({
+                    ...parsed,
+                    systems: parsed.systems || [] // Ensure systems exists even if empty in cookie
+                });
+            } catch (e) {
+                console.error("Failed to hydrate cloud session", e);
+            }
         }
 
+        // 2. Handle OAuth callback code
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
         if (code) {
@@ -182,7 +219,7 @@ export function NxAuthentication() {
             url.searchParams.delete('code');
             window.history.replaceState({}, '', url.toString());
         }
-    }, [exchangeCloudCode]);
+    }, [exchangeCloudCode, cloudSession]);
 
     const handleLogin = async () => {
         if (!credentials.username || !credentials.password) {
