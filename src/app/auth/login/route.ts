@@ -82,9 +82,10 @@ export async function POST(request: NextRequest) {
     const identificationId = system_id || server_id;
     console.log(`[Login Attempt] User: ${username}, SystemID: ${system_id || "None"}, ServerID: ${server_id || "None"}`);
 
-    // If system_id is not provided, try to detect it from cloud systems
-    if (!system_id) {
-      console.log("[Login] No system_id in request, attempting cloud detection...");
+    // Only attempt cloud detection when NEITHER system_id NOR server_id is provided.
+    // If server_id is already set, we're in local-only mode — skip cloud detection.
+    if (!system_id && !server_id) {
+      console.log("[Login] No system_id or server_id in request, attempting cloud detection...");
       const detectedSystems = await fetchCloudSystems(request);
       console.log(`[Login] Detected ${detectedSystems.length} systems from cloud`);
 

@@ -54,7 +54,7 @@ export default function LoginPage() {
     let storedSystemId = Cookies.get("nx_system_id") || "";
     let storedServerId = Cookies.get("nx_server_id") || "";
 
-    // Fallback parsing from sessions if dedicated keys are missing
+    // Fallback: parse system_id from cloud session cookie if dedicated key is missing
     if (!storedSystemId && cloudStored) {
       try {
         const cloud = JSON.parse(cloudStored);
@@ -62,18 +62,20 @@ export default function LoginPage() {
       } catch (e) { }
     }
 
-    // 2. Apply Rule: "if nx cloud is not connected then it is local"
-    // If not cloud connected, any available ID is effectively a server_id
-    if (!hasCloudLogin) {
-      if (!storedServerId && storedSystemId) {
-        storedServerId = storedSystemId;
-        storedSystemId = "";
-      }
-    }
+    // 2. Mutually exclusive routing:
+    //    Cloud connected  → use system_id only  (server_id is a local concept)
+    //    Local only       → use server_id only  (promote system_id → server_id if needed)
+    let system_id: string;
+    let server_id: string;
 
-    // 3. Resolve final IDs (taken directly from nx authentication storage)
-    let system_id = hasCloudLogin ? storedSystemId : "";
-    let server_id = storedServerId;
+    if (hasCloudLogin) {
+      system_id = storedSystemId;
+      server_id = "";           // never send server_id when cloud is connected
+    } else {
+      system_id = "";
+      // If no server_id stored but we have a system_id, treat it as server_id
+      server_id = storedServerId || storedSystemId;
+    }
 
     if (!system_id && !server_id) {
       clearError();
