@@ -24,14 +24,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
-
-interface CloudSystem {
-  id: string;
-  name: string;
-  stateOfHealth: string;
-  accessRole: string;
-}
+import { getElectronHeaders } from "@/lib/config";
+import { useInventorySync } from "@/hooks/use-inventory-sync";
+import Cookies from "js-cookie";
 
 interface EventLog {
   actionType: string;
@@ -47,6 +42,7 @@ interface EventLog {
     };
   };
   aggregationCount: number;
+  systemId?: string;
 }
 
 // Helper functions
@@ -121,126 +117,81 @@ const getLevelConfig = (level: string) => {
   }
 };
 
-export default function AlarmConsoleWidget({ systemId }: { systemId?: string }) {
+export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemId?: string }) {
   const router = useRouter();
-  const [events, setEvents] = useState<EventLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [serverId, setServerId] = useState<string | null>(null);
 
-  // Auto-login (disabled - using Dual-Login flow)
-  const attemptAutoLogin = useCallback(async (targetSystemId: string) => {
-    return false;
+  // 1. Define Fetchers
+  const fetchLocalAlarms = useCallback(async () => {
+    const localUserStr = Cookies.get("local_nx_user");
+    if (!localUserStr) return null;
+
+    try {
+      const localUser = JSON.parse(localUserStr);
+      const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
+
+      // Use local proxy with specific 'this' server endpoint
+      const response = await fetch("/nx/rest/v3/servers/this/events", {
+        headers: {
+          "x-runtime-guid": localUser.token,
+          "Accept": "application/json"
+        }
+      });
+
+      if (!response.ok) return null;
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : [];
+
+      return {
+        systemId: sid,
+        systemName: "Local Server",
+        items,
+        stateOfHealth: "online"
+      };
+    } catch (e) {
+      console.error("[AlarmWidget] Local fetch failed:", e);
+      return null;
+    }
   }, []);
 
-  // Fetch servers for a system
-  const fetchServers = useCallback(
-    async (targetSystemId: string, retry = false): Promise<string | null> => {
-      try {
-        const response = await fetch(`/api/cloud/servers?systemId=${encodeURIComponent(targetSystemId)}`, {
-          method: "GET",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
+  const fetchCloudAlarmsForSystem = useCallback(async (system: { id: string, name: string }) => {
+    try {
+      const response = await fetch(`/api/cloud/events?systemId=${encodeURIComponent(system.id)}`, {
+        headers: {
+          Accept: "application/json",
+          ...getElectronHeaders(),
+        },
+      });
 
-        if (response.status === 401 && !retry) {
-          // Try auto-login
-          const success = await attemptAutoLogin(targetSystemId);
-          if (success) {
-            return fetchServers(targetSystemId, true);
-          }
-          return null;
-        }
-
-        if (!response.ok) return null;
-
-        const servers = await response.json();
-        if (Array.isArray(servers) && servers.length > 0) {
-          return servers[0].id;
-        }
-        return null;
-      } catch {
-        return null;
-      }
-    },
-    [attemptAutoLogin],
-  );
-
-  // Fetch events
-  const fetchEvents = useCallback(
-    async (targetSystemId: string, srvId: string, retry = false) => {
-      try {
-        const params = new URLSearchParams({
-          systemId: targetSystemId,
-          serverId: srvId,
-        });
-
-        const response = await fetch(`/api/cloud/events?${params.toString()}`, {
-          method: "GET",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-
-        if (response.status === 401 && !retry) {
-          const success = await attemptAutoLogin(targetSystemId);
-          if (success) {
-            return fetchEvents(targetSystemId, srvId, true);
-          }
-          setError("Login required");
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch");
-        }
-
-        const data = await response.json();
-        const sortedEvents = Array.isArray(data)
-          ? data.sort((a: EventLog, b: EventLog) => {
-            const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
-            const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
-            return timeB - timeA;
-          })
-          : [];
-
-        setEvents(sortedEvents);
-        setError(null);
-      } catch {
-        setError("Failed to fetch alarms");
-      }
-    },
-    [attemptAutoLogin],
-  );
-
-  // Load data
-  const loadData = useCallback(
-    async (targetSystemId: string) => {
-      setLoading(true);
-      setError(null);
-
-      // Get server ID first
-      const srvId = await fetchServers(targetSystemId);
-      if (!srvId) {
-        setError("No server found");
-        setLoading(false);
-        return;
-      }
-
-      setServerId(srvId);
-      await fetchEvents(targetSystemId, srvId);
-      setLoading(false);
-    },
-    [fetchServers, fetchEvents],
-  );
-
-  useEffect(() => {
-    if (systemId) {
-      loadData(systemId);
-    } else {
-      setLoading(false);
-      setEvents([]);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.error(`[AlarmWidget] Error fetching alarms from ${system.name}:`, e);
+      return [];
     }
-  }, [systemId, loadData]);
+  }, []);
+
+  // 2. Use Inventory sync hook
+  const {
+    dataBySystem,
+    loading,
+    error,
+    refetch
+  } = useInventorySync<EventLog>(
+    fetchLocalAlarms,
+    fetchCloudAlarmsForSystem
+  );
+
+  // 3. Consolidated events list
+  const events = useMemo(() => {
+    return dataBySystem
+      .flatMap(sys => sys.items.map(item => ({ ...item, systemId: sys.systemId })))
+      .sort((a, b) => {
+        const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
+        const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
+        return timeB - timeA;
+      });
+  }, [dataBySystem]);
 
   // Stats
   const stats = useMemo(() => {
@@ -253,15 +204,10 @@ export default function AlarmConsoleWidget({ systemId }: { systemId?: string }) 
   }, [events]);
 
   const handleRefresh = () => {
-    if (systemId && serverId) {
-      setLoading(true);
-      fetchEvents(systemId, serverId).finally(() => setLoading(false));
-    } else if (systemId) {
-      loadData(systemId);
-    }
+    refetch();
   };
 
-  if (loading) {
+  if (loading && events.length === 0) {
     return (
       <div className="flex items-center justify-center h-full p-4">
         <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -270,7 +216,7 @@ export default function AlarmConsoleWidget({ systemId }: { systemId?: string }) 
     );
   }
 
-  if (error) {
+  if (error && events.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-4 text-center">
         <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
