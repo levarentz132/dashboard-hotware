@@ -206,11 +206,29 @@ export function getCloudAuthHeader(request?: Request | NextRequest): string {
 
   const dynamicConfig = getDynamicConfig(request);
 
-  // Use Cloud Token (Bearer) - This is the primary and now ONLY authentication method
+  // 1. Prefer static env / Electron-injected token
   const token = dynamicConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN;
   if (token && token !== 'undefined' && token.length > 20) {
     if (token.toLowerCase().startsWith('bearer ')) return token;
     return `Bearer ${token}`;
+  }
+
+  // 2. Fall back to the OAuth token stored in the nx_cloud_session cookie
+  //    This is set by the browser-side OAuth flow in NxAuthentication
+  if (request) {
+    try {
+      const cookieHeader = (request as NextRequest).headers?.get('cookie') || '';
+      const match = cookieHeader.match(/(?:^|;\s*)nx_cloud_session=([^;]+)/);
+      if (match) {
+        const session = JSON.parse(decodeURIComponent(match[1]));
+        const accessToken = session?.accessToken;
+        if (accessToken && accessToken.length > 20) {
+          return `Bearer ${accessToken}`;
+        }
+      }
+    } catch {
+      // Malformed cookie — ignore
+    }
   }
 
   return "";

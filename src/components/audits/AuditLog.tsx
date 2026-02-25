@@ -14,8 +14,6 @@ import {
   Settings,
   Shield,
   LogIn,
-  Eye,
-  EyeOff,
   Search,
   Filter,
   X,
@@ -38,8 +36,7 @@ import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import { performAdminLogin } from "@/lib/auth-utils";
+import { getElectronHeaders } from "@/lib/config";
 
 interface AuthSession {
   id: string;
@@ -117,14 +114,8 @@ export default function AuditLog() {
   // Pagination
   const [displayCount, setDisplayCount] = useState(20);
 
-  // Auth state
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [requiresAuth, setRequiresAuth] = useState(false);
-  const [showLoginForm, setShowLoginForm] = useState(false);
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [showPassword, setShowPassword] = useState(false);
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  // No longer needed: Auth state removed as it is handled by the proxy
+  // (requiresAuth, showLoginForm, etc.)
 
   // Fetch cloud systems
   const fetchCloudSystems = useCallback(async () => {
@@ -191,57 +182,7 @@ export default function AuditLog() {
     }
   }, []);
 
-  // Admin login function
-  const attemptAdminLogin = useCallback(async (systemId: string) => {
-    console.log(`[AuditLog] Attempting Admin login to ${systemId}...`);
-    const success = await performAdminLogin(systemId);
-
-    if (success) {
-      setIsLoggedIn(true);
-      setRequiresAuth(false);
-      return true;
-    }
-    return false;
-  }, []);
-
-  // Manual login
-  const handleLogin = async () => {
-    if (!selectedSystem || !loginForm.username || !loginForm.password) {
-      setLoginError("Username and password are required");
-      return;
-    }
-
-    setLoggingIn(true);
-    setLoginError(null);
-
-    try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId: selectedSystem.id,
-          username: loginForm.username,
-          password: loginForm.password,
-        }),
-      });
-
-      if (response.ok) {
-        setIsLoggedIn(true);
-        setRequiresAuth(false);
-        setShowLoginForm(false);
-        setLoginForm({ username: "", password: "" });
-        // Refresh audit logs
-        fetchAuditLogs(selectedSystem);
-      } else {
-        const data = await response.json();
-        setLoginError(data.error || "Login failed");
-      }
-    } catch {
-      setLoginError("Connection error");
-    } finally {
-      setLoggingIn(false);
-    }
-  };
+  // removed attemptAdminLogin and handleLogin logic
 
   // Fetch audit logs
   const fetchAuditLogs = useCallback(
@@ -274,32 +215,13 @@ export default function AuditLog() {
 
         const response = await fetch(`/api/cloud/audit-log?${queryParams}`);
 
-        if (response.status === 401) {
-          setRequiresAuth(true);
-          // Try admin login
-          const adminLoginSuccess = await attemptAdminLogin(system.id);
-          if (adminLoginSuccess) {
-            // Retry fetch
-            const retryResponse = await fetch(`/api/cloud/audit-log?${queryParams}`);
-            if (retryResponse.ok) {
-              const data = await retryResponse.json();
-              const logs = data.reply || data;
-              setAuditLogs(Array.isArray(logs) ? logs : []);
-              setRequiresAuth(false);
-            }
-          }
-          return;
-        }
-
         if (!response.ok) {
-          throw new Error("Failed to fetch audit logs");
+          throw new Error(response.status === 401 ? "Unauthorized access" : "Failed to fetch audit logs");
         }
 
         const data = await response.json();
         const logs = data.reply || data;
         setAuditLogs(Array.isArray(logs) ? logs : []);
-        setIsLoggedIn(true);
-        setRequiresAuth(false);
       } catch (err) {
         console.error("Error fetching audit logs:", err);
         setError("Failed to fetch audit logs");
@@ -307,7 +229,7 @@ export default function AuditLog() {
         setLoading(false);
       }
     },
-    [date, attemptAdminLogin],
+    [date],
   );
 
   // Initial load
@@ -676,261 +598,177 @@ export default function AuditLog() {
             </CardContent>
           </Card>
 
-          {/* Auth Required */}
-          {requiresAuth && !showLoginForm && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-yellow-600" />
-                  <div>
-                    <p className="font-medium text-yellow-800">Authentication Required</p>
-                    <p className="text-sm text-yellow-600">Please login to view audit logs for {selectedSystem?.name}</p>
-                  </div>
-                </div>
-                <Button onClick={() => setShowLoginForm(true)}>
-                  <LogIn className="w-4 h-4 mr-2" />
-                  Login
-                </Button>
-              </div>
+          {/* Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-white p-3 rounded-lg border">
+              <div className="text-2xl font-bold text-gray-900">{filteredLogs.length}</div>
+              <div className="text-xs text-gray-500">Total Events</div>
             </div>
-          )}
-
-          {/* Login Form */}
-          {showLoginForm && (
-            <div className="bg-white border rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
-              <div className="space-y-3 max-w-md">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                  <input
-                    type="text"
-                    value={loginForm.username}
-                    onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    placeholder="admin"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={loginForm.password}
-                      onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
-                      placeholder="••••••••"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {loginError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</p>}
-
-                <div className="flex gap-2">
-                  <Button onClick={handleLogin} disabled={loggingIn}>
-                    {loggingIn ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Logging in...
-                      </>
-                    ) : (
-                      <>
-                        <LogIn className="w-4 h-4 mr-2" />
-                        Login
-                      </>
-                    )}
-                  </Button>
-                  <Button variant="outline" onClick={() => setShowLoginForm(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
+            <div className="bg-white p-3 rounded-lg border">
+              <div className="text-2xl font-bold text-blue-600">{uniqueUsers.length}</div>
+              <div className="text-xs text-gray-500">Active Users</div>
             </div>
-          )}
-
-
-
-          {/* Stats - only show when authenticated */}
-          {!requiresAuth && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-white p-3 rounded-lg border">
-                <div className="text-2xl font-bold text-gray-900">{filteredLogs.length}</div>
-                <div className="text-xs text-gray-500">Total Events</div>
+            <div className="bg-white p-3 rounded-lg border">
+              <div className="text-2xl font-bold text-green-600">
+                {filteredLogs.filter((l) => l.eventType === "AR_Login").length}
               </div>
-              <div className="bg-white p-3 rounded-lg border">
-                <div className="text-2xl font-bold text-blue-600">{uniqueUsers.length}</div>
-                <div className="text-xs text-gray-500">Active Users</div>
-              </div>
-              <div className="bg-white p-3 rounded-lg border">
-                <div className="text-2xl font-bold text-green-600">
-                  {filteredLogs.filter((l) => l.eventType === "AR_Login").length}
-                </div>
-                <div className="text-xs text-gray-500">Login Events</div>
-              </div>
-              <div className="bg-white p-3 rounded-lg border">
-                <div className="text-2xl font-bold text-purple-600">{uniqueEventTypes.length}</div>
-                <div className="text-xs text-gray-500">Event Types</div>
-              </div>
+              <div className="text-xs text-gray-500">Login Events</div>
             </div>
-          )}
+            <div className="bg-white p-3 rounded-lg border">
+              <div className="text-2xl font-bold text-purple-600">{uniqueEventTypes.length}</div>
+              <div className="text-xs text-gray-500">Event Types</div>
+            </div>
+          </div>
 
-          {/* Audit Log Table - only show when authenticated */}
-          {!requiresAuth && (
-            <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-              {loading ? (
-                <div className="flex items-center justify-center p-8">
-                  <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-                  <span className="text-gray-600">Loading audit logs...</span>
-                </div>
-              ) : error ? (
-                <div className="flex items-center justify-center p-8 text-red-600">
-                  <AlertCircle className="w-6 h-6 mr-2" />
-                  <span>{error}</span>
-                </div>
-              ) : !selectedSystem ? (
-                <div className="flex items-center justify-center p-8 text-gray-500">
-                  <Cloud className="w-6 h-6 mr-2" />
-                  <span>Select a cloud system to view audit logs</span>
-                </div>
-              ) : displayedLogs.length === 0 ? (
-                <div className="flex items-center justify-center p-8 text-gray-500">
-                  <Activity className="w-6 h-6 mr-2" />
-                  <span>No audit logs found</span>
-                </div>
-              ) : (
-                <>
-                  {/* Desktop Table */}
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Time
-                          </th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Event
-                          </th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            User
-                          </th>
-                          <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Resources
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {displayedLogs.map((log, index) => {
-                          const eventInfo = getEventInfo(log.eventType);
-                          return (
-                            <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-gray-50">
-                              <td className="px-3 py-2.5 whitespace-nowrap">
-                                <div className="flex items-center text-xs lg:text-sm text-gray-600">
-                                  <Clock className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
-                                  {formatTimestamp(log.createdTimeSec)}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2.5 whitespace-nowrap">
-                                <span
-                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${eventInfo.color}`}
-                                >
-                                  {getEventIcon(eventInfo.icon)}
-                                  <span className="hidden lg:inline">{eventInfo.label}</span>
-                                </span>
-                              </td>
-                              <td className="px-3 py-2.5 whitespace-nowrap">
-                                <div className="flex items-center text-xs lg:text-sm">
-                                  <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
-                                  <div className="flex flex-col">
-                                    <span className="font-medium text-gray-900">{log.authSession?.userName || "System"}</span>
-                                    {log.authSession?.userHost && (
-                                      <span className="text-[10px] text-gray-400">
-                                        {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-3 py-2.5">
-                                <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
-                                  {log.resources && log.resources.length > 0
-                                    ? log.resources
-                                      .slice(0, 2)
-                                      .map((r) => getResourceName(r))
-                                      .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
-                                    : ""}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Mobile Cards */}
-                  <div className="md:hidden space-y-2 p-2">
-                    {displayedLogs.map((log, index) => {
-                      const eventInfo = getEventInfo(log.eventType);
-                      return (
-                        <div
-                          key={`${log.createdTimeSec}-${index}`}
-                          className="bg-gray-50 border rounded-lg p-2.5 space-y-1.5"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${eventInfo.color}`}
-                            >
-                              {getEventIcon(eventInfo.icon)}
-                              {eventInfo.label}
-                            </span>
-                            <span className="text-[10px] text-gray-500 whitespace-nowrap">
-                              {formatTimestamp(log.createdTimeSec)}
-                            </span>
-                          </div>
-                          <div className="flex flex-col text-sm">
-                            <div className="flex items-center">
-                              <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
-                              <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "System"}</span>
-                            </div>
-                            {log.authSession?.userHost && (
-                              <span className="text-[9px] text-gray-400 ml-5">
-                                {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+          {/* Audit Log Table */}
+          <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center p-8">
+                <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+                <span className="text-gray-600">Loading audit logs...</span>
+              </div>
+            ) : error ? (
+              <div className="flex items-center justify-center p-8 text-red-600">
+                <AlertCircle className="w-6 h-6 mr-2" />
+                <span>{error}</span>
+              </div>
+            ) : !selectedSystem ? (
+              <div className="flex items-center justify-center p-8 text-gray-500">
+                <Cloud className="w-6 h-6 mr-2" />
+                <span>Select a cloud system to view audit logs</span>
+              </div>
+            ) : displayedLogs.length === 0 ? (
+              <div className="flex items-center justify-center p-8 text-gray-500">
+                <Activity className="w-6 h-6 mr-2" />
+                <span>No audit logs found</span>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Time
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Event
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          User
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Resources
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {displayedLogs.map((log, index) => {
+                        const eventInfo = getEventInfo(log.eventType);
+                        return (
+                          <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-gray-50">
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              <div className="flex items-center text-xs lg:text-sm text-gray-600">
+                                <Clock className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                                {formatTimestamp(log.createdTimeSec)}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${eventInfo.color}`}
+                              >
+                                {getEventIcon(eventInfo.icon)}
+                                <span className="hidden lg:inline">{eventInfo.label}</span>
                               </span>
-                            )}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              <div className="flex items-center text-xs lg:text-sm">
+                                <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-gray-900">{log.authSession?.userName || "System"}</span>
+                                  {log.authSession?.userHost && (
+                                    <span className="text-[10px] text-gray-400">
+                                      {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
+                                {log.resources && log.resources.length > 0
+                                  ? log.resources
+                                    .slice(0, 2)
+                                    .map((r) => getResourceName(r))
+                                    .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
+                                  : ""}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Cards */}
+                <div className="md:hidden space-y-2 p-2">
+                  {displayedLogs.map((log, index) => {
+                    const eventInfo = getEventInfo(log.eventType);
+                    return (
+                      <div
+                        key={`${log.createdTimeSec}-${index}`}
+                        className="bg-gray-50 border rounded-lg p-2.5 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${eventInfo.color}`}
+                          >
+                            {getEventIcon(eventInfo.icon)}
+                            {eventInfo.label}
+                          </span>
+                          <span className="text-[10px] text-gray-500 whitespace-nowrap">
+                            {formatTimestamp(log.createdTimeSec)}
+                          </span>
+                        </div>
+                        <div className="flex flex-col text-sm">
+                          <div className="flex items-center">
+                            <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
+                            <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "System"}</span>
                           </div>
-                          {log.resources && log.resources.length > 0 && (
-                            <div className="text-[10px] text-gray-500 truncate">
-                              <span className="font-medium">Resources:</span>{" "}
-                              {log.resources
-                                .slice(0, 2)
-                                .map((r) => getResourceName(r))
-                                .join(", ")}
-                              {log.resources.length > 2 && ` +${log.resources.length - 2} more`}
-                            </div>
+                          {log.authSession?.userHost && (
+                            <span className="text-[9px] text-gray-400 ml-5">
+                              {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
+                            </span>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
+                        {log.resources && log.resources.length > 0 && (
+                          <div className="text-[10px] text-gray-500 truncate">
+                            <span className="font-medium">Resources:</span>{" "}
+                            {log.resources
+                              .slice(0, 2)
+                              .map((r) => getResourceName(r))
+                              .join(", ")}
+                            {log.resources.length > 2 && ` +${log.resources.length - 2} more`}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
 
-                  {/* Load More */}
-                  {sortedLogs.length > displayCount && (
-                    <div className="p-3 border-t text-center">
-                      <Button variant="outline" size="sm" onClick={() => setDisplayCount((prev) => prev + 20)}>
-                        Load More ({sortedLogs.length - displayCount} remaining)
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
+                {/* Load More */}
+                {sortedLogs.length > displayCount && (
+                  <div className="p-3 border-t text-center">
+                    <Button variant="outline" size="sm" onClick={() => setDisplayCount((prev) => prev + 20)}>
+                      Load More ({sortedLogs.length - displayCount} remaining)
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </>
       )}
     </div>

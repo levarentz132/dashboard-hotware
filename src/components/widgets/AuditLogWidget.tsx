@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -19,9 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
-import { performAdminLogin } from "@/lib/auth-utils";
+import { getElectronHeaders } from "@/lib/config";
 
 interface CloudSystem {
   id: string;
@@ -125,8 +123,6 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showLoginDialog, setShowLoginDialog] = useState(false);
-  const autoLoginBlockedSystemsRef = useRef<Set<string>>(new Set());
   const [deviceMap, setDeviceMap] = useState<Record<string, string>>({});
 
   // Fetch devices for name mapping
@@ -155,17 +151,10 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
     return deviceMap[resourceId] || resourceId;
   };
 
-  // Auto-login logic
-  const attemptAutoLogin = useCallback(async (targetSystemId: string) => {
-    console.log(`[AuditLogWidget] Attempting silent login to ${targetSystemId}...`);
-    return await performAdminLogin(targetSystemId);
-  }, []);
-
   // Fetch audit logs
   const fetchAuditLogs = useCallback(
-    async (targetSystemId: string, retry = false) => {
+    async (targetSystemId: string) => {
       try {
-        // Fetch most recent logs (e.g., 50) without a hard date limit to show the actual latest activity
         const response = await fetch(
           `/api/cloud/audit-log?systemId=${encodeURIComponent(targetSystemId)}&limit=50`,
           {
@@ -178,27 +167,8 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
           },
         );
 
-        if (response.status === 401 && !retry) {
-          const hasAutoLoginCreds = false; // Disabled - using Dual-Login flow
-          const autoLoginBlocked = autoLoginBlockedSystemsRef.current.has(targetSystemId);
-
-          if (hasAutoLoginCreds && !autoLoginBlocked) {
-            const success = await attemptAutoLogin(targetSystemId);
-            if (success) {
-              return fetchAuditLogs(targetSystemId, true);
-            }
-            // Mark blocked to avoid repeated loops on retry
-            autoLoginBlockedSystemsRef.current.add(targetSystemId);
-            setError("Cloud login failed. Please login manually.");
-            return;
-          }
-
-          setError("Login required");
-          return;
-        }
-
         if (!response.ok) {
-          throw new Error("Failed to fetch");
+          throw new Error(response.status === 401 ? "Unauthorized access" : "Failed to fetch logs");
         }
 
         const data = await response.json();
@@ -209,11 +179,11 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
 
         setAuditLogs(sortedLogs);
         setError(null);
-      } catch {
-        setError("Failed to fetch audit logs");
+      } catch (err: any) {
+        setError(err.message || "Failed to fetch audit logs");
       }
     },
-    [attemptAutoLogin],
+    [],
   );
 
   // Load data
@@ -272,35 +242,15 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
 
   if (error) {
     return (
-      <>
-        <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-          <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
-          <p className="text-sm text-red-500">{error}</p>
-          <div className="mt-2 flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleRefresh}>
-              <RefreshCw className="w-4 h-4 mr-1" /> Retry
-            </Button>
-            {systemId && (
-              <Button size="sm" onClick={() => setShowLoginDialog(true)}>
-                <LogIn className="w-4 h-4 mr-1" /> Login
-              </Button>
-            )}
-          </div>
+      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+        <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
+        <p className="text-sm text-red-500">{error}</p>
+        <div className="mt-2 flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleRefresh}>
+            <RefreshCw className="w-4 h-4 mr-1" /> Retry
+          </Button>
         </div>
-        {systemId && (
-          <CloudLoginDialog
-            open={showLoginDialog}
-            onOpenChange={setShowLoginDialog}
-            systemId={systemId}
-            systemName={systemId} // We don't have name here easily, systemId is okay for dialog
-            onLoginSuccess={() => {
-              setError(null);
-              autoLoginBlockedSystemsRef.current.delete(systemId);
-              handleRefresh();
-            }}
-          />
-        )}
-      </>
+      </div>
     );
   }
 
@@ -440,19 +390,6 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
         )}
       </div>
 
-      {systemId && (
-        <CloudLoginDialog
-          open={showLoginDialog}
-          onOpenChange={setShowLoginDialog}
-          systemId={systemId}
-          systemName={systemId}
-          onLoginSuccess={() => {
-            setError(null);
-            autoLoginBlockedSystemsRef.current.delete(systemId);
-            handleRefresh();
-          }}
-        />
-      )}
     </div>
   );
 }
