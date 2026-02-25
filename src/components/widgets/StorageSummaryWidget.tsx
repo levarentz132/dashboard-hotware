@@ -1,14 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { HardDrive, Database, RefreshCw, AlertCircle, CheckCircle, XCircle, LogIn, Eye, EyeOff } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { HardDrive, Database, RefreshCw, AlertCircle, CheckCircle, XCircle } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { CLOUD_CONFIG, getCloudAuthHeader } from "@/lib/config";
+import { useInventorySync } from "@/hooks/use-inventory-sync";
+import { getElectronHeaders } from "@/lib/config";
+import Cookies from "js-cookie";
 
 interface StorageStatusInfo {
+  storageId: string;
   totalSpace: string;
   freeSpace: string;
   isOnline: boolean;
@@ -19,117 +21,97 @@ interface Storage {
   name: string;
   status?: string;
   statusInfo?: StorageStatusInfo | null;
+  systemId?: string;
 }
 
-interface CloudSystem {
-  id: string;
-  name: string;
-  stateOfHealth: string;
-}
+export default function StorageSummaryWidget({ systemId: propSystemId }: { systemId?: string }) {
+  // 1. Define Fetchers
+  const fetchLocalStorages = useCallback(async () => {
+    const localUserStr = Cookies.get("local_nx_user");
+    if (!localUserStr) return null;
 
-export default function StorageSummaryWidget({ systemId }: { systemId?: string }) {
-  const [storages, setStorages] = useState<Storage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [requiresAuth, setRequiresAuth] = useState(false);
-  const [showLoginForm, setShowLoginForm] = useState(false);
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [showPassword, setShowPassword] = useState(false);
-  const [loggingIn, setLoggingIn] = useState(false);
-
-  // Manual login handler
-  const handleLogin = async () => {
-    if (!systemId || !loginForm.username || !loginForm.password) return;
-
-    setLoggingIn(true);
     try {
-      const response = await fetch("/api/cloud/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemId: systemId,
-          username: loginForm.username,
-          password: loginForm.password,
-        }),
+      const localUser = JSON.parse(localUserStr);
+      const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
+
+      // Fetch storage list (v3)
+      const listResp = await fetch("/nx/rest/v3/servers/this/storages", {
+        headers: { "x-runtime-guid": localUser.token }
       });
 
-      if (response.ok) {
-        setRequiresAuth(false);
-        setShowLoginForm(false);
-        setLoginForm({ username: "", password: "" });
-        fetchStorages(systemId);
-      } else {
-        setError("Login failed");
-      }
-    } catch {
-      setError("Login failed");
-    } finally {
-      setLoggingIn(false);
-    }
-  };
+      // Fetch storage status (v4)
+      const statusResp = await fetch("/nx/rest/v4/servers/this/storages/*/status", {
+        headers: { "x-runtime-guid": localUser.token }
+      });
 
-  // Auto-login function - always try with config credentials
-  const attemptAutoLogin = useCallback(async (systemId: string) => {
-    // Authentication is now handled centrally by the Dual-Login flow
-    return false;
+      if (!listResp.ok) return null;
+
+      const listData = await listResp.json();
+      const statusData = await statusResp.json();
+
+      const merged = (Array.isArray(listData) ? listData : []).map((storage: any) => {
+        const sid_clean = storage.id.replace(/[{}]/g, '');
+        const status = (Array.isArray(statusData) ? statusData : []).find((s: any) =>
+          s.storageId.replace(/[{}]/g, '') === sid_clean
+        );
+        return {
+          ...storage,
+          statusInfo: status || null,
+          systemId: sid
+        };
+      });
+
+      return {
+        systemId: sid,
+        systemName: "Local Server",
+        items: merged,
+        stateOfHealth: "online"
+      };
+    } catch (e) {
+      console.error("[StorageWidget] Local fetch failed:", e);
+      return null;
+    }
   }, []);
 
-  // Fetch storages
-  const fetchStorages = useCallback(
-    async (targetSystemId: string) => {
-      setLoading(true);
-      setError(null);
+  const fetchCloudStoragesForSystem = useCallback(async (system: { id: string, name: string }) => {
+    try {
+      const response = await fetch(
+        `/api/cloud/storages?systemId=${encodeURIComponent(system.id)}`,
+        {
+          headers: {
+            Accept: "application/json",
+            ...getElectronHeaders()
+          },
+        },
+      );
 
-      try {
-        const response = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(targetSystemId)}`);
+      if (response.status >= 400) return [];
+      const data = await response.json();
+      return (Array.isArray(data) ? data : []).map((storage: any) => ({
+        ...storage,
+        systemId: system.id
+      }));
+    } catch (err) {
+      console.error(`[StorageWidget] Error fetching storages from ${system.name}:`, err);
+      return [];
+    }
+  }, []);
 
-        if (response.status === 401) {
-          // Session belum ada, coba auto-login dulu
-          const autoLoginSuccess = await attemptAutoLogin(targetSystemId);
-          if (autoLoginSuccess) {
-            // Retry fetch after successful login
-            const retryResponse = await fetch(`/api/cloud/storages?systemId=${encodeURIComponent(targetSystemId)}`);
-            if (retryResponse.ok) {
-              const data = await retryResponse.json();
-              setStorages(Array.isArray(data) ? data : []);
-              setRequiresAuth(false);
-              setLoading(false);
-              return;
-            }
-          }
-          // Auto-login gagal, minta user login manual
-          setRequiresAuth(true);
-          setShowLoginForm(true);
-          setLoading(false);
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch storages");
-        }
-
-        const data = await response.json();
-        setStorages(Array.isArray(data) ? data : []);
-        setRequiresAuth(false);
-      } catch (err) {
-        console.error("Error fetching storages:", err);
-        setError("Failed to fetch storages");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [attemptAutoLogin],
+  // 2. Use Inventory sync hook
+  const {
+    dataBySystem,
+    loading,
+    error,
+    refetch
+  } = useInventorySync<Storage>(
+    fetchLocalStorages,
+    fetchCloudStoragesForSystem
   );
 
-  // Fetch storages when system changes
-  useEffect(() => {
-    if (systemId) {
-      fetchStorages(systemId);
-    } else {
-      setLoading(false);
-      setStorages([]);
-    }
-  }, [systemId, fetchStorages]);
+  // 3. Consolidated storage list
+  const storages = useMemo(() => {
+    return dataBySystem.flatMap(sys => sys.items);
+  }, [dataBySystem]);
 
   // Format bytes to human readable
   const formatBytes = (bytes: string | number): string => {
@@ -142,39 +124,37 @@ export default function StorageSummaryWidget({ systemId }: { systemId?: string }
   };
 
   // Calculate totals
-  const totalStorage = storages.reduce((acc, s) => {
+  const totalStorage = useMemo(() => storages.reduce((acc, s) => {
     if (s.statusInfo) {
       return acc + parseInt(s.statusInfo.totalSpace || "0");
     }
     return acc;
-  }, 0);
+  }, 0), [storages]);
 
-  const totalUsed = storages.reduce((acc, s) => {
+  const totalUsed = useMemo(() => storages.reduce((acc, s) => {
     if (s.statusInfo) {
       const total = parseInt(s.statusInfo.totalSpace || "0");
       const free = parseInt(s.statusInfo.freeSpace || "0");
       return acc + (total - free);
     }
     return acc;
-  }, 0);
+  }, 0), [storages]);
 
-  const totalFree = storages.reduce((acc, s) => {
+  const totalFree = useMemo(() => storages.reduce((acc, s) => {
     if (s.statusInfo) {
       return acc + parseInt(s.statusInfo.freeSpace || "0");
     }
     return acc;
-  }, 0);
+  }, 0), [storages]);
 
   const onlineStorages = storages.filter((s) => s.status === "Online" || s.statusInfo?.isOnline).length;
   const usagePercentage = totalStorage > 0 ? Math.round((totalUsed / totalStorage) * 100) : 0;
 
   const handleRefresh = () => {
-    if (systemId) {
-      fetchStorages(systemId);
-    }
+    refetch();
   };
 
-  if (loading) {
+  if (loading && storages.length === 0) {
     return (
       <div className="flex items-center justify-center h-full p-4">
         <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -183,53 +163,7 @@ export default function StorageSummaryWidget({ systemId }: { systemId?: string }
     );
   }
 
-  // Show login form when auth required
-  if (requiresAuth && showLoginForm) {
-    return (
-      <div className="p-3 space-y-3">
-        <div className="flex items-center gap-2 text-amber-600">
-          <LogIn className="w-5 h-5" />
-          <span className="font-medium text-sm">Login Required</span>
-        </div>
-        <p className="text-xs text-muted-foreground">Please login to view storage data</p>
-        <div className="space-y-2">
-          <Input
-            placeholder="Username/Email"
-            value={loginForm.username}
-            onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-            className="h-8 text-sm"
-          />
-          <div className="relative">
-            <Input
-              type={showPassword ? "text" : "password"}
-              placeholder="Password"
-              value={loginForm.password}
-              onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-              className="h-8 text-sm pr-8"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-            >
-              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-          <Button
-            size="sm"
-            className="w-full h-8"
-            onClick={handleLogin}
-            disabled={loggingIn || !loginForm.username || !loginForm.password}
-          >
-            {loggingIn ? <RefreshCw className="w-4 h-4 animate-spin mr-1" /> : <LogIn className="w-4 h-4 mr-1" />}
-            Login
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
+  if (error && storages.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-4 text-center">
         <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
@@ -259,7 +193,7 @@ export default function StorageSummaryWidget({ systemId }: { systemId?: string }
           onClick={handleRefresh}
           className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
-          <RefreshCw className="w-4 h-4 text-gray-500" />
+          <RefreshCw className={`w-4 h-4 text-gray-500 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
 
@@ -321,7 +255,7 @@ export default function StorageSummaryWidget({ systemId }: { systemId?: string }
             const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
 
             return (
-              <div key={storage.id} className="flex items-center gap-2 text-xs p-1.5 bg-muted/50 rounded">
+              <div key={`${storage.systemId}-${storage.id}`} className="flex items-center gap-2 text-xs p-1.5 bg-muted/50 rounded">
                 <div className={`w-2 h-2 rounded-full ${isOnline ? "bg-green-500" : "bg-red-500"}`} />
                 <span className="truncate flex-1">{storage.name}</span>
                 <Badge variant="outline" className="text-[10px] h-5">
