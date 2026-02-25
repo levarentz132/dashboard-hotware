@@ -1,17 +1,111 @@
 "use client";
 
-import { Camera, Wifi, WifiOff, Activity, AlertCircle, Circle } from "lucide-react";
-import { useCameras } from "@/hooks/useNxAPI-camera";
+import { Camera, Wifi, WifiOff, Activity, AlertCircle, Circle, RefreshCw } from "lucide-react";
+import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getStatusVariant, sortByStatus } from "@/lib/status-utils";
+import { getElectronHeaders } from "@/lib/config";
+import { NxCamera } from "@/lib/nxapi";
 import Link from "next/link";
+import { useCallback, useMemo } from "react";
+import Cookies from "js-cookie";
 
-export default function CameraOverviewWidget({ systemId }: { systemId?: string }) {
-  const { cameras, loading, error } = useCameras(systemId);
+export default function CameraOverviewWidget({ systemId: propSystemId }: { systemId?: string }) {
+  // 1. Define Fetchers to match CameraInventory logic
+  const fetchLocalCameras = useCallback(async () => {
+    const localUserStr = Cookies.get("local_nx_user");
+    if (!localUserStr) return null;
+
+    try {
+      const localUser = JSON.parse(localUserStr);
+      const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
+
+      // Try to get actual server name
+      let actualServerName = "";
+      try {
+        const infoResp = await fetch("/nx/rest/v4/servers/this", {
+          headers: { "x-runtime-guid": localUser.token }
+        });
+        if (infoResp.ok) {
+          const info = await infoResp.json();
+          actualServerName = info.name || info.systemName || "";
+        }
+      } catch (e) { }
+
+      const displayName = actualServerName ? `Local Server (${actualServerName})` : "Local Server";
+
+      const response = await fetch("/nx/rest/v4/devices", {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "x-runtime-guid": localUser.token
+        }
+      });
+
+      if (response.status >= 400) return null;
+      const devices = await response.json();
+      const cams = (Array.isArray(devices) ? devices : []).map((d: any) => ({
+        ...d,
+        systemId: sid,
+      }));
+
+      return {
+        systemId: sid,
+        systemName: displayName,
+        items: cams,
+        stateOfHealth: "online"
+      };
+    } catch (e) {
+      console.error("[CameraWidget] Local fetch failed:", e);
+      return null;
+    }
+  }, []);
+
+  const fetchCloudCamerasForSystem = useCallback(async (system: { id: string, name: string }) => {
+    try {
+      const response = await fetch(
+        `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            ...getElectronHeaders(),
+          },
+        },
+      );
+
+      if (response.status >= 400) return [];
+      const devices = await response.json();
+      return (Array.isArray(devices) ? devices : []).map((device: any) => ({
+        ...device,
+        systemId: system.id,
+        systemName: system.name,
+      }));
+    } catch (err) {
+      console.error(`[CameraWidget] Error fetching cameras from ${system.name}:`, err);
+      return [];
+    }
+  }, []);
+
+  // 2. Use Inventory sync hook
+  const {
+    dataBySystem,
+    loading,
+    error,
+    refetch
+  } = useInventorySync<NxCamera>(
+    fetchLocalCameras,
+    fetchCloudCamerasForSystem
+  );
+
+  // 3. Consolidated cameras array
+  const cameras = useMemo(() => {
+    return dataBySystem.flatMap(sys => sys.items);
+  }, [dataBySystem]);
 
   // Count cameras by status
   const totalCameras = cameras.length;
@@ -28,7 +122,7 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
   const onlinePercentage = totalCameras > 0 ? (onlineCameras / totalCameras) * 100 : 0;
 
   // Sort cameras using shared utility
-  const sortedCameras = sortByStatus(cameras);
+  const sortedCameras = useMemo(() => sortByStatus(cameras), [cameras]);
 
   const getStatusIcon = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -42,7 +136,7 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
     }
   };
 
-  if (loading) {
+  if (loading && cameras.length === 0) {
     return (
       <div className="h-full flex flex-col p-2 sm:p-4">
         <div className="flex items-center gap-2 mb-2 sm:mb-4">
@@ -62,11 +156,12 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
     );
   }
 
-  if (error) {
+  if (error && cameras.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-4">
         <AlertCircle className="w-10 h-10 text-destructive mb-2" />
         <p className="text-sm text-muted-foreground">Failed to load cameras</p>
+        <button onClick={() => refetch()} className="mt-2 text-xs text-blue-500 hover:underline">Retry</button>
       </div>
     );
   }
@@ -90,9 +185,19 @@ export default function CameraOverviewWidget({ systemId }: { systemId?: string }
           </div>
           <div className="min-w-0">
             <h3 className="font-semibold text-foreground text-sm sm:text-base truncate">Camera Overview</h3>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">{totalCameras} cameras</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground">
+              {totalCameras} cameras
+            </p>
           </div>
         </div>
+        <button
+          onClick={() => refetch()}
+          disabled={loading}
+          className="p-1.5 hover:bg-muted rounded-md transition-colors disabled:opacity-50"
+          title="Refresh Cameras"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
       <Tabs defaultValue="summary" className="flex-1 flex flex-col min-h-0">

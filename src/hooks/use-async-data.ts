@@ -166,7 +166,7 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
   }
 
   const data = await response.json();
-  const systems: CloudSystem[] = data.systems || [];
+  const systems: CloudSystem[] = Array.isArray(data) ? data : (data.systems || []);
   const sortedSystems = sortCloudSystems(systems);
 
   // Update cache
