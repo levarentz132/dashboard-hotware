@@ -28,6 +28,9 @@ import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
 import { Shield, LogIn, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useInventorySync } from "@/hooks/use-inventory-sync";
+import type { NxCamera } from "@/lib/nxapi";
+import Cookies from "js-cookie";
 import type { ServerMarkerData } from "./ServerMap";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -68,8 +71,79 @@ export default function SystemHealth() {
   const canEditHealth = isUserAdmin || localUser?.privileges?.find(p => p.module === "system_health" || p.module === "health")?.can_edit === true;
 
   const { systemInfo, connected, loading } = useSystemInfo();
-  const { cameras } = useCameras();
   const { data: cloudSystems, loading: cloudLoading, refetch: refetchCloudSystems } = useCloudSystems();
+
+  // Camera Inventory sync logic (mirrored from CameraInventory.tsx)
+  const fetchLocalCameras = useCallback(async () => {
+    const localUserStr = Cookies.get("local_nx_user");
+    const localServerId = Cookies.get("nx_server_id");
+    if (!localUserStr) return null;
+
+    try {
+      const localUserParsed = JSON.parse(localUserStr);
+      const sid = Cookies.get("nx_system_id") || localServerId || localUserParsed.serverId || "local";
+
+      const response = await fetch("/nx/rest/v4/devices", {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "x-runtime-guid": localUserParsed.token
+        }
+      });
+
+      if (response.status >= 400) return null;
+      const devices = await response.json();
+      const cams = (Array.isArray(devices) ? devices : []).map((d: any) => ({
+        ...d,
+        systemId: sid
+      }));
+
+      return {
+        systemId: sid,
+        systemName: "Local Server",
+        items: cams,
+        stateOfHealth: "online"
+      };
+    } catch (e) {
+      console.error("[SystemHealth] Local camera fetch failed:", e);
+      return null;
+    }
+  }, []);
+
+  const fetchCloudCamerasForSystem = useCallback(async (system: CloudSystem) => {
+    try {
+      const response = await fetch(
+        `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            ...getElectronHeaders(),
+          },
+        },
+      );
+
+      if (response.status >= 400) return [];
+      const devices = await response.json();
+      return (Array.isArray(devices) ? devices : []).map((device: any) => ({
+        ...device,
+        systemId: system.id,
+      }));
+    } catch (err) {
+      console.error(`[SystemHealth] Error fetching cameras from ${system.name}:`, err);
+      return [];
+    }
+  }, []);
+
+  const {
+    dataBySystem: camerasBySystem,
+    loading: loadingCamerasSync,
+    refetch: refetchCamerasSync
+  } = useInventorySync<NxCamera>(
+    fetchLocalCameras,
+    fetchCloudCamerasForSystem
+  );
   const [systemDetails, setSystemDetails] = useState<Map<string, SystemInfoData | null>>(new Map());
   const [serverLocations, setServerLocations] = useState<Map<string, ServerLocationData>>(new Map());
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -167,9 +241,12 @@ export default function SystemHealth() {
   // Refresh handler
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refetchCloudSystems();
+    await Promise.all([
+      refetchCloudSystems(),
+      refetchCamerasSync(),
+      fetchServerLocations()
+    ]);
     await fetchAllSystemDetails();
-    await fetchServerLocations();
     setRefreshing(false);
   };
 
@@ -191,8 +268,9 @@ export default function SystemHealth() {
     return <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeClass(role)}`}>{role}</span>;
   };
 
-  const onlineCameras = cameras?.filter((c) => c.status?.toLowerCase() === "online").length || 0;
-  const totalCameras = cameras?.length || 0;
+  const allCameras = useMemo(() => camerasBySystem.flatMap(s => s.items), [camerasBySystem]);
+  const onlineCameras = allCameras.filter((c) => c.status?.toLowerCase() === "online" || c.status?.toLowerCase() === "recording").length;
+  const totalCameras = allCameras.length;
   const onlineSystemsCount = cloudSystems.filter((s) => s.stateOfHealth === "online").length;
   const totalSystemsCount = cloudSystems.length;
 
@@ -374,7 +452,7 @@ export default function SystemHealth() {
               </div>
             </div>
           </div>
-          {/* <div className="bg-white p-6 rounded-lg border">
+          <div className="bg-white p-6 rounded-lg border">
             <div className="flex items-center space-x-3">
               <Activity className="w-8 h-8 text-purple-600" />
               <div>
@@ -384,7 +462,7 @@ export default function SystemHealth() {
                 <div className="text-sm text-gray-600">Cameras Online</div>
               </div>
             </div>
-          </div> */}
+          </div>
         </div>
       )}
 
@@ -455,9 +533,19 @@ export default function SystemHealth() {
                       </div>
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3 col-span-2">
-                      <div className="text-xs text-gray-500 mb-1">Owner Email</div>
-                      <div className="font-medium text-gray-900 truncate" title={system.ownerAccountEmail}>
-                        {system.ownerAccountEmail || "N/A"}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">Cameras</div>
+                          <div className="font-medium text-gray-900">
+                            {(() => {
+                              const sysData = camerasBySystem.find(s => s.systemId === system.id);
+                              if (!sysData) return "0 / 0";
+                              const online = sysData.items.filter(c => c.status?.toLowerCase() === "online" || c.status?.toLowerCase() === "recording").length;
+                              return `${online} / ${sysData.items.length}`;
+                            })()}
+                          </div>
+                        </div>
+                        <Activity className="w-4 h-4 text-purple-500 opacity-60" />
                       </div>
                     </div>
                   </div>
