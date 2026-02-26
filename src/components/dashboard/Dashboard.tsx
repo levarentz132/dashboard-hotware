@@ -342,6 +342,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
+  const [isAddingWidget, setIsAddingWidget] = useState(false);
   const isElectron = typeof window !== 'undefined' && (window as any).electron;
 
   // Detect device type based on screen width
@@ -597,18 +598,27 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
 
   // Add new widget
   const addWidget = (type: WidgetType) => {
-    const widgetConfig = widgetRegistry[type];
-    const isMobile = deviceType === "mobile";
-    const newWidget: DashboardWidget = {
-      i: `widget-${Date.now()}`,
-      type,
-      x: 0,
-      y: Infinity, // will be automatically placed at the bottom
-      w: isMobile ? COLS : widgetConfig.defaultSize.w,
-      h: widgetConfig.defaultSize.h,
-    };
-    setWidgets([...widgets, newWidget]);
-    setShowAddWidget(false);
+    if (isAddingWidget) return;
+    setIsAddingWidget(true);
+
+    try {
+      const widgetConfig = widgetRegistry[type];
+      const isMobile = deviceType === "mobile";
+      const newWidget: DashboardWidget = {
+        i: `widget-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        type,
+        x: 0,
+        y: Infinity, // will be automatically placed at the bottom
+        w: isMobile ? COLS : widgetConfig.defaultSize.w,
+        h: widgetConfig.defaultSize.h,
+      };
+
+      setWidgets((prev) => [...prev, newWidget]);
+      setShowAddWidget(false);
+    } finally {
+      // Add a small delay before allowing another add to prevent double-click issues
+      setTimeout(() => setIsAddingWidget(false), 300);
+    }
   };
 
   // Remove widget
