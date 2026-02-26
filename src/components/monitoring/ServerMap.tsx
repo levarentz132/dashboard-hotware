@@ -17,6 +17,8 @@ export interface ServerMarkerData {
   version?: string;
   ownerFullName?: string;
   accessRole?: string;
+  systemName?: string;
+  isLocal?: boolean;
 }
 
 interface ServerMapProps {

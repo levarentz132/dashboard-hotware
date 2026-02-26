@@ -105,7 +105,14 @@ export default function ServerMapWidget({ systemId }: { systemId?: string }) {
   // Prepare server data for map
   const serverMapData: ServerMarkerData[] = useMemo(() => {
     return cloudSystems.map((system) => {
-      const location = serverLocations.get(system.name);
+      // 1. Try to get location by server name
+      let location = serverLocations.get(system.name);
+
+      // 2. FALLBACK for Local: If no location for server name, try parent system name
+      if (!location && system.isLocal && system.systemName) {
+        location = serverLocations.get(system.systemName);
+      }
+
       return {
         id: system.id,
         name: system.name,

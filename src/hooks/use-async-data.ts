@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
+import { getCloudAuthHeader, getElectronHeaders, API_CONFIG } from "@/lib/config";
 import Cookies from "js-cookie";
 
 /**
@@ -114,6 +114,8 @@ export interface CloudSystem {
   version?: string;
   ownerFullName?: string;
   ownerAccountEmail?: string;
+  isLocal?: boolean;
+  systemName?: string;
 }
 
 /**
@@ -134,10 +136,94 @@ let cloudSystemsCache: { data: CloudSystem[]; timestamp: number } | null = null;
 const CLOUD_CACHE_TTL = 300000; // 5 minutes
 
 /**
+ * Fetch local systems/servers as CloudSystem objects for fallback
+ */
+async function fetchLocalSystemsAsCloudSystems(): Promise<CloudSystem[]> {
+  if (typeof window === 'undefined') return [];
+
+  const systemId = API_CONFIG.systemId || 'localhost:7001';
+
+  // 1. Fetch both System Info and Servers
+  const [infoRes, serversRes] = await Promise.allSettled([
+    fetch(`/api/nx/system/info?systemId=${encodeURIComponent(systemId)}`, { headers: getElectronHeaders() }),
+    fetch(`/api/nx/servers?systemId=${encodeURIComponent(systemId)}`, { headers: getElectronHeaders() })
+  ]);
+
+  let systemName = '';
+  let systemVersion = '';
+  if (infoRes.status === 'fulfilled' && infoRes.value.ok) {
+    try {
+      const info = await infoRes.value.json();
+      if (info && info.name) {
+        systemName = info.name;
+        systemVersion = info.version || '';
+      }
+    } catch (e) { }
+  }
+
+  let servers: any[] = [];
+  if (serversRes.status === 'fulfilled' && serversRes.value.ok) {
+    try {
+      servers = await serversRes.value.json();
+    } catch (e) { }
+  }
+
+  // Use a Map to deduplicate by name (case-insensitive)
+  // We prefer the Server entries!
+  const results: CloudSystem[] = [];
+
+  // 2. Add Servers first if found
+  if (Array.isArray(servers) && servers.length > 0) {
+    servers.forEach(server => {
+      results.push({
+        id: server.id, // Real UUID (e.g., {ef78cdcb-...})
+        name: server.name,
+        stateOfHealth: server.status === 'Online' || server.status === 'online' ? 'online' : 'offline',
+        accessRole: 'owner',
+        version: server.version || systemVersion,
+        ownerFullName: 'Local',
+        isLocal: true,
+        systemName: systemName // Store the system name for location fallback
+      });
+    });
+    return results;
+  }
+
+  // 3. Fallback to System entry ONLY if no servers found
+  if (systemName) {
+    return [{
+      id: `${systemId}_sys`, // Synthetic ID
+      name: systemName,
+      stateOfHealth: 'online',
+      accessRole: 'owner',
+      version: systemVersion,
+      ownerFullName: 'Local',
+      isLocal: true,
+      systemName: systemName
+    }];
+  }
+
+  // 4. Final resort fallback
+  if (systemId) {
+    return [{
+      id: systemId,
+      name: 'Local Server',
+      stateOfHealth: 'online',
+      accessRole: 'owner',
+      version: '',
+      ownerFullName: 'Local',
+      isLocal: true
+    }];
+  }
+
+  return [];
+}
+
+/**
  * Fetch cloud systems from internal API proxy
  */
 export async function fetchCloudSystems(): Promise<CloudSystem[]> {
-  // Return from cache if valid
+  // Return from cache if valid (short cache time for cloud systems)
   if (cloudSystemsCache && Date.now() - cloudSystemsCache.timestamp < CLOUD_CACHE_TTL) {
     return cloudSystemsCache.data;
   }
@@ -152,21 +238,38 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
     } catch (e) { }
   }
 
-  const response = await fetch("/api/cloud/systems", {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      ...getElectronHeaders(),
-      ...(cloudToken ? { "X-Electron-Cloud-Token": cloudToken } : {}),
-    }
-  });
+  let systems: CloudSystem[] = [];
+  let fetchError = false;
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch cloud systems: ${response.status}`);
+  try {
+    const response = await fetch("/api/cloud/systems", {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        ...getElectronHeaders(),
+        ...(cloudToken ? { "X-Electron-Cloud-Token": cloudToken } : {}),
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      systems = Array.isArray(data) ? data : (data.systems || []);
+    } else {
+      fetchError = true;
+    }
+  } catch (err) {
+    console.warn("[use-async-data] Cloud systems fetch error:", err);
+    fetchError = true;
   }
 
-  const data = await response.json();
-  const systems: CloudSystem[] = Array.isArray(data) ? data : (data.systems || []);
+  // FALLBACK: If cloud fetch failed or returned no systems, try local servers
+  if (fetchError || systems.length === 0) {
+    const localSystems = await fetchLocalSystemsAsCloudSystems();
+    if (localSystems.length > 0) {
+      systems = localSystems;
+    }
+  }
+
   const sortedSystems = sortCloudSystems(systems);
 
   // Update cache

@@ -15,6 +15,7 @@ const MapSelector = globalDynamic(() => import("./MapSelector"), {
 
 interface ServerLocationFormProps {
   serverName: string;
+  fallbackName?: string;
   onClose: () => void;
   onSave?: () => void;
 }
@@ -24,7 +25,7 @@ interface LocationData {
   longitude: number | null;
 }
 
-export default function ServerLocationForm({ serverName, onClose, onSave }: ServerLocationFormProps) {
+export default function ServerLocationForm({ serverName, fallbackName, onClose, onSave }: ServerLocationFormProps) {
   const [latitude, setLatitude] = useState<string>("");
   const [longitude, setLongitude] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -37,12 +38,27 @@ export default function ServerLocationForm({ serverName, onClose, onSave }: Serv
     const fetchLocation = async () => {
       setLoading(true);
       try {
+        // 1. Try primary server name
         const response = await fetch(`/api/server-location?server_name=${encodeURIComponent(serverName)}`);
         if (response.ok) {
           const data = await response.json();
-          if (data.location) {
+          if (data.location && (data.location.latitude || data.location.longitude)) {
             setLatitude(data.location.latitude?.toString() || "");
             setLongitude(data.location.longitude?.toString() || "");
+            setLoading(false);
+            return;
+          }
+        }
+
+        // 2. Try fallback name (e.g. system name) if primary failed
+        if (fallbackName) {
+          const fbResponse = await fetch(`/api/server-location?server_name=${encodeURIComponent(fallbackName)}`);
+          if (fbResponse.ok) {
+            const fbData = await fbResponse.json();
+            if (fbData.location) {
+              setLatitude(fbData.location.latitude?.toString() || "");
+              setLongitude(fbData.location.longitude?.toString() || "");
+            }
           }
         }
       } catch (err) {
@@ -53,7 +69,7 @@ export default function ServerLocationForm({ serverName, onClose, onSave }: Serv
     };
 
     fetchLocation();
-  }, [serverName]);
+  }, [serverName, fallbackName]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

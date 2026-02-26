@@ -69,12 +69,12 @@ export default function SystemHealth() {
 
   const { systemInfo, connected, loading } = useSystemInfo();
   const { cameras } = useCameras();
-  const { data: cloudSystems, refetch: refetchCloudSystems } = useCloudSystems();
+  const { data: cloudSystems, loading: cloudLoading, refetch: refetchCloudSystems } = useCloudSystems();
   const [systemDetails, setSystemDetails] = useState<Map<string, SystemInfoData | null>>(new Map());
   const [serverLocations, setServerLocations] = useState<Map<string, ServerLocationData>>(new Map());
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [editingLocation, setEditingLocation] = useState<string | null>(null);
+  const [editingLocation, setEditingLocation] = useState<{ name: string, fallbackName?: string } | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
@@ -196,10 +196,27 @@ export default function SystemHealth() {
   const onlineSystemsCount = cloudSystems.filter((s) => s.stateOfHealth === "online").length;
   const totalSystemsCount = cloudSystems.length;
 
+  const isLocalOnly = useMemo(() =>
+    cloudSystems.length > 0 && cloudSystems.every(s => s.ownerFullName === 'Local Admin'),
+    [cloudSystems]
+  );
+
+  const shouldShowWarning = useMemo(() =>
+    cloudSystems.length === 0 && !refreshing && !cloudLoading,
+    [cloudSystems.length, refreshing, cloudLoading]
+  );
+
   // Prepare server data for map
   const serverMapData: ServerMarkerData[] = useMemo(() => {
     return cloudSystems.map((system) => {
-      const location = serverLocations.get(system.name);
+      // 1. Try to get location by server name (standard)
+      let location = serverLocations.get(system.name);
+
+      // 2. FALLBACK for Local: If no location for server name, try parent system name
+      if (!location && system.isLocal && system.systemName) {
+        location = serverLocations.get(system.systemName);
+      }
+
       const details = systemDetails.get(system.id);
       return {
         id: system.id,
@@ -210,6 +227,8 @@ export default function SystemHealth() {
         version: details?.version || system.version,
         ownerFullName: system.ownerFullName,
         accessRole: system.accessRole,
+        systemName: system.systemName,
+        isLocal: system.isLocal,
       };
     });
   }, [cloudSystems, serverLocations, systemDetails]);
@@ -313,13 +332,13 @@ export default function SystemHealth() {
       </div>
 
       {/* Cloud Systems Error - Now positioned below title */}
-      {cloudSystems.length === 0 && !refreshing && (
+      {shouldShowWarning && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 select-none">
           <div className="flex items-center">
             <AlertTriangle className="w-6 h-6 text-yellow-600 mr-3" />
             <div>
-              <h3 className="font-medium text-yellow-800">No Cloud Systems Found</h3>
-              <p className="text-sm text-yellow-700">Unable to fetch cloud systems. Check your connection.</p>
+              <h3 className="font-medium text-yellow-800">No Systems Found</h3>
+              <p className="text-sm text-yellow-700">Unable to fetch cloud or local systems. Check your connection.</p>
             </div>
           </div>
         </div>
@@ -333,7 +352,7 @@ export default function SystemHealth() {
               <Cloud className="w-8 h-8 text-blue-600" />
               <div>
                 <div className="text-lg font-bold text-gray-900">{totalSystemsCount}</div>
-                <div className="text-sm text-gray-600">Cloud Systems</div>
+                <div className="text-sm text-gray-600">{isLocalOnly ? 'Local Servers' : 'Cloud Systems'}</div>
               </div>
             </div>
           </div>
@@ -342,7 +361,7 @@ export default function SystemHealth() {
               <CheckCircle className="w-8 h-8 text-green-600" />
               <div>
                 <div className="text-lg font-bold text-green-600">{onlineSystemsCount}</div>
-                <div className="text-sm text-gray-600">Systems Online</div>
+                <div className="text-sm text-gray-600">{isLocalOnly ? 'Servers Online' : 'Systems Online'}</div>
               </div>
             </div>
           </div>
@@ -351,7 +370,7 @@ export default function SystemHealth() {
               <XCircle className="w-8 h-8 text-red-600" />
               <div>
                 <div className="text-lg font-bold text-red-600">{totalSystemsCount - onlineSystemsCount}</div>
-                <div className="text-sm text-gray-600">Systems Offline</div>
+                <div className="text-sm text-gray-600">{isLocalOnly ? 'Servers Offline' : 'Systems Offline'}</div>
               </div>
             </div>
           </div>
@@ -372,8 +391,11 @@ export default function SystemHealth() {
       {/* Server Locations Map */}
       <ServerMap
         servers={serverMapData}
-        className={cloudSystems.length > 0 ? "" : "hidden"}
-        onServerClick={(server) => setEditingLocation(server.name)}
+        className=""
+        onServerClick={(server) => setEditingLocation({
+          name: server.name,
+          fallbackName: server.isLocal ? server.systemName : undefined
+        })}
         onRefresh={handleRefresh}
         isRefreshing={refreshing}
       />
@@ -383,14 +405,17 @@ export default function SystemHealth() {
         <div>
           <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Globe className="w-5 h-5" />
-            All Cloud Systems
+            {isLocalOnly ? 'Local Servers' : 'All Cloud Systems'}
           </h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {cloudSystems.map((system) => {
               const details = systemDetails.get(system.id);
               const isOnline = system.stateOfHealth === "online";
-              const location = serverLocations.get(system.name);
-              const hasLocation = location?.latitude && location?.longitude;
+              let location = serverLocations.get(system.name);
+              if (!location && system.isLocal && system.systemName) {
+                location = serverLocations.get(system.systemName);
+              }
+              const hasLocation = !!(location?.latitude && location?.longitude);
 
               return (
                 <div
@@ -442,18 +467,21 @@ export default function SystemHealth() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <MapPin className="w-4 h-4 text-gray-500" />
-                        <span className="text-sm text-gray-600">Lokasi Server</span>
+                        <span className="text-sm text-gray-600">{isLocalOnly ? 'Lokasi' : 'Lokasi Server'}</span>
                       </div>
                       {canEditHealth && (
                         <button
-                          onClick={() => setEditingLocation(system.name)}
+                          onClick={() => setEditingLocation({
+                            name: system.name,
+                            fallbackName: system.isLocal ? system.systemName : undefined
+                          })}
                           className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
                         >
                           {hasLocation ? "Edit" : "Set Lokasi"}
                         </button>
                       )}
                     </div>
-                    {hasLocation ? (
+                    {hasLocation && location ? (
                       <button
                         onClick={() => openInMaps(location.latitude!, location.longitude!)}
                         className="mt-2 flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors group"
@@ -472,7 +500,7 @@ export default function SystemHealth() {
                   {isOnline && (
                     <div className="mt-4 pt-3 border-t border-gray-100">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600">Cloud Relay</span>
+                        <span className="text-gray-600">{isLocalOnly ? 'Server Status' : 'Cloud Relay'}</span>
                         <div className="flex items-center space-x-2">
                           {loadingDetails ? (
                             <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />
@@ -534,7 +562,8 @@ export default function SystemHealth() {
       {/* Server Location Form Modal */}
       {editingLocation && (
         <ServerLocationForm
-          serverName={editingLocation}
+          serverName={editingLocation.name}
+          fallbackName={editingLocation.fallbackName}
           onClose={() => setEditingLocation(null)}
           onSave={fetchServerLocations}
         />
