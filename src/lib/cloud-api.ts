@@ -25,10 +25,7 @@ export interface CloudApiError {
   status?: number;
 }
 
-/**
- * Build cloud relay URL with optional query parameters
- */
-export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams): string {
+export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams, request?: NextRequest): string {
   const id = (systemId || API_CONFIG.systemId)?.trim().toLowerCase();
   const cleanId = id?.replace(/[{}]/g, "");
   const localSysId = API_CONFIG.systemId?.trim().toLowerCase().replace(/[{}]/g, "");
@@ -42,25 +39,46 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
     return queryParams?.toString() ? `${baseUrl}?${queryParams.toString()}` : baseUrl;
   }
 
-  // 2. Handle local addresses (IPs, localhost, or URLs with ports)
-  const isAddress = cleanId === 'localhost' ||
+  // 2. Identify if this is a local system
+  const isDirectAddress = cleanId === 'localhost' ||
     cleanId === '127.0.0.1' ||
     /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$/.test(cleanId) ||
     cleanId.includes(':');
 
-  // Also check if this matches the configured local system and we have a local host
-  const isConfiguredLocal = cleanId === localSysId && API_CONFIG.serverHost;
+  let isConfiguredLocal = !!(cleanId === localSysId && API_CONFIG.serverHost);
 
-  if (isAddress || isConfiguredLocal) {
-    // If it's the configured local system, use the serverHost and serverPort
-    const host = isAddress ? cleanId : (API_CONFIG.serverPort ? `${API_CONFIG.serverHost}:${API_CONFIG.serverPort}` : API_CONFIG.serverHost);
+  // Check cookies for local system match
+  if (!isDirectAddress && !isConfiguredLocal && request) {
+    const localId = request.cookies.get("nx_system_id")?.value ||
+      request.cookies.get("nx_server_id")?.value;
+    if (localId && localId.toLowerCase().replace(/[{}]/g, "") === cleanId) {
+      isConfiguredLocal = true;
+    }
+  }
 
-    // Nx Witness usually uses 7001 for HTTPS. If port 7001 is specified, default to https.
-    // Use http only for other explicit ports or if it's explicitly 127.0.0.1 without a port.
-    const protocol = host.includes(':7001') ? 'https' : (host.startsWith('127.0.0.1') && !host.includes(':') ? 'http' : 'https');
-    const finalHost = host.startsWith('http') ? host : `${protocol}://${host}`;
+  if (isDirectAddress || isConfiguredLocal) {
+    // Resolve host and port
+    let host = isDirectAddress ? cleanId : (API_CONFIG.serverHost || 'localhost');
+    let port = API_CONFIG.serverPort || '7001';
 
-    const baseUrl = `${finalHost}${endpoint}`;
+    // If host already contains a port, don't override it
+    if (host.includes(':')) {
+      const parts = host.split(':');
+      host = parts[0];
+      port = parts[1] || port;
+    }
+
+    // Determine protocol: default https unless clearly http (local only)
+    let protocol = 'https';
+    if (host === '127.0.0.1' || host === 'localhost') {
+      // For local VMS, we use https by default because of port 7001 usually being HTTPS
+      // But we'll use http if port is specifically 80 or something known
+      protocol = (port === '7001') ? 'https' : 'http';
+    }
+
+    const hostWithPort = `${host}:${port}`;
+    const baseUrl = `${protocol}://${hostWithPort}${endpoint}`;
+
     return queryParams?.toString() ? `${baseUrl}?${queryParams.toString()}` : baseUrl;
   }
 
@@ -235,7 +253,7 @@ export async function fetchFromCloudApi<T>(
   const { systemId, systemName, endpoint, queryParams, preferCloudAuth } = options;
 
   try {
-    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
+    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
 
     console.log(`[Cloud API] Fetching GET ${cloudUrl}`);
@@ -357,7 +375,7 @@ async function requestCloudApi<T>(
   const { systemId, systemName, endpoint, queryParams, method, body, preferCloudAuth } = options;
 
   try {
-    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams);
+    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
 
     console.log(`[Cloud API] Requesting ${method} ${cloudUrl}`);

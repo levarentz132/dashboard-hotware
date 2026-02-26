@@ -4,14 +4,7 @@ import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
 import { useCallback, useEffect, useState } from "react";
 import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 
-// Interface for cloud system
-interface CloudSystem {
-  id: string;
-  name: string;
-  stateOfHealth: string;
-  accessRole: string;
-  version?: string;
-}
+import { fetchCloudSystems, type CloudSystem } from "./use-async-data";
 
 // Custom hook for system info (with cloud relay support)
 export function useSystemInfo(cloudId?: string) {
@@ -23,25 +16,12 @@ export function useSystemInfo(cloudId?: string) {
   const [selectedCloudId, setSelectedCloudId] = useState<string | null>(cloudId || nxAPI.getSystemId());
 
   // Fetch available cloud systems
-  const fetchCloudSystems = useCallback(async () => {
+  const fetchAvailableSystems = useCallback(async () => {
     try {
-      const response = await fetch("/api/cloud/systems", {
-        method: "GET",
-        headers: {
-          ...getElectronHeaders()
-        }
-      });
-
-      if (!response.ok) {
-        console.log("[useSystemInfo] Cloud systems fetch failed:", response.status);
-        return [];
-      }
-
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
+      const systems = await fetchCloudSystems();
 
       // Sort: owner first, then online systems
-      systems.sort((a, b) => {
+      const sortedSystems = [...systems].sort((a, b) => {
         if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
         if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
         if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
@@ -49,8 +29,8 @@ export function useSystemInfo(cloudId?: string) {
         return 0;
       });
 
-      setAvailableSystems(systems);
-      return systems;
+      setAvailableSystems(sortedSystems);
+      return sortedSystems;
     } catch (err) {
       console.error("[useSystemInfo] Error fetching cloud systems:", err);
       return [];
@@ -64,7 +44,7 @@ export function useSystemInfo(cloudId?: string) {
 
       // If we don't have a selected system ID, try to find one
       if (!selectedCloudId) {
-        const systems = await fetchCloudSystems();
+        const systems = await fetchAvailableSystems();
         if (systems.length > 0) {
           const onlineSystem = systems.find((s) => s.stateOfHealth === "online");
           if (onlineSystem) {
@@ -114,7 +94,7 @@ export function useSystemInfo(cloudId?: string) {
     } finally {
       setLoading(false);
     }
-  }, [selectedCloudId, fetchCloudSystems]);
+  }, [selectedCloudId, fetchAvailableSystems]);
 
   const testConnection = useCallback(async () => {
     try {
