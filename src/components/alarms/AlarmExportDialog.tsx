@@ -13,7 +13,8 @@ import {
     Printer,
     Info,
     Calendar,
-    GripVertical
+    GripVertical,
+    ClipboardList
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -53,6 +54,15 @@ import * as XLSX from "xlsx";
 import { format, subDays } from "date-fns";
 import { Input } from "@/components/ui/input";
 
+interface Incident {
+    id: string;
+    failureEvent: EventLog;
+    recoveryEvent: EventLog | null;
+    status: "Open" | "Closed";
+    downtime: string;
+    downtimeSeconds?: number;
+}
+
 interface EventLog {
     timestampMs: number;
     eventData: {
@@ -70,6 +80,8 @@ interface EventLog {
         level: string;
         timestamp: string;
         sourceName: string;
+        serverId?: string;
+        type?: string;
     };
     aggregatedInfo: {
         total: number;
@@ -91,13 +103,15 @@ interface AlarmExportDialogProps {
 }
 
 const COLUMNS = [
-    { id: "timestamp", label: "Timestamp" },
+    { id: "incidentId", label: "Incident ID" },
+    { id: "failureTime", label: "Failure Time" },
+    { id: "recoveryTime", label: "Recovery Time" },
+    { id: "downtime", label: "Downtime" },
     { id: "severity", label: "Severity" },
-    { id: "event", label: "Event Type" },
-    { id: "caption", label: "Caption" },
-    { id: "description", label: "Description" },
-    { id: "source", label: "Source" },
     { id: "status", label: "Status" },
+    { id: "source", label: "Source" },
+    { id: "description", label: "Description" },
+    { id: "event", label: "Event Type" },
     { id: "occurrences", label: "Count" },
 ];
 
@@ -187,10 +201,11 @@ export function AlarmExportDialog({
     `;
 
     const [formatType, setFormatType] = useState<"pdf" | "xlsx" | "csv">("pdf");
+    const [reportType, setReportType] = useState("availability_incident");
     const [sortBy, setSortBy] = useState<"newest" | "oldest" | "severity">("newest");
     const [columnOrder, setColumnOrder] = useState<string[]>(COLUMNS.map(c => c.id));
     const [selectedColumns, setSelectedColumns] = useState<string[]>(
-        ["timestamp", "severity", "event", "caption", "description", "status"]
+        ["incidentId", "failureTime", "recoveryTime", "downtime", "severity", "status", "source", "description"]
     );
     const [exportPeriod, setExportPeriod] = useState({
         from: period.from || format(subDays(new Date(), 30), "yyyy-MM-dd"),
@@ -205,19 +220,17 @@ export function AlarmExportDialog({
         })
     );
 
-    const processedEvents = useMemo(() => {
-        let result = [...events];
-
-        // Apply Date Range Filter
+    const processedIncidents = useMemo(() => {
+        // 1. Filter by Date Range
+        let filtered = [...events];
         if (exportPeriod.from || exportPeriod.to) {
-            result = result.filter(event => {
+            filtered = filtered.filter(event => {
                 const eventTime = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0") / 1000;
                 if (exportPeriod.from) {
                     const fromTime = new Date(exportPeriod.from).getTime();
                     if (eventTime < fromTime) return false;
                 }
                 if (exportPeriod.to) {
-                    // end of day logic
                     const toTime = new Date(exportPeriod.to).getTime() + 86400000;
                     if (eventTime > toTime) return false;
                 }
@@ -225,17 +238,94 @@ export function AlarmExportDialog({
             });
         }
 
-        // Apply Sorting
+        // 2. Sort by Timestamp ASC for pairing logic
+        filtered.sort((a, b) => parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0") - parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0"));
+
+        const incidents: Incident[] = [];
+
+        if (reportType === "standard") {
+            // 3a. Standard Log - Just include everything raw
+            filtered.forEach(event => {
+                incidents.push({
+                    id: "",
+                    failureEvent: event,
+                    recoveryEvent: null,
+                    status: event.actionData?.acknowledge ? "Closed" : "Open",
+                    downtime: "N/A"
+                });
+            });
+        } else {
+            // 3b. Availability & Incident Report - Pairing Logic
+            const pendingFailures = new Map<string, Incident[]>();
+
+            filtered.forEach(event => {
+                const type = (event.eventData?.type || event.actionData?.type || "").toLowerCase();
+                const serverId = event.eventData?.serverId || event.actionData?.serverId || "unknown";
+
+                const isFailure = type.includes('failure') || type.includes('disconnect') || type.includes('offline');
+                const isRecovery = type.includes('start') || type.includes('online') || type.includes('connect');
+
+                if (isFailure) {
+                    const newIncident: Incident = {
+                        id: "",
+                        failureEvent: event,
+                        recoveryEvent: null,
+                        status: "Open",
+                        downtime: "Ongoing"
+                    };
+                    incidents.push(newIncident);
+
+                    if (!pendingFailures.has(serverId)) {
+                        pendingFailures.set(serverId, []);
+                    }
+                    pendingFailures.get(serverId)!.push(newIncident);
+                } else if (isRecovery) {
+                    const queue = pendingFailures.get(serverId);
+                    if (queue && queue.length > 0) {
+                        const incident = queue.shift()!; // Match earliest open failure
+                        incident.recoveryEvent = event;
+                        incident.status = "Closed";
+
+                        const failTime = parseInt(incident.failureEvent.actionData?.timestamp || incident.failureEvent.eventData?.timestamp || "0") / 1000;
+                        const recTime = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0") / 1000;
+                        const diffSeconds = Math.floor((recTime - failTime) / 1000);
+
+                        if (diffSeconds < 60) incident.downtime = `${diffSeconds} sec`;
+                        else if (diffSeconds < 3600) incident.downtime = `${Math.floor(diffSeconds / 60)}m ${diffSeconds % 60}s`;
+                        else incident.downtime = `${Math.floor(diffSeconds / 3600)}h ${Math.floor((diffSeconds % 3600) / 60)}m`;
+
+                        incident.downtimeSeconds = diffSeconds;
+                        if (queue.length === 0) pendingFailures.delete(serverId);
+                    }
+                } else {
+                    incidents.push({
+                        id: "",
+                        failureEvent: event,
+                        recoveryEvent: null,
+                        status: "Closed",
+                        downtime: "N/A"
+                    });
+                }
+            });
+        }
+
+        // 4. Apply Final Sorting and Assign IDs
+        let result = [...incidents];
         if (sortBy === "newest") {
-            result.sort((a, b) => parseInt(b.actionData?.timestamp || "0") - parseInt(a.actionData?.timestamp || "0"));
+            result.sort((a, b) => parseInt(b.failureEvent.actionData?.timestamp || b.failureEvent.eventData?.timestamp || "0") - parseInt(a.failureEvent.actionData?.timestamp || a.failureEvent.eventData?.timestamp || "0"));
         } else if (sortBy === "oldest") {
-            result.sort((a, b) => parseInt(a.actionData?.timestamp || "0") - parseInt(b.actionData?.timestamp || "0"));
+            result.sort((a, b) => parseInt(a.failureEvent.actionData?.timestamp || a.failureEvent.eventData?.timestamp || "0") - parseInt(b.failureEvent.actionData?.timestamp || b.failureEvent.eventData?.timestamp || "0"));
         } else if (sortBy === "severity") {
             const priority: Record<string, number> = { critical: 0, error: 1, warning: 2, info: 3 };
-            result.sort((a, b) => (priority[a.actionData?.level?.toLowerCase()] ?? 4) - (priority[b.actionData?.level?.toLowerCase()] ?? 4));
+            result.sort((a, b) => (priority[a.failureEvent.actionData?.level?.toLowerCase()] ?? 4) - (priority[b.failureEvent.actionData?.level?.toLowerCase()] ?? 4));
         }
-        return result;
-    }, [events, sortBy, exportPeriod]);
+
+        // Assign Sequential IDs based on result order
+        return result.map((inc, index) => ({
+            ...inc,
+            id: (reportType === "standard" ? "LOG" : "INC") + "-" + (sortBy === "newest" ? result.length - index : index + 1).toString().padStart(3, '0')
+        }));
+    }, [events, sortBy, exportPeriod, reportType]);
 
     const handleDragEnd = (event: DragEndEvent) => {
         const { active, over } = event;
@@ -288,79 +378,91 @@ export function AlarmExportDialog({
         });
 
         // Executive Summary (Right Side)
-        const summaryX = pageWidth / 2 + 10;
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(8);
-        doc.text("Executive Summary", summaryX, 30);
-
-        doc.setFont("helvetica", "normal");
-
         const counts = {
-            critical: processedEvents.filter(e => e.actionData?.level?.toLowerCase() === "critical").length,
-            error: processedEvents.filter(e => e.actionData?.level?.toLowerCase() === "error").length,
-            warning: processedEvents.filter(e => e.actionData?.level?.toLowerCase() === "warning").length,
-            info: processedEvents.filter(e => e.actionData?.level?.toLowerCase() === "info" || !e.actionData?.level).length,
-            acked: processedEvents.filter(e => e.actionData?.acknowledge).length,
-            unacked: processedEvents.filter(e => !e.actionData?.acknowledge).length,
+            critical: processedIncidents.filter(inc => inc.failureEvent.actionData?.level?.toLowerCase() === "critical").length,
+            error: processedIncidents.filter(inc => inc.failureEvent.actionData?.level?.toLowerCase() === "error").length,
+            warning: processedIncidents.filter(inc => inc.failureEvent.actionData?.level?.toLowerCase() === "warning").length,
+            info: processedIncidents.filter(inc => inc.failureEvent.actionData?.level?.toLowerCase() === "info" || !inc.failureEvent.actionData?.level).length,
+            acked: processedIncidents.filter(inc => inc.failureEvent.actionData?.acknowledge).length,
+            unacked: processedIncidents.filter(inc => !inc.failureEvent.actionData?.acknowledge).length,
         };
 
         const summaryPart1 = [
-            { label: "Total Alarms", value: processedEvents.length.toString() },
-            { label: "Acknowledged", value: counts.acked.toString() },
-            { label: "Unacknowledged", value: counts.unacked.toString() },
+            { label: "Total Incidents", value: processedIncidents.length.toString() },
+            { label: "Closed Incidents", value: processedIncidents.filter(i => i.status === "Closed").length.toString() },
+            { label: "Open Incidents", value: processedIncidents.filter(i => i.status === "Open").length.toString() },
         ];
 
+        const closedIncidents = processedIncidents.filter(i => i.status === "Closed" && i.downtimeSeconds !== undefined);
+        const totalSec = closedIncidents.reduce((acc, i) => acc + (i.downtimeSeconds || 0), 0);
+        const avgSec = closedIncidents.length > 0 ? Math.floor(totalSec / closedIncidents.length) : 0;
+        const maxSec = closedIncidents.length > 0 ? Math.max(...closedIncidents.map(i => i.downtimeSeconds || 0)) : 0;
+
+        const formatDuration = (s: number) => {
+            if (s === 0) return "0s";
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            let res = "";
+            if (h > 0) res += `${h}h `;
+            if (m > 0 || h > 0) res += `${m}m `;
+            res += `${sec}s`;
+            return res.trim();
+        };
+
         const summaryPart2 = [
-            { label: "Critical", value: counts.critical.toString() },
-            { label: "High / Error", value: counts.error.toString() },
-            { label: "Medium / Warning", value: counts.warning.toString() },
-            { label: "Low / Info", value: counts.info.toString() },
+            { label: "Total Downtime", value: formatDuration(totalSec) },
+            { label: "Average Downtime", value: formatDuration(avgSec) },
+            { label: "Longest Downtime", value: formatDuration(maxSec) },
         ];
 
         const summaryX1 = pageWidth / 2 + 10;
         const summaryX2 = pageWidth / 2 + 75;
 
+        doc.setFont("helvetica", "bold");
+        doc.text("Executive Summary", summaryX1, 30);
+        doc.setFont("helvetica", "normal");
+
         summaryPart1.forEach((item, i) => {
             const y = 36 + (i * 4);
-            doc.text(item.label, summaryX1, y);
+            doc.text(item.label.toString(), summaryX1, y);
             doc.text(":", summaryX1 + 35, y);
-            doc.text(item.value, summaryX1 + 38, y);
+            doc.text(item.value.toString(), summaryX1 + 38, y);
         });
 
         summaryPart2.forEach((item, i) => {
-            const y = 36 + (i * 4); // Same starting Y as Part 1
-            doc.text(item.label, summaryX2, y);
+            const y = 36 + (i * 4);
+            doc.text(item.label.toString(), summaryX2, y);
             doc.text(":", summaryX2 + 35, y);
-            doc.text(item.value, summaryX2 + 38, y);
+            doc.text(item.value.toString(), summaryX2 + 38, y);
         });
 
         // Alarms Log Table
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-
         const orderedSelectedColumns = columnOrder.filter(id => selectedColumns.includes(id));
         const tableHeaders = orderedSelectedColumns.map(id => COLUMNS.find(c => c.id === id)?.label || "");
-        const tableData = processedEvents.map(event => {
+
+        const tableData = processedIncidents.map(inc => {
             const row: string[] = [];
+            const timestamp = parseInt(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp || "0") / 1000;
+            const eventType = inc.failureEvent.eventData?.type || "Unknown";
+
+            let recoveryTimeStr = "N/A";
+            if (inc.recoveryEvent) {
+                const rTime = parseInt(inc.recoveryEvent.actionData?.timestamp || inc.recoveryEvent.eventData?.timestamp || "0") / 1000;
+                recoveryTimeStr = new Date(rTime).toLocaleString();
+            }
+
             orderedSelectedColumns.forEach(id => {
-                if (id === "timestamp") {
-                    row.push(new Date(parseInt(event.actionData?.timestamp || event.eventData?.timestamp) / 1000).toLocaleString());
-                } else if (id === "severity") {
-                    row.push(event.actionData?.level?.toUpperCase() || "INFO");
-                } else if (id === "event") {
-                    row.push(event.eventData?.type || "Unknown");
-                } else if (id === "caption") {
-                    row.push(event.actionData?.caption || "");
-                } else if (id === "description") {
-                    const desc = event.actionData?.description || "";
-                    row.push(desc.length > 50 ? desc.substring(0, 47) + "..." : desc);
-                } else if (id === "source") {
-                    row.push(event.actionData?.sourceName || "");
-                } else if (id === "status") {
-                    row.push(event.actionData?.acknowledge ? "Acknowledged" : "Not Acknowledged");
-                } else if (id === "occurrences") {
-                    row.push(event.aggregatedInfo?.total?.toString() || "1");
-                }
+                if (id === "incidentId") row.push(inc.id);
+                else if (id === "failureTime") row.push(new Date(timestamp).toLocaleString());
+                else if (id === "recoveryTime") row.push(recoveryTimeStr);
+                else if (id === "downtime") row.push(inc.downtime);
+                else if (id === "severity") row.push(inc.failureEvent.actionData?.level?.toUpperCase() || "INFO");
+                else if (id === "event") row.push(eventType);
+                else if (id === "source") row.push(inc.failureEvent.actionData?.sourceName || "");
+                else if (id === "status") row.push(inc.status);
+                else if (id === "description") row.push(inc.failureEvent.actionData?.description || "");
+                else if (id === "occurrences") row.push(inc.failureEvent.aggregatedInfo?.total?.toString() || "1");
             });
             return row;
         });
@@ -369,19 +471,13 @@ export function AlarmExportDialog({
             startY: 68,
             head: [tableHeaders],
             body: tableData,
-            styles: { fontSize: 8, cellPadding: 2 },
-            headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255] }, // Black header with white text
+            styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+            headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255] },
             alternateRowStyles: { fillColor: [249, 250, 251] },
             margin: { top: 30 },
             didDrawPage: (data) => {
-                // Footer
                 doc.setFontSize(8);
-                doc.text(
-                    `Page ${data.pageNumber}`,
-                    pageWidth / 2,
-                    doc.internal.pageSize.getHeight() - 10,
-                    { align: "center" }
-                );
+                doc.text(`Page ${data.pageNumber}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: "center" });
             }
         });
 
@@ -394,18 +490,29 @@ export function AlarmExportDialog({
 
     const generateExcel = () => {
         const orderedSelectedColumns = columnOrder.filter(id => selectedColumns.includes(id));
-        const data = processedEvents.map(event => {
+        const data = processedIncidents.map(inc => {
             const obj: any = {};
+            const timestamp = parseInt(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp || "0") / 1000;
+            const eventType = inc.failureEvent.eventData?.type || "Unknown";
+
+            let recoveryTimeStr = "N/A";
+            if (inc.recoveryEvent) {
+                const rTime = parseInt(inc.recoveryEvent.actionData?.timestamp || inc.recoveryEvent.eventData?.timestamp || "0") / 1000;
+                recoveryTimeStr = new Date(rTime).toLocaleString();
+            }
+
             orderedSelectedColumns.forEach(id => {
                 const colLabel = COLUMNS.find(c => c.id === id)?.label || id;
-                if (id === "timestamp") obj[colLabel] = new Date(parseInt(event.actionData?.timestamp || event.eventData?.timestamp) / 1000).toLocaleString();
-                else if (id === "severity") obj[colLabel] = event.actionData?.level?.toUpperCase() || "INFO";
-                else if (id === "event") obj[colLabel] = event.eventData?.type;
-                else if (id === "caption") obj[colLabel] = event.actionData?.caption;
-                else if (id === "description") obj[colLabel] = event.actionData?.description;
-                else if (id === "source") obj[colLabel] = event.actionData?.sourceName;
-                else if (id === "status") obj[colLabel] = event.actionData?.acknowledge ? "Acknowledged" : "Not Acknowledged";
-                else if (id === "occurrences") obj[colLabel] = event.aggregatedInfo?.total || 1;
+                if (id === "incidentId") obj[colLabel] = inc.id;
+                else if (id === "failureTime") obj[colLabel] = new Date(timestamp).toLocaleString();
+                else if (id === "recoveryTime") obj[colLabel] = recoveryTimeStr;
+                else if (id === "downtime") obj[colLabel] = inc.downtime;
+                else if (id === "severity") obj[colLabel] = inc.failureEvent.actionData?.level?.toUpperCase() || "INFO";
+                else if (id === "event") obj[colLabel] = eventType;
+                else if (id === "source") obj[colLabel] = inc.failureEvent.actionData?.sourceName;
+                else if (id === "status") obj[colLabel] = inc.status;
+                else if (id === "description") obj[colLabel] = inc.failureEvent.actionData?.description;
+                else if (id === "occurrences") obj[colLabel] = inc.failureEvent.aggregatedInfo?.total || 1;
             });
             return obj;
         });
@@ -445,10 +552,41 @@ export function AlarmExportDialog({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-4">
                     <div className="space-y-6">
-                        {/* 1. Configuration */}
+                        {/* 1. Report Template */}
                         <div className="space-y-4">
                             <Label className="text-sm font-bold flex items-center gap-2">
                                 <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">1</span>
+                                Report Template
+                            </Label>
+                            <div className="space-y-3 pl-7">
+                                <div className="space-y-2">
+                                    <Select value={reportType} onValueChange={setReportType}>
+                                        <SelectTrigger className="h-10">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="availability_incident">
+                                                <div className="flex items-center gap-2">
+                                                    <ClipboardList className="h-4 w-4 text-blue-500" />
+                                                    <span>Availability & Incident Report</span>
+                                                </div>
+                                            </SelectItem>
+                                            <SelectItem value="standard">
+                                                <div className="flex items-center gap-2">
+                                                    <FileText className="h-4 w-4 text-gray-400" />
+                                                    <span>Standard Alarm Log</span>
+                                                </div>
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 2. Configuration */}
+                        <div className="space-y-4 pt-2">
+                            <Label className="text-sm font-bold flex items-center gap-2">
+                                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">2</span>
                                 General Configuration
                             </Label>
 
@@ -501,7 +639,7 @@ export function AlarmExportDialog({
                             </div>
                         </div>
 
-                        {/* 2. Format Selection - Moved to Last */}
+                        {/* 3. Export Format & Preview */}
                         <div className="space-y-4 pt-2">
                             <Label className="text-sm font-bold flex items-center gap-2">
                                 <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">3</span>
@@ -544,45 +682,49 @@ export function AlarmExportDialog({
                                     disabled={formatType !== 'pdf'}
                                 >
                                     <Eye className="h-4 w-4" />
-                                    Open Preview PDF
+                                    Preview
                                 </Button>
                             </div>
                         </div>
                     </div>
 
-                    <div className="space-y-4">
-                        <Label className="text-sm font-bold flex items-center gap-2">
-                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">2</span>
-                            Column Settings
-                        </Label>
-                        <p className="text-[10px] text-gray-400 pl-7 leading-tight mb-2">
-                            Toggle checkboxes to include columns. Drag handles to change their order in the report.
-                        </p>
+                    <div className="bg-gray-50/50 border border-gray-100 rounded-xl p-5 flex flex-col h-[400px]">
+                        <div className="space-y-4 flex flex-col h-full">
+                            <div>
+                                <Label className="text-sm font-bold flex items-center gap-2 mb-1">
+                                    <Settings2 className="h-4 w-4 text-blue-500" />
+                                    Column Settings
+                                </Label>
+                                <p className="text-[10px] text-gray-400 leading-tight">
+                                    Toggle checkboxes to include columns. Drag handles to change their order in the report.
+                                </p>
+                            </div>
 
-                        <div className="pl-7 pr-2 max-h-[380px] overflow-y-auto custom-scrollbar">
-                            <DndContext
-                                sensors={sensors}
-                                collisionDetection={closestCenter}
-                                onDragEnd={handleDragEnd}
-                            >
-                                <SortableContext
-                                    items={columnOrder}
-                                    strategy={verticalListSortingStrategy}
+                            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar min-h-0">
+                                <DndContext
+                                    sensors={sensors}
+                                    collisionDetection={closestCenter}
+                                    onDragEnd={handleDragEnd}
                                 >
-                                    <div className="space-y-2 py-1">
-                                        {columnOrder.map((id, index) => (
-                                            <SortableColumn
-                                                key={id}
-                                                id={id}
-                                                index={index}
-                                                label={COLUMNS.find(c => c.id === id)?.label || id}
-                                                isSelected={selectedColumns.includes(id)}
-                                                onToggle={toggleColumn}
-                                            />
-                                        ))}
-                                    </div>
-                                </SortableContext>
-                            </DndContext>
+                                    <SortableContext
+                                        items={columnOrder}
+                                        strategy={verticalListSortingStrategy}
+                                    >
+                                        <div className="space-y-2 py-1">
+                                            {columnOrder.map((id, index) => (
+                                                <SortableColumn
+                                                    key={id}
+                                                    id={id}
+                                                    index={index}
+                                                    label={COLUMNS.find(c => c.id === id)?.label || id}
+                                                    isSelected={selectedColumns.includes(id)}
+                                                    onToggle={toggleColumn}
+                                                />
+                                            ))}
+                                        </div>
+                                    </SortableContext>
+                                </DndContext>
+                            </div>
                         </div>
                     </div>
                 </div>

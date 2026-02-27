@@ -719,12 +719,44 @@ export default function AlarmConsole() {
     const allEvents = dataBySystem.flatMap(s =>
       s.items.map(item => ({ ...item, systemId: s.systemId }))
     );
-    // Sort all events by timestamp
-    const sortedEvents = allEvents.sort((a, b) => {
-      const timeA = parseInt(a.actionData?.timestamp || "0");
-      const timeB = parseInt(b.actionData?.timestamp || "0");
+
+    // Deduplicate events by timestamp, type, and source server
+    const uniqueMap = new Map<string, EventLog>();
+    allEvents.forEach(event => {
+      const timestamp = event.actionData?.timestamp || event.eventData?.timestamp || "0";
+      const type = event.eventData?.type || event.actionData?.type || "unknown";
+      const serverId = event.eventData?.serverId || event.actionData?.serverId || "unknown";
+      const key = `${timestamp}-${type}-${serverId}`;
+
+      const existing = uniqueMap.get(key);
+      if (!existing) {
+        uniqueMap.set(key, event);
+      } else {
+        // Prefer entries with more content or higher severity
+        const existingInfoScore = (existing.actionData?.caption ? 2 : 0) + (existing.actionData?.description ? 1 : 0);
+        const currentInfoScore = (event.actionData?.caption ? 2 : 0) + (event.actionData?.description ? 1 : 0);
+
+        const priority: Record<string, number> = { critical: 0, error: 1, warning: 2, info: 3 };
+        const existingPrio = priority[existing.actionData?.level?.toLowerCase() || "info"] ?? 4;
+        const currentPrio = priority[event.actionData?.level?.toLowerCase() || "info"] ?? 4;
+
+        if (currentInfoScore > existingInfoScore) {
+          uniqueMap.set(key, event);
+        } else if (currentInfoScore === existingInfoScore && currentPrio < existingPrio) {
+          uniqueMap.set(key, event);
+        }
+      }
+    });
+
+    const deduplicatedEvents = Array.from(uniqueMap.values());
+
+    // Sort all events by timestamp (newest first)
+    const sortedEvents = deduplicatedEvents.sort((a, b) => {
+      const timeA = parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0");
+      const timeB = parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0");
       return timeB - timeA;
     });
+
     setEvents(sortedEvents);
   }, [dataBySystem]);
 
@@ -1100,7 +1132,13 @@ export default function AlarmConsole() {
       if (!matchesSystem || !matchesServer) return false;
 
       const matchesEventType = filterEventType === "all" || event.eventData?.type === filterEventType;
-      const matchesLevel = filterLevel === "all" || event.actionData?.level === filterLevel;
+      const matchesLevel = filterLevel === "all" || (() => {
+        const l = event.actionData?.level?.toLowerCase() || "info";
+        if (filterLevel === "error") return l === "error" || l === "critical";
+        if (filterLevel === "warning") return l === "warning";
+        if (filterLevel === "info") return l !== "error" && l !== "critical" && l !== "warning";
+        return l === filterLevel;
+      })();
       const matchesActionType = filterActionType === "all" || event.actionData?.type === filterActionType;
       const matchesResource = filterResource === "all" ||
         (event.actionData?.deviceIds && event.actionData.deviceIds.includes(filterResource)) ||
@@ -1143,6 +1181,8 @@ export default function AlarmConsole() {
     });
   }, [
     events,
+    selectedCloudSystemId,
+    selectedCloudServerId,
     filterEventType,
     filterLevel,
     filterActionType,
