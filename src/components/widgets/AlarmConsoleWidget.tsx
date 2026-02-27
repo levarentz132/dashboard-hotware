@@ -29,19 +29,50 @@ import { useInventorySync } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
 
 interface EventLog {
-  actionType: string;
-  eventParams: {
-    eventType: string;
-    eventTimestampUsec: string;
-    eventResourceId: string;
-    resourceName: string;
+  timestampMs: number;
+  eventData: {
+    reason: string;
+    serverId: string;
+    state: string;
+    timestamp: string;
+    type: string;
+  };
+  actionData: {
+    acknowledge: boolean;
+    attributes: any[];
     caption: string;
+    clientAction: string;
+    customIcon: string;
     description: string;
-    metadata: {
-      level: string;
+    deviceIds: string[];
+    extendedCaption: string;
+    icon: string;
+    id: string;
+    interval: string;
+    level: string;
+    objectTrackId: string;
+    objectTypeId: string;
+    originPeerId: string;
+    ruleId: string;
+    serverId: string;
+    sourceName: string;
+    state: string;
+    timestamp: string;
+    tooltip: string;
+    type: string;
+    url: string;
+    users: {
+      all: boolean;
+      ids: string[];
     };
   };
-  aggregationCount: number;
+  aggregatedInfo: {
+    total: number;
+    firstEventsData: any[];
+    lastEventsData: any[];
+  };
+  ruleId: string;
+  flags: string;
   systemId?: string;
 }
 
@@ -71,50 +102,61 @@ const getEventTypeLabel = (eventType: string): string => {
     serverStartEvent: "Server On",
     licenseIssueEvent: "License",
     systemHealthEvent: "Health",
-    serverConflictEvent: "Conflict",
+    serverConflictEvent: "Server Conflict",
   };
   return labels[eventType] || eventType.replace("Event", "");
 };
 
-const getEventIcon = (eventType: string) => {
+const getEventIcon = (iconName: string, eventType: string) => {
   const iconClass = "h-3.5 w-3.5";
-  if (eventType.includes("Motion") || eventType.includes("motion")) return <Zap className={iconClass} />;
-  if (eventType.includes("camera") || eventType.includes("Camera")) return <Camera className={iconClass} />;
-  if (eventType.includes("Disconnect") || eventType.includes("disconnect")) return <WifiOff className={iconClass} />;
-  if (eventType.includes("server") || eventType.includes("Server")) return <Server className={iconClass} />;
-  if (eventType.includes("storage") || eventType.includes("Storage")) return <HardDrive className={iconClass} />;
-  if (eventType.includes("network") || eventType.includes("Network")) return <Network className={iconClass} />;
-  if (eventType.includes("license") || eventType.includes("License")) return <Shield className={iconClass} />;
-  if (eventType.includes("health") || eventType.includes("Health")) return <Activity className={iconClass} />;
-  if (eventType.includes("Conflict") || eventType.includes("conflict")) return <AlertTriangle className={iconClass} />;
-  if (eventType.includes("Start") || eventType.includes("start")) return <Wifi className={iconClass} />;
+
+  // Use icon hint from actionData if available, otherwise fallback to eventType
+  const searchStr = (iconName || eventType || "").toLowerCase();
+
+  if (searchStr.includes("motion")) return <Zap className={iconClass} />;
+  if (searchStr.includes("camera")) return <Camera className={iconClass} />;
+  if (searchStr.includes("disconnect") || searchStr.includes("failure") || searchStr.includes("offline")) {
+    if (searchStr.includes("server")) return <Server className={iconClass} />;
+    return <WifiOff className={iconClass} />;
+  }
+  if (searchStr.includes("server")) return <Server className={iconClass} />;
+  if (searchStr.includes("storage")) return <HardDrive className={iconClass} />;
+  if (searchStr.includes("network")) return <Network className={iconClass} />;
+  if (searchStr.includes("license")) return <Shield className={iconClass} />;
+  if (searchStr.includes("health")) return <Activity className={iconClass} />;
+  if (searchStr.includes("conflict")) return <AlertTriangle className={iconClass} />;
+  if (searchStr.includes("start")) return <Wifi className={iconClass} />;
+
   return <Bell className={iconClass} />;
 };
 
 const getLevelConfig = (level: string) => {
-  switch (level?.toLowerCase()) {
-    case "error":
-      return {
-        bgClass: "bg-red-50 dark:bg-red-950/30",
-        borderClass: "border-red-200 dark:border-red-800",
-        textClass: "text-red-600",
-        icon: <XCircle className="h-4 w-4 text-red-500" />,
-      };
-    case "warning":
-      return {
-        bgClass: "bg-amber-50 dark:bg-amber-950/30",
-        borderClass: "border-amber-200 dark:border-amber-800",
-        textClass: "text-amber-600",
-        icon: <AlertTriangle className="h-4 w-4 text-amber-500" />,
-      };
-    default:
-      return {
-        bgClass: "bg-blue-50 dark:bg-blue-950/30",
-        borderClass: "border-blue-200 dark:border-blue-800",
-        textClass: "text-blue-600",
-        icon: <Info className="h-4 w-4 text-blue-500" />,
-      };
+  const normalizedLevel = level?.toLowerCase();
+
+  if (normalizedLevel === "critical" || normalizedLevel === "error") {
+    return {
+      bgClass: "bg-red-50 dark:bg-red-950/30",
+      borderClass: "border-red-200 dark:border-red-800",
+      textClass: "text-red-600",
+      icon: <XCircle className="h-4 w-4 text-red-500" />,
+    };
   }
+
+  if (normalizedLevel === "warning") {
+    return {
+      bgClass: "bg-amber-50 dark:bg-amber-950/30",
+      borderClass: "border-amber-200 dark:border-amber-800",
+      textClass: "text-amber-600",
+      icon: <AlertTriangle className="h-4 w-4 text-amber-500" />,
+    };
+  }
+
+  return {
+    bgClass: "bg-blue-50 dark:bg-blue-950/30",
+    borderClass: "border-blue-200 dark:border-blue-800",
+    textClass: "text-blue-600",
+    icon: <Info className="h-4 w-4 text-blue-500" />,
+  };
 };
 
 export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemId?: string }) {
@@ -130,7 +172,7 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
       const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
 
       // Use local proxy with specific 'this' server endpoint
-      const response = await fetch("/nx/rest/v3/servers/this/events", {
+      const response = await fetch("/nx/rest/v4/events/log", {
         headers: {
           "x-runtime-guid": localUser.token,
           "Accept": "application/json"
@@ -187,19 +229,27 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
     return dataBySystem
       .flatMap(sys => sys.items.map(item => ({ ...item, systemId: sys.systemId })))
       .sort((a, b) => {
-        const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
-        const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
+        // Use actionData.timestamp (usec) for sorting
+        const timeA = parseInt(a.actionData?.timestamp || "0");
+        const timeB = parseInt(b.actionData?.timestamp || "0");
         return timeB - timeA;
       });
   }, [dataBySystem]);
 
   // Stats
   const stats = useMemo(() => {
-    const errorCount = events.filter((e) => e.eventParams?.metadata?.level === "error").length;
-    const warningCount = events.filter((e) => e.eventParams?.metadata?.level === "warning").length;
-    const infoCount = events.filter(
-      (e) => e.eventParams?.metadata?.level !== "error" && e.eventParams?.metadata?.level !== "warning",
-    ).length;
+    const errorCount = events.filter((e) => {
+      const level = e.actionData?.level?.toLowerCase();
+      return level === "error" || level === "critical";
+    }).length;
+
+    const warningCount = events.filter((e) => e.actionData?.level?.toLowerCase() === "warning").length;
+
+    const infoCount = events.filter((e) => {
+      const level = e.actionData?.level?.toLowerCase();
+      return level !== "error" && level !== "critical" && level !== "warning";
+    }).length;
+
     return { error: errorCount, warning: warningCount, info: infoCount, total: events.length };
   }, [events]);
 
@@ -274,10 +324,10 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
           <div className="text-center text-xs text-muted-foreground py-4">No alarms</div>
         ) : (
           events.slice(0, 5).map((event, index) => {
-            const level = event.eventParams?.metadata?.level || "info";
+            const level = event.actionData?.level || "info";
             const levelConfig = getLevelConfig(level);
-            const eventType = event.eventParams?.eventType || "unknown";
-            const timestamp = event.eventParams?.eventTimestampUsec;
+            const eventType = event.eventData?.type || "unknown";
+            const timestamp = event.actionData?.timestamp || event.eventData?.timestamp;
 
             return (
               <div
@@ -292,17 +342,20 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <Badge variant="outline" className="h-5 gap-1 text-[10px] px-1.5">
-                      {getEventIcon(eventType)}
+                      {getEventIcon(event.actionData?.icon, eventType)}
                       {getEventTypeLabel(eventType)}
                     </Badge>
-                    {event.aggregationCount > 1 && (
+                    {event.aggregatedInfo?.total > 1 && (
                       <Badge variant="secondary" className="h-5 text-[10px] px-1.5">
-                        x{event.aggregationCount}
+                        x{event.aggregatedInfo.total}
                       </Badge>
                     )}
                   </div>
                   <p className="font-medium truncate text-gray-800 dark:text-gray-200">
-                    {event.eventParams?.caption || event.eventParams?.resourceName || "Event"}
+                    {event.actionData?.caption || event.actionData?.sourceName || "Event"}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground truncate mb-0.5">
+                    {event.actionData?.description}
                   </p>
                   <TooltipProvider>
                     <Tooltip>

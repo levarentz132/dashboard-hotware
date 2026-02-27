@@ -10,29 +10,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "System ID is required" }, { status: 400 });
   }
 
-  // Determine endpoint: system-wide or server-specific
-  const endpoint = serverId
-    ? `/rest/v3/servers/${serverId}/events`
-    : `/rest/v3/events`;
+  // Use v4 events log endpoint
+  const endpoint = "/rest/v4/events/log";
 
   // Build query parameters for events
   const queryParams = new URLSearchParams();
+  const serverIdParam = searchParams.get("serverId");
+  if (serverIdParam) queryParams.set("serverId", serverIdParam);
+
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-  const limit = searchParams.get("_limit");
-  const order = searchParams.get("_order");
-  const with_ = searchParams.get("_with");
+  const limit = searchParams.get("_limit") || "50";
 
   if (from) queryParams.set("from", from);
   if (to) queryParams.set("to", to);
-  if (limit) queryParams.set("_limit", limit);
-  if (order) queryParams.set("_order", order);
-  if (with_) queryParams.set("_with", with_);
+  queryParams.set("limit", limit);
 
   return fetchFromCloudApi(request, {
     systemId,
     systemName: systemName || undefined,
-    endpoint: `/rest/v3/servers/${serverId}/events`,
+    endpoint,
     queryParams,
   });
 }

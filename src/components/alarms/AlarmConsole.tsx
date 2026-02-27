@@ -77,59 +77,50 @@ interface ServerOption {
 }
 
 interface EventLog {
-  actionType: string;
-  actionParams: {
-    actionId: string;
-    needConfirmation: boolean;
-    actionResourceId: string;
-    url: string;
-    emailAddress: string;
-    fps: number;
-    streamQuality: string;
-    recordAfter: number;
-    relayOutputId: string;
-    sayText: string;
-    tags: string;
-    text: string;
-    durationMs: number;
-    additionalResources: string[];
-    allUsers: boolean;
-    forced: boolean;
-    presetId: string;
-    useSource: boolean;
-    recordBeforeMs: number;
-    playToClient: boolean;
-    contentType: string;
-    authType: string;
-    httpMethod: string;
+  timestampMs: number;
+  eventData: {
+    reason: string;
+    serverId: string;
+    state: string;
+    timestamp: string;
+    type: string;
   };
-  eventParams: {
-    eventType: string;
-    eventTimestampUsec: string;
-    eventResourceId: string;
-    resourceName: string;
-    sourceServerId: string;
-    reasonCode: string;
-    inputPortId: string;
+  actionData: {
+    acknowledge: boolean;
+    attributes: any[];
     caption: string;
+    clientAction: string;
+    customIcon: string;
     description: string;
-    metadata: {
-      cameraRefs: string[];
-      instigators: string[];
-      allUsers: boolean;
-      level: string;
-    };
-    omitDbLogging: boolean;
-    analyticsEngineId: string;
+    deviceIds: string[];
+    extendedCaption: string;
+    icon: string;
+    id: string;
+    interval: string;
+    level: string;
     objectTrackId: string;
-    key: string;
-    attributes: { name: string; value: string }[];
-    progress: number;
+    objectTypeId: string;
+    originPeerId: string;
+    ruleId: string;
+    serverId: string;
+    sourceName: string;
+    state: string;
+    timestamp: string;
+    tooltip: string;
+    type: string;
+    url: string;
+    users: {
+      all: boolean;
+      ids: string[];
+    };
   };
-  businessRuleId: string;
-  aggregationCount: number;
-  flags: number;
-  compareString: string;
+  aggregatedInfo: {
+    total: number;
+    firstEventsData: any[];
+    lastEventsData: any[];
+  };
+  ruleId: string;
+  flags: string;
   systemId?: string;
 }
 
@@ -227,52 +218,62 @@ const getActionTypeLabel = (actionType: string): string => {
   return labels[actionType] || actionType;
 };
 
-const getEventIcon = (eventType: string) => {
+const getEventIcon = (iconName: string, eventType: string) => {
   const iconClass = "h-4 w-4";
-  if (eventType.includes("Motion") || eventType.includes("motion")) return <Zap className={iconClass} />;
-  if (eventType.includes("camera") || eventType.includes("Camera")) return <Camera className={iconClass} />;
-  if (eventType.includes("Disconnect") || eventType.includes("disconnect")) return <WifiOff className={iconClass} />;
-  if (eventType.includes("server") || eventType.includes("Server")) return <Server className={iconClass} />;
-  if (eventType.includes("storage") || eventType.includes("Storage")) return <HardDrive className={iconClass} />;
-  if (eventType.includes("network") || eventType.includes("Network")) return <Network className={iconClass} />;
-  if (eventType.includes("license") || eventType.includes("License")) return <Shield className={iconClass} />;
-  if (eventType.includes("health") || eventType.includes("Health")) return <Activity className={iconClass} />;
-  if (eventType.includes("Conflict") || eventType.includes("conflict")) return <AlertTriangle className={iconClass} />;
-  if (eventType.includes("Start") || eventType.includes("start")) return <Wifi className={iconClass} />;
+
+  // Use icon hint from actionData if available, otherwise fallback to eventType
+  const searchStr = (iconName || eventType || "").toLowerCase();
+
+  if (searchStr.includes("motion")) return <Zap className={iconClass} />;
+  if (searchStr.includes("camera")) return <Camera className={iconClass} />;
+  if (searchStr.includes("disconnect") || searchStr.includes("failure") || searchStr.includes("offline")) {
+    if (searchStr.includes("server")) return <Server className={iconClass} />;
+    return <WifiOff className={iconClass} />;
+  }
+  if (searchStr.includes("server")) return <Server className={iconClass} />;
+  if (searchStr.includes("storage")) return <HardDrive className={iconClass} />;
+  if (searchStr.includes("network")) return <Network className={iconClass} />;
+  if (searchStr.includes("license")) return <Shield className={iconClass} />;
+  if (searchStr.includes("health")) return <Activity className={iconClass} />;
+  if (searchStr.includes("conflict")) return <AlertTriangle className={iconClass} />;
+  if (searchStr.includes("start")) return <Wifi className={iconClass} />;
+
   return <Bell className={iconClass} />;
 };
 
 const getLevelConfig = (level: string) => {
-  switch (level?.toLowerCase()) {
-    case "error":
-      return {
-        variant: "destructive" as const,
-        bgClass: "bg-red-50 dark:bg-red-950/20",
-        borderClass: "border-red-200 dark:border-red-800",
-        textClass: "text-red-700 dark:text-red-400",
-        icon: <XCircle className="h-5 w-5 text-red-500" />,
-        label: "Error",
-      };
-    case "warning":
-      return {
-        variant: "outline" as const,
-        bgClass: "bg-amber-50 dark:bg-amber-950/20",
-        borderClass: "border-amber-200 dark:border-amber-800",
-        textClass: "text-amber-700 dark:text-amber-400",
-        icon: <AlertTriangle className="h-5 w-5 text-amber-500" />,
-        label: "Warning",
-      };
-    case "info":
-    default:
-      return {
-        variant: "secondary" as const,
-        bgClass: "bg-blue-50 dark:bg-blue-950/20",
-        borderClass: "border-blue-200 dark:border-blue-800",
-        textClass: "text-blue-700 dark:text-blue-400",
-        icon: <Info className="h-5 w-5 text-blue-500" />,
-        label: "Info",
-      };
+  const normalizedLevel = level?.toLowerCase();
+
+  if (normalizedLevel === "critical" || normalizedLevel === "error") {
+    return {
+      variant: "destructive" as const,
+      bgClass: "bg-red-50 dark:bg-red-950/20",
+      borderClass: "border-red-200 dark:border-red-800",
+      textClass: "text-red-700 dark:text-red-400",
+      icon: <XCircle className="h-5 w-5 text-red-500" />,
+      label: "Critical",
+    };
   }
+
+  if (normalizedLevel === "warning") {
+    return {
+      variant: "outline" as const,
+      bgClass: "bg-amber-50 dark:bg-amber-950/20",
+      borderClass: "border-amber-200 dark:border-amber-800",
+      textClass: "text-amber-700 dark:text-amber-400",
+      icon: <AlertTriangle className="h-5 w-5 text-amber-500" />,
+      label: "Warning",
+    };
+  }
+
+  return {
+    variant: "secondary" as const,
+    bgClass: "bg-blue-50 dark:bg-blue-950/20",
+    borderClass: "border-blue-200 dark:border-blue-800",
+    textClass: "text-blue-700 dark:text-blue-400",
+    icon: <Info className="h-5 w-5 text-blue-500" />,
+    label: "Info",
+  };
 };
 
 // ============================================
@@ -331,17 +332,16 @@ interface EventCardProps {
 }
 
 function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardProps) {
-  const eventType = event.eventParams?.eventType || "unknown";
-  const level = event.eventParams?.metadata?.level || "info";
-  const timestamp = event.eventParams?.eventTimestampUsec;
-  const caption = event.eventParams?.caption;
-  const description = event.eventParams?.description;
-  const resourceName = event.eventParams?.resourceName;
-  const actionType = event.actionType;
+  const eventType = event.eventData?.type || "unknown";
+  const level = event.actionData?.level || "info";
+  const timestamp = event.actionData?.timestamp || event.eventData?.timestamp;
+  const caption = event.actionData?.caption || event.actionData?.sourceName;
+  const description = event.actionData?.description;
+  const actionType = event.actionData?.type;
 
   const levelConfig = getLevelConfig(level);
-  const resource = getResourceName(event.eventParams?.eventResourceId);
-  const sourceServer = getResourceName(event.eventParams?.sourceServerId);
+  const resource = getResourceName(event.eventData?.serverId);
+  const sourceServer = getResourceName(event.actionData?.serverId);
 
   return (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
@@ -363,7 +363,7 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
                 {/* Top Row: Badges */}
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs font-medium px-1.5 sm:px-2">
-                    {getEventIcon(eventType)}
+                    {getEventIcon(event.actionData?.icon, eventType)}
                     <span className="hidden xs:inline sm:hidden md:inline">{getEventTypeLabel(eventType)}</span>
                     <span className="xs:hidden sm:inline md:hidden">{getEventTypeLabel(eventType).split(" ")[0]}</span>
                   </Badge>
@@ -387,7 +387,7 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
 
                 {/* Title */}
                 <div className="font-medium text-gray-900 text-sm sm:text-base line-clamp-1">
-                  {caption || resourceName || "No description available"}
+                  {caption || "System Event"}
                 </div>
 
                 {/* Preview Description */}
@@ -520,61 +520,61 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
               </div>
 
               {/* Aggregation Count */}
-              {event.aggregationCount > 1 && (
+              {event.aggregatedInfo?.total > 1 && (
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3">
                   <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Occurrences</div>
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
                     <MoreHorizontal className="h-4 w-4 text-gray-400 shrink-0" />
-                    <span className="font-medium">{event.aggregationCount} events</span>
+                    <span className="font-medium">{event.aggregatedInfo.total} events</span>
                   </div>
                 </div>
               )}
 
-              {/* Reason Code */}
-              {event.eventParams?.reasonCode && event.eventParams.reasonCode !== "none" && (
+              {/* Reason */}
+              {event.eventData?.reason && event.eventData.reason !== "none" && (
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Reason Code</div>
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Reason</div>
                   <Badge variant="outline" className="text-xs">
-                    {event.eventParams.reasonCode}
+                    {event.eventData.reason}
                   </Badge>
                 </div>
               )}
 
-              {/* Input Port */}
-              {event.eventParams?.inputPortId && (
+              {/* State */}
+              {event.eventData?.state && (
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Input Port</div>
-                  <code className="text-xs sm:text-sm font-mono">{event.eventParams.inputPortId}</code>
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">State</div>
+                  <code className="text-xs sm:text-sm font-mono">{event.eventData.state}</code>
                 </div>
               )}
 
               {/* Action URL */}
-              {event.actionParams?.url && (
+              {event.actionData?.url && (
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3 sm:col-span-2">
                   <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Action URL</div>
-                  <code className="text-xs sm:text-sm font-mono break-all text-blue-600">{event.actionParams.url}</code>
+                  <code className="text-xs sm:text-sm font-mono break-all text-blue-600">{event.actionData.url}</code>
                 </div>
               )}
 
-              {/* Email */}
-              {event.actionParams?.emailAddress && (
+              {/* Origin Peer ID */}
+              {event.actionData?.originPeerId && (
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Email</div>
-                  <span className="text-xs sm:text-sm">{event.actionParams.emailAddress}</span>
+                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Origin Peer</div>
+                  <span className="text-xs sm:text-sm truncate block">{event.actionData.originPeerId}</span>
                 </div>
               )}
             </div>
 
             {/* Attributes */}
-            {event.eventParams?.attributes && event.eventParams.attributes.length > 0 && (
+            {event.actionData?.attributes && event.actionData.attributes.length > 0 && (
               <div className="space-y-2">
                 <h4 className="text-xs sm:text-sm font-medium text-gray-700">Attributes</h4>
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {event.eventParams.attributes.map((attr, i) => (
+                    {event.actionData.attributes.map((attr: any, i: number) => (
                       <div key={i} className="text-xs sm:text-sm">
-                        <span className="text-gray-500">{attr.name}:</span>{" "}
-                        <span className="font-medium">{attr.value}</span>
+                        <span className="text-gray-500">{attr.name || i}:</span>{" "}
+                        <span className="font-medium">{attr.value || JSON.stringify(attr)}</span>
                       </div>
                     ))}
                   </div>
@@ -582,17 +582,17 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
               </div>
             )}
 
-            {/* Related Cameras */}
-            {event.eventParams?.metadata?.cameraRefs && event.eventParams.metadata.cameraRefs.length > 0 && (
+            {/* Related Devices */}
+            {event.actionData?.deviceIds && event.actionData.deviceIds.length > 0 && (
               <div className="space-y-2">
-                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Related Cameras</h4>
+                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Related Devices</h4>
                 <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                  {event.eventParams.metadata.cameraRefs.map((ref, i) => {
-                    const camera = getResourceName(ref);
+                  {event.actionData.deviceIds.map((id, i) => {
+                    const camera = getResourceName(id);
                     return (
                       <Badge key={i} variant="secondary" className="gap-1 text-xs">
                         <Camera className="h-3 w-3" />
-                        {camera ? camera.name : ref}
+                        {camera ? camera.name : id}
                       </Badge>
                     );
                   })}
@@ -653,7 +653,7 @@ export default function AlarmConsole() {
       const sid = Cookies.get("nx_server_id") || localUser.serverId || "local";
 
       // Use local proxy with specific 'this' server endpoint
-      const response = await fetch("/nx/rest/v3/servers/this/events", {
+      const response = await fetch("/nx/rest/v4/events/log", {
         headers: {
           "x-runtime-guid": localUser.token,
           "Accept": "application/json"
@@ -720,8 +720,8 @@ export default function AlarmConsole() {
     );
     // Sort all events by timestamp
     const sortedEvents = allEvents.sort((a, b) => {
-      const timeA = parseInt(a.eventParams?.eventTimestampUsec || "0");
-      const timeB = parseInt(b.eventParams?.eventTimestampUsec || "0");
+      const timeA = parseInt(a.actionData?.timestamp || "0");
+      const timeB = parseInt(b.actionData?.timestamp || "0");
       return timeB - timeA;
     });
     setEvents(sortedEvents);
@@ -1094,21 +1094,23 @@ export default function AlarmConsole() {
         (event.systemId && normalizeId(event.systemId) === normalizeId(selectedCloudSystemId));
 
       const matchesServer = selectedCloudServerId === "all" ||
-        (event.eventParams?.sourceServerId && normalizeId(event.eventParams.sourceServerId) === normalizeId(selectedCloudServerId));
+        (event.actionData?.serverId && normalizeId(event.actionData.serverId) === normalizeId(selectedCloudServerId));
 
       if (!matchesSystem || !matchesServer) return false;
 
-      const matchesEventType = filterEventType === "all" || event.eventParams?.eventType === filterEventType;
-      const matchesLevel = filterLevel === "all" || event.eventParams?.metadata?.level === filterLevel;
-      const matchesActionType = filterActionType === "all" || event.actionType === filterActionType;
-      const matchesResource = filterResource === "all" || event.eventParams?.eventResourceId === filterResource;
+      const matchesEventType = filterEventType === "all" || event.eventData?.type === filterEventType;
+      const matchesLevel = filterLevel === "all" || event.actionData?.level === filterLevel;
+      const matchesActionType = filterActionType === "all" || event.actionData?.type === filterActionType;
+      const matchesResource = filterResource === "all" ||
+        (event.actionData?.deviceIds && event.actionData.deviceIds.includes(filterResource)) ||
+        (event.eventData?.serverId === filterResource);
       const matchesSourceServer =
-        filterSourceServer === "all" || event.eventParams?.sourceServerId === filterSourceServer;
+        filterSourceServer === "all" || event.actionData?.serverId === filterSourceServer;
 
       // Date range filter
       let matchesDateRange = true;
       if (filterDateFrom || filterDateTo) {
-        const eventTime = parseInt(event.eventParams?.eventTimestampUsec || "0") / 1000;
+        const eventTime = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0") / 1000;
         if (filterDateFrom) {
           const fromDate = new Date(filterDateFrom).getTime();
           if (eventTime < fromDate) matchesDateRange = false;
@@ -1121,10 +1123,10 @@ export default function AlarmConsole() {
 
       const matchesSearch =
         searchQuery === "" ||
-        event.eventParams?.caption?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        event.eventParams?.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        event.eventParams?.resourceName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        getEventTypeLabel(event.eventParams?.eventType || "")
+        event.actionData?.caption?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        event.actionData?.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        event.actionData?.sourceName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        getEventTypeLabel(event.eventData?.type || "")
           .toLowerCase()
           .includes(searchQuery.toLowerCase());
 
@@ -1152,25 +1154,38 @@ export default function AlarmConsole() {
 
   // Unique event types
   const uniqueEventTypes = useMemo(() => {
-    return Array.from(new Set(events.map((e) => e.eventParams?.eventType).filter(Boolean))).sort();
+    return Array.from(new Set(events.map((e) => e.eventData?.type).filter(Boolean))).sort() as string[];
   }, [events]);
 
   // Unique action types
   const uniqueActionTypes = useMemo(() => {
-    return Array.from(new Set(events.map((e) => e.actionType).filter(Boolean))).sort();
+    return Array.from(new Set(events.map((e) => e.actionData?.type).filter(Boolean))).sort() as string[];
   }, [events]);
 
   // Unique resources from events
   const uniqueResources = useMemo(() => {
     const resourceSet = new Map<string, { id: string; name: string; type: "camera" | "server" }>();
     events.forEach((event) => {
-      const resourceId = event.eventParams?.eventResourceId;
-      if (resourceId) {
-        const resource = getResourceName(resourceId);
+      // Collect camera IDs
+      if (event.actionData?.deviceIds) {
+        event.actionData.deviceIds.forEach(id => {
+          const resource = getResourceName(id);
+          if (resource) {
+            resourceSet.set(id, { id, ...resource });
+          } else {
+            resourceSet.set(id, { id, name: id.substring(0, 8) + "...", type: "camera" });
+          }
+        });
+      }
+
+      // Collect server IDs as well
+      const serverId = event.eventData?.serverId || event.actionData?.serverId;
+      if (serverId && !resourceSet.has(serverId)) {
+        const resource = getResourceName(serverId);
         if (resource) {
-          resourceSet.set(resourceId, { id: resourceId, ...resource });
+          resourceSet.set(serverId, { id: serverId, ...resource });
         } else {
-          resourceSet.set(resourceId, { id: resourceId, name: resourceId.substring(0, 8) + "...", type: "camera" });
+          resourceSet.set(serverId, { id: serverId, name: serverId.substring(0, 8) + "...", type: "server" });
         }
       }
     });
@@ -1181,7 +1196,7 @@ export default function AlarmConsole() {
   const uniqueSourceServers = useMemo(() => {
     const serverSet = new Map<string, { id: string; name: string }>();
     events.forEach((event) => {
-      const serverId = event.eventParams?.sourceServerId;
+      const serverId = event.actionData?.serverId;
       if (serverId) {
         const server = getResourceName(serverId);
         if (server) {
@@ -1198,9 +1213,15 @@ export default function AlarmConsole() {
   const stats = useMemo(
     () => ({
       total: events.length,
-      errors: events.filter((e) => e.eventParams?.metadata?.level === "error").length,
-      warnings: events.filter((e) => e.eventParams?.metadata?.level === "warning").length,
-      info: events.filter((e) => e.eventParams?.metadata?.level === "info" || !e.eventParams?.metadata?.level).length,
+      errors: events.filter((e) => {
+        const l = e.actionData?.level?.toLowerCase();
+        return l === "error" || l === "critical";
+      }).length,
+      warnings: events.filter((e) => e.actionData?.level?.toLowerCase() === "warning").length,
+      info: events.filter((e) => {
+        const l = e.actionData?.level?.toLowerCase();
+        return l !== "error" && l !== "critical" && l !== "warning";
+      }).length,
     }),
     [events],
   );
@@ -1550,7 +1571,7 @@ export default function AlarmConsole() {
                           {uniqueEventTypes.map((type) => (
                             <SelectItem key={type} value={type}>
                               <span className="flex items-center gap-2">
-                                {getEventIcon(type)}
+                                {getEventIcon("", type)}
                                 {getEventTypeLabel(type)}
                               </span>
                             </SelectItem>
