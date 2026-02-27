@@ -47,6 +47,7 @@ import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
+import { AlarmExportDialog } from "./AlarmExportDialog";
 
 // ============================================
 // INTERFACE DEFINITIONS
@@ -1363,6 +1364,14 @@ export default function AlarmConsole() {
               <span className="hidden sm:inline">Logout</span>
             </Button>
           )}
+
+          {/* Export Button */}
+          <AlarmExportDialog
+            events={filteredEvents}
+            stats={stats}
+            systemName={getCurrentCloudSystemName()}
+            period={{ from: filterDateFrom, to: filterDateTo }}
+          />
 
           {/* Refresh Button */}
           <button
