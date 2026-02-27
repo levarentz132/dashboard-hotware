@@ -370,7 +370,7 @@ export function AlarmExportDialog({
             head: [tableHeaders],
             body: tableData,
             styles: { fontSize: 8, cellPadding: 2 },
-            headStyles: { fillColor: [59, 130, 246] }, // Blue-500
+            headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255] }, // Black header with white text
             alternateRowStyles: { fillColor: [249, 250, 251] },
             margin: { top: 30 },
             didDrawPage: (data) => {
