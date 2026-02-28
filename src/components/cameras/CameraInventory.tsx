@@ -33,6 +33,7 @@ import { isAdmin } from "@/lib/auth";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
 
+
 interface CloudSystem {
   id: string;
   name: string;
@@ -213,6 +214,17 @@ export default function CameraInventory() {
     fetchCloudCamerasForSystem,
     syncOptions
   );
+
+  // Listen for background status changes from GlobalDeviceMonitor
+  useEffect(() => {
+    const handleStatusChange = () => {
+      console.log("[CameraInventory] 🔄 Device status changed in background, refetching...");
+      refetchSync();
+    };
+
+    window.addEventListener('nx:device-status-changed' as any, handleStatusChange);
+    return () => window.removeEventListener('nx:device-status-changed' as any, handleStatusChange);
+  }, [refetchSync]);
 
   // Consolidate expansion logic into computed state during render
 

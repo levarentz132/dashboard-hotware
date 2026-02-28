@@ -49,6 +49,7 @@ import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
 import { AlarmExportDialog } from "./AlarmExportDialog";
 
+
 // ============================================
 // INTERFACE DEFINITIONS
 // ============================================
@@ -159,7 +160,8 @@ const formatRelativeTime = (timestampUsec: string): string => {
   return formatTimestamp(timestampUsec);
 };
 
-const getEventTypeLabel = (eventType: string): string => {
+const getEventTypeLabel = (eventType: string, caption?: string): string => {
+  if (eventType === "userDefinedEvent" && caption) return caption;
   const labels: Record<string, string> = {
     undefinedEvent: "Undefined Event",
     cameraMotionEvent: "Motion Detected",
@@ -237,7 +239,7 @@ const getEventIcon = (iconName: string, eventType: string) => {
   if (searchStr.includes("license")) return <Shield className={iconClass} />;
   if (searchStr.includes("health")) return <Activity className={iconClass} />;
   if (searchStr.includes("conflict")) return <AlertTriangle className={iconClass} />;
-  if (searchStr.includes("start")) return <Wifi className={iconClass} />;
+  if (searchStr.includes("start") || searchStr.includes("online")) return <Wifi className={iconClass} />;
 
   return <Bell className={iconClass} />;
 };
@@ -342,7 +344,6 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
 
   const levelConfig = getLevelConfig(level);
   const resource = getResourceName(event.eventData?.serverId);
-  const sourceServer = getResourceName(event.actionData?.serverId);
 
   return (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
@@ -365,8 +366,8 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs font-medium px-1.5 sm:px-2">
                     {getEventIcon(event.actionData?.icon, eventType)}
-                    <span className="hidden xs:inline sm:hidden md:inline">{getEventTypeLabel(eventType)}</span>
-                    <span className="xs:hidden sm:inline md:hidden">{getEventTypeLabel(eventType).split(" ")[0]}</span>
+                    <span className="hidden xs:inline sm:hidden md:inline">{getEventTypeLabel(eventType, caption)}</span>
+                    <span className="xs:hidden sm:inline md:hidden">{getEventTypeLabel(eventType, caption).split(" ")[0]}</span>
                   </Badge>
 
                   <Badge
@@ -398,9 +399,9 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
 
                 {/* Resource & Time Row */}
                 <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[10px] sm:text-xs text-gray-500">
-                  {resource && (
+                  {resource && resource.type === "camera" && (
                     <span className="flex items-center gap-1">
-                      {resource.type === "camera" ? <Camera className="h-3 w-3" /> : <Server className="h-3 w-3" />}
+                      <Camera className="h-3 w-3" />
                       <span className="truncate max-w-[100px] sm:max-w-[150px]">{resource.name}</span>
                     </span>
                   )}
@@ -484,29 +485,14 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
             {/* Details Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
               {/* Resource */}
-              {resource && (
+              {resource && resource.type === "camera" && (
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3">
                   <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">
-                    {resource.type === "camera" ? "Camera" : "Server"}
+                    Camera
                   </div>
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    {resource.type === "camera" ? (
-                      <Camera className="h-4 w-4 text-blue-500 shrink-0" />
-                    ) : (
-                      <Server className="h-4 w-4 text-green-500 shrink-0" />
-                    )}
+                    <Camera className="h-4 w-4 text-blue-500 shrink-0" />
                     <span className="font-medium truncate">{resource.name}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Source Server */}
-              {sourceServer && (
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Source Server</div>
-                  <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <Server className="h-4 w-4 text-green-500 shrink-0" />
-                    <span className="font-medium truncate">{sourceServer.name}</span>
                   </div>
                 </div>
               )}
@@ -561,7 +547,12 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
               {event.actionData?.originPeerId && (
                 <div className="bg-white rounded-lg border p-2.5 sm:p-3">
                   <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Origin Peer</div>
-                  <span className="text-xs sm:text-sm truncate block">{event.actionData.originPeerId}</span>
+                  <span className="text-xs sm:text-sm truncate block">
+                    {(() => {
+                      const peer = getResourceName(event.actionData.originPeerId);
+                      return peer ? peer.name : event.actionData.originPeerId;
+                    })()}
+                  </span>
                 </div>
               )}
             </div>
@@ -777,6 +768,61 @@ export default function AlarmConsole() {
   const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
   const [loggingOut, setLoggingOut] = useState(false);
 
+  // Global cameras for lookup fallback
+  const [globalCameras, setGlobalCameras] = useState<any[]>([]);
+  // Global servers for lookup fallback
+  const [globalServers, setGlobalServers] = useState<any[]>([]);
+
+  // Fetch global cameras fallback
+  useEffect(() => {
+    const fetchGlobalCameras = async () => {
+      try {
+        const response = await fetch("/api/device-monitor");
+        if (response.ok) {
+          const snapshot = await response.json();
+          const allDevices = (snapshot.systems || []).flatMap((s: any) => s.devices || []);
+          setGlobalCameras(allDevices);
+        }
+      } catch (e) {
+        console.error("[AlarmConsole] Failed to fetch global cameras lookup:", e);
+      }
+    };
+    fetchGlobalCameras();
+  }, []);
+
+  // Fetch servers for all systems to use as a global fallback
+  useEffect(() => {
+    const fetchAllServers = async () => {
+      const allServers: any[] = [];
+      const systemIds = Array.from(new Set([...cloudSystems.map(s => s.id), ...dataBySystem.map(s => s.systemId)]));
+
+      await Promise.allSettled(
+        systemIds.map(async (sysId) => {
+          try {
+            const res = await fetch(`/api/nx/servers?systemId=${encodeURIComponent(sysId)}`, {
+              headers: { Accept: "application/json" }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const serversList = Array.isArray(data) ? data : data?.servers || [];
+              allServers.push(...serversList);
+            }
+          } catch (e) {
+            console.error(`[AlarmConsole] Failed to fetch servers for system ${sysId}`, e);
+          }
+        })
+      );
+
+      if (allServers.length > 0) {
+        setGlobalServers(allServers);
+      }
+    };
+
+    if (cloudSystems.length > 0 || dataBySystem.length > 0) {
+      fetchAllServers();
+    }
+  }, [cloudSystems, dataBySystem]);
+
   // Filter state
   const [filterEventType, setFilterEventType] = useState<string>("all");
   const [filterLevel, setFilterLevel] = useState<string>("all");
@@ -873,23 +919,42 @@ export default function AlarmConsole() {
   // Resource lookup map
   const resourceNameMap = useMemo(() => {
     const map = new Map<string, { name: string; type: "camera" | "server" }>();
+
+    const addToMap = (id: string | undefined, name: string, type: "camera" | "server") => {
+      if (!id) return;
+      const cleanId = id.toLowerCase().replace(/[{}]/g, "");
+      map.set(cleanId, { name, type });
+      map.set(id.toLowerCase(), { name, type });
+    };
+
+    // 1. Initial global fallback from device monitoring
+    globalCameras.forEach((camera) => {
+      addToMap(camera.id, camera.name || camera.id || "Unknown Camera", "camera");
+    });
+
+    // 2. Global servers fallback
+    globalServers.forEach((server) => {
+      addToMap(server.id, server.name || server.id || "Unknown Server", "server");
+    });
+
+    // 3. Focused cameras from currently selected system (fresher)
     cameras.forEach((camera) => {
-      if (camera.id) {
-        map.set(camera.id, { name: camera.name || "Unknown Camera", type: "camera" });
-      }
+      addToMap(camera.id, camera.name || "Unknown Camera", "camera");
     });
+
+    // 4. Focused servers from currently selected system
     servers.forEach((server) => {
-      if (server.id) {
-        map.set(server.id, { name: server.name || "Unknown Server", type: "server" });
-      }
+      addToMap(server.id, server.name || "Unknown Server", "server");
     });
+
     return map;
-  }, [cameras, servers]);
+  }, [cameras, servers, globalCameras, globalServers]);
 
   const getResourceName = useCallback(
     (resourceId: string | undefined) => {
       if (!resourceId) return null;
-      return resourceNameMap.get(resourceId) || null;
+      const cleanId = resourceId.toLowerCase().replace(/[{}]/g, "");
+      return resourceNameMap.get(cleanId) || resourceNameMap.get(resourceId.toLowerCase()) || null;
     },
     [resourceNameMap],
   );
@@ -1002,6 +1067,7 @@ export default function AlarmConsole() {
 
     return options;
   }, [cloudSystems, dataBySystem]);
+
 
   const selectedSystemType = useMemo(() => {
     return serverOptions.find(o => o.id === selectedCloudSystemId)?.type || "all";
@@ -1165,7 +1231,7 @@ export default function AlarmConsole() {
         event.actionData?.caption?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         event.actionData?.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         event.actionData?.sourceName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        getEventTypeLabel(event.eventData?.type || "")
+        getEventTypeLabel(event.eventData?.type || "", event.actionData?.caption)
           .toLowerCase()
           .includes(searchQuery.toLowerCase());
 

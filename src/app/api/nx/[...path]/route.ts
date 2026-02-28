@@ -26,10 +26,10 @@ async function handleRequest(request: NextRequest, method: string) {
   const url = new URL(request.url);
   const path = url.pathname.replace("/api/nx", "");
 
-  // Most NX Witness REST v3 APIs require the /rest/v3 prefix.
-  // We add it here if it's missing to ensure compatibility with cloud relay and local v3 API.
-  // We also normalize the path by removing curly braces from UUIDs if present.
-  let endpoint = path.startsWith("/rest/v3") ? path : `/rest/v3${path}`;
+  let endpoint = path;
+  if (!path.startsWith("/rest/v3") && !path.startsWith("/rest/v4")) {
+    endpoint = `/rest/v3${path}`;
+  }
   endpoint = endpoint.replace(/[{}]/g, "");
 
   // If no systemId, return error (local check has been removed)

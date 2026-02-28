@@ -3,6 +3,8 @@
 import { useEffect, useRef, useCallback } from "react";
 import { getElectronHeaders } from "@/lib/config";
 import { showNotification } from "@/lib/notifications";
+import nxAPI from "@/lib/nxapi";
+import Cookies from "js-cookie";
 
 interface CloudSystem {
   id: string;
@@ -54,9 +56,20 @@ export function GlobalDeviceMonitor() {
   }, []);
 
   /**
-   * Fetch all available cloud systems
+   * Fetch all available systems (Local + Cloud)
    */
-  const fetchCloudSystems = useCallback(async () => {
+  const fetchAllSystems = useCallback(async () => {
+    const allSystems: CloudSystem[] = [];
+
+    // 1. Add Local System baseline if found in cookies
+    const localId = Cookies.get("nx_system_id") || Cookies.get("nx_server_id");
+    if (localId) {
+      allSystems.push({
+        id: localId.replace(/[{}]/g, ""),
+        name: "Local Server"
+      });
+    }
+
     try {
       const response = await fetch("/api/cloud/systems", {
         method: "GET",
@@ -67,28 +80,28 @@ export function GlobalDeviceMonitor() {
         },
       });
 
-      if (!response.ok) {
-        console.warn("[GlobalDeviceMonitor] Failed to fetch cloud systems");
-        return [];
-      }
+      if (response.ok) {
+        const data = await response.json();
+        const systems = Array.isArray(data) ? data : data?.systems || [];
 
-      const data = await response.json();
-      const systems = Array.isArray(data) ? data : data?.systems || [];
-      
-      // Only monitor the first system to avoid duplicate events
-      if (systems.length === 0) return [];
-      
-      const firstSystem = systems[0];
-      console.log(`[GlobalDeviceMonitor] Using first system only: ${firstSystem.name}`);
-      
-      return [{
-        id: firstSystem.id,
-        name: firstSystem.name,
-      }];
+        console.log(`[GlobalDeviceMonitor] Found ${systems.length} cloud systems`);
+
+        systems.forEach((s: any) => {
+          const cleanId = s.id.replace(/[{}]/g, "");
+          if (!allSystems.find(existing => existing.id.replace(/[{}]/g, "") === cleanId)) {
+            allSystems.push({
+              id: s.id,
+              name: s.name,
+            });
+          }
+        });
+      }
     } catch (error) {
       console.error("[GlobalDeviceMonitor] Error fetching cloud systems:", error);
-      return [];
     }
+
+    console.log(`[GlobalDeviceMonitor] Total systems to monitor: ${allSystems.length}`);
+    return allSystems;
   }, []);
 
   /**
@@ -114,10 +127,10 @@ export function GlobalDeviceMonitor() {
         console.log(
           `[GlobalDeviceMonitor] ✓ ${systemName}: ${deviceCount} devices (Status: ${response.status})`
         );
-        return { 
-          success: true, 
-          deviceCount, 
-          systemId, 
+        return {
+          success: true,
+          deviceCount,
+          systemId,
           systemName,
           devices: devices // Include full device data for comparison
         };
@@ -134,39 +147,35 @@ export function GlobalDeviceMonitor() {
   }, []);
 
   /**
-   * Create event in NX system when camera comes online
+   * Create event in NX system when camera status changes
    */
-  const createCameraOnlineEvent = useCallback(async (cameraName: string, systemId: string, systemName: string) => {
+  const triggerCameraEvent = useCallback(async (cameraName: string, cameraId: string, systemId: string, systemName: string, status: 'online' | 'offline') => {
     try {
-      const timestamp = new Date().toISOString();
-      const caption = `${cameraName} is online`;
+      const isOnline = status === 'online';
+      const caption = isOnline ? "Camera Online" : "Camera Offline";
+      const description = `Camera "${cameraName}" is ${isOnline ? "back online" : "now offline"}.`;
 
-      console.log(`[GlobalDeviceMonitor] 📡 Creating event: ${caption}`);
+      console.log(`[GlobalDeviceMonitor] 📡 Triggering ${caption} for ${cameraName} on ${systemName}`);
 
-      const response = await fetch('/api/nx/create-event', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          ...getElectronHeaders(),
-        },
-        body: JSON.stringify({
-          timestamp,
-          caption,
-          systemId,
-          systemName,
-        }),
+      // Temporarily set systemId to target system for the API call
+      const originalSystemId = nxAPI.getSystemId();
+      nxAPI.setSystemId(systemId);
+
+      await nxAPI.createGenericEvent({
+        source: systemName || "VMS Server",
+        caption: caption,
+        description: description,
+        deviceIds: [cameraId],
+        level: isOnline ? "info" : "warning",
+        state: "instant"
       });
 
-      if (response.ok) {
-        console.log(`[GlobalDeviceMonitor] ✅ Event created successfully for ${cameraName}`);
-      } else {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.warn(`[GlobalDeviceMonitor] ⚠️ Failed to create event: ${response.status}`, error);
-      }
+      // Restore original systemId
+      if (originalSystemId) nxAPI.setSystemId(originalSystemId);
+
+      console.log(`[GlobalDeviceMonitor] ✅ ${caption} event created successfully for ${cameraName}`);
     } catch (error) {
-      console.error(`[GlobalDeviceMonitor] ❌ Error creating event:`, error);
+      console.error(`[GlobalDeviceMonitor] ❌ Error triggering status event:`, error);
     }
   }, []);
 
@@ -198,23 +207,22 @@ export function GlobalDeviceMonitor() {
    * Compare two snapshots to detect changes and notify about status changes
    */
   const hasChanges = useCallback(async (current: MonitoringSnapshot, previous: MonitoringSnapshot | null): Promise<boolean> => {
-    if (!previous) return true; // First run, always has changes
+    let hasAnyChanges = !previous; // If no previous snapshot, it's the first run, so there are "changes" to establish baseline
+    const isFirstRun = !previous;
 
     // Compare summary
-    if (current.summary.totalDevices !== previous.summary.totalDevices) return true;
-    if (current.summary.successfulSystems !== previous.summary.successfulSystems) return true;
-
-    let hasAnyChanges = false;
+    if (!isFirstRun && current.summary.totalDevices !== previous!.summary.totalDevices) hasAnyChanges = true;
+    if (!isFirstRun && current.summary.successfulSystems !== previous!.summary.successfulSystems) hasAnyChanges = true;
 
     // Compare each system and detect device status changes
     for (const currentSystem of current.systems) {
-      const previousSystem = previous.systems.find(s => s.systemId === currentSystem.systemId);
-      
+      const previousSystem = previous?.systems.find(s => s.systemId === currentSystem.systemId);
+
       if (!previousSystem) {
         hasAnyChanges = true;
         continue;
       }
-      
+
       if (currentSystem.deviceCount !== previousSystem.deviceCount) hasAnyChanges = true;
       if (currentSystem.status !== previousSystem.status) hasAnyChanges = true;
 
@@ -224,47 +232,88 @@ export function GlobalDeviceMonitor() {
 
       for (const currentDevice of currentDevices) {
         const previousDevice = previousDevices.find((d: any) => d.id === currentDevice.id);
-        
+
         if (previousDevice && previousDevice.status !== currentDevice.status) {
           hasAnyChanges = true;
-          
+
           // Normalize status strings for comparison
           const currentStatus = (currentDevice.status || '').toLowerCase().trim();
           const previousStatus = (previousDevice.status || '').toLowerCase().trim();
-          
-          console.log(`[GlobalDeviceMonitor] 📊 Device ${currentDevice.name}: ${previousStatus} → ${currentStatus}`);
-          
-          // Notify about status change
-          const isNowOnline = currentStatus === 'online';
-          const wasOffline = previousStatus === 'offline';
-          const isNowOffline = currentStatus === 'offline';
-          const wasOnline = previousStatus === 'online';
-          
-          const deviceKey = `${currentSystem.systemId}:${currentDevice.id}`;
-          const lastNotifiedStatus = lastNotifiedStatusRef.current[deviceKey];
 
-          if (wasOffline && isNowOnline && lastNotifiedStatus !== 'online') {
+          // Definitions of online/offline
+          const isStatusOnline = (s: string) => s === 'online' || s === 'recording';
+          const isStatusOffline = (s: string) => s === 'offline' || s === 'unauthorized' || s === 'no-access';
+
+          const isNowOnline = isStatusOnline(currentStatus);
+          const wasOnline = isStatusOnline(previousStatus);
+          const isNowOffline = isStatusOffline(currentStatus);
+          const wasOffline = isStatusOffline(previousStatus);
+
+          if (previousStatus !== currentStatus) {
+            console.log(`[GlobalDeviceMonitor] 📊 Device ${currentDevice.name} status transition: "${previousStatus}" → "${currentStatus}"`);
+          }
+
+          const deviceKey = `${currentSystem.systemId}:${currentDevice.id}`;
+          const lastNotified = lastNotifiedStatusRef.current[deviceKey];
+
+          if (!isFirstRun && !wasOnline && isNowOnline && lastNotified !== 'online') {
             // Device came online
             console.log(`[GlobalDeviceMonitor] 🟢 ALERT: ${currentDevice.name} (${currentSystem.systemName}) came ONLINE`);
-            
-            // Create event in NX system - await to ensure it executes
-            await createCameraOnlineEvent(
-              currentDevice.name || currentDevice.id, 
+
+            await triggerCameraEvent(
+              currentDevice.name || currentDevice.id,
+              currentDevice.id,
               currentSystem.systemId,
-              currentSystem.systemName
+              currentSystem.systemName,
+              'online'
             );
-            
+
             showNotification({
               type: 'success',
               title: '🟢 Camera Online',
               message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} is now online`
             });
-            
-            // Mark as notified AFTER successful event creation
+
             lastNotifiedStatusRef.current[deviceKey] = 'online';
-          } else {
-            // Track status for non-online transitions
+          } else if (!isFirstRun && !wasOffline && isNowOffline && lastNotified !== 'offline') {
+            // Device went offline
+            console.log(`[GlobalDeviceMonitor] 🔴 ALERT: ${currentDevice.name} (${currentSystem.systemName}) went OFFLINE`);
+
+            await triggerCameraEvent(
+              currentDevice.name || currentDevice.id,
+              currentDevice.id,
+              currentSystem.systemId,
+              currentSystem.systemName,
+              'offline'
+            );
+
+            showNotification({
+              type: 'error',
+              title: '🔴 Camera Offline',
+              message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} is now offline`
+            });
+
+            lastNotifiedStatusRef.current[deviceKey] = 'offline';
+          } else if (previousStatus !== currentStatus) {
+            // Track status for other transitions without notifying if it's just e.g. 'recording' -> 'online' (both online)
             lastNotifiedStatusRef.current[deviceKey] = currentStatus;
+          }
+
+          // INITIALIZATION: If we haven't tracked this device yet, record its current baseline status
+          if (lastNotified === undefined) {
+            lastNotifiedStatusRef.current[deviceKey] = isNowOnline ? 'online' : (isNowOffline ? 'offline' : currentStatus);
+            console.log(`[GlobalDeviceMonitor] 📝 Initializing baseline status for ${currentDevice.name} to "${lastNotifiedStatusRef.current[deviceKey]}"`);
+          }
+
+          // If ANY change was detected (online or offline), broadcast it so UI can refresh
+          if (previousDevice && previousDevice.status !== currentDevice.status) {
+            window.dispatchEvent(new CustomEvent('nx:device-status-changed', {
+              detail: {
+                deviceId: currentDevice.id,
+                systemId: currentSystem.systemId,
+                status: currentDevice.status
+              }
+            }));
           }
         }
       }
@@ -276,10 +325,10 @@ export function GlobalDeviceMonitor() {
     }
 
     // Check for removed systems
-    if (current.systems.length !== previous.systems.length) hasAnyChanges = true;
+    if (!isFirstRun && current.systems.length !== previous!.systems.length) hasAnyChanges = true;
 
     return hasAnyChanges;
-  }, [createCameraOnlineEvent]);
+  }, [triggerCameraEvent]);
 
   /**
    * Save monitoring snapshot to JSON file via API
@@ -309,14 +358,14 @@ export function GlobalDeviceMonitor() {
    */
   const checkAllDevices = useCallback(async () => {
     const systems = systemsRef.current;
-    
+
     if (systems.length === 0) {
       console.log("[GlobalDeviceMonitor] No online systems to monitor");
       return;
     }
 
     console.log(`[GlobalDeviceMonitor] 🔄 Checking devices for ${systems.length} system(s)...`);
-    
+
     // Check all systems in parallel
     const results = await Promise.all(
       systems.map((system) => checkDevicesForSystem(system.id, system.name))
@@ -324,20 +373,22 @@ export function GlobalDeviceMonitor() {
 
     const successCount = results.filter((r) => r.success).length;
     const totalDevices = results.reduce((sum, r) => sum + r.deviceCount, 0);
-    
+
     // Log individual device statuses
-    console.log(`[GlobalDeviceMonitor] 📋 Current Device Statuses:`);
+    console.log(`[GlobalDeviceMonitor] 📋 Monitoring results: ${totalDevices} total devices`);
     results.forEach(result => {
       if (result.success && result.devices) {
-        console.log(`\n  System: ${result.systemName}`);
+        let onlineCount = 0;
+        let offlineCount = 0;
         result.devices.forEach((device: any) => {
           const status = (device.status || 'unknown').toLowerCase();
-          const statusIcon = status === 'online' ? '🟢' : status === 'offline' ? '🔴' : '⚪';
-          console.log(`    ${statusIcon} ${device.name || device.id} - Status: ${device.status}`);
+          if (status === 'online' || status === 'recording') onlineCount++;
+          else if (status === 'offline') offlineCount++;
         });
+        console.log(`  System: ${result.systemName} -> ${onlineCount} online, ${offlineCount} offline`);
       }
     });
-    
+
     // Create current snapshot
     const currentSnapshot: MonitoringSnapshot = {
       timestamp: new Date().toISOString(),
@@ -357,7 +408,7 @@ export function GlobalDeviceMonitor() {
 
     // Compare with previous snapshot
     const changed = await hasChanges(currentSnapshot, previousSnapshotRef.current);
-    
+
     if (changed) {
       console.log(`[GlobalDeviceMonitor] 🔔 Changes detected! Saving to JSON...`);
       await saveSnapshot(currentSnapshot);
@@ -365,7 +416,7 @@ export function GlobalDeviceMonitor() {
     } else {
       console.log(`[GlobalDeviceMonitor] ℹ️ No changes detected, skipping save`);
     }
-    
+
     console.log(
       `[GlobalDeviceMonitor] ✓ Monitoring complete: ${successCount}/${systems.length} systems, ${totalDevices} total devices`
     );
@@ -380,14 +431,14 @@ export function GlobalDeviceMonitor() {
       console.log("[GlobalDeviceMonitor] ⏭️ Already running, skipping");
       return;
     }
-    
+
     console.log("[GlobalDeviceMonitor] 🚀 Initializing global device monitoring...");
-    
+
     // Load previous snapshot for comparison
     await loadPreviousSnapshot();
-    
+
     // Fetch available systems
-    const systems = await fetchCloudSystems();
+    const systems = await fetchAllSystems();
     systemsRef.current = systems;
 
     if (systems.length === 0) {
@@ -396,7 +447,7 @@ export function GlobalDeviceMonitor() {
     }
 
     console.log(
-      `[GlobalDeviceMonitor] Found ${systems.length} system(s): ${systems.map((s) => s.name).join(", ")}`
+      `[GlobalDeviceMonitor] Found ${systems.length} system(s): ${systems.map((s: any) => s.name).join(", ")}`
     );
 
     // Initial check
@@ -412,14 +463,14 @@ export function GlobalDeviceMonitor() {
     }, 10000);
 
     console.log("[GlobalDeviceMonitor] ✓ Monitoring started (30s interval)");
-  }, [loadPreviousSnapshot, fetchCloudSystems, checkAllDevices]);
+  }, [loadPreviousSnapshot, fetchAllSystems, checkAllDevices]);
 
   /**
    * Start monitoring on mount
    */
   useEffect(() => {
     console.log("[GlobalDeviceMonitor] 🔧 Starting initialization...");
-    
+
     const startMonitoring = async () => {
       try {
         await initializeMonitoring();

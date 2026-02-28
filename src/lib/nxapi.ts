@@ -229,9 +229,13 @@ class NxWitnessAPI {
     }
 
     const requestPromise = (async () => {
+      // Use /nx proxy for local server, /api/nx for cloud relay
+      const isLocal = this.systemId === "local" || (typeof API_CONFIG !== 'undefined' && this.systemId === API_CONFIG.systemId);
+      const targetBaseURL = isLocal ? "/nx" : this.baseURL;
+
       // Build URL with systemId
-      const url = new URL(`${window.location.origin}${this.baseURL}${endpoint}`);
-      if (this.systemId) {
+      const url = new URL(`${window.location.origin}${targetBaseURL}${endpoint}`);
+      if (this.systemId && !isLocal) {
         url.searchParams.set("systemId", this.systemId);
       }
 
@@ -510,6 +514,30 @@ class NxWitnessAPI {
     } catch (error) {
       console.error("[getEvents] Error fetching events:", error);
       return [];
+    }
+  }
+
+  async createGenericEvent(payload: {
+    timestamp?: string;
+    state?: string;
+    source?: string;
+    caption?: string;
+    description?: string;
+    deviceIds?: string[];
+    level?: string;
+  }): Promise<any> {
+    try {
+      return await this.apiRequest("/rest/v4/events/generic", {
+        method: "POST",
+        body: JSON.stringify({
+          ...payload,
+          timestamp: payload.timestamp || new Date().toISOString(),
+          state: payload.state || "instant"
+        }),
+      });
+    } catch (error) {
+      console.error("[createGenericEvent] Failed:", error);
+      throw error;
     }
   }
 

@@ -92,7 +92,8 @@ const formatRelativeTime = (timestampUsec: string): string => {
   return `${Math.floor(diff / 604800000)}w ago`;
 };
 
-const getEventTypeLabel = (eventType: string): string => {
+const getEventTypeLabel = (eventType: string, caption?: string): string => {
+  if (eventType === "userDefinedEvent" && caption) return caption;
   const labels: Record<string, string> = {
     cameraMotionEvent: "Motion",
     cameraDisconnectEvent: "Offline",
@@ -125,7 +126,7 @@ const getEventIcon = (iconName: string, eventType: string) => {
   if (searchStr.includes("license")) return <Shield className={iconClass} />;
   if (searchStr.includes("health")) return <Activity className={iconClass} />;
   if (searchStr.includes("conflict")) return <AlertTriangle className={iconClass} />;
-  if (searchStr.includes("start")) return <Wifi className={iconClass} />;
+  if (searchStr.includes("start") || searchStr.includes("online")) return <Wifi className={iconClass} />;
 
   return <Bell className={iconClass} />;
 };
@@ -343,7 +344,7 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <Badge variant="outline" className="h-5 gap-1 text-[10px] px-1.5">
                       {getEventIcon(event.actionData?.icon, eventType)}
-                      {getEventTypeLabel(eventType)}
+                      {getEventTypeLabel(eventType, event.actionData?.caption)}
                     </Badge>
                     {event.aggregatedInfo?.total > 1 && (
                       <Badge variant="secondary" className="h-5 text-[10px] px-1.5">
