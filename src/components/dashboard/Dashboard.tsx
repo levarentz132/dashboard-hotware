@@ -877,6 +877,7 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
               margin={[16, 16]}
               containerPadding={[0, 0]}
               useCSSTransforms={true}
+              resizeHandles={["se", "sw"]}
             >
               {widgets.map((widget) => (
                 <div key={widget.i}>

@@ -248,7 +248,7 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
       const localUser = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
 
-      const response = await fetch("/nx/rest/v3/events/log", {
+      const response = await fetch("/nx/rest/v4/events/log", {
         headers: {
           "x-runtime-guid": localUser.token,
           "Accept": "application/json"
@@ -316,7 +316,7 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
           effectiveLevel = ageHours > 24 ? "critical" : "info";
         } else if (type === "serverFailureEvent") {
           effectiveLevel = "critical";
-        } else if (type === "serverConflictEvent") {
+        } else if (type === "serverConflictEvent" || type === "storageFailureEvent" || item.actionData?.caption?.toLowerCase().includes("low disk space")) {
           effectiveLevel = "warning";
         }
 

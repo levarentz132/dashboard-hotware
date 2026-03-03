@@ -138,15 +138,7 @@
 }
 
 .react-resizable-handle::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid rgba(0, 0, 0, 0.3);
-  border-bottom: 2px solid rgba(0, 0, 0, 0.3);
-  border-radius: 1px;
+  content: none;
 }
 
 .react-resizable-handle-sw {
@@ -316,6 +308,7 @@
     transform: translate(-50%, -60%) scale(0.8);
     opacity: 1;
   }
+
   100% {
     transform: translate(-50%, -60%) scale(2);
     opacity: 0;
