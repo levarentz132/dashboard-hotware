@@ -25,7 +25,7 @@ export interface CloudApiError {
   status?: number;
 }
 
-export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams, request?: NextRequest): string {
+export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams, request?: NextRequest, systemName?: string): string {
   const id = (systemId || API_CONFIG.systemId)?.trim().toLowerCase();
   const cleanId = id?.replace(/[{}]/g, "");
   const localSysId = API_CONFIG.systemId?.trim().toLowerCase().replace(/[{}]/g, "");
@@ -54,6 +54,11 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
     if (localId && localId.toLowerCase().replace(/[{}]/g, "") === cleanId) {
       isConfiguredLocal = true;
     }
+  }
+
+  // 2b. Check System Name for "Local" markers if ID match failed
+  if (!isConfiguredLocal && systemName?.toLowerCase().includes("local server")) {
+    isConfiguredLocal = true;
   }
 
   if (isDirectAddress || isConfiguredLocal) {
@@ -236,8 +241,11 @@ export function validateSystemId(request: NextRequest): { systemId: string | nul
     systemId = request.headers.get('x-electron-system-id');
   }
 
+  // Always clean brackets from systemId
+  const cleanSystemId = systemId ? systemId.replace(/[{}]/g, "") : null;
+
   return {
-    systemId,
+    systemId: cleanSystemId,
     systemName: searchParams.get("systemName"),
   };
 }
@@ -253,7 +261,7 @@ export async function fetchFromCloudApi<T>(
   const { systemId, systemName, endpoint, queryParams, preferCloudAuth } = options;
 
   try {
-    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request);
+    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request, systemName);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
 
     console.log(`[Cloud API] Fetching GET ${cloudUrl}`);
@@ -294,12 +302,19 @@ export async function fetchFromCloudApi<T>(
     // Handle other errors
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn(`[Cloud API] Error (${response.status}) for ${cloudUrl}:`, errorText);
+      const status = response.status;
+
+      if ([502, 503, 504].includes(status)) {
+        console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
+      } else {
+        console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
+      }
+
       return createFetchErrorResponse(
         `Failed to fetch from ${systemName || systemId}`,
         systemId,
         systemName,
-        response.status
+        status
       );
     }
 
@@ -375,7 +390,7 @@ async function requestCloudApi<T>(
   const { systemId, systemName, endpoint, queryParams, method, body, preferCloudAuth } = options;
 
   try {
-    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request);
+    const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request, systemName);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
 
     console.log(`[Cloud API] Requesting ${method} ${cloudUrl}`);
@@ -415,12 +430,19 @@ async function requestCloudApi<T>(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn(`[Cloud API] Error (${response.status}) for ${cloudUrl}:`, errorText);
+      const status = response.status;
+
+      if ([502, 503, 504].includes(status)) {
+        console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
+      } else {
+        console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
+      }
+
       return createFetchErrorResponse(
         `Failed to ${method} to ${systemName || systemId}`,
         systemId,
         systemName,
-        response.status
+        status
       );
     }
 

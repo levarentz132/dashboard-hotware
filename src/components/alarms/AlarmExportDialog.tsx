@@ -61,6 +61,7 @@ interface Incident {
     status: "Open" | "Closed";
     downtime: string;
     downtimeSeconds?: number;
+    category: "Camera" | "Server" | "Other";
 }
 
 interface EventLog {
@@ -77,10 +78,12 @@ interface EventLog {
         attributes: any[];
         caption: string;
         description: string;
+        extendedCaption?: string;
         level: string;
         timestamp: string;
         sourceName: string;
         serverId?: string;
+        deviceIds?: string[];
         type?: string;
     };
     aggregatedInfo: {
@@ -246,24 +249,67 @@ export function AlarmExportDialog({
         if (reportType === "standard") {
             // 3a. Standard Log - Just include everything raw
             filtered.forEach(event => {
+                const type = (event.eventData?.type || event.actionData?.type || "").toLowerCase();
+                const caption = (event.actionData?.caption || "").toLowerCase();
+                const desc = (event.actionData?.description || "").toLowerCase();
+
+                const category: "Camera" | "Server" | "Other" =
+                    (type.includes("camera") || type.includes("device") || caption.includes("camera") || desc.includes("camera")) ? "Camera" :
+                        (type.includes("server") || caption.includes("server") || desc.includes("server")) ? "Server" : "Other";
+
                 incidents.push({
                     id: "",
                     failureEvent: event,
                     recoveryEvent: null,
                     status: event.actionData?.acknowledge ? "Closed" : "Open",
-                    downtime: "N/A"
+                    downtime: "N/A",
+                    category
                 });
             });
         } else {
             // 3b. Availability & Incident Report - Pairing Logic
-            const pendingFailures = new Map<string, Incident[]>();
+            // Using a Map of arrays (stacks) to track all pending failures for each specific device/event type
+            const activeIncidents = new Map<string, Incident[]>();
 
             filtered.forEach(event => {
                 const type = (event.eventData?.type || event.actionData?.type || "").toLowerCase();
+                const caption = (event.actionData?.caption || "").toLowerCase();
+                const desc = (event.actionData?.description || "").toLowerCase();
                 const serverId = event.eventData?.serverId || event.actionData?.serverId || "unknown";
+                const sourceName = event.actionData?.sourceName || "";
 
-                const isFailure = type.includes('failure') || type.includes('disconnect') || type.includes('offline');
-                const isRecovery = type.includes('start') || type.includes('online') || type.includes('connect');
+                const category: "Camera" | "Server" | "Other" =
+                    (type.includes("camera") || type.includes("device") || caption.includes("camera") || desc.includes("camera")) ? "Camera" :
+                        (type.includes("server") || caption.includes("server") || desc.includes("server")) ? "Server" : "Other";
+
+                const isFailure = type.includes('failure') || type.includes('disconnect') || type.includes('offline') ||
+                    caption.includes('disconnected') || caption.includes('failure') || caption.includes('offline') ||
+                    desc.includes('lost connection') || desc.includes('is now offline') || desc.includes('disconnected');
+
+                const isRecovery = type.includes('start') || type.includes('online') || type.includes('connect') || type.includes('reconnect') || type.includes('finished') ||
+                    caption.includes('reconnected') || caption.includes('online') || caption.includes('connected') ||
+                    desc.includes('reconnected') || desc.includes('back online') || desc.includes('connection restored');
+
+                // Create a highly specific pairing key to avoid mixing different event types
+                // For cameras, we prioritize the unique deviceId to ensure monitor and server events pair correctly.
+                // For servers, we use the serverId to ensure different "Down" and "Up" types can pair correctly.
+                let pairingKey = "";
+                if (category === "Camera") {
+                    let cameraKey = sourceName;
+                    const deviceId = event.actionData?.deviceIds?.[0];
+                    if (deviceId) {
+                        cameraKey = deviceId;
+                    } else {
+                        const genericSources = ["local server", "server", "vms server", "vms"];
+                        if (genericSources.includes(sourceName.toLowerCase()) || !sourceName) {
+                            const match = desc.match(/["'](.*?)["']/);
+                            cameraKey = match ? match[1] : sourceName;
+                        }
+                    }
+                    pairingKey = `Camera-${cameraKey}`;
+                } else {
+                    pairingKey = `${category}-${serverId}`;
+                }
 
                 if (isFailure) {
                     const newIncident: Incident = {
@@ -271,18 +317,21 @@ export function AlarmExportDialog({
                         failureEvent: event,
                         recoveryEvent: null,
                         status: "Open",
-                        downtime: "Ongoing"
+                        downtime: "Ongoing",
+                        category
                     };
                     incidents.push(newIncident);
 
-                    if (!pendingFailures.has(serverId)) {
-                        pendingFailures.set(serverId, []);
+                    // Track all open incidents for this key in a list (don't overwrite)
+                    if (!activeIncidents.has(pairingKey)) {
+                        activeIncidents.set(pairingKey, []);
                     }
-                    pendingFailures.get(serverId)!.push(newIncident);
+                    activeIncidents.get(pairingKey)!.push(newIncident);
                 } else if (isRecovery) {
-                    const queue = pendingFailures.get(serverId);
+                    const queue = activeIncidents.get(pairingKey);
                     if (queue && queue.length > 0) {
-                        const incident = queue.shift()!; // Match earliest open failure
+                        // Use Nearest Down (last in stack) for the main downtime calculation
+                        const incident = queue.pop()!;
                         incident.recoveryEvent = event;
                         incident.status = "Closed";
 
@@ -295,7 +344,15 @@ export function AlarmExportDialog({
                         else incident.downtime = `${Math.floor(diffSeconds / 3600)}h ${Math.floor((diffSeconds % 3600) / 60)}m`;
 
                         incident.downtimeSeconds = diffSeconds;
-                        if (queue.length === 0) pendingFailures.delete(serverId);
+
+                        // Also auto-close any older "orphaned" failures for this device that were logged before the nearest recovery
+                        while (queue.length > 0) {
+                            const oldInc = queue.pop()!;
+                            oldInc.recoveryEvent = event;
+                            oldInc.status = "Closed";
+                            oldInc.downtime = "Redundant";
+                        }
+                        activeIncidents.delete(pairingKey);
                     }
                 } else {
                     incidents.push({
@@ -303,14 +360,22 @@ export function AlarmExportDialog({
                         failureEvent: event,
                         recoveryEvent: null,
                         status: "Closed",
-                        downtime: "N/A"
+                        downtime: "N/A",
+                        category
                     });
                 }
             });
         }
 
-        // 4. Apply Final Sorting and Assign IDs
-        let result = [...incidents];
+        // 4. Filter by Report Template Requirement
+        let result = incidents;
+        if (reportType === "camera_incident") {
+            result = result.filter(inc => inc.category === "Camera");
+        } else if (reportType === "server_incident") {
+            result = result.filter(inc => inc.category === "Server");
+        }
+
+        // 5. Apply Final Sorting and Assign IDs
         if (sortBy === "newest") {
             result.sort((a, b) => parseInt(b.failureEvent.actionData?.timestamp || b.failureEvent.eventData?.timestamp || "0") - parseInt(a.failureEvent.actionData?.timestamp || a.failureEvent.eventData?.timestamp || "0"));
         } else if (sortBy === "oldest") {
@@ -321,10 +386,14 @@ export function AlarmExportDialog({
         }
 
         // Assign Sequential IDs based on result order
-        return result.map((inc, index) => ({
-            ...inc,
-            id: (reportType === "standard" ? "LOG" : "INC") + "-" + (sortBy === "newest" ? result.length - index : index + 1).toString().padStart(3, '0')
-        }));
+        return result.map((inc, index) => {
+            const prefix = inc.category === "Camera" ? "CAM" : inc.category === "Server" ? "SVR" : "OTH";
+            const typePrefix = reportType === "standard" ? "LOG" : (reportType === "overview" ? "INC" : prefix);
+            return {
+                ...inc,
+                id: typePrefix + "-" + (sortBy === "newest" ? result.length - index : index + 1).toString().padStart(3, '0')
+            };
+        });
     }, [events, sortBy, exportPeriod, reportType]);
 
     const handleDragEnd = (event: DragEndEvent) => {
@@ -342,6 +411,35 @@ export function AlarmExportDialog({
         setSelectedColumns(prev =>
             prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
         );
+    };
+
+    const formatDateTime = (ts: number | string | undefined, fallbackTsMs?: number) => {
+        if (!ts || ts === 0) {
+            if (fallbackTsMs && fallbackTsMs !== 0) return formatDateTime(fallbackTsMs);
+            return "N/A";
+        }
+        // Nx Witness usually provides microseconds (16 digits)
+        // JavaScript Date expects milliseconds (13 digits)
+        let ms = typeof ts === "string" ? parseInt(ts) : ts;
+
+        // If it's a huge number (microseconds), convert to milliseconds
+        if (ms > 10000000000000) ms = ms / 1000;
+        // If it's a small number (seconds), convert to milliseconds
+        else if (ms < 10000000000) ms = ms * 1000;
+
+        const d = new Date(ms);
+        const day = d.getDate().toString().padStart(2, '0');
+        const month = (d.getMonth() + 1).toString().padStart(2, '0');
+        const year = d.getFullYear();
+        const datePart = `${day}/${month}/${year}`;
+
+        const timePart = d.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        return `${datePart},\n${timePart}`;
     };
 
     const generatePDF = (preview = false) => {
@@ -362,9 +460,14 @@ export function AlarmExportDialog({
         doc.text("System Information", 20, 30);
 
         doc.setFont("helvetica", "normal");
+        const reportTitle = reportType === "standard" ? "Alarm Log" :
+            reportType === "camera_incident" ? "Camera Incident Report" :
+                reportType === "server_incident" ? "Server Incident Report" :
+                    "Availability & Incident Report";
+
         const sysInfo = [
             { label: "System Name", value: systemName || "all" },
-            { label: "Report Type", value: "Alarm Report" },
+            { label: "Report Type", value: reportTitle },
             { label: "Reporting Period", value: `${format(new Date(exportPeriod.from), "dd MMMM yyyy")} to ${format(new Date(exportPeriod.to), "dd MMMM yyyy")}` },
             { label: "Generated On", value: format(new Date(), "dd MMMM yyyy - HH:mm") },
             { label: "Generated By", value: userName }
@@ -408,6 +511,7 @@ export function AlarmExportDialog({
             if (m > 0 || h > 0) res += `${m}m `;
             res += `${sec}s`;
             return res.trim();
+            return res.trim();
         };
 
         const summaryPart2 = [
@@ -446,22 +550,25 @@ export function AlarmExportDialog({
             const timestamp = parseInt(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp || "0") / 1000;
             const eventType = inc.failureEvent.eventData?.type || "Unknown";
 
-            let recoveryTimeStr = "N/A";
-            if (inc.recoveryEvent) {
-                const rTime = parseInt(inc.recoveryEvent.actionData?.timestamp || inc.recoveryEvent.eventData?.timestamp || "0") / 1000;
-                recoveryTimeStr = new Date(rTime).toLocaleString();
-            }
-
             orderedSelectedColumns.forEach(id => {
                 if (id === "incidentId") row.push(inc.id);
-                else if (id === "failureTime") row.push(new Date(timestamp).toLocaleString());
-                else if (id === "recoveryTime") row.push(recoveryTimeStr);
+                else if (id === "failureTime") row.push(formatDateTime(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp, inc.failureEvent.timestampMs));
+                else if (id === "recoveryTime") {
+                    row.push(formatDateTime(inc.recoveryEvent?.actionData?.timestamp || inc.recoveryEvent?.eventData?.timestamp, inc.recoveryEvent?.timestampMs));
+                }
                 else if (id === "downtime") row.push(inc.downtime);
-                else if (id === "severity") row.push(inc.failureEvent.actionData?.level?.toUpperCase() || "INFO");
+                else if (id === "severity") {
+                    const level = (inc.failureEvent as any).effectiveLevel || inc.failureEvent.actionData?.level?.toLowerCase() || "info";
+                    row.push(level.toUpperCase());
+                }
                 else if (id === "event") row.push(eventType);
                 else if (id === "source") row.push(inc.failureEvent.actionData?.sourceName || "");
                 else if (id === "status") row.push(inc.status);
-                else if (id === "description") row.push(inc.failureEvent.actionData?.description || "");
+                else if (id === "description") {
+                    const desc = inc.failureEvent.actionData?.description;
+                    const extended = inc.failureEvent.actionData?.extendedCaption;
+                    row.push(desc || extended || "");
+                }
                 else if (id === "occurrences") row.push(inc.failureEvent.aggregatedInfo?.total?.toString() || "1");
             });
             return row;
@@ -471,10 +578,19 @@ export function AlarmExportDialog({
             startY: 68,
             head: [tableHeaders],
             body: tableData,
-            styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
-            headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255] },
+            styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+            headStyles: {
+                fillColor: [0, 0, 0],
+                textColor: [255, 255, 255],
+                fontSize: 7.5,
+                halign: 'center',
+                valign: 'middle',
+                minCellHeight: 8,
+                overflow: 'visible',
+                cellWidth: 'wrap'
+            },
             alternateRowStyles: { fillColor: [249, 250, 251] },
-            margin: { top: 30 },
+            margin: { top: 30, left: 10, right: 10 },
             didDrawPage: (data) => {
                 doc.setFontSize(8);
                 doc.text(`Page ${data.pageNumber}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: "center" });
@@ -495,23 +611,26 @@ export function AlarmExportDialog({
             const timestamp = parseInt(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp || "0") / 1000;
             const eventType = inc.failureEvent.eventData?.type || "Unknown";
 
-            let recoveryTimeStr = "N/A";
-            if (inc.recoveryEvent) {
-                const rTime = parseInt(inc.recoveryEvent.actionData?.timestamp || inc.recoveryEvent.eventData?.timestamp || "0") / 1000;
-                recoveryTimeStr = new Date(rTime).toLocaleString();
-            }
-
             orderedSelectedColumns.forEach(id => {
                 const colLabel = COLUMNS.find(c => c.id === id)?.label || id;
                 if (id === "incidentId") obj[colLabel] = inc.id;
-                else if (id === "failureTime") obj[colLabel] = new Date(timestamp).toLocaleString();
-                else if (id === "recoveryTime") obj[colLabel] = recoveryTimeStr;
+                else if (id === "failureTime") obj[colLabel] = formatDateTime(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp, inc.failureEvent.timestampMs);
+                else if (id === "recoveryTime") {
+                    obj[colLabel] = formatDateTime(inc.recoveryEvent?.actionData?.timestamp || inc.recoveryEvent?.eventData?.timestamp, inc.recoveryEvent?.timestampMs);
+                }
                 else if (id === "downtime") obj[colLabel] = inc.downtime;
-                else if (id === "severity") obj[colLabel] = inc.failureEvent.actionData?.level?.toUpperCase() || "INFO";
+                else if (id === "severity") {
+                    const level = (inc.failureEvent as any).effectiveLevel || inc.failureEvent.actionData?.level?.toLowerCase() || "info";
+                    obj[colLabel] = level.toUpperCase();
+                }
                 else if (id === "event") obj[colLabel] = eventType;
                 else if (id === "source") obj[colLabel] = inc.failureEvent.actionData?.sourceName;
                 else if (id === "status") obj[colLabel] = inc.status;
-                else if (id === "description") obj[colLabel] = inc.failureEvent.actionData?.description;
+                else if (id === "description") {
+                    const desc = inc.failureEvent.actionData?.description;
+                    const extended = inc.failureEvent.actionData?.extendedCaption;
+                    obj[colLabel] = desc || extended || "";
+                }
                 else if (id === "occurrences") obj[colLabel] = inc.failureEvent.aggregatedInfo?.total || 1;
             });
             return obj;
@@ -565,10 +684,22 @@ export function AlarmExportDialog({
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
+                                            <SelectItem value="camera_incident">
+                                                <div className="flex items-center gap-2">
+                                                    <ClipboardList className="h-4 w-4 text-green-500" />
+                                                    <span>Camera Incident Report</span>
+                                                </div>
+                                            </SelectItem>
+                                            <SelectItem value="server_incident">
+                                                <div className="flex items-center gap-2">
+                                                    <ClipboardList className="h-4 w-4 text-orange-500" />
+                                                    <span>Server Incident Report</span>
+                                                </div>
+                                            </SelectItem>
                                             <SelectItem value="availability_incident">
                                                 <div className="flex items-center gap-2">
                                                     <ClipboardList className="h-4 w-4 text-blue-500" />
-                                                    <span>Availability & Incident Report</span>
+                                                    <span>Availability & Incident Report (All)</span>
                                                 </div>
                                             </SelectItem>
                                             <SelectItem value="standard">

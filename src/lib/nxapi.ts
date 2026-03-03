@@ -100,11 +100,11 @@ class NxWitnessAPI {
 
   constructor() {
     this.baseURL = API_CONFIG.baseURL;
-    this.systemId = API_CONFIG.systemId || null;
+    this.systemId = API_CONFIG.systemId ? API_CONFIG.systemId.replace(/[{}]/g, "") : null;
   }
 
   setSystemId(id: string | null) {
-    this.systemId = id;
+    this.systemId = id ? id.replace(/[{}]/g, "") : null;
     // Clear cache when switching systems
     this.cache.clear();
   }

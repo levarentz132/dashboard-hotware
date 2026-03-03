@@ -29,6 +29,7 @@ import {
   Cloud,
   LogIn,
   LogOut,
+  CheckCircle,
 } from "lucide-react";
 import { useServers } from "@/hooks/useNxAPI-server";
 import { useCameras } from "@/hooks/useNxAPI-camera";
@@ -166,7 +167,8 @@ const getEventTypeLabel = (eventType: string, caption?: string): string => {
     undefinedEvent: "Undefined Event",
     cameraMotionEvent: "Motion Detected",
     cameraInputEvent: "Camera Input",
-    cameraDisconnectEvent: "Camera Offline",
+    cameraDisconnectEvent: "Camera Disconnected",
+    deviceDisconnected: "Camera Disconnected",
     storageFailureEvent: "Storage Failure",
     networkIssueEvent: "Network Issue",
     cameraIpConflictEvent: "IP Conflict",
@@ -217,6 +219,7 @@ const getActionTypeLabel = (actionType: string): string => {
     openLayoutAction: "Layout Opened",
     buzzerAction: "Buzzer",
     pushNotificationAction: "Push Sent",
+    desktopNotification: "Notification",
   };
   return labels[actionType] || actionType;
 };
@@ -239,13 +242,24 @@ const getEventIcon = (iconName: string, eventType: string) => {
   if (searchStr.includes("license")) return <Shield className={iconClass} />;
   if (searchStr.includes("health")) return <Activity className={iconClass} />;
   if (searchStr.includes("conflict")) return <AlertTriangle className={iconClass} />;
-  if (searchStr.includes("start") || searchStr.includes("online")) return <Wifi className={iconClass} />;
+
+  // Use Wifi (Online) icon for positive events
+  if (searchStr.includes("start") || searchStr.includes("online") || searchStr.includes("reconnect") || searchStr.includes("finished")) {
+    return <Wifi className={iconClass} />;
+  }
 
   return <Bell className={iconClass} />;
 };
 
-const getLevelConfig = (level: string) => {
+const getLevelConfig = (level: string, eventType?: string, caption?: string) => {
   const normalizedLevel = level?.toLowerCase();
+  const type = eventType?.toLowerCase() || "";
+  const cap = caption?.toLowerCase() || "";
+
+  const isPositive = type.includes("start") || type.includes("online") ||
+    cap.includes("online") || cap.includes("started") ||
+    type.includes("finished") || type.includes("complete") ||
+    cap.includes("finished") || cap.includes("complete");
 
   if (normalizedLevel === "critical" || normalizedLevel === "error") {
     return {
@@ -253,7 +267,7 @@ const getLevelConfig = (level: string) => {
       bgClass: "bg-red-50 dark:bg-red-950/20",
       borderClass: "border-red-200 dark:border-red-800",
       textClass: "text-red-700 dark:text-red-400",
-      icon: <XCircle className="h-5 w-5 text-red-500" />,
+      icon: <AlertCircle className="h-5 w-5 text-red-600" />,
       label: "Critical",
     };
   }
@@ -266,6 +280,17 @@ const getLevelConfig = (level: string) => {
       textClass: "text-amber-700 dark:text-amber-400",
       icon: <AlertTriangle className="h-5 w-5 text-amber-500" />,
       label: "Warning",
+    };
+  }
+
+  if (isPositive) {
+    return {
+      variant: "secondary" as const,
+      bgClass: "bg-green-50 dark:bg-green-950/20",
+      borderClass: "border-green-200 dark:border-green-800",
+      textClass: "text-green-700 dark:text-green-400",
+      icon: <CheckCircle className="h-5 w-5 text-green-500" />,
+      label: "Info",
     };
   }
 
@@ -336,13 +361,46 @@ interface EventCardProps {
 
 function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardProps) {
   const eventType = event.eventData?.type || "unknown";
-  const level = event.actionData?.level || "info";
+  const level = (event as any).effectiveLevel || event.actionData?.level || "info";
   const timestamp = event.actionData?.timestamp || event.eventData?.timestamp;
-  const caption = event.actionData?.caption || event.actionData?.sourceName;
-  const description = event.actionData?.description;
+  let caption = event.actionData?.caption || event.actionData?.sourceName;
+  let description = event.actionData?.description;
   const actionType = event.actionData?.type;
 
-  const levelConfig = getLevelConfig(level);
+  // Normalize caption/description for camera disconnections
+  if (eventType === "cameraDisconnectEvent" || eventType === "deviceDisconnected" || (caption && caption.toLowerCase().includes("disconnected"))) {
+    if (caption) {
+      caption = caption.replace(/deviceDisconnected/g, "Camera Disconnected");
+      caption = caption.replace(/device disconnected/i, "Camera Disconnected");
+      caption = caption.replace(/device/i, "Camera");
+    }
+
+    // Get a friendly device name for usage in messages
+    let deviceName = "Camera";
+    const deviceIds = event.actionData?.deviceIds || [];
+    if (deviceIds.length > 0) {
+      const resource = getResourceName(deviceIds[0]);
+      if (resource) deviceName = resource.name;
+    } else if (event.actionData?.sourceName) {
+      deviceName = event.actionData.sourceName;
+    }
+
+    // If description is missing or generic, use the specific user-requested format
+    const isDescriptionEmptyOrGeneric = !description ||
+      description === "deviceDisconnected" ||
+      description === "cameraDisconnectEvent" ||
+      description === caption;
+
+    if (isDescriptionEmptyOrGeneric && (eventType === "cameraDisconnectEvent" || eventType === "deviceDisconnected")) {
+      description = `Camera '${deviceName}' has lost connection to the server. Please verify the camera's network connection.`;
+
+      if (!caption || caption === "Camera Disconnected") {
+        caption = `${deviceName} Disconnected`;
+      }
+    }
+  }
+
+  const levelConfig = getLevelConfig(level, eventType, caption);
   const resource = getResourceName(event.eventData?.serverId);
 
   return (
@@ -362,31 +420,6 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
 
               {/* Main Content */}
               <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
-                {/* Top Row: Badges */}
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                  <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs font-medium px-1.5 sm:px-2">
-                    {getEventIcon(event.actionData?.icon, eventType)}
-                    <span className="hidden xs:inline sm:hidden md:inline">{getEventTypeLabel(eventType, caption)}</span>
-                    <span className="xs:hidden sm:inline md:hidden">{getEventTypeLabel(eventType, caption).split(" ")[0]}</span>
-                  </Badge>
-
-                  <Badge
-                    variant={levelConfig.variant}
-                    className={cn(
-                      "text-[10px] sm:text-xs px-1.5 sm:px-2",
-                      level === "warning" && "bg-amber-100 text-amber-700 border-amber-300",
-                    )}
-                  >
-                    {levelConfig.label}
-                  </Badge>
-
-                  {actionType && actionType !== "undefinedAction" && (
-                    <Badge variant="secondary" className="text-[10px] sm:text-xs hidden lg:flex px-1.5 sm:px-2">
-                      {getActionTypeLabel(actionType)}
-                    </Badge>
-                  )}
-                </div>
-
                 {/* Title */}
                 <div className="font-medium text-gray-900 text-sm sm:text-base line-clamp-1">
                   {caption || "System Event"}
@@ -470,6 +503,12 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
                               </code>
                             </div>
                           )}
+                          <div className="flex items-start gap-2 pt-2 text-amber-700 border-t border-amber-100">
+                            <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                            <p className="text-xs">
+                              Impact: This conflict may affect server response times and cause interruptions for cameras assigned to these servers.
+                            </p>
+                          </div>
                         </>
                       );
                     })()}
@@ -705,15 +744,65 @@ export default function AlarmConsole() {
     fetchCloudAlarmsForSystem
   );
 
-  // Update events when sync data changes
   useEffect(() => {
     const allEvents = dataBySystem.flatMap(s =>
-      s.items.map(item => ({ ...item, systemId: s.systemId }))
+      s.items.map(item => {
+        const type = item.eventData?.type;
+        const originalLevel = item.actionData?.level?.toLowerCase() || "info";
+        let effectiveLevel = originalLevel;
+
+        // Custom Severity Rules
+        if (type === "cameraDisconnectEvent") {
+          const timestamp = parseInt(item.actionData?.timestamp || item.eventData?.timestamp || "0");
+          const now = Date.now() * 1000;
+          const ageHours = (now - timestamp) / (1000000 * 3600);
+          // Flag transient disconnections (< 24h) as Info, otherwise Critical
+          effectiveLevel = ageHours > 24 ? "critical" : "info";
+        } else if (type === "serverFailureEvent") {
+          effectiveLevel = "critical";
+        } else if (type === "serverConflictEvent") {
+          effectiveLevel = "warning";
+        }
+
+        return { ...item, systemId: s.systemId, effectiveLevel };
+      })
     );
 
-    // Deduplicate events by timestamp, type, and source server
+    // 1. Sort by timestamp (EARLIEST first) to find the first occurrence of an event
+    const sortedByTimeAsc = [...allEvents].sort((a, b) => {
+      const timeA = parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0");
+      const timeB = parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0");
+      return timeA - timeB;
+    });
+
+    // 2. Proximity-based deduplication for camera disconnections
+    // This handles the case where multiple events are fired for the same "incident" (e.g. generic vs native)
+    const processedEvents: EventLog[] = [];
+    const recentDisconnections = new Map<string, number>(); // deviceId -> microsecond timestamp
+
+    sortedByTimeAsc.forEach(event => {
+      const timestamp = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0");
+      const type = event.eventData?.type || "unknown";
+      const isDisconnection = type === "cameraDisconnectEvent" || type === "deviceDisconnected";
+
+      if (isDisconnection) {
+        const deviceId = event.actionData?.deviceIds?.[0];
+        if (deviceId) {
+          const lastTime = recentDisconnections.get(deviceId);
+          // If we saw a disconnection for this device recently (within 60s), skip this one
+          // Since we process in chronological order, the first one we encountered is the earliest.
+          if (lastTime !== undefined && (timestamp - lastTime) < 60000000) {
+            return;
+          }
+          recentDisconnections.set(deviceId, timestamp);
+        }
+      }
+      processedEvents.push(event);
+    });
+
+    // 3. Fine-grained exact-timestamp deduplication (the previous logic)
     const uniqueMap = new Map<string, EventLog>();
-    allEvents.forEach(event => {
+    processedEvents.forEach(event => {
       const timestamp = event.actionData?.timestamp || event.eventData?.timestamp || "0";
       const type = event.eventData?.type || event.actionData?.type || "unknown";
       const serverId = event.eventData?.serverId || event.actionData?.serverId || "unknown";
@@ -723,13 +812,13 @@ export default function AlarmConsole() {
       if (!existing) {
         uniqueMap.set(key, event);
       } else {
-        // Prefer entries with more content or higher severity
+        // Tie-break: prefer entries with more informative content
         const existingInfoScore = (existing.actionData?.caption ? 2 : 0) + (existing.actionData?.description ? 1 : 0);
         const currentInfoScore = (event.actionData?.caption ? 2 : 0) + (event.actionData?.description ? 1 : 0);
 
         const priority: Record<string, number> = { critical: 0, error: 1, warning: 2, info: 3 };
-        const existingPrio = priority[existing.actionData?.level?.toLowerCase() || "info"] ?? 4;
-        const currentPrio = priority[event.actionData?.level?.toLowerCase() || "info"] ?? 4;
+        const existingPrio = priority[(existing as any).effectiveLevel || existing.actionData?.level?.toLowerCase() || "info"] ?? 4;
+        const currentPrio = priority[(event as any).effectiveLevel || event.actionData?.level?.toLowerCase() || "info"] ?? 4;
 
         if (currentInfoScore > existingInfoScore) {
           uniqueMap.set(key, event);
@@ -1199,7 +1288,7 @@ export default function AlarmConsole() {
 
       const matchesEventType = filterEventType === "all" || event.eventData?.type === filterEventType;
       const matchesLevel = filterLevel === "all" || (() => {
-        const l = event.actionData?.level?.toLowerCase() || "info";
+        const l = (event as any).effectiveLevel || event.actionData?.level?.toLowerCase() || "info";
         if (filterLevel === "error") return l === "error" || l === "critical";
         if (filterLevel === "warning") return l === "warning";
         if (filterLevel === "info") return l !== "error" && l !== "critical" && l !== "warning";
@@ -1321,12 +1410,12 @@ export default function AlarmConsole() {
     () => ({
       total: events.length,
       errors: events.filter((e) => {
-        const l = e.actionData?.level?.toLowerCase();
+        const l = (e as any).effectiveLevel || e.actionData?.level?.toLowerCase();
         return l === "error" || l === "critical";
       }).length,
-      warnings: events.filter((e) => e.actionData?.level?.toLowerCase() === "warning").length,
+      warnings: events.filter((e) => ((e as any).effectiveLevel || e.actionData?.level?.toLowerCase()) === "warning").length,
       info: events.filter((e) => {
-        const l = e.actionData?.level?.toLowerCase();
+        const l = (e as any).effectiveLevel || e.actionData?.level?.toLowerCase();
         return l !== "error" && l !== "critical" && l !== "warning";
       }).length,
     }),
@@ -1473,7 +1562,7 @@ export default function AlarmConsole() {
 
           {/* Export Button */}
           <AlarmExportDialog
-            events={filteredEvents}
+            events={events}
             stats={stats}
             systemName={getCurrentCloudSystemName()}
             period={{ from: filterDateFrom, to: filterDateTo }}
@@ -1561,7 +1650,7 @@ export default function AlarmConsole() {
                 <div className="relative flex-1 select-none">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                   <Input
-                    placeholder="Cari event..."
+                    placeholder="Search event..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10 text-sm select-text h-10"
@@ -1838,10 +1927,10 @@ export default function AlarmConsole() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="off">Off</SelectItem>
-                          <SelectItem value="10">Setiap 10 detik</SelectItem>
-                          <SelectItem value="30">Setiap 30 detik</SelectItem>
-                          <SelectItem value="60">Setiap 1 menit</SelectItem>
-                          <SelectItem value="300">Setiap 5 menit</SelectItem>
+                          <SelectItem value="10">Every 10 seconds</SelectItem>
+                          <SelectItem value="30">Every 30 seconds</SelectItem>
+                          <SelectItem value="60">Every 1 minute</SelectItem>
+                          <SelectItem value="300">Every 5 minutes</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1849,7 +1938,7 @@ export default function AlarmConsole() {
 
                   {/* Quick Date Filters */}
                   <div className="flex flex-wrap gap-2 pt-2">
-                    <span className="text-xs text-gray-500 self-center mr-1">Rentang cepat:</span>
+                    <span className="text-xs text-gray-500 self-center mr-1">Quick range:</span>
                     <Button
                       variant="outline"
                       size="sm"
@@ -1860,7 +1949,7 @@ export default function AlarmConsole() {
                         setFilterDateTo(today);
                       }}
                     >
-                      Hari ini
+                      Today
                     </Button>
                     <Button
                       variant="outline"
@@ -1874,7 +1963,7 @@ export default function AlarmConsole() {
                         setFilterDateTo(yesterday.toISOString().split("T")[0]);
                       }}
                     >
-                      Kemarin
+                      Yesterday
                     </Button>
                     <Button
                       variant="outline"
@@ -1888,7 +1977,7 @@ export default function AlarmConsole() {
                         setFilterDateTo(today.toISOString().split("T")[0]);
                       }}
                     >
-                      7 hari terakhir
+                      Last 7 days
                     </Button>
                     <Button
                       variant="outline"
@@ -1902,7 +1991,7 @@ export default function AlarmConsole() {
                         setFilterDateTo(today.toISOString().split("T")[0]);
                       }}
                     >
-                      30 hari terakhir
+                      Last 30 days
                     </Button>
                     {(filterDateFrom || filterDateTo) && (
                       <Button
@@ -1914,7 +2003,7 @@ export default function AlarmConsole() {
                           setFilterDateTo("");
                         }}
                       >
-                        Reset tanggal
+                        Reset date
                       </Button>
                     )}
                   </div>
@@ -1926,14 +2015,14 @@ export default function AlarmConsole() {
           {/* Results Info */}
           <div className="flex items-center justify-between text-xs sm:text-sm text-gray-500">
             <span>
-              Menampilkan {displayedEvents.length} dari {filteredEvents.length} events
+              Showing {displayedEvents.length} of {filteredEvents.length} events
               {filteredEvents.length !== events.length && ` (${events.length} total)`}
               {hasActiveFilters && " (filtered)"}
             </span>
             {autoRefresh && (
               <span className="flex items-center gap-1 text-green-600">
                 <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-                <span className="hidden sm:inline">Live update aktif</span>
+                <span className="hidden sm:inline">Live update active</span>
               </span>
             )}
           </div>
@@ -1954,14 +2043,14 @@ export default function AlarmConsole() {
               <Card className="border-blue-200 bg-blue-50">
                 <CardContent className="flex flex-col items-center justify-center p-6 sm:p-8 text-center">
                   <Cloud className="h-10 w-10 sm:h-12 sm:w-12 mb-4 text-blue-500" />
-                  <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Login Diperlukan</h3>
+                  <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Login Required</h3>
                   <p className="text-sm text-gray-600 mb-4 max-w-md">
-                    Cloud system <strong>{getCurrentCloudSystemName()}</strong> memerlukan autentikasi. Silakan login untuk
-                    melihat event logs.
+                    Cloud system <strong>{getCurrentCloudSystemName()}</strong> requires authentication. Please login to
+                    view event logs.
                   </p>
                   <Button onClick={openLoginDialog} className="gap-2">
                     <LogIn className="h-4 w-4" />
-                    Login ke Cloud System
+                    Login to Cloud System
                   </Button>
                 </CardContent>
               </Card>
@@ -1982,11 +2071,11 @@ export default function AlarmConsole() {
               <Card>
                 <CardContent className="flex flex-col items-center justify-center p-8 sm:p-12 text-gray-500">
                   <Bell className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-30" />
-                  <h3 className="text-base sm:text-lg font-medium mb-1">Tidak ada event ditemukan</h3>
+                  <h3 className="text-base sm:text-lg font-medium mb-1">No events found</h3>
                   <p className="text-xs sm:text-sm text-center max-w-md">
                     {hasActiveFilters
-                      ? "Coba ubah filter atau kata kunci pencarian"
-                      : "Event akan muncul saat sistem mendeteksi aktivitas"}
+                      ? "Try changing filters or search keywords"
+                      : "Events will appear when the system detects activity"}
                   </p>
                   {hasActiveFilters && (
                     <Button variant="outline" onClick={clearFilters} className="mt-4">
@@ -2017,9 +2106,9 @@ export default function AlarmConsole() {
               <div className="flex flex-col items-center gap-2 pt-4">
                 <Button variant="outline" onClick={loadMore} className="w-full sm:w-auto gap-2">
                   <ChevronDown className="h-4 w-4" />
-                  Muat {Math.min(LOAD_MORE_COUNT, remainingCount)} event lagi
+                  Load {Math.min(LOAD_MORE_COUNT, remainingCount)} more events
                 </Button>
-                <span className="text-xs text-gray-400">{remainingCount} event tersisa</span>
+                <span className="text-xs text-gray-400">{remainingCount} events remaining</span>
               </div>
             )}
 
@@ -2032,7 +2121,7 @@ export default function AlarmConsole() {
                   onClick={() => setDisplayCount(filteredEvents.length)}
                   className="text-xs text-gray-500 hover:text-gray-700"
                 >
-                  Atau tampilkan semua {filteredEvents.length} events
+                  Or show all {filteredEvents.length} events
                 </Button>
               </div>
             )}

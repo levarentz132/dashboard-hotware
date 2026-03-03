@@ -152,8 +152,10 @@ export function GlobalDeviceMonitor() {
   const triggerCameraEvent = useCallback(async (cameraName: string, cameraId: string, systemId: string, systemName: string, status: 'online' | 'offline') => {
     try {
       const isOnline = status === 'online';
-      const caption = isOnline ? "Camera Online" : "Camera Offline";
-      const description = `Camera "${cameraName}" is ${isOnline ? "back online" : "now offline"}.`;
+      const caption = isOnline ? "Camera Online" : "Camera Disconnected";
+      const description = isOnline
+        ? `Camera '${cameraName}' has been reconnected and is back online.`
+        : `Camera '${cameraName}' has lost connection to the server. Please verify the camera's network connection.`;
 
       console.log(`[GlobalDeviceMonitor] 📡 Triggering ${caption} for ${cameraName} on ${systemName}`);
 
@@ -271,28 +273,12 @@ export function GlobalDeviceMonitor() {
             showNotification({
               type: 'success',
               title: '🟢 Camera Online',
-              message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} is now online`
+              message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} is now back online`
             });
 
             lastNotifiedStatusRef.current[deviceKey] = 'online';
           } else if (!isFirstRun && !wasOffline && isNowOffline && lastNotified !== 'offline') {
-            // Device went offline
-            console.log(`[GlobalDeviceMonitor] 🔴 ALERT: ${currentDevice.name} (${currentSystem.systemName}) went OFFLINE`);
-
-            await triggerCameraEvent(
-              currentDevice.name || currentDevice.id,
-              currentDevice.id,
-              currentSystem.systemId,
-              currentSystem.systemName,
-              'offline'
-            );
-
-            showNotification({
-              type: 'error',
-              title: '🔴 Camera Offline',
-              message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} is now offline`
-            });
-
+            // Device went offline - Only track state, no alert/notification for now
             lastNotifiedStatusRef.current[deviceKey] = 'offline';
           } else if (previousStatus !== currentStatus) {
             // Track status for other transitions without notifying if it's just e.g. 'recording' -> 'online' (both online)
@@ -460,7 +446,7 @@ export function GlobalDeviceMonitor() {
 
     intervalRef.current = setInterval(() => {
       checkAllDevices();
-    }, 10000);
+    }, 30000);
 
     console.log("[GlobalDeviceMonitor] ✓ Monitoring started (30s interval)");
   }, [loadPreviousSnapshot, fetchAllSystems, checkAllDevices]);

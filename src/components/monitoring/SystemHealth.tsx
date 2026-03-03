@@ -83,7 +83,7 @@ export default function SystemHealth() {
       const localUserParsed = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_system_id") || localServerId || localUserParsed.serverId || "local";
 
-      const response = await fetch("/nx/rest/v4/devices", {
+      const response = await fetch("/nx/rest/v3/devices", {
         method: "GET",
         headers: {
           "Accept": "application/json",
@@ -111,6 +111,9 @@ export default function SystemHealth() {
   }, []);
 
   const fetchCloudCamerasForSystem = useCallback(async (system: CloudSystem) => {
+    // If it's a local system, we've already fetched it via fetchLocalCameras
+    if (system.isLocal) return [];
+
     try {
       const response = await fetch(
         `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
@@ -509,7 +512,7 @@ export default function SystemHealth() {
                       </div>
                       <div>
                         <h3 className="font-semibold text-gray-900">{system.name}</h3>
-                        <p className="text-xs text-gray-500 truncate max-w-[200px]" title={system.id}>
+                        <p className="text-xs text-gray-500" title={system.id}>
                           ID: {system.id}
                         </p>
                       </div>
@@ -538,10 +541,33 @@ export default function SystemHealth() {
                           <div className="text-xs text-gray-500 mb-1">Cameras</div>
                           <div className="font-medium text-gray-900">
                             {(() => {
-                              const sysData = camerasBySystem.find(s => s.systemId === system.id);
-                              if (!sysData) return "0 / 0";
-                              const online = sysData.items.filter(c => c.status?.toLowerCase() === "online" || c.status?.toLowerCase() === "recording").length;
-                              return `${online} / ${sysData.items.length}`;
+                              const normalize = (id: string | undefined) => id?.toLowerCase().replace(/[{}]/g, "") || "";
+                              const targetId = normalize(system.id);
+
+                              // First try to find system-level data
+                              const sysData = camerasBySystem.find(s => normalize(s.systemId) === targetId);
+
+                              let relevantCameras = [];
+                              if (sysData) {
+                                relevantCameras = sysData.items;
+                              } else {
+                                // Fallback: search across all systems for cameras belonging to this server ID
+                                relevantCameras = (allCameras || []).filter(c => normalize(c.serverId) === targetId);
+                              }
+
+                              if (relevantCameras.length === 0 && (allCameras || []).length > 0 && system.isLocal) {
+                                // Second fallback for local: if only one server and we have cameras, show them
+                                if (cloudSystems.filter(s => s.isLocal).length === 1) {
+                                  relevantCameras = allCameras;
+                                }
+                              }
+
+                              const online = relevantCameras.filter(c => {
+                                const status = c.status?.toLowerCase();
+                                return status === "online" || status === "recording";
+                              }).length;
+
+                              return `${online} / ${relevantCameras.length}`;
                             })()}
                           </div>
                         </div>

@@ -68,14 +68,18 @@ export async function POST(request: NextRequest) {
     let { username, password, system_id, server_id } = validation.data;
     const dynamicConfig = getDynamicConfig(request);
 
+    // Clean brackets from IDs
+    if (system_id) system_id = system_id.replace(/[{}]/g, "");
+    if (server_id) server_id = server_id.replace(/[{}]/g, "");
+
     // Prioritize system_id from Electron headers if missing from body
     if (!system_id && dynamicConfig?.NEXT_PUBLIC_NX_SYSTEM_ID) {
-      system_id = dynamicConfig.NEXT_PUBLIC_NX_SYSTEM_ID;
+      system_id = dynamicConfig.NEXT_PUBLIC_NX_SYSTEM_ID.replace(/[{}]/g, "");
       console.log(`[Login] Using system_id from Electron header: ${system_id}`);
     }
 
     if (!server_id && dynamicConfig?.NEXT_PUBLIC_NX_SERVER_ID) {
-      server_id = (dynamicConfig as any).NEXT_PUBLIC_NX_SERVER_ID;
+      server_id = (dynamicConfig as any).NEXT_PUBLIC_NX_SERVER_ID.replace(/[{}]/g, "");
       console.log(`[Login] Using server_id from Electron header: ${server_id}`);
     }
 

@@ -19,6 +19,7 @@ import {
   Network,
   Shield,
   Wifi,
+  CheckCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,7 +77,25 @@ interface EventLog {
   systemId?: string;
 }
 
-// Helper functions
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+const formatTimestamp = (timestampUsec: string): string => {
+  if (!timestampUsec) return "N/A";
+  const ms = parseInt(timestampUsec) / 1000;
+  if (isNaN(ms)) return timestampUsec;
+  const date = new Date(ms);
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
 const formatRelativeTime = (timestampUsec: string): string => {
   if (!timestampUsec) return "";
   const ms = parseInt(timestampUsec) / 1000;
@@ -86,17 +105,18 @@ const formatRelativeTime = (timestampUsec: string): string => {
   const diff = now - ms;
 
   if (diff < 60000) return "Just now";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
-  return `${Math.floor(diff / 604800000)}w ago`;
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} minutes ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} hours ago`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)} days ago`;
+  return formatTimestamp(timestampUsec);
 };
 
 const getEventTypeLabel = (eventType: string, caption?: string): string => {
   if (eventType === "userDefinedEvent" && caption) return caption;
   const labels: Record<string, string> = {
     cameraMotionEvent: "Motion",
-    cameraDisconnectEvent: "Offline",
+    cameraDisconnectEvent: "Camera Disconnected",
+    deviceDisconnected: "Camera Disconnected",
     storageFailureEvent: "Storage",
     networkIssueEvent: "Network",
     serverFailureEvent: "Server",
@@ -108,38 +128,22 @@ const getEventTypeLabel = (eventType: string, caption?: string): string => {
   return labels[eventType] || eventType.replace("Event", "");
 };
 
-const getEventIcon = (iconName: string, eventType: string) => {
-  const iconClass = "h-3.5 w-3.5";
-
-  // Use icon hint from actionData if available, otherwise fallback to eventType
-  const searchStr = (iconName || eventType || "").toLowerCase();
-
-  if (searchStr.includes("motion")) return <Zap className={iconClass} />;
-  if (searchStr.includes("camera")) return <Camera className={iconClass} />;
-  if (searchStr.includes("disconnect") || searchStr.includes("failure") || searchStr.includes("offline")) {
-    if (searchStr.includes("server")) return <Server className={iconClass} />;
-    return <WifiOff className={iconClass} />;
-  }
-  if (searchStr.includes("server")) return <Server className={iconClass} />;
-  if (searchStr.includes("storage")) return <HardDrive className={iconClass} />;
-  if (searchStr.includes("network")) return <Network className={iconClass} />;
-  if (searchStr.includes("license")) return <Shield className={iconClass} />;
-  if (searchStr.includes("health")) return <Activity className={iconClass} />;
-  if (searchStr.includes("conflict")) return <AlertTriangle className={iconClass} />;
-  if (searchStr.includes("start") || searchStr.includes("online")) return <Wifi className={iconClass} />;
-
-  return <Bell className={iconClass} />;
-};
-
-const getLevelConfig = (level: string) => {
+const getLevelConfig = (level: string, eventType?: string, caption?: string) => {
   const normalizedLevel = level?.toLowerCase();
+  const type = eventType?.toLowerCase() || "";
+  const cap = caption?.toLowerCase() || "";
+
+  const isPositive = type.includes("start") || type.includes("online") ||
+    cap.includes("online") || cap.includes("started") ||
+    type.includes("finished") || type.includes("complete") ||
+    cap.includes("finished") || cap.includes("complete");
 
   if (normalizedLevel === "critical" || normalizedLevel === "error") {
     return {
       bgClass: "bg-red-50 dark:bg-red-950/30",
       borderClass: "border-red-200 dark:border-red-800",
       textClass: "text-red-600",
-      icon: <XCircle className="h-4 w-4 text-red-500" />,
+      icon: <AlertCircle className="h-4 w-4 text-red-500" />,
     };
   }
 
@@ -149,6 +153,15 @@ const getLevelConfig = (level: string) => {
       borderClass: "border-amber-200 dark:border-amber-800",
       textClass: "text-amber-600",
       icon: <AlertTriangle className="h-4 w-4 text-amber-500" />,
+    };
+  }
+
+  if (isPositive) {
+    return {
+      bgClass: "bg-green-50 dark:bg-green-950/30",
+      borderClass: "border-green-200 dark:border-green-800",
+      textClass: "text-green-600",
+      icon: <CheckCircle className="h-4 w-4 text-green-500" />,
     };
   }
 
@@ -162,6 +175,69 @@ const getLevelConfig = (level: string) => {
 
 export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemId?: string }) {
   const router = useRouter();
+  const [globalCameras, setGlobalCameras] = useState<any[]>([]);
+  const [globalServers, setGlobalServers] = useState<any[]>([]);
+
+  // Fetch global cameras fallback
+  useEffect(() => {
+    const fetchGlobalCameras = async () => {
+      try {
+        const response = await fetch("/api/device-monitor");
+        if (response.ok) {
+          const snapshot = await response.json();
+          const allDevices = (snapshot.systems || []).flatMap((s: any) => s.devices || []);
+          setGlobalCameras(allDevices);
+        }
+      } catch (e) {
+        console.error("[AlarmWidget] Failed to fetch global cameras lookup:", e);
+      }
+    };
+    fetchGlobalCameras();
+  }, []);
+
+  // Sync servers as well for full name resolution
+  useEffect(() => {
+    const fetchAllServers = async () => {
+      try {
+        const systems = await fetch("/api/cloud/systems").then(res => res.json()).then(d => d.systems || []);
+        const allServers: any[] = [];
+
+        await Promise.allSettled(
+          systems.map(async (sys: any) => {
+            const res = await fetch(`/api/nx/servers?systemId=${encodeURIComponent(sys.id)}`);
+            if (res.ok) {
+              const data = await res.json();
+              allServers.push(...(Array.isArray(data) ? data : []));
+            }
+          })
+        );
+        setGlobalServers(allServers);
+      } catch (e) {
+        console.log("[AlarmWidget] Failed to fetch servers for lookup", e);
+      }
+    };
+    fetchAllServers();
+  }, []);
+
+  const resourceNameMap = useMemo(() => {
+    const map = new Map<string, { name: string; type: "camera" | "server" }>();
+    const addToMap = (id: string | undefined, name: string, type: "camera" | "server") => {
+      if (!id) return;
+      const cleanId = id.toLowerCase().replace(/[{}]/g, "");
+      map.set(cleanId, { name, type });
+      map.set(id.toLowerCase(), { name, type });
+    };
+
+    globalCameras.forEach(camera => addToMap(camera.id, camera.name || "Camera", "camera"));
+    globalServers.forEach(server => addToMap(server.id, server.name || "Server", "server"));
+    return map;
+  }, [globalCameras, globalServers]);
+
+  const getResourceName = useCallback((id: string | undefined) => {
+    if (!id) return null;
+    const cleanId = id.toLowerCase().replace(/[{}]/g, "");
+    return resourceNameMap.get(cleanId) || resourceNameMap.get(id.toLowerCase()) || null;
+  }, [resourceNameMap]);
 
   // 1. Define Fetchers
   const fetchLocalAlarms = useCallback(async () => {
@@ -172,8 +248,7 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
       const localUser = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
 
-      // Use local proxy with specific 'this' server endpoint
-      const response = await fetch("/nx/rest/v4/events/log", {
+      const response = await fetch("/nx/rest/v3/events/log", {
         headers: {
           "x-runtime-guid": localUser.token,
           "Accept": "application/json"
@@ -227,27 +302,102 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
 
   // 3. Consolidated events list
   const events = useMemo(() => {
-    return dataBySystem
-      .flatMap(sys => sys.items.map(item => ({ ...item, systemId: sys.systemId })))
-      .sort((a, b) => {
-        // Use actionData.timestamp (usec) for sorting
-        const timeA = parseInt(a.actionData?.timestamp || "0");
-        const timeB = parseInt(b.actionData?.timestamp || "0");
-        return timeB - timeA;
-      });
+    const allEvents = dataBySystem
+      .flatMap(sys => sys.items.map(item => {
+        const type = item.eventData?.type;
+        const originalLevel = item.actionData?.level?.toLowerCase() || "info";
+        let effectiveLevel = originalLevel;
+
+        // Custom Severity Rules
+        if (type === "cameraDisconnectEvent") {
+          const timestamp = parseInt(item.actionData?.timestamp || item.eventData?.timestamp || "0");
+          const now = Date.now() * 1000;
+          const ageHours = (now - timestamp) / (1000000 * 3600);
+          effectiveLevel = ageHours > 24 ? "critical" : "info";
+        } else if (type === "serverFailureEvent") {
+          effectiveLevel = "critical";
+        } else if (type === "serverConflictEvent") {
+          effectiveLevel = "warning";
+        }
+
+        return { ...item, systemId: sys.systemId, effectiveLevel };
+      }));
+
+    // Deduplicate disconnections preferring EARLIEST timestamp
+    const sortedTimeline = [...allEvents].sort((a, b) => {
+      const timeA = parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0");
+      const timeB = parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0");
+      return timeA - timeB;
+    });
+
+    const recentDisconnections = new Map<string, number>();
+    const processedEvents: any[] = [];
+
+    sortedTimeline.forEach(event => {
+      const type = event.eventData?.type || "unknown";
+      const isDisconnection = type === "cameraDisconnectEvent" || type === "deviceDisconnected";
+
+      if (isDisconnection) {
+        const deviceId = event.actionData?.deviceIds?.[0];
+        if (deviceId) {
+          const timestamp = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0");
+          const lastTime = recentDisconnections.get(deviceId);
+          if (lastTime !== undefined && (timestamp - lastTime) < 60000000) {
+            return;
+          }
+          recentDisconnections.set(deviceId, timestamp);
+        }
+      }
+      processedEvents.push(event);
+    });
+
+    const uniqueMap = new Map<string, any>();
+    processedEvents.forEach(event => {
+      const timestamp = event.actionData?.timestamp || event.eventData?.timestamp || "0";
+      const type = event.eventData?.type || event.actionData?.type || "unknown";
+      const serverId = event.eventData?.serverId || event.actionData?.serverId || "unknown";
+      const key = `${timestamp}-${type}-${serverId}`;
+
+      const existing = uniqueMap.get(key);
+      if (!existing) {
+        uniqueMap.set(key, event);
+      } else {
+        const existingInfoScore = (existing.actionData?.caption ? 2 : 0) + (existing.actionData?.description ? 1 : 0);
+        const currentInfoScore = (event.actionData?.caption ? 2 : 0) + (event.actionData?.description ? 1 : 0);
+
+        const priority: Record<string, number> = { critical: 0, error: 1, warning: 2, info: 3 };
+        const existingPrio = priority[(existing as any).effectiveLevel || existing.actionData?.level?.toLowerCase() || "info"] ?? 4;
+        const currentPrio = priority[(event as any).effectiveLevel || event.actionData?.level?.toLowerCase() || "info"] ?? 4;
+
+        if (currentInfoScore > existingInfoScore) {
+          uniqueMap.set(key, event);
+        } else if (currentInfoScore === existingInfoScore && currentPrio < existingPrio) {
+          uniqueMap.set(key, event);
+        }
+      }
+    });
+
+    const deduplicatedEvents = Array.from(uniqueMap.values());
+
+    // Return newest first for display
+    return deduplicatedEvents.sort((a, b) => {
+      const timeA = parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0");
+      const timeB = parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0");
+      return timeB - timeA;
+    });
   }, [dataBySystem]);
 
   // Stats
   const stats = useMemo(() => {
     const errorCount = events.filter((e) => {
-      const level = e.actionData?.level?.toLowerCase();
+      const level = (e as any).effectiveLevel || e.actionData?.level?.toLowerCase();
       return level === "error" || level === "critical";
     }).length;
 
-    const warningCount = events.filter((e) => e.actionData?.level?.toLowerCase() === "warning").length;
+    const warningCount = events.filter((e) => ((e as any).effectiveLevel || e.actionData?.level?.toLowerCase()) === "warning").length;
 
     const infoCount = events.filter((e) => {
-      const level = e.actionData?.level?.toLowerCase();
+      const level = (e as any).effectiveLevel || e.actionData?.level?.toLowerCase();
       return level !== "error" && level !== "critical" && level !== "warning";
     }).length;
 
@@ -325,52 +475,99 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
           <div className="text-center text-xs text-muted-foreground py-4">No alarms</div>
         ) : (
           events.slice(0, 5).map((event, index) => {
-            const level = event.actionData?.level || "info";
-            const levelConfig = getLevelConfig(level);
             const eventType = event.eventData?.type || "unknown";
+            const level = (event as any).effectiveLevel || event.actionData?.level || "info";
+            const caption = event.actionData?.caption || event.actionData?.sourceName || "Event";
+            const levelConfig = getLevelConfig(level, eventType, caption);
             const timestamp = event.actionData?.timestamp || event.eventData?.timestamp;
+
+            let displayCaption = caption;
+            let description = event.actionData?.description;
+
+            const deviceIds = event.actionData?.deviceIds || [];
+            let deviceName = "Camera";
+            if (deviceIds.length > 0) {
+              const res = getResourceName(deviceIds[0]);
+              if (res) deviceName = res.name;
+            } else if (event.actionData?.sourceName) {
+              deviceName = event.actionData.sourceName;
+            }
+
+            if (eventType === "cameraDisconnectEvent" || eventType === "deviceDisconnected" || (displayCaption && displayCaption.toLowerCase().includes("disconnected"))) {
+              if (displayCaption) {
+                displayCaption = displayCaption.replace(/deviceDisconnected/g, "Camera Disconnected");
+                displayCaption = displayCaption.replace(/device disconnected/i, "Camera Disconnected");
+                displayCaption = displayCaption.replace(/device/i, "Camera");
+              }
+
+              // If description is missing or generic, use the custom template
+              const isDescriptionEmptyOrGeneric = !description ||
+                description === "deviceDisconnected" ||
+                description === "cameraDisconnectEvent" ||
+                description === displayCaption;
+
+              if (isDescriptionEmptyOrGeneric && (eventType === "cameraDisconnectEvent" || eventType === "deviceDisconnected")) {
+                description = `Camera '${deviceName}' has lost connection to the server. Please verify the camera's network connection.`;
+
+                if (!displayCaption || displayCaption === "Camera Disconnected") {
+                  displayCaption = `${deviceName} Disconnected`;
+                }
+              }
+            }
+
+            const originPeer = getResourceName(event.actionData?.originPeerId);
 
             return (
               <div
                 key={index}
                 className={cn(
-                  "flex items-start gap-2 p-2 rounded-lg border text-xs",
+                  "flex items-start gap-2 p-2 rounded-lg border text-xs transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02]",
                   levelConfig.bgClass,
                   levelConfig.borderClass,
                 )}
               >
                 <div className="shrink-0 mt-0.5">{levelConfig.icon}</div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <Badge variant="outline" className="h-5 gap-1 text-[10px] px-1.5">
-                      {getEventIcon(event.actionData?.icon, eventType)}
-                      {getEventTypeLabel(eventType, event.actionData?.caption)}
-                    </Badge>
+                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                    <p className="font-semibold truncate text-gray-900 dark:text-gray-100 flex-1">
+                      {displayCaption}
+                    </p>
                     {event.aggregatedInfo?.total > 1 && (
-                      <Badge variant="secondary" className="h-5 text-[10px] px-1.5">
+                      <Badge variant="secondary" className="h-4 text-[9px] px-1 font-bold shrink-0">
                         x{event.aggregatedInfo.total}
                       </Badge>
                     )}
                   </div>
-                  <p className="font-medium truncate text-gray-800 dark:text-gray-200">
-                    {event.actionData?.caption || event.actionData?.sourceName || "Event"}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground truncate mb-0.5">
-                    {event.actionData?.description}
-                  </p>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
-                          <Clock className="h-3 w-3" />
-                          {formatRelativeTime(timestamp)}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{new Date(parseInt(timestamp) / 1000).toLocaleString()}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+
+                  {description && (
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 line-clamp-1 mb-1">
+                      {description}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-gray-500">
+                    {/* Device info if relevant */}
+                    {deviceName && deviceName !== "Camera" && (
+                      <span className="flex items-center gap-1 font-medium text-gray-600 dark:text-gray-300">
+                        <Camera className="h-2.5 w-2.5" />
+                        {deviceName}
+                      </span>
+                    )}
+
+                    {/* Origin Peer info */}
+                    {originPeer && (
+                      <span className="flex items-center gap-1">
+                        <Server className="h-2.5 w-2.5" />
+                        {originPeer.name}
+                      </span>
+                    )}
+
+                    {/* Relative Time */}
+                    <span className="flex items-center gap-1 opacity-80">
+                      <Clock className="h-2.5 w-2.5" />
+                      {formatRelativeTime(timestamp)}
+                    </span>
+                  </div>
                 </div>
               </div>
             );

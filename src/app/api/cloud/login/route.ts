@@ -4,7 +4,10 @@ import { getDynamicConfig, isSecureContext } from "@/lib/config";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { systemId, username, password } = body;
+    let { systemId, username, password } = body;
+
+    // Clean brackets from systemId
+    if (systemId) systemId = systemId.replace(/[{}]/g, "");
 
     if (!systemId || !username || !password) {
       return NextResponse.json({ error: "System ID, username, and password are required" }, { status: 400 });
