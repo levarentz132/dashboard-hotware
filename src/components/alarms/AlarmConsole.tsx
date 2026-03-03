@@ -237,7 +237,7 @@ const getEventIcon = (iconName: string, eventType: string) => {
     return <WifiOff className={iconClass} />;
   }
   if (searchStr.includes("server")) return <Server className={iconClass} />;
-  if (searchStr.includes("storage")) return <HardDrive className={iconClass} />;
+  if (searchStr.includes("storage") || searchStr.includes("disk") || searchStr.includes("space")) return <HardDrive className={iconClass} />;
   if (searchStr.includes("network")) return <Network className={iconClass} />;
   if (searchStr.includes("license")) return <Shield className={iconClass} />;
   if (searchStr.includes("health")) return <Activity className={iconClass} />;
@@ -761,6 +761,8 @@ export default function AlarmConsole() {
         } else if (type === "serverFailureEvent") {
           effectiveLevel = "critical";
         } else if (type === "serverConflictEvent") {
+          effectiveLevel = "warning";
+        } else if (item.actionData?.caption === "Low Disk Space" || (item.actionData?.caption && item.actionData.caption.includes("Disk Space"))) {
           effectiveLevel = "warning";
         }
 

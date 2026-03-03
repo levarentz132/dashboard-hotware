@@ -684,6 +684,12 @@ export function AlarmExportDialog({
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
+                                            <SelectItem value="availability_incident">
+                                                <div className="flex items-center gap-2">
+                                                    <ClipboardList className="h-4 w-4 text-blue-500" />
+                                                    <span>Availability & Incident Report (All)</span>
+                                                </div>
+                                            </SelectItem>
                                             <SelectItem value="camera_incident">
                                                 <div className="flex items-center gap-2">
                                                     <ClipboardList className="h-4 w-4 text-green-500" />
@@ -694,12 +700,6 @@ export function AlarmExportDialog({
                                                 <div className="flex items-center gap-2">
                                                     <ClipboardList className="h-4 w-4 text-orange-500" />
                                                     <span>Server Incident Report</span>
-                                                </div>
-                                            </SelectItem>
-                                            <SelectItem value="availability_incident">
-                                                <div className="flex items-center gap-2">
-                                                    <ClipboardList className="h-4 w-4 text-blue-500" />
-                                                    <span>Availability & Incident Report (All)</span>
                                                 </div>
                                             </SelectItem>
                                             <SelectItem value="standard">

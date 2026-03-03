@@ -46,6 +46,13 @@ export function GlobalDeviceMonitor() {
   const systemsRef = useRef<CloudSystem[]>([]);
   const previousSnapshotRef = useRef<MonitoringSnapshot | null>(null);
   const lastNotifiedStatusRef = useRef<Record<string, string>>({});
+  const lastNotifiedStorageRef = useRef<Record<string, number>>({});
+
+  // Thresholds for disk space alerts
+  const FREE_GB_THRESHOLD = 20;
+  const FREE_PERCENT_THRESHOLD = 0.15; // 15%
+  const STORAGE_COOLDOWN = 60 * 60 * 1000; // 1 hour cooldown for same storage alert
+
 
   console.log("[GlobalDeviceMonitor] ⚡ Component rendering");
 
@@ -180,6 +187,105 @@ export function GlobalDeviceMonitor() {
       console.error(`[GlobalDeviceMonitor] ❌ Error triggering status event:`, error);
     }
   }, []);
+
+  /**
+   * Create event in NX system for low disk space
+   */
+  const triggerStorageEvent = useCallback(async (storageName: string, storagePath: string, systemId: string, systemName: string, message: string) => {
+    try {
+      console.log(`[GlobalDeviceMonitor] 💾 Triggering Low Disk Space event for ${storageName} on ${systemName}`);
+
+      // Temporarily set systemId to target system for the API call
+      const originalSystemId = nxAPI.getSystemId();
+      nxAPI.setSystemId(systemId);
+
+      await nxAPI.createGenericEvent({
+        source: systemName || "VMS Server",
+        caption: "Low Disk Space",
+        description: `You are running out of disk space on ${storageName || storagePath} (${systemName}). ${message}.`,
+        level: "warning",
+        state: "instant"
+      });
+
+      // Restore original systemId
+      if (originalSystemId) nxAPI.setSystemId(originalSystemId);
+
+      console.log(`[GlobalDeviceMonitor] ✅ Low Disk Space event created successfully for ${storageName}`);
+    } catch (error) {
+      console.error(`[GlobalDeviceMonitor] ❌ Error triggering storage event:`, error);
+    }
+  }, []);
+
+  /**
+   * Check storage for a specific system
+   */
+  const checkStorageForSystem = useCallback(async (systemId: string, systemName: string) => {
+    try {
+      const response = await fetch(
+        `/api/cloud/storages?systemId=${encodeURIComponent(systemId)}`,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            ...getElectronHeaders(),
+          },
+        }
+      );
+
+      if (response.ok) {
+        const storages = await response.json();
+        if (!Array.isArray(storages)) return;
+
+        for (const storage of storages) {
+          // Only check storages used for writing
+          if (storage.isUsedForWriting === false) continue;
+
+          const freeBytes = parseInt(storage.statusInfo?.freeSpace || storage.freeSpaceBytes || "0");
+          const totalBytes = parseInt(storage.statusInfo?.totalSpace || storage.totalSpaceBytes || "0");
+
+          if (totalBytes === 0) continue;
+
+          const freeGB = freeBytes / (1024 * 1024 * 1024);
+          const freePercent = freeBytes / totalBytes;
+
+          if (freeGB < FREE_GB_THRESHOLD || freePercent < FREE_PERCENT_THRESHOLD) {
+            const storageKey = `${systemId}:${storage.id}`;
+            const now = Date.now();
+            const lastNotified = lastNotifiedStorageRef.current[storageKey] || 0;
+
+            if (now - lastNotified > STORAGE_COOLDOWN) {
+              const message = freeGB < FREE_GB_THRESHOLD
+                ? `Less than ${freeGB.toFixed(1)} GB free remains`
+                : `Less than ${(freePercent * 100).toFixed(0)}% free space remains`;
+
+              console.log(`[GlobalDeviceMonitor] ⚠️ LOW DISK SPACE: ${storage.name || storage.path} on ${systemName}: ${message}`);
+
+              // 1. Notify UI
+              showNotification({
+                type: 'warning',
+                title: 'Low Disk Space',
+                message: `${storage.name || storage.path} on ${systemName} is running low: ${message}`
+              });
+
+              // 2. Trigger NX Event
+              await triggerStorageEvent(
+                storage.name || 'Disk',
+                storage.path || 'Unknown Path',
+                systemId,
+                systemName,
+                message
+              );
+
+              lastNotifiedStorageRef.current[storageKey] = now;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[GlobalDeviceMonitor] Error checking storage for ${systemName}:`, error);
+    }
+  }, [triggerStorageEvent]);
 
   /**
    * Load previous snapshot from API (if exists)
@@ -352,9 +458,16 @@ export function GlobalDeviceMonitor() {
 
     console.log(`[GlobalDeviceMonitor] 🔄 Checking devices for ${systems.length} system(s)...`);
 
-    // Check all systems in parallel
+    // Check all systems in parallel (Devices + Storage)
     const results = await Promise.all(
-      systems.map((system) => checkDevicesForSystem(system.id, system.name))
+      systems.map(async (system) => {
+        const deviceResult = await checkDevicesForSystem(system.id, system.name);
+        // Only check storage if device check was successful (implies system is reachable)
+        if (deviceResult.success) {
+          await checkStorageForSystem(system.id, system.name);
+        }
+        return deviceResult;
+      })
     );
 
     const successCount = results.filter((r) => r.success).length;
