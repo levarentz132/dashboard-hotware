@@ -52,6 +52,7 @@ export interface ExternalAuthResponse {
     is_active?: boolean;
     created_at?: string;
   };
+  organization?: ExternalOrganization; // Single organization from /me
 }
 
 /**

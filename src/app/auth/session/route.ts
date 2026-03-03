@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
           session.user = {
             ...session.user,
             ...meResult.user,
+            organization: meResult.organization || session.user.organization,
             // Ensure ID is number and role is typed correctly
             id: Number(meResult.user.id),
             role: meResult.user.role as any,
@@ -76,6 +77,7 @@ export async function GET(request: NextRequest) {
                 refreshedSession.user = {
                   ...refreshedSession.user,
                   ...meResult.user,
+                  organization: meResult.organization || refreshedSession.user.organization,
                   id: Number(meResult.user.id),
                   role: meResult.user.role as any,
                 };

@@ -40,6 +40,7 @@ export interface UserPublic {
   role?: UserRole | Role; // Support both old string and new object role
   system_id: string; // The system ID this user is licensed for
   organizations?: Organization[]; // New: organizations the user belongs to
+  organization?: Organization; // Single organization from /me
   privileges?: Privilege[]; // New: user's access privileges
   is_active: boolean;
   created_at: Date | string;

@@ -189,7 +189,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
       <button
         onClick={() => handleNavClick(item)}
         className={cn(
-          "flex items-center w-full transition-all duration-200 group no-drag h-12 text-left px-0",
+          "flex items-center w-full transition-all duration-200 group no-drag h-12 text-left px-0 select-none",
           isActive
             ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
             : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
@@ -237,8 +237,10 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
           )}>
             {!isCollapsed && (
               <div className="no-drag whitespace-nowrap overflow-hidden min-w-0 flex-1 mr-2">
-                <h1 className="text-xl font-bold text-gray-900 tracking-tight truncate">Hotware</h1>
-                <p className="text-xs text-gray-500 font-medium truncate">Camera Dashboard</p>
+                <h1 className="text-xl font-bold text-gray-900 tracking-tight truncate select-none">
+                  {user?.organization?.name || "Dashboard"}
+                </h1>
+                <p className="text-xs text-gray-500 font-medium truncate select-none">Camera Dashboard</p>
               </div>
             )}
 
@@ -283,7 +285,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
         </nav>
 
         {/* User Profile Footer */}
-        <div className="p-3 border-t border-gray-200 bg-gray-50/50 no-drag shrink-0">
+        <div className="p-3 border-t border-gray-200 bg-gray-50/50 no-drag shrink-0 select-none">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className={cn(
@@ -302,7 +304,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent onClick={(e) => e.stopPropagation()} side={isCollapsed ? "right" : "top"} align={isCollapsed ? "end" : "start"} className="w-56 z-[9999] bg-white" sideOffset={10}>
-              <DropdownMenuLabel className="font-normal">
+              <DropdownMenuLabel className="font-normal select-none">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none">{user?.username || "Guest User"}</p>
                   <p className="text-xs leading-none text-muted-foreground">{getDisplayRole(user?.role)}</p>
@@ -312,7 +314,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
               <DropdownMenuItem
                 onClick={() => logout()}
                 disabled={isAuthLoading}
-                className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
+                className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50 select-none"
               >
                 {isAuthLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
                 {isAuthLoading ? "Logging out..." : "Logout"}

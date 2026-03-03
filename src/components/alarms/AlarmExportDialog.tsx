@@ -1,4 +1,5 @@
 "use client";
+import { useAuth } from "@/contexts/auth-context";
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
@@ -189,6 +190,7 @@ export function AlarmExportDialog({
     period,
     userName = "Administrator"
 }: AlarmExportDialogProps) {
+    const { user } = useAuth();
     const [open, setOpen] = useState(false);
 
     // Add CSS to hide native date icon and fix layout
@@ -600,14 +602,6 @@ export function AlarmExportDialog({
             doc.addImage(logoData.dataUrl, 'PNG', 15, 6, logoData.finalW, logoData.finalH);
         }
 
-        // Header
-        doc.setFontSize(16);
-        doc.setTextColor(40);
-        doc.text("HOTWARE SYSTEM REPORT", pageWidth / 2, 15, { align: "center" });
-
-        doc.setDrawColor(200);
-        doc.line(20, 24, pageWidth - 20, 24);
-
         // System Info
         doc.setFontSize(8);
         doc.setFont("helvetica", "bold");
@@ -749,6 +743,15 @@ export function AlarmExportDialog({
                 if (logoData) {
                     doc.addImage(logoData.dataUrl, 'PNG', 15, 6, logoData.finalW, logoData.finalH);
                 }
+
+                // Header Text & Line on every page
+                doc.setFontSize(16);
+                doc.setTextColor(40);
+                const orgName = user?.organization?.name ? `${user.organization.name} ` : "";
+                doc.text(`${orgName}System Report`, pageWidth / 2, 15, { align: "center" });
+
+                doc.setDrawColor(200);
+                doc.line(20, 24, pageWidth - 20, 24);
 
                 doc.setFontSize(8);
                 doc.text(`Page ${data.pageNumber}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: "center" });
