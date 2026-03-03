@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import * as SelectPrimitive from "@radix-ui/react-select";
 import {
     Download,
     FileText,
@@ -14,7 +15,11 @@ import {
     Info,
     Calendar,
     GripVertical,
-    ClipboardList
+    ClipboardList,
+    Image,
+    Trash2,
+    Upload,
+    Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -45,7 +50,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { jsPDF } from "jspdf";
@@ -216,6 +221,70 @@ export function AlarmExportDialog({
     });
     const [isPreviewing, setIsPreviewing] = useState(false);
 
+    const [selectedLogoUrl, setSelectedLogoUrl] = useState<string | null>(null);
+    const [availableLogos, setAvailableLogos] = useState<{ name: string, url: string }[]>([]);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const fetchLogos = async () => {
+        try {
+            const res = await fetch("/api/settings/logos");
+            if (res.ok) {
+                const data = await res.json();
+                setAvailableLogos(data);
+            }
+        } catch (error) {
+            console.error("Error fetching logos:", error);
+        }
+    };
+
+    useEffect(() => {
+        if (open) {
+            fetchLogos();
+        }
+    }, [open]);
+
+    const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            const res = await fetch("/api/settings/logos", {
+                method: "POST",
+                body: formData
+            });
+            if (res.ok) {
+                const data = await res.json();
+                await fetchLogos();
+                setSelectedLogoUrl(data.url);
+            }
+        } catch (error) {
+            console.error("Error uploading logo:", error);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleDeleteLogo = async (name: string) => {
+        try {
+            const res = await fetch(`/api/settings/logos?name=${encodeURIComponent(name)}`, {
+                method: "DELETE"
+            });
+            if (res.ok) {
+                if (selectedLogoUrl?.includes(name)) {
+                    setSelectedLogoUrl(null);
+                }
+                await fetchLogos();
+            }
+        } catch (error) {
+            console.error("Error deleting logo:", error);
+        }
+    };
+
     const sensors = useSensors(
         useSensor(PointerSensor),
         useSensor(KeyboardSensor, {
@@ -373,9 +442,12 @@ export function AlarmExportDialog({
             result = result.filter(inc => inc.category === "Camera");
         } else if (reportType === "server_incident") {
             result = result.filter(inc => inc.category === "Server");
+        } else if (reportType === "availability_incident") {
+            // Merge camera and server report as requested
+            result = result.filter(inc => inc.category === "Camera" || inc.category === "Server");
         }
 
-        // 5. Apply Final Sorting and Assign IDs
+        // 5. Apply Final Sorting
         if (sortBy === "newest") {
             result.sort((a, b) => parseInt(b.failureEvent.actionData?.timestamp || b.failureEvent.eventData?.timestamp || "0") - parseInt(a.failureEvent.actionData?.timestamp || a.failureEvent.eventData?.timestamp || "0"));
         } else if (sortBy === "oldest") {
@@ -385,13 +457,36 @@ export function AlarmExportDialog({
             result.sort((a, b) => (priority[a.failureEvent.actionData?.level?.toLowerCase()] ?? 4) - (priority[b.failureEvent.actionData?.level?.toLowerCase()] ?? 4));
         }
 
-        // Assign Sequential IDs based on result order
-        return result.map((inc, index) => {
+        // 6. Assign Sequential IDs with separate counters for each category
+        const typeCounters: Record<string, number> = {};
+        const typeTotals: Record<string, number> = {};
+
+        // If sorting newest first, we need to know the totals for each type to count backwards correctly
+        if (sortBy === "newest") {
+            result.forEach(inc => {
+                const prefix = inc.category === "Camera" ? "CAM" : inc.category === "Server" ? "SVR" : "OTH";
+                const typePrefix = reportType === "standard" ? "LOG" : (reportType === "overview" ? "INC" : prefix);
+                typeTotals[typePrefix] = (typeTotals[typePrefix] || 0) + 1;
+            });
+        }
+
+        return result.map((inc) => {
             const prefix = inc.category === "Camera" ? "CAM" : inc.category === "Server" ? "SVR" : "OTH";
             const typePrefix = reportType === "standard" ? "LOG" : (reportType === "overview" ? "INC" : prefix);
+
+            // Increment current counter for this type
+            typeCounters[typePrefix] = (typeCounters[typePrefix] || 0) + 1;
+
+            // Calculate sequence number:
+            // - For oldest first: increment from 1
+            // - For newest first: decrement from total to 1
+            const seqNum = sortBy === "newest"
+                ? (typeTotals[typePrefix] - typeCounters[typePrefix] + 1)
+                : typeCounters[typePrefix];
+
             return {
                 ...inc,
-                id: typePrefix + "-" + (sortBy === "newest" ? result.length - index : index + 1).toString().padStart(3, '0')
+                id: `${typePrefix}-${seqNum.toString().padStart(3, '0')}`
             };
         });
     }, [events, sortBy, exportPeriod, reportType]);
@@ -442,9 +537,68 @@ export function AlarmExportDialog({
         return `${datePart},\n${timePart}`;
     };
 
-    const generatePDF = (preview = false) => {
+    const generatePDF = async (preview = false) => {
         const doc = new jsPDF({ orientation: "landscape" });
         const pageWidth = doc.internal.pageSize.getWidth();
+
+        // Optional Logo - Pre-load for reliability
+        let logoData: { dataUrl: string, finalW: number, finalH: number } | null = null;
+        if (selectedLogoUrl) {
+            try {
+                // Use a helper function to get base64/image for jsPDF
+                const loadImage = (url: string): Promise<{ dataUrl: string, width: number, height: number }> => {
+                    return new Promise((resolve, reject) => {
+                        const img = new (window as any).Image();
+                        img.crossOrigin = 'Anonymous';
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            const ctx = canvas.getContext('2d');
+                            ctx?.drawImage(img, 0, 0);
+                            resolve({
+                                dataUrl: canvas.toDataURL('image/png'),
+                                width: img.width,
+                                height: img.height
+                            });
+                        };
+                        img.onerror = () => reject('Could not load image');
+                        img.src = url;
+                    });
+                };
+
+                const { dataUrl, width, height } = await loadImage(selectedLogoUrl);
+
+                // Calculate dimensions to maintain aspect ratio within a max bounding box
+                const maxW = 40;
+                const maxH = 15;
+                let finalW = width;
+                let finalH = height;
+
+                const ratio = width / height;
+
+                // Fit into maxH first if needed
+                if (finalH > maxH) {
+                    finalH = maxH;
+                    finalW = finalH * ratio;
+                }
+
+                // Then fit into maxW if still too wide
+                if (finalW > maxW) {
+                    finalW = maxW;
+                    finalH = finalW / ratio;
+                }
+
+                logoData = { dataUrl, finalW, finalH };
+            } catch (e) {
+                console.error("Failed to load logo for PDF:", e);
+            }
+        }
+
+        // Initial Logo drawing (First Page)
+        if (logoData) {
+            doc.addImage(logoData.dataUrl, 'PNG', 15, 6, logoData.finalW, logoData.finalH);
+        }
 
         // Header
         doc.setFontSize(16);
@@ -452,12 +606,12 @@ export function AlarmExportDialog({
         doc.text("HOTWARE SYSTEM REPORT", pageWidth / 2, 15, { align: "center" });
 
         doc.setDrawColor(200);
-        doc.line(20, 20, pageWidth - 20, 20);
+        doc.line(20, 24, pageWidth - 20, 24);
 
         // System Info
         doc.setFontSize(8);
         doc.setFont("helvetica", "bold");
-        doc.text("System Information", 20, 30);
+        doc.text("System Information", 20, 32);
 
         doc.setFont("helvetica", "normal");
         const reportTitle = reportType === "standard" ? "Alarm Log" :
@@ -474,7 +628,7 @@ export function AlarmExportDialog({
         ];
 
         sysInfo.forEach((item, i) => {
-            const y = 36 + (i * 4);
+            const y = 38 + (i * 4);
             doc.text(item.label, 25, y);
             doc.text(":", 55, y);
             doc.text(item.value, 58, y);
@@ -511,7 +665,6 @@ export function AlarmExportDialog({
             if (m > 0 || h > 0) res += `${m}m `;
             res += `${sec}s`;
             return res.trim();
-            return res.trim();
         };
 
         const summaryPart2 = [
@@ -524,18 +677,18 @@ export function AlarmExportDialog({
         const summaryX2 = pageWidth / 2 + 75;
 
         doc.setFont("helvetica", "bold");
-        doc.text("Executive Summary", summaryX1, 30);
+        doc.text("Executive Summary", summaryX1, 32);
         doc.setFont("helvetica", "normal");
 
         summaryPart1.forEach((item, i) => {
-            const y = 36 + (i * 4);
+            const y = 38 + (i * 4);
             doc.text(item.label.toString(), summaryX1, y);
             doc.text(":", summaryX1 + 35, y);
             doc.text(item.value.toString(), summaryX1 + 38, y);
         });
 
         summaryPart2.forEach((item, i) => {
-            const y = 36 + (i * 4);
+            const y = 38 + (i * 4);
             doc.text(item.label.toString(), summaryX2, y);
             doc.text(":", summaryX2 + 35, y);
             doc.text(item.value.toString(), summaryX2 + 38, y);
@@ -575,7 +728,7 @@ export function AlarmExportDialog({
         });
 
         autoTable(doc, {
-            startY: 68,
+            startY: 72,
             head: [tableHeaders],
             body: tableData,
             styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
@@ -592,6 +745,11 @@ export function AlarmExportDialog({
             alternateRowStyles: { fillColor: [249, 250, 251] },
             margin: { top: 30, left: 10, right: 10 },
             didDrawPage: (data) => {
+                // Header Logo on every page
+                if (logoData) {
+                    doc.addImage(logoData.dataUrl, 'PNG', 15, 6, logoData.finalW, logoData.finalH);
+                }
+
                 doc.setFontSize(8);
                 doc.text(`Page ${data.pageNumber}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: "center" });
             }
@@ -669,18 +827,18 @@ export function AlarmExportDialog({
                     </DialogTitle>
                 </DialogHeader>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-4">
-                    <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-2">
+                    <div className="space-y-2">
                         {/* 1. Report Template */}
-                        <div className="space-y-4">
+                        <div className="space-y-1">
                             <Label className="text-sm font-bold flex items-center gap-2">
                                 <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">1</span>
                                 Report Template
                             </Label>
-                            <div className="space-y-3 pl-7">
-                                <div className="space-y-2">
+                            <div className="space-y-2 pl-7">
+                                <div className="space-y-1">
                                     <Select value={reportType} onValueChange={setReportType}>
-                                        <SelectTrigger className="h-10">
+                                        <SelectTrigger className="h-9">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -715,17 +873,17 @@ export function AlarmExportDialog({
                         </div>
 
                         {/* 2. Configuration */}
-                        <div className="space-y-4 pt-2">
+                        <div className="space-y-1 pt-1">
                             <Label className="text-sm font-bold flex items-center gap-2">
                                 <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">2</span>
                                 General Configuration
                             </Label>
 
-                            <div className="space-y-3 pl-7">
-                                <div className="space-y-2">
+                            <div className="space-y-2 pl-7">
+                                <div className="space-y-1">
                                     <Label className="text-xs text-gray-500 font-medium">Sort Alarms By</Label>
                                     <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
-                                        <SelectTrigger className="h-10">
+                                        <SelectTrigger className="h-9">
                                             <SelectValue placeholder="Sort by..." />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -736,11 +894,10 @@ export function AlarmExportDialog({
                                     </Select>
                                 </div>
 
-                                <div className="space-y-2">
-                                    <Label className="text-xs text-gray-500 font-medium">Reporting Period</Label>
+                                <div className="space-y-1">
                                     <div className="grid grid-cols-2 gap-3">
                                         <div className="space-y-1">
-                                            <Label htmlFor="export-from" className="text-[10px] uppercase text-gray-400 font-bold">From</Label>
+                                            <Label htmlFor="export-from" className="text-[9px] uppercase text-gray-400 font-bold">From</Label>
                                             <div className="relative">
                                                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none z-10" />
                                                 <Input
@@ -748,12 +905,12 @@ export function AlarmExportDialog({
                                                     type="date"
                                                     value={exportPeriod.from}
                                                     onChange={(e) => setExportPeriod({ ...exportPeriod, from: e.target.value })}
-                                                    className="h-9 text-xs pl-8 pr-2 w-full bg-white appearance-none"
+                                                    className="h-8 text-[10px] pl-8 pr-2 w-full bg-white appearance-none"
                                                 />
                                             </div>
                                         </div>
                                         <div className="space-y-1">
-                                            <Label htmlFor="export-to" className="text-[10px] uppercase text-gray-400 font-bold">To</Label>
+                                            <Label htmlFor="export-to" className="text-[9px] uppercase text-gray-400 font-bold">To</Label>
                                             <div className="relative">
                                                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none z-10" />
                                                 <Input
@@ -761,7 +918,7 @@ export function AlarmExportDialog({
                                                     type="date"
                                                     value={exportPeriod.to}
                                                     onChange={(e) => setExportPeriod({ ...exportPeriod, to: e.target.value })}
-                                                    className="h-9 text-xs pl-8 pr-2 w-full bg-white appearance-none"
+                                                    className="h-8 text-[10px] pl-8 pr-2 w-full bg-white appearance-none"
                                                 />
                                             </div>
                                         </div>
@@ -771,16 +928,16 @@ export function AlarmExportDialog({
                         </div>
 
                         {/* 3. Export Format & Preview */}
-                        <div className="space-y-4 pt-2">
+                        <div className="space-y-1 pt-1">
                             <Label className="text-sm font-bold flex items-center gap-2">
                                 <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">3</span>
                                 Export Format & Preview
                             </Label>
-                            <div className="space-y-3 pl-7">
-                                <div className="space-y-2">
+                            <div className="space-y-2 pl-7">
+                                <div className="space-y-1">
                                     <Label className="text-xs text-gray-500 font-medium">Final Output Format</Label>
                                     <Select value={formatType} onValueChange={(v: any) => setFormatType(v)}>
-                                        <SelectTrigger className="h-10">
+                                        <SelectTrigger className="h-9">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -793,7 +950,7 @@ export function AlarmExportDialog({
                                             <SelectItem value="xlsx">
                                                 <div className="flex items-center gap-2">
                                                     <FileSpreadsheet className="h-4 w-4 text-green-600" />
-                                                    <span>Excel Spreadhsheet</span>
+                                                    <span>Excel Spreadsheet</span>
                                                 </div>
                                             </SelectItem>
                                             <SelectItem value="csv">
@@ -805,69 +962,147 @@ export function AlarmExportDialog({
                                         </SelectContent>
                                     </Select>
                                 </div>
-
-                                <Button
-                                    variant="outline"
-                                    className="w-full h-10 border-blue-200 hover:border-blue-500 hover:bg-blue-50 gap-2 text-blue-600"
-                                    onClick={() => generatePDF(true)}
-                                    disabled={formatType !== 'pdf'}
-                                >
-                                    <Eye className="h-4 w-4" />
-                                    Preview
-                                </Button>
                             </div>
                         </div>
-                    </div>
 
-                    <div className="bg-gray-50/50 border border-gray-100 rounded-xl p-5 flex flex-col h-[400px]">
-                        <div className="space-y-4 flex flex-col h-full">
-                            <div>
-                                <Label className="text-sm font-bold flex items-center gap-2 mb-1">
-                                    <Settings2 className="h-4 w-4 text-blue-500" />
-                                    Column Settings
-                                </Label>
-                                <p className="text-[10px] text-gray-400 leading-tight">
-                                    Toggle checkboxes to include columns. Drag handles to change their order in the report.
-                                </p>
-                            </div>
+                        {/* 4. Report Logo */}
+                        <div className="space-y-1 pt-1">
+                            <Label className="text-sm font-bold flex items-center gap-2">
+                                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px]">4</span>
+                                Logo (Optional)
+                            </Label>
 
-                            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar min-h-0">
-                                <DndContext
-                                    sensors={sensors}
-                                    collisionDetection={closestCenter}
-                                    onDragEnd={handleDragEnd}
-                                >
-                                    <SortableContext
-                                        items={columnOrder}
-                                        strategy={verticalListSortingStrategy}
+                            <div className="space-y-2 pl-7">
+                                <div className="flex gap-2 w-full">
+                                    <Select
+                                        value={selectedLogoUrl || "none"}
+                                        onValueChange={(v) => {
+                                            if (v === "___upload___") return;
+                                            setSelectedLogoUrl(v === "none" ? null : v);
+                                        }}
                                     >
-                                        <div className="space-y-2 py-1">
-                                            {columnOrder.map((id, index) => (
-                                                <SortableColumn
-                                                    key={id}
-                                                    id={id}
-                                                    index={index}
-                                                    label={COLUMNS.find(c => c.id === id)?.label || id}
-                                                    isSelected={selectedColumns.includes(id)}
-                                                    onToggle={toggleColumn}
-                                                />
+                                        <SelectTrigger className="w-full h-9 select-none">
+                                            <SelectValue placeholder="Pilih Logo..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectPrimitive.Item
+                                                value="none"
+                                                className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                                            >
+                                                <SelectPrimitive.ItemText>Tanpa Logo</SelectPrimitive.ItemText>
+                                            </SelectPrimitive.Item>
+
+                                            {[...availableLogos].sort((a, b) => (selectedLogoUrl === a.url ? -1 : selectedLogoUrl === b.url ? 1 : 0)).map((logo) => (
+                                                <SelectPrimitive.Item
+                                                    key={logo.name}
+                                                    value={logo.url}
+                                                    className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 group data-[state=checked]:bg-blue-50/80 data-[state=checked]:text-blue-700"
+                                                >
+                                                    <SelectPrimitive.ItemText>{logo.name}</SelectPrimitive.ItemText>
+                                                    <div
+                                                        className="ml-auto flex items-center justify-center h-7 w-7 rounded-md hover:bg-red-100 text-red-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer pointer-events-auto z-10"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            e.preventDefault();
+                                                            handleDeleteLogo(logo.name);
+                                                        }}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </div>
+                                                </SelectPrimitive.Item>
                                             ))}
-                                        </div>
-                                    </SortableContext>
-                                </DndContext>
+                                            <SelectSeparator />
+                                            <SelectPrimitive.Item
+                                                value="___upload___"
+                                                className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 text-blue-600 focus:text-blue-700 focus:bg-blue-50 cursor-pointer"
+                                                onPointerDown={(e) => {
+                                                    e.preventDefault();
+                                                    fileInputRef.current?.click();
+                                                }}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <Upload className="h-4 w-4" />
+                                                    <span>Upload Logo Baru</span>
+                                                </div>
+                                            </SelectPrimitive.Item>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="w-full">
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        className="hidden"
+                                        accept="image/*"
+                                        onChange={handleLogoUpload}
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
+
+                    <div>
+                        <div className="bg-gray-50/50 border border-gray-100 rounded-xl p-5 flex flex-col h-[400px]">
+                            <div className="space-y-4 flex flex-col h-full">
+                                <div>
+                                    <Label className="text-sm font-bold flex items-center gap-2 mb-1">
+                                        <Settings2 className="h-4 w-4 text-blue-500" />
+                                        Column Settings
+                                    </Label>
+                                    <p className="text-[10px] text-gray-400 leading-tight">
+                                        Toggle checkboxes to include columns. Drag handles to change their order in the report.
+                                    </p>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar min-h-0">
+                                    <DndContext
+                                        sensors={sensors}
+                                        collisionDetection={closestCenter}
+                                        onDragEnd={handleDragEnd}
+                                    >
+                                        <SortableContext
+                                            items={columnOrder}
+                                            strategy={verticalListSortingStrategy}
+                                        >
+                                            <div className="space-y-2 py-1">
+                                                {columnOrder.map((id, index) => (
+                                                    <SortableColumn
+                                                        key={id}
+                                                        id={id}
+                                                        index={index}
+                                                        label={COLUMNS.find(c => c.id === id)?.label || id}
+                                                        isSelected={selectedColumns.includes(id)}
+                                                        onToggle={toggleColumn}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </SortableContext>
+                                    </DndContext>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
 
-                <DialogFooter className="gap-2 sm:gap-0">
-                    <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+                <DialogFooter className="mt-4 gap-2 sm:gap-2">
+                    <Button
+                        variant="outline"
+                        className="border-blue-200 hover:border-blue-500 hover:bg-blue-50 gap-2 text-blue-600"
+                        onClick={() => generatePDF(true)}
+                        disabled={formatType !== 'pdf'}
+                    >
+                        <Eye className="h-4 w-4" />
+                        Preview
+                    </Button>
                     <Button onClick={handleExport} className="bg-blue-600 hover:bg-blue-700 px-8 gap-2">
                         <Printer className="h-4 w-4" />
                         Generate Report
                     </Button>
                 </DialogFooter>
             </DialogContent>
-        </Dialog>
+        </Dialog >
     );
 }
