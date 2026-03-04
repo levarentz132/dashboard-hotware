@@ -33,7 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Cookies from "js-cookie";
 
-const LOCAL_NX_URL = "/nx/rest/v4/login/sessions";
+const LOCAL_NX_URL = "/nx/rest/v3/login/sessions";
 
 interface NxSession {
     token: string;
@@ -262,9 +262,9 @@ export function NxAuthentication() {
                     expiresS: data.durationS || 2419200
                 };
 
-                // Fetch server id from /rest/v4/servers
+                // Fetch server id from /rest/v3/servers
                 try {
-                    const serversResp = await fetch("/nx/rest/v4/servers", {
+                    const serversResp = await fetch("/nx/rest/v3/servers", {
                         method: "GET",
                         headers: {
                             "Accept": "application/json",

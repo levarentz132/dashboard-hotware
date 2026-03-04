@@ -541,6 +541,7 @@ class NxWitnessAPI {
     level?: string;
   }): Promise<any> {
     try {
+      // 1. Try modern v4 endpoint first
       return await this.apiRequest("/rest/v4/events/generic", {
         method: "POST",
         body: JSON.stringify({
@@ -550,8 +551,25 @@ class NxWitnessAPI {
         }),
       });
     } catch (error) {
-      console.error("[createGenericEvent] Failed:", error);
-      throw error;
+      console.warn("[createGenericEvent] v4 failed, trying fallback /api/createEvent...", error);
+
+      try {
+        // 2. Fallback to legacy endpoint (uses GET with query params)
+        const params = new URLSearchParams();
+        if (payload.timestamp) params.set("timestamp", payload.timestamp);
+        if (payload.caption) params.set("caption", payload.caption);
+        if (payload.description) params.set("description", payload.description);
+        if (payload.source) params.set("source", payload.source);
+        if (payload.state) params.set("state", payload.state);
+        // Note: level and deviceIds are not standard in the simplest v1 /api/createEvent
+
+        return await this.apiRequest(`/api/createEvent?${params.toString()}`, {
+          method: "GET",
+        });
+      } catch (fallbackError) {
+        console.error("[createGenericEvent] All versions failed:", fallbackError);
+        throw fallbackError;
+      }
     }
   }
 

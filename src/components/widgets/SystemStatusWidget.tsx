@@ -25,7 +25,7 @@ export default function SystemStatusWidget({ systemId: propSystemId }: { systemI
       const localUser = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
 
-      const response = await fetch("/nx/rest/v4/servers/this", {
+      const response = await fetch("/nx/rest/v3/servers/this", {
         headers: {
           "Accept": "application/json",
           "x-runtime-guid": localUser.token

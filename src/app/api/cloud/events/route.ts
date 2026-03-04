@@ -37,16 +37,15 @@ export async function GET(request: NextRequest) {
 
     if (response.ok) {
       const data = await response.json();
-      const items = Array.isArray(data) ? data : [];
-      if (items.length > 0) {
-        return NextResponse.json(normalizeNxEvents(items));
+      const normalized = normalizeNxEvents(data);
+      if (normalized.length > 0) {
+        return NextResponse.json(normalized);
       }
     }
 
     // 2. Fallback to v3 /api/getEvents if v4 not found (404) or failed or empty
     console.log(`[Cloud Events] v4 failed or empty, trying v3 fallback for ${systemId}`);
 
-    // v3 endpoint has different parameters sometimes, but we'll try basic fetch
     const v3Response = await fetchFromCloudApi(request, {
       systemId,
       systemName: systemName || undefined,
@@ -55,9 +54,7 @@ export async function GET(request: NextRequest) {
 
     if (v3Response.ok) {
       const v3Data = await v3Response.json();
-      // v3 structure is { reply: [...] }
-      const events = v3Data.reply || [];
-      return NextResponse.json(normalizeNxEvents(events));
+      return NextResponse.json(normalizeNxEvents(v3Data));
     }
 
     return response;

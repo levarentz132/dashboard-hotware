@@ -6,6 +6,19 @@
 export function normalizeNxEvent(event: any): any {
     // If it's already v4 format (has eventData)
     if (event.eventData && event.actionData) {
+        // Fix level for known important events that might be incorrectly reported as 'info'
+        if (event.actionData.level === "info") {
+            const warningTypes = ["serverConflictEvent", "serverFailureEvent", "storageFailureEvent", "networkIssueEvent"];
+            if (warningTypes.includes(event.eventData.type)) {
+                return {
+                    ...event,
+                    actionData: {
+                        ...event.actionData,
+                        level: "warning"
+                    }
+                };
+            }
+        }
         return event;
     }
 
@@ -43,6 +56,15 @@ export function normalizeNxEvent(event: any): any {
         if (actionType === "showPopupAction") actionType = "showPopup";
         if (actionType === "pushNotificationAction") actionType = "pushNotification";
 
+        // Determine level if missing or 'info' for critical events
+        let level = ep.metadata?.level || "info";
+        if (level === "info") {
+            const warningTypes = ["serverConflictEvent", "serverFailureEvent", "storageFailureEvent", "networkIssueEvent"];
+            if (warningTypes.includes(type)) {
+                level = "warning";
+            }
+        }
+
         return {
             timestampMs: timestampMs,
             eventData: {
@@ -64,7 +86,7 @@ export function normalizeNxEvent(event: any): any {
                 icon: "",
                 id: businessRuleId,
                 interval: "0",
-                level: ep.metadata?.level || "info",
+                level: level,
                 objectTrackId: ep.objectTrackId || "",
                 objectTypeId: "",
                 originPeerId: serverId,
@@ -97,7 +119,100 @@ export function normalizeNxEvent(event: any): any {
 /**
  * Normalizes an array of events
  */
-export function normalizeNxEvents(events: any[]): any[] {
-    if (!Array.isArray(events)) return [];
+export function normalizeNxEvents(data: any): any[] {
+    const events = Array.isArray(data) ? data : (data?.reply || []);
     return events.map(normalizeNxEvent);
+}
+
+/**
+ * Normalizes a server object from v3/v4 format
+ */
+export function normalizeNxServer(server: any): any {
+    if (!server) return null;
+
+    // Normalize IDs (remove braces)
+    const cleanId = (id: string) => {
+        if (!id) return "";
+        return typeof id === 'string' ? id.replace(/[{}]/g, "") : id;
+    };
+
+    // Extract basic info
+    const id = cleanId(server.id || "");
+    const name = server.name || "";
+    // v3 uses 'status', v4 might also use 'status' or it might be in 'parameters'
+    const status = server.status || "Online";
+
+    // Extract IP from endpoints if 'ip' field is missing (common in v3)
+    let ip = server.ip || "";
+    if (!ip && server.endpoints && server.endpoints.length > 0) {
+        // Find first non-IPv6 endpoint that looks like an IP
+        const endpoint = server.endpoints.find((e: string) => !e.includes('[') && !e.startsWith(':'));
+        if (endpoint) {
+            ip = endpoint.split(':')[0];
+        } else {
+            ip = server.endpoints[0].split(':')[0].replace(/[\[\]]/g, "");
+        }
+    }
+
+    return {
+        ...server,
+        id,
+        name,
+        status,
+        ip,
+        version: server.version || server.parameters?.version || server.osInfo?.variantVersion || "",
+    };
+}
+
+/**
+ * Normalizes an array of servers
+ */
+export function normalizeNxServers(data: any): any[] {
+    const servers = Array.isArray(data) ? data : (data?.reply || []);
+    return servers.map(normalizeNxServer);
+}
+
+/**
+ * Normalizes a device (camera) object from v3/v4 format
+ */
+export function normalizeNxDevice(device: any): any {
+    if (!device) return null;
+
+    // Normalize IDs (remove braces)
+    const cleanId = (id: string) => {
+        if (!id) return "";
+        return typeof id === 'string' ? id.replace(/[{}]/g, "").toLowerCase() : id;
+    };
+
+    const id = cleanId(device.id || "");
+    const serverId = cleanId(device.serverId || device.parentId || "");
+
+    // Extract IP from URL if missing
+    let ip = device.ip || "";
+    if (!ip && device.url) {
+        try {
+            const url = new URL(device.url);
+            ip = url.hostname;
+        } catch {
+            // Fallback: simple regex for IP/hostname in URL
+            const match = device.url.match(/:\/\/([^\/:]+)/);
+            if (match) ip = match[1];
+        }
+    }
+
+    return {
+        ...device,
+        id,
+        serverId,
+        ip,
+        status: device.status || "Offline",
+    };
+}
+
+/**
+ * Normalizes an array of devices
+ */
+export function normalizeNxDevices(data: any): any[] {
+    const devices = Array.isArray(data) ? data : (data?.reply || []);
+    return devices.map(normalizeNxDevice);
 }
