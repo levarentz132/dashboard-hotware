@@ -28,6 +28,8 @@ import { cn } from "@/lib/utils";
 import { getElectronHeaders } from "@/lib/config";
 import { useInventorySync } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
+import { normalizeNxEvents } from "@/lib/nx-normalization";
+
 
 interface EventLog {
   timestampMs: number;
@@ -121,6 +123,7 @@ const getEventTypeLabel = (eventType: string, caption?: string): string => {
     networkIssueEvent: "Network",
     serverFailureEvent: "Server",
     serverStartEvent: "Server On",
+    serverStarted: "Server On",
     licenseIssueEvent: "License",
     systemHealthEvent: "Health",
     serverConflictEvent: "Server Conflict",
@@ -248,6 +251,7 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
       const localUser = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_system_id") || localUser.serverId || "local";
 
+      // 1. Try v4 endpoint first
       const response = await fetch("/nx/rest/v4/events/log", {
         headers: {
           "x-runtime-guid": localUser.token,
@@ -255,9 +259,34 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
         }
       });
 
-      if (!response.ok) return null;
-      const data = await response.json();
-      const items = Array.isArray(data) ? data : [];
+      let items: EventLog[] = [];
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawItems = Array.isArray(data) ? data : [];
+        if (rawItems.length > 0) {
+          items = normalizeNxEvents(rawItems);
+        }
+      }
+
+      // 2. Fallback to v3 if v4 failed or returned no items
+      if (items.length === 0) {
+        console.log(`[AlarmWidget] v4 failed or empty, trying v3 fallback for local server`);
+        const v3Response = await fetch("/nx/api/getEvents", {
+          headers: {
+            "x-runtime-guid": localUser.token,
+            "Accept": "application/json"
+          }
+        });
+
+        if (v3Response.ok) {
+          const v3Data = await v3Response.json();
+          const v3Events = v3Data.reply || [];
+          items = normalizeNxEvents(v3Events);
+        }
+      }
+
+      if (items.length === 0 && !response.ok) return null;
 
       return {
         systemId: sid,
@@ -282,7 +311,7 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
 
       if (!response.ok) return [];
       const data = await response.json();
-      return Array.isArray(data) ? data : [];
+      return normalizeNxEvents(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(`[AlarmWidget] Error fetching alarms from ${system.name}:`, e);
       return [];
@@ -314,10 +343,13 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
           const now = Date.now() * 1000;
           const ageHours = (now - timestamp) / (1000000 * 3600);
           effectiveLevel = ageHours > 24 ? "critical" : "info";
-        } else if (type === "serverFailureEvent") {
+        } else if (type === "serverFailureEvent" || type === "serverFailure") {
           effectiveLevel = "critical";
-        } else if (type === "serverConflictEvent" || type === "storageFailureEvent" || item.actionData?.caption?.toLowerCase().includes("low disk space")) {
+        } else if (type === "serverConflictEvent" || type === "serverConflict" || type === "storageFailureEvent" || item.actionData?.caption?.toLowerCase().includes("low disk space")) {
           effectiveLevel = "warning";
+        } else if (type === "anyEvent" || type === "systemHealthEvent") {
+          // General system events should be Info unless specifically handled above
+          effectiveLevel = originalLevel === "warning" ? "info" : originalLevel;
         }
 
         return { ...item, systemId: sys.systemId, effectiveLevel };

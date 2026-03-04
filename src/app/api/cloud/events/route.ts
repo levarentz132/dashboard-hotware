@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchFromCloudApi, validateSystemId } from "@/lib/cloud-api";
+import { normalizeNxEvents } from "@/lib/nx-normalization";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const { systemId, systemName } = validateSystemId(request);
-  const serverId = searchParams.get("serverId");
 
   if (!systemId) {
     return NextResponse.json({ error: "System ID is required" }, { status: 400 });
@@ -20,16 +20,49 @@ export async function GET(request: NextRequest) {
 
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-  const limit = searchParams.get("_limit") || "50";
+  const limit = searchParams.get("_limit") || "100";
 
   if (from) queryParams.set("from", from);
   if (to) queryParams.set("to", to);
   queryParams.set("limit", limit);
 
-  return fetchFromCloudApi(request, {
-    systemId,
-    systemName: systemName || undefined,
-    endpoint,
-    queryParams,
-  });
+  try {
+    // 1. Try v4 endpoint first
+    const response = await fetchFromCloudApi(request, {
+      systemId,
+      systemName: systemName || undefined,
+      endpoint,
+      queryParams,
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : [];
+      if (items.length > 0) {
+        return NextResponse.json(normalizeNxEvents(items));
+      }
+    }
+
+    // 2. Fallback to v3 /api/getEvents if v4 not found (404) or failed or empty
+    console.log(`[Cloud Events] v4 failed or empty, trying v3 fallback for ${systemId}`);
+
+    // v3 endpoint has different parameters sometimes, but we'll try basic fetch
+    const v3Response = await fetchFromCloudApi(request, {
+      systemId,
+      systemName: systemName || undefined,
+      endpoint: "/api/getEvents",
+    });
+
+    if (v3Response.ok) {
+      const v3Data = await v3Response.json();
+      // v3 structure is { reply: [...] }
+      const events = v3Data.reply || [];
+      return NextResponse.json(normalizeNxEvents(events));
+    }
+
+    return response;
+  } catch (error) {
+    console.error("[Cloud Events] Fetch error:", error);
+    return NextResponse.json({ error: "Cloud fetch failed" }, { status: 500 });
+  }
 }

@@ -49,6 +49,7 @@ import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
 import { AlarmExportDialog } from "./AlarmExportDialog";
+import { normalizeNxEvents } from "@/lib/nx-normalization";
 
 
 // ============================================
@@ -175,6 +176,7 @@ const getEventTypeLabel = (eventType: string, caption?: string): string => {
     serverFailureEvent: "Server Failure",
     serverConflictEvent: "Server Conflict",
     serverStartEvent: "Server Started",
+    serverStarted: "Server Started",
     licenseIssueEvent: "License Issue",
     backupFinishedEvent: "Backup Complete",
     softwareTriggerEvent: "Software Trigger",
@@ -683,7 +685,7 @@ export default function AlarmConsole() {
       const localUser = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_server_id") || localUser.serverId || "local";
 
-      // Use local proxy with specific 'this' server endpoint
+      // 1. Try v4 endpoint first
       const response = await fetch("/nx/rest/v4/events/log", {
         headers: {
           "x-runtime-guid": localUser.token,
@@ -691,9 +693,34 @@ export default function AlarmConsole() {
         }
       });
 
-      if (!response.ok) return null;
-      const data = await response.json();
-      const items = Array.isArray(data) ? data : [];
+      let items: EventLog[] = [];
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawItems = Array.isArray(data) ? data : [];
+        if (rawItems.length > 0) {
+          items = normalizeNxEvents(rawItems);
+        }
+      }
+
+      // 2. Fallback to v3 if v4 failed or returned no items
+      if (items.length === 0) {
+        console.log(`[AlarmConsole] v4 failed or empty, trying v3 fallback for local server`);
+        const v3Response = await fetch("/nx/api/getEvents", {
+          headers: {
+            "x-runtime-guid": localUser.token,
+            "Accept": "application/json"
+          }
+        });
+
+        if (v3Response.ok) {
+          const v3Data = await v3Response.json();
+          const v3Events = v3Data.reply || [];
+          items = normalizeNxEvents(v3Events);
+        }
+      }
+
+      if (items.length === 0 && !response.ok) return null;
 
       return {
         systemId: sid,
@@ -727,7 +754,8 @@ export default function AlarmConsole() {
       }
 
       const data = await response.json();
-      return Array.isArray(data) ? data : [];
+      // Use normalization if data exists
+      return normalizeNxEvents(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(`[AlarmConsole] Cloud fetch failed for ${system.name}:`, e);
       return [];
@@ -758,9 +786,9 @@ export default function AlarmConsole() {
           const ageHours = (now - timestamp) / (1000000 * 3600);
           // Flag transient disconnections (< 24h) as Info, otherwise Critical
           effectiveLevel = ageHours > 24 ? "critical" : "info";
-        } else if (type === "serverFailureEvent") {
+        } else if (type === "serverFailureEvent" || type === "serverFailure") {
           effectiveLevel = "critical";
-        } else if (type === "serverConflictEvent") {
+        } else if (type === "serverConflictEvent" || type === "serverConflict") {
           effectiveLevel = "warning";
         } else if (item.actionData?.caption === "Low Disk Space" || (item.actionData?.caption && item.actionData.caption.includes("Disk Space"))) {
           effectiveLevel = "warning";
