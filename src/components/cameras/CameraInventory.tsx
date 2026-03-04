@@ -143,7 +143,7 @@ export default function CameraInventory() {
 
       const displayName = actualServerName ? `Local Server (${actualServerName})` : "Local Server";
 
-      const response = await fetch("/nx/rest/v4/devices", {
+      const response = await fetch("/nx/rest/v3/devices", {
         method: "GET",
         headers: {
           "Accept": "application/json",

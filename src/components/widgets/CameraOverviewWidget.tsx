@@ -27,7 +27,7 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
       // Try to get actual server name
       let actualServerName = "";
       try {
-        const infoResp = await fetch("/nx/rest/v4/servers/this", {
+        const infoResp = await fetch("/nx/rest/v3/servers/this", {
           headers: { "x-runtime-guid": localUser.token }
         });
         if (infoResp.ok) {
@@ -38,7 +38,7 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
 
       const displayName = actualServerName ? `Local Server (${actualServerName})` : "Local Server";
 
-      const response = await fetch("/nx/rest/v4/devices", {
+      const response = await fetch("/nx/rest/v3/devices", {
         method: "GET",
         headers: {
           "Accept": "application/json",
