@@ -264,6 +264,16 @@ export async function fetchFromCloudApi<T>(
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request, systemName);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
 
+    // Stop calling if there's no auth material for a cloud request
+    const isGlobal = (systemId || '').trim().toLowerCase() === 'all';
+    const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"]);
+
+    // Only block if it looks like a cloud-bound request (nxvms.com or vmsproxy.com)
+    if (!hasAuth && (cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com"))) {
+      console.warn(`[Cloud API] Blocking request to ${cloudUrl} due to missing auth token`);
+      return createAuthErrorResponse(systemId, systemName);
+    }
+
     console.log(`[Cloud API] Fetching GET ${cloudUrl}`);
 
     let response = await fetch(cloudUrl, {
@@ -392,6 +402,13 @@ async function requestCloudApi<T>(
   try {
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request, systemName);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
+
+    // Stop calling if there's no auth material for a cloud request
+    const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"]);
+    if (!hasAuth && (cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com"))) {
+      console.warn(`[Cloud API] Blocking request to ${cloudUrl} due to missing auth token`);
+      return createAuthErrorResponse(systemId, systemName);
+    }
 
     console.log(`[Cloud API] Requesting ${method} ${cloudUrl}`);
 

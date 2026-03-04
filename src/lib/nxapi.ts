@@ -256,6 +256,20 @@ class NxWitnessAPI {
         },
       };
 
+      // 4. Stop calling if it's a cloud request and we have no auth material
+      // Only for web context as Electron might handle auth differently
+      if (typeof window !== 'undefined' && !isLocal) {
+        const hasElectronToken = (config.headers as any)['X-Electron-Cloud-Token'];
+        const hasCookieSession = document.cookie.includes('nx_cloud_session') ||
+          document.cookie.includes('nx-cloud-') ||
+          document.cookie.includes('local_nx_user');
+
+        if (!hasElectronToken && !hasCookieSession) {
+          console.warn(`[nxAPI] Request to ${endpoint} blocked: No cloud login token or local session found.`);
+          throw new Error("AUTH_REQUIRED");
+        }
+      }
+
       try {
         const response = await fetch(url.toString(), config);
 
