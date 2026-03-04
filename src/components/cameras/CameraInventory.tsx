@@ -132,7 +132,7 @@ export default function CameraInventory() {
       // Try to get actual server name
       let actualServerName = "";
       try {
-        const infoResp = await fetch("/nx/rest/v4/servers/this", {
+        const infoResp = await fetch("/nx/rest/v3/servers/this", {
           headers: { "x-runtime-guid": localUser.token }
         });
         if (infoResp.ok) {
