@@ -921,9 +921,9 @@ export default function StorageManagement() {
                               </div>
                               <Progress
                                 value={usagePercent}
-                                className={`h-1.5 sm:h-2 ${usagePercent > 90
+                                className={`h-1.5 sm:h-2 ${usagePercent > 95
                                   ? "[&>div]:bg-red-500"
-                                  : usagePercent > 70
+                                  : usagePercent > 85
                                     ? "[&>div]:bg-yellow-500"
                                     : "[&>div]:bg-green-500"
                                   }`}

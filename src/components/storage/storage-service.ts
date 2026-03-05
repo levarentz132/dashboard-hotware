@@ -294,7 +294,7 @@ export async function fetchLocalStorages(systemId: string): Promise<{ storages: 
       error:
         err instanceof Error
           ? err.message
-          : "Failed to fetch local storages. Make sure the local server is running on localhost:7001",
+          : "Failed to fetch local storages. Make sure the NX Server is running.",
     };
   }
 }
