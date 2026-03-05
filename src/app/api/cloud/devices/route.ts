@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     let response = await fetchFromCloudApi(request, {
       systemId,
       systemName: systemName || undefined,
-      endpoint: "/rest/v4/devices",
+      endpoint: "/rest/v3/devices",
     });
 
     if (response.ok) {

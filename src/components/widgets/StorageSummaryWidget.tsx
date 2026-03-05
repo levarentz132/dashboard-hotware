@@ -40,7 +40,7 @@ export default function StorageSummaryWidget({ systemId: propSystemId }: { syste
       });
 
       // Fetch storage status (v4)
-      const statusResp = await fetch("/nx/rest/v4/servers/this/storages/*/status", {
+      const statusResp = await fetch("/nx/rest/v3/servers/this/storages/*/status", {
         headers: { "x-runtime-guid": localUser.token }
       });
 

@@ -349,7 +349,7 @@ ipcMain.handle('setup:check-relay', async (event, { systemId, vmsUser, vmsPasswo
         console.log(`[Setup] Phase 2: Verifying Local Login via Relay...`);
 
         // Pattern 1: Try REST v4 (Modern)
-        const v4Url = `https://${systemId}.relay.vmsproxy.com/rest/v4/login/sessions`;
+        const v4Url = `https://${systemId}.relay.vmsproxy.com/rest/v3/login/sessions`;
         let response = await fetch(v4Url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

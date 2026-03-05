@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     const statusResponse = await fetchFromCloudApi(request, {
       systemId,
       systemName: systemName || undefined,
-      endpoint: "/rest/v4/servers/this/storages/*/status",
+      endpoint: "/rest/v3/servers/this/storages/*/status",
     });
 
     const statusData = await statusResponse.json();

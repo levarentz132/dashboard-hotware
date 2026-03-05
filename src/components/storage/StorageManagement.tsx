@@ -312,7 +312,7 @@ export default function StorageManagement() {
       const storagesV3 = await v3Response.json();
 
       // 2. Fetch live usage stats from v4
-      const v4Response = await fetch("/nx/rest/v4/servers/this/storages/*/status", {
+      const v4Response = await fetch("/nx/rest/v3/servers/this/storages/*/status", {
         headers: { "x-runtime-guid": token, Accept: "application/json" },
       });
 

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Use v4 events log endpoint
-  const endpoint = "/rest/v4/events/log";
+  const endpoint = "/rest/v3/events/log";
 
   // Build query parameters for events
   const queryParams = new URLSearchParams();

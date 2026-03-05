@@ -686,7 +686,7 @@ export default function AlarmConsole() {
       const sid = Cookies.get("nx_server_id") || localUser.serverId || "local";
 
       // 1. Try v4 endpoint first
-      const response = await fetch("/nx/rest/v4/events/log", {
+      const response = await fetch("/nx/rest/v3/events/log", {
         headers: {
           "x-runtime-guid": localUser.token,
           "Accept": "application/json"
