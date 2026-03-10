@@ -63,20 +63,13 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
 }
 
 export async function fetchCloudDevices(
-  systemId: string,
-  vmsUsername?: string,
-  vmsPassword?: string
+  systemId: string
 ): Promise<CloudDevice[]> {
   try {
     const headers: Record<string, string> = {
       Accept: "application/json",
       ...getElectronHeaders(),
     };
-
-    if (vmsUsername && vmsPassword) {
-      headers["X-VMS-Username"] = vmsUsername;
-      headers["X-VMS-Password"] = vmsPassword;
-    }
 
     const response = await fetch(
       `/api/cloud/recordings/devices?systemId=${encodeURIComponent(systemId)}`,
@@ -104,20 +97,13 @@ export async function fetchRecordedTimePeriods(
   systemId: string,
   deviceId: string,
   startTime?: number,
-  endTime?: number,
-  vmsUsername?: string,
-  vmsPassword?: string
+  endTime?: number
 ): Promise<any> {
   try {
     const headers: Record<string, string> = {
       Accept: "application/json",
       ...getElectronHeaders(),
     };
-
-    if (vmsUsername && vmsPassword) {
-      headers["X-VMS-Username"] = vmsUsername;
-      headers["X-VMS-Password"] = vmsPassword;
-    }
 
     const params = new URLSearchParams();
     params.set("systemId", systemId);
@@ -147,19 +133,12 @@ export async function getDownloadUrl(
   systemId: string,
   deviceId: string,
   startTime: number,
-  endTime?: number,
-  vmsUsername?: string,
-  vmsPassword?: string
+  endTime?: number
 ): Promise<{ downloadUrl: string; authHeader: string }> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...getElectronHeaders(),
   };
-
-  if (vmsUsername && vmsPassword) {
-    headers["X-VMS-Username"] = vmsUsername;
-    headers["X-VMS-Password"] = vmsPassword;
-  }
 
   const params = new URLSearchParams();
   params.set("systemId", systemId);

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildCloudUrl, buildCloudHeaders, validateSystemId } from "@/lib/cloud-api";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const systemId = searchParams.get("systemId");
+    const { systemId, systemName } = validateSystemId(request);
     const deviceId = searchParams.get("deviceId");
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
@@ -15,19 +16,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get VMS credentials from headers or env
-    const vmsUsername = request.headers.get("X-VMS-Username") || process.env.NX_USERNAME;
-    const vmsPassword = request.headers.get("X-VMS-Password") || process.env.NX_PASSWORD;
-
-    if (!vmsUsername || !vmsPassword) {
-      return NextResponse.json(
-        { error: "VMS credentials required" },
-        { status: 401 }
-      );
-    }
-
-    const basicAuth = Buffer.from(`${vmsUsername}:${vmsPassword}`).toString("base64");
-
     // Build query params for recorded time periods
     const params = new URLSearchParams();
     params.set("cameraId", deviceId);
@@ -35,14 +23,12 @@ export async function GET(request: NextRequest) {
     if (endTime) params.set("endTime", endTime);
     params.set("detail", "2"); // Get detailed periods
 
-    const relayUrl = `https://${systemId}.relay.vmsproxy.com/ec2/recordedTimePeriods?${params.toString()}`;
+    const cloudUrl = buildCloudUrl(systemId, "/ec2/recordedTimePeriods", params, request, systemName || undefined);
+    const headers = buildCloudHeaders(request, systemId);
 
-    const response = await fetch(relayUrl, {
+    const response = await fetch(cloudUrl, {
       method: "GET",
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Basic ${basicAuth}`,
-      },
+      headers,
     });
 
     if (!response.ok) {

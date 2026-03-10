@@ -43,10 +43,6 @@ export default function CloudRecordings() {
   const [error, setError] = useState<string>("");
   const [requiresCloudAuth, setRequiresCloudAuth] = useState(false);
 
-  // VMS credentials
-  const [vmsUsername, setVmsUsername] = useState("");
-  const [vmsPassword, setVmsPassword] = useState("");
-
   // Cloud OAuth configuration
   const CLOUD_HOST = 'https://nxvms.com';
   const CLIENT_ID = 'api-tool';
@@ -156,8 +152,8 @@ export default function CloudRecordings() {
     }
   };
 
-  const loadDevices = async () => {
-    if (!selectedSystem) return;
+  const loadDevices = async (systemId: string) => {
+    if (!systemId) return;
     
     setLoadingDevices(true);
     setError("");
@@ -165,13 +161,13 @@ export default function CloudRecordings() {
     setSelectedDevice("");
 
     try {
-      const data = await fetchCloudDevices(selectedSystem, vmsUsername, vmsPassword);
+      const data = await fetchCloudDevices(systemId);
       setDevices(data);
       if (data.length === 0) {
-        setError("No cameras found in this system.");
+        setError("No cameras found in this system. The system may be offline or have no cameras.");
       }
     } catch (err: any) {
-      setError(err.message || "Failed to load devices. Check VMS credentials.");
+      setError(err.message || "Failed to load devices. The system may be offline.");
     } finally {
       setLoadingDevices(false);
     }
@@ -198,9 +194,7 @@ export default function CloudRecordings() {
         selectedSystem,
         selectedDevice,
         startMs,
-        endMs,
-        vmsUsername,
-        vmsPassword
+        endMs
       );
 
       // Parse response - could be array or object with reply
@@ -223,9 +217,7 @@ export default function CloudRecordings() {
         selectedSystem,
         selectedDevice,
         startTimeMs,
-        startTimeMs + durationMs,
-        vmsUsername,
-        vmsPassword
+        startTimeMs + durationMs
       );
 
       // Open in new tab (browser will prompt for download)
@@ -304,6 +296,8 @@ export default function CloudRecordings() {
                   setSelectedDevice("");
                   setDevices([]);
                   setRecordings([]);
+                  // Auto-load devices when system is selected
+                  loadDevices(value);
                 }}
                 disabled={loadingSystems}
               >
@@ -318,42 +312,13 @@ export default function CloudRecordings() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-
-            {/* VMS Credentials */}
-            {selectedSystem && (
-              <div className="space-y-3 p-3 border rounded-md bg-muted/50">
-                <Label className="text-sm font-medium">VMS Credentials</Label>
-                <div className="grid gap-2">
-                  <Input
-                    placeholder="VMS Username"
-                    value={vmsUsername}
-                    onChange={(e) => setVmsUsername(e.target.value)}
-                  />
-                  <Input
-                    type="password"
-                    placeholder="VMS Password"
-                    value={vmsPassword}
-                    onChange={(e) => setVmsPassword(e.target.value)}
-                  />
+              {loadingDevices && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading cameras...
                 </div>
-                <Button
-                  onClick={loadDevices}
-                  disabled={loadingDevices || !vmsUsername || !vmsPassword}
-                  size="sm"
-                  className="w-full"
-                >
-                  {loadingDevices ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Loading...
-                    </>
-                  ) : (
-                    "Load Devices"
-                  )}
-                </Button>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Device Select */}
             {devices.length > 0 && (

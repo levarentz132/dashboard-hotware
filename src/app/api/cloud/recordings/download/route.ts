@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildCloudUrl, buildCloudHeaders, validateSystemId } from "@/lib/cloud-api";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const systemId = searchParams.get("systemId");
+    const { systemId, systemName } = validateSystemId(request);
     const deviceId = searchParams.get("deviceId");
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
@@ -15,30 +16,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get VMS credentials from headers or env
-    const vmsUsername = request.headers.get("X-VMS-Username") || process.env.NX_USERNAME;
-    const vmsPassword = request.headers.get("X-VMS-Password") || process.env.NX_PASSWORD;
-
-    if (!vmsUsername || !vmsPassword) {
-      return NextResponse.json(
-        { error: "VMS credentials required" },
-        { status: 401 }
-      );
-    }
-
-    const basicAuth = Buffer.from(`${vmsUsername}:${vmsPassword}`).toString("base64");
-
-    // Build download URL
+    // Build download URL params
     const params = new URLSearchParams();
     params.set("pos", startTime);
     if (endTime) params.set("duration", String(parseInt(endTime) - parseInt(startTime)));
 
-    const downloadUrl = `https://${systemId}.relay.vmsproxy.com/media/${deviceId}.mp4?${params.toString()}`;
+    const downloadUrl = buildCloudUrl(systemId, `/media/${deviceId}.mp4`, params, request, systemName || undefined);
+    const headers = buildCloudHeaders(request, systemId);
 
-    // Return redirect URL for client to download directly
+    // Return download URL with auth header for client
     return NextResponse.json({
       downloadUrl,
-      authHeader: `Basic ${basicAuth}`,
+      authHeader: headers["Authorization"] || headers["x-runtime-guid"] || "",
     });
   } catch (error) {
     console.error("[recordings/download] Exception:", error);
