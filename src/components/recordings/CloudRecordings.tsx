@@ -217,16 +217,26 @@ export default function CloudRecordings() {
 
   const handleDownload = async (startTimeMs: number, durationMs: number) => {
     try {
-      const { downloadUrl, authHeader } = await getDownloadUrl(
-        selectedSystem,
-        selectedDevice,
-        startTimeMs,
-        startTimeMs + durationMs
-      );
-
-      // Open in new tab (browser will prompt for download)
-      // Note: Auth header can't be sent via simple link, so we show the URL
-      window.open(downloadUrl, "_blank");
+      setError("");
+      
+      // Build the proxy download URL with stream=true
+      const params = new URLSearchParams({
+        systemId: selectedSystem,
+        deviceId: selectedDevice,
+        startTime: String(startTimeMs),
+        endTime: String(startTimeMs + durationMs),
+        stream: "true"
+      });
+      
+      const downloadUrl = `/api/cloud/recordings/download?${params.toString()}`;
+      
+      // Create a hidden anchor and click it to trigger download
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `recording_${selectedDevice.substring(0, 8)}_${startTimeMs}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (err: any) {
       setError(err.message || "Failed to download");
     }
