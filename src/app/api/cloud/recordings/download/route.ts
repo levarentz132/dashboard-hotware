@@ -16,12 +16,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Log the incoming parameters for debugging
+    console.log(`[recordings/download] Params: systemId=${systemId}, deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}`);
+
     // Build download URL params
+    // NX media API expects pos in milliseconds
     const params = new URLSearchParams();
     params.set("pos", startTime);
-    if (endTime) params.set("duration", String(parseInt(endTime) - parseInt(startTime)));
+    if (endTime) {
+      const duration = parseInt(endTime) - parseInt(startTime);
+      params.set("duration", String(duration));
+      console.log(`[recordings/download] Duration: ${duration}ms`);
+    }
 
     const downloadUrl = buildCloudUrl(systemId, `/media/${deviceId}.mp4`, params, request, systemName || undefined);
+    console.log(`[recordings/download] Generated URL: ${downloadUrl}`);
     const headers = buildCloudHeaders(request, systemId);
 
     // Return download URL with auth header for client

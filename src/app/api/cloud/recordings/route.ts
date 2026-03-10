@@ -41,7 +41,48 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json();
-    return NextResponse.json(data);
+    
+    // Log raw response for debugging
+    console.log("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
+    
+    // NX API returns { reply: [{ guid: "serverId", periods: [{startTimeMs, durationMs}] }] }
+    // We need to flatten all periods from all servers
+    let allPeriods: any[] = [];
+    
+    const replyItems = Array.isArray(data) ? data : (data?.reply || []);
+    
+    for (const item of replyItems) {
+      // Each item may have a 'periods' array (per-server response) or be a period itself
+      const periods = item.periods || (item.startTimeMs ? [item] : []);
+      
+      for (const p of periods) {
+        // Parse timestamps - they come as strings from NX API
+        let startTimeMs = parseInt(p.startTimeMs || p.startTime || '0', 10);
+        let durationMs = parseInt(p.durationMs || p.duration || '0', 10);
+        
+        // If in microseconds (> year 2100 in ms), convert to ms
+        if (startTimeMs > 4102444800000) {
+          startTimeMs = Math.floor(startTimeMs / 1000);
+        }
+        if (durationMs > 86400000000) { // 1 day in usec
+          durationMs = Math.floor(durationMs / 1000);
+        }
+        
+        allPeriods.push({
+          ...p,
+          startTimeMs,
+          durationMs,
+          serverId: item.guid || p.guid,
+        });
+      }
+    }
+    
+    console.log(`[recordings] Extracted ${allPeriods.length} periods from ${replyItems.length} reply items`);
+    if (allPeriods.length > 0) {
+      console.log("[recordings] First period:", allPeriods[0]);
+    }
+    
+    return NextResponse.json(allPeriods);
   } catch (error) {
     console.error("[recordings] Exception:", error);
     return NextResponse.json(

@@ -37,6 +37,7 @@ export default function CloudRecordings() {
   const [startTime, setStartTime] = useState<string>("00:00");
   const [endTime, setEndTime] = useState<string>("23:59");
   const [recordings, setRecordings] = useState<any[]>([]);
+  const [searchedRange, setSearchedRange] = useState<{ startMs: number; endMs: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingSystems, setLoadingSystems] = useState(true);
   const [loadingDevices, setLoadingDevices] = useState(false);
@@ -189,6 +190,9 @@ export default function CloudRecordings() {
 
       const startMs = new Date(date).setHours(startHour, startMin, 0, 0);
       const endMs = new Date(date).setHours(endHour, endMin, 59, 999);
+
+      // Store the searched range for download options
+      setSearchedRange({ startMs, endMs });
 
       const data = await fetchRecordedTimePeriods(
         selectedSystem,
@@ -418,20 +422,45 @@ export default function CloudRecordings() {
       )}
 
       {/* Results */}
-      {!requiresCloudAuth && recordings.length > 0 && (
+      {!requiresCloudAuth && recordings.length > 0 && searchedRange && (
         <Card>
           <CardHeader>
             <CardTitle>Recording Segments</CardTitle>
             <CardDescription>
-              Found {recordings.length} recording segment(s)
+              Found {recordings.length} recording segment(s) overlapping with your search: {new Date(searchedRange.startMs).toLocaleString()} - {new Date(searchedRange.endMs).toLocaleTimeString()}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
+            <div className="space-y-4">
+              {/* Download selected time range button */}
+              <div className="p-3 border rounded-md bg-primary/5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">Download Selected Time Range</div>
+                    <div className="text-sm text-muted-foreground">
+                      {new Date(searchedRange.startMs).toLocaleString()} - {new Date(searchedRange.endMs).toLocaleTimeString()}
+                      {" ("}{formatDuration(searchedRange.endMs - searchedRange.startMs)}{")"}    
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => handleDownload(searchedRange.startMs, searchedRange.endMs - searchedRange.startMs)}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download Selected
+                  </Button>
+                </div>
+              </div>
+
+              {/* Individual segments */}
+              <div className="text-sm font-medium text-muted-foreground">Or download full segments:</div>
               {recordings.map((rec, idx) => {
-                const startMs = rec.startTimeMs || rec.startTime || 0;
-                const durationMs = rec.durationMs || rec.duration || 0;
-                const endMs = startMs + durationMs;
+                // Server normalizes timestamps to milliseconds as numbers
+                const segStartMs = rec.startTimeMs || 0;
+                const segDurationMs = rec.durationMs || 0;
+                const segEndMs = segStartMs + segDurationMs;
+                
+                // Log for debugging
+                console.log(`[Recording ${idx}]`, { segStartMs, segDurationMs, raw: rec });
 
                 return (
                   <div
@@ -440,19 +469,19 @@ export default function CloudRecordings() {
                   >
                     <div>
                       <div className="font-medium">
-                        {new Date(startMs).toLocaleString()} - {new Date(endMs).toLocaleTimeString()}
+                        {new Date(segStartMs).toLocaleString()} - {new Date(segEndMs).toLocaleTimeString()}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        Duration: {formatDuration(durationMs)}
+                        Full segment: {formatDuration(segDurationMs)}
                       </div>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleDownload(startMs, durationMs)}
+                      onClick={() => handleDownload(segStartMs, segDurationMs)}
                     >
                       <Download className="mr-2 h-4 w-4" />
-                      Download MP4
+                      Download Segment
                     </Button>
                   </div>
                 );
