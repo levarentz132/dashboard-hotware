@@ -20,7 +20,8 @@ import {
   LogOut,
   User,
   Loader2,
-  Cpu
+  Cpu,
+  Video
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
@@ -64,6 +65,7 @@ const navigationItems: NavItem[] = [
   { id: "cameras", label: "Camera Inventory", icon: Camera, module: "camera_inventory" },
   { id: "health", label: "System Health", icon: Activity, module: "system_health" },
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle, module: "alarm_console" },
+  { id: "recordings", label: "Recordings", icon: Video, href: "/recordings", module: "recordings" },
   { id: "audits", label: "User Logs", icon: Users, module: "user_logs" },
   { id: "analytics", label: "Analytics", icon: BarChart3, module: "analytics" },
   { id: "storage", label: "Storage", icon: Database, module: "storage" },

@@ -275,7 +275,12 @@ class NxWitnessAPI {
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
+          // Use debug for 404s (expected when endpoint not available), error for others
+          if (response.status === 404) {
+            console.debug(`[apiRequest] ${endpoint}: 404 Not Found`);
+          } else {
+            console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
+          }
           throw new Error(`HTTP_${response.status}: ${errorText}`);
         }
 
@@ -299,7 +304,11 @@ class NxWitnessAPI {
 
         return result;
       } catch (error) {
-        console.error(`[apiRequest] ${endpoint}: Request failed:`, error);
+        // Don't re-log 404 errors as they've already been logged above
+        const errorMsg = String(error);
+        if (!errorMsg.includes('HTTP_404')) {
+          console.error(`[apiRequest] ${endpoint}: Request failed:`, error);
+        }
         throw error;
       } finally {
         this.pendingRequests.delete(cacheKey);
@@ -551,7 +560,15 @@ class NxWitnessAPI {
         }),
       });
     } catch (error) {
-      console.warn("[createGenericEvent] v4 failed, trying fallback /api/createEvent...", error);
+      // Check if it's a 404 - server doesn't support this endpoint
+      const errorMsg = String(error);
+      const is404 = errorMsg.includes('404') || errorMsg.includes('Not Found');
+      
+      if (is404) {
+        console.debug("[createGenericEvent] v4 endpoint not available, trying legacy...");
+      } else {
+        console.warn("[createGenericEvent] v4 failed, trying fallback /api/createEvent...", error);
+      }
 
       try {
         // 2. Fallback to legacy endpoint (uses GET with query params)
@@ -567,7 +584,15 @@ class NxWitnessAPI {
           method: "GET",
         });
       } catch (fallbackError) {
-        console.error("[createGenericEvent] All versions failed:", fallbackError);
+        const fallbackMsg = String(fallbackError);
+        const isFallback404 = fallbackMsg.includes('404') || fallbackMsg.includes('Not Found');
+        
+        if (isFallback404) {
+          // Server doesn't support generic events - this is expected for some deployments
+          console.debug("[createGenericEvent] Server does not support generic events API");
+        } else {
+          console.error("[createGenericEvent] All versions failed:", fallbackError);
+        }
         throw fallbackError;
       }
     }

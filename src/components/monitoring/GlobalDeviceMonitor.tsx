@@ -212,7 +212,13 @@ export function GlobalDeviceMonitor() {
 
       console.log(`[GlobalDeviceMonitor] ✅ Low Disk Space event created successfully for ${storageName}`);
     } catch (error) {
-      console.error(`[GlobalDeviceMonitor] ❌ Error triggering storage event:`, error);
+      // Silently ignore 404/501 errors - server doesn't support generic events API
+      const errorMsg = String(error);
+      if (errorMsg.includes('404') || errorMsg.includes('501') || errorMsg.includes('Not Found')) {
+        console.debug(`[GlobalDeviceMonitor] ℹ️ System ${systemName} does not support generic events API (skipped)`);
+      } else {
+        console.error(`[GlobalDeviceMonitor] ❌ Error triggering storage event:`, error);
+      }
     }
   }, []);
 
