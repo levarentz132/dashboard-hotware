@@ -25,6 +25,30 @@ export interface CloudApiError {
   status?: number;
 }
 
+export function getBasicAuthHeaderFromRequest(request: NextRequest): string | null {
+  const headerUsername = request.headers.get("x-basic-username") || undefined;
+  const headerPassword = request.headers.get("x-basic-password") || undefined;
+
+  if (headerUsername && headerPassword) {
+    const fromHeaders = Buffer.from(`${headerUsername}:${headerPassword}`, "utf-8").toString("base64");
+    return `Basic ${fromHeaders}`;
+  }
+
+  const existingAuthorization = request.headers.get("authorization");
+  if (existingAuthorization && existingAuthorization.toLowerCase().startsWith("basic ")) {
+    return existingAuthorization;
+  }
+
+  const dynamicConfig = getDynamicConfig(request);
+  const username = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
+  const password = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+
+  if (!username || !password) return null;
+
+  const base64Credentials = Buffer.from(`${username}:${password}`, "utf-8").toString("base64");
+  return `Basic ${base64Credentials}`;
+}
+
 export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams, request?: NextRequest, systemName?: string): string {
   const id = (systemId || API_CONFIG.systemId)?.trim().toLowerCase();
   const cleanId = id?.replace(/[{}]/g, "");
@@ -263,10 +287,16 @@ export async function fetchFromCloudApi<T>(
   try {
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request, systemName);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
+    const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
+
+    // Allow per-source basic auth to drive requests when cloud/GUID tokens are unavailable.
+    if (!headers["Authorization"] && !headers["x-runtime-guid"] && basicAuthHeader) {
+      headers["Authorization"] = basicAuthHeader;
+    }
 
     // Stop calling if there's no auth material for a cloud request
     const isGlobal = (systemId || '').trim().toLowerCase() === 'all';
-    const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"]);
+    const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"] || basicAuthHeader);
 
     // Only block if it looks like a cloud-bound request (nxvms.com or vmsproxy.com)
     if (!hasAuth && (cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com"))) {
@@ -300,6 +330,27 @@ export async function fetchFromCloudApi<T>(
         status: 304,
         headers,
       });
+    }
+
+    const isRelayDevicesEndpoint =
+      cloudUrl.includes(".relay.vmsproxy.com") && endpoint.startsWith("/rest/v3/devices");
+
+    // Retry once with Basic auth when relay token session is not accepted
+    if ((response.status === 401 || response.status === 403) && isRelayDevicesEndpoint) {
+      if (basicAuthHeader) {
+        const retryHeaders: Record<string, string> = {
+          ...headers,
+          Authorization: basicAuthHeader,
+        };
+        delete retryHeaders["x-runtime-guid"];
+
+        console.warn(`[Cloud API] Retrying relay devices with Basic auth for ${systemName || systemId}`);
+        response = await fetch(cloudUrl, {
+          method: "GET",
+          headers: retryHeaders,
+          redirect: "manual",
+        });
+      }
     }
 
     // Handle auth errors

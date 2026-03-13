@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildCloudUrl, buildCloudHeaders, validateSystemId } from "@/lib/cloud-api";
+import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,10 +26,27 @@ export async function GET(request: NextRequest) {
     const cloudUrl = buildCloudUrl(systemId, "/ec2/recordedTimePeriods", params, request, systemName || undefined);
     const headers = buildCloudHeaders(request, systemId);
 
-    const response = await fetch(cloudUrl, {
+    let response = await fetch(cloudUrl, {
       method: "GET",
       headers,
     });
+
+    if (response.status === 401 || response.status === 403) {
+      const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
+      if (basicAuthHeader) {
+        const retryHeaders: Record<string, string> = {
+          ...headers,
+          Authorization: basicAuthHeader,
+        };
+        delete retryHeaders["x-runtime-guid"];
+
+        console.warn("[recordings] Retrying recordedTimePeriods with Basic auth");
+        response = await fetch(cloudUrl, {
+          method: "GET",
+          headers: retryHeaders,
+        });
+      }
+    }
 
     if (!response.ok) {
       const errorText = await response.text();

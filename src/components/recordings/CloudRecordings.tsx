@@ -22,10 +22,10 @@ import {
   fetchCloudSystems,
   fetchCloudDevices,
   fetchRecordedTimePeriods,
-  getDownloadUrl,
   CloudSystem,
   CloudDevice,
   CloudAuthError,
+  BasicAuthCredentials,
 } from "./recordings-service";
 
 export default function CloudRecordings() {
@@ -41,8 +41,11 @@ export default function CloudRecordings() {
   const [loading, setLoading] = useState(false);
   const [loadingSystems, setLoadingSystems] = useState(true);
   const [loadingDevices, setLoadingDevices] = useState(false);
+
   const [error, setError] = useState<string>("");
   const [requiresCloudAuth, setRequiresCloudAuth] = useState(false);
+  const [sourceUsername, setSourceUsername] = useState("");
+  const [sourcePassword, setSourcePassword] = useState("");
 
   // Cloud OAuth configuration
   const CLOUD_HOST = 'https://nxvms.com';
@@ -153,8 +156,21 @@ export default function CloudRecordings() {
     }
   };
 
+  const getSourceAuth = (): BasicAuthCredentials | undefined => {
+    if (!sourceUsername.trim() || !sourcePassword) return undefined;
+    return {
+      username: sourceUsername.trim(),
+      password: sourcePassword,
+    };
+  };
+
   const loadDevices = async (systemId: string) => {
     if (!systemId) return;
+
+    if (!sourceUsername.trim() || !sourcePassword) {
+      setError("Please enter source username and password.");
+      return;
+    }
     
     setLoadingDevices(true);
     setError("");
@@ -162,13 +178,17 @@ export default function CloudRecordings() {
     setSelectedDevice("");
 
     try {
-      const data = await fetchCloudDevices(systemId);
+      const data = await fetchCloudDevices(systemId, getSourceAuth());
       setDevices(data);
       if (data.length === 0) {
         setError("No cameras found in this system. The system may be offline or have no cameras.");
       }
     } catch (err: any) {
-      setError(err.message || "Failed to load devices. The system may be offline.");
+      if (err instanceof CloudAuthError || err?.requiresAuth) {
+        setError("Authentication required for selected source. Please check source username and password.");
+      } else {
+        setError(err.message || "Failed to load devices. The system may be offline.");
+      }
     } finally {
       setLoadingDevices(false);
     }
@@ -198,7 +218,8 @@ export default function CloudRecordings() {
         selectedSystem,
         selectedDevice,
         startMs,
-        endMs
+        endMs,
+        getSourceAuth()
       );
 
       // Parse response - could be array or object with reply
@@ -209,37 +230,28 @@ export default function CloudRecordings() {
         setError("No recordings found for the selected time range.");
       }
     } catch (err: any) {
-      setError(err.message || "Failed to search recordings");
+      if (err instanceof CloudAuthError || err?.requiresAuth) {
+        setError("Authentication required for selected source. Please check source username and password.");
+      } else {
+        setError(err.message || "Failed to search recordings");
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDownload = async (startTimeMs: number, durationMs: number) => {
-    try {
-      setError("");
-      
-      // Build the proxy download URL with stream=true
-      const params = new URLSearchParams({
-        systemId: selectedSystem,
-        deviceId: selectedDevice,
-        startTime: String(startTimeMs),
-        endTime: String(startTimeMs + durationMs),
-        stream: "true"
-      });
-      
-      const downloadUrl = `/api/cloud/recordings/download?${params.toString()}`;
-      
-      // Create a hidden anchor and click it to trigger download
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = `recording_${selectedDevice.substring(0, 8)}_${startTimeMs}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err: any) {
-      setError(err.message || "Failed to download");
+  const handleDownload = (startTimeMs: number, durationMs: number) => {
+    const params = new URLSearchParams({
+      systemId: selectedSystem,
+      deviceId: selectedDevice,
+      startTime: String(startTimeMs),
+      endTime: String(startTimeMs + durationMs),
+    });
+    if (sourceUsername.trim()) {
+      params.set("username", sourceUsername.trim());
+      params.set("password", sourcePassword);
     }
+    window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
   };
 
   const formatDuration = (ms: number) => {
@@ -310,8 +322,6 @@ export default function CloudRecordings() {
                   setSelectedDevice("");
                   setDevices([]);
                   setRecordings([]);
-                  // Auto-load devices when system is selected
-                  loadDevices(value);
                 }}
                 disabled={loadingSystems}
               >
@@ -333,6 +343,44 @@ export default function CloudRecordings() {
                 </div>
               )}
             </div>
+
+            {selectedSystem && (
+              <>
+                <div className="space-y-2">
+                  <Label>Source Username</Label>
+                  <Input
+                    value={sourceUsername}
+                    onChange={(e) => setSourceUsername(e.target.value)}
+                    placeholder="Enter VMS username for this source"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Source Password</Label>
+                  <Input
+                    type="password"
+                    value={sourcePassword}
+                    onChange={(e) => setSourcePassword(e.target.value)}
+                    placeholder="Enter VMS password for this source"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => loadDevices(selectedSystem)}
+                  disabled={loadingDevices || !sourceUsername.trim() || !sourcePassword}
+                  className="w-full"
+                >
+                  {loadingDevices ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Connecting source...
+                    </>
+                  ) : (
+                    "Connect Source and Load Cameras"
+                  )}
+                </Button>
+              </>
+            )}
 
             {/* Device Select */}
             {devices.length > 0 && (
@@ -414,7 +462,7 @@ export default function CloudRecordings() {
 
             <Button
               onClick={handleSearchRecordings}
-              disabled={loading || !selectedSystem || !selectedDevice || !date}
+              disabled={loading || !selectedSystem || !selectedDevice || !date || !sourceUsername.trim() || !sourcePassword}
               className="w-full"
             >
               {loading ? (
@@ -456,7 +504,7 @@ export default function CloudRecordings() {
                     onClick={() => handleDownload(searchedRange.startMs, searchedRange.endMs - searchedRange.startMs)}
                   >
                     <Download className="mr-2 h-4 w-4" />
-                    Download Selected
+                    Open Recording
                   </Button>
                 </div>
               </div>
@@ -491,7 +539,7 @@ export default function CloudRecordings() {
                       onClick={() => handleDownload(segStartMs, segDurationMs)}
                     >
                       <Download className="mr-2 h-4 w-4" />
-                      Download Segment
+                      Open Segment
                     </Button>
                   </div>
                 );

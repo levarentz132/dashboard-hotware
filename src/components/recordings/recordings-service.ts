@@ -18,6 +18,11 @@ export interface RecordingPeriod {
   durationMs: number;
 }
 
+export interface BasicAuthCredentials {
+  username: string;
+  password: string;
+}
+
 // Custom error class for auth-related errors
 export class CloudAuthError extends Error {
   public requiresAuth: boolean;
@@ -25,6 +30,12 @@ export class CloudAuthError extends Error {
     super(message);
     this.name = 'CloudAuthError';
     this.requiresAuth = true;
+  }
+}
+
+function throwIfCloudAuthError(response: Response, errorData: any) {
+  if (response.status === 401 || response.status === 403 || errorData?.requiresAuth) {
+    throw new CloudAuthError(errorData?.error || "Authentication required");
   }
 }
 
@@ -63,13 +74,19 @@ export async function fetchCloudSystems(): Promise<CloudSystem[]> {
 }
 
 export async function fetchCloudDevices(
-  systemId: string
+  systemId: string,
+  basicAuth?: BasicAuthCredentials
 ): Promise<CloudDevice[]> {
   try {
     const headers: Record<string, string> = {
       Accept: "application/json",
       ...getElectronHeaders(),
     };
+
+    if (basicAuth?.username && basicAuth?.password) {
+      headers["X-Basic-Username"] = basicAuth.username;
+      headers["X-Basic-Password"] = basicAuth.password;
+    }
 
     const response = await fetch(
       `/api/cloud/recordings/devices?systemId=${encodeURIComponent(systemId)}`,
@@ -82,6 +99,7 @@ export async function fetchCloudDevices(
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
+      throwIfCloudAuthError(response, error);
       throw new Error(error.error || `Failed to fetch devices: ${response.status}`);
     }
 
@@ -97,13 +115,19 @@ export async function fetchRecordedTimePeriods(
   systemId: string,
   deviceId: string,
   startTime?: number,
-  endTime?: number
+  endTime?: number,
+  basicAuth?: BasicAuthCredentials
 ): Promise<any> {
   try {
     const headers: Record<string, string> = {
       Accept: "application/json",
       ...getElectronHeaders(),
     };
+
+    if (basicAuth?.username && basicAuth?.password) {
+      headers["X-Basic-Username"] = basicAuth.username;
+      headers["X-Basic-Password"] = basicAuth.password;
+    }
 
     const params = new URLSearchParams();
     params.set("systemId", systemId);
@@ -119,6 +143,7 @@ export async function fetchRecordedTimePeriods(
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
+      throwIfCloudAuthError(response, error);
       throw new Error(error.error || `Failed to fetch recordings: ${response.status}`);
     }
 

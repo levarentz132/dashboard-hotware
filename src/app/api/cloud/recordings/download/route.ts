@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildCloudUrl, buildCloudHeaders, validateSystemId } from "@/lib/cloud-api";
+import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
 
 export async function GET(request: NextRequest) {
+  let requestTimeout: ReturnType<typeof setTimeout> | null = null;
   try {
     const { searchParams } = new URL(request.url);
     const { systemId, systemName } = validateSystemId(request);
@@ -28,6 +29,9 @@ export async function GET(request: NextRequest) {
       console.log(`[recordings/download] Duration: ${duration}ms`);
     }
 
+    const username = searchParams.get("username");
+    const password = searchParams.get("password");
+
     const downloadUrl = buildCloudUrl(systemId, `/media/${deviceId}.mp4`, params, request, systemName || undefined);
     console.log(`[recordings/download] Generated URL: ${downloadUrl}`);
     const headers = buildCloudHeaders(request, systemId);
@@ -35,10 +39,36 @@ export async function GET(request: NextRequest) {
     // If stream=true, proxy the actual video content with auth
     if (stream === "true") {
       console.log(`[recordings/download] Streaming video with auth headers`);
+
+      const controller = new AbortController();
+      requestTimeout = setTimeout(() => controller.abort(), 85000);
       
-      const videoResponse = await fetch(downloadUrl, {
+      let videoResponse = await fetch(downloadUrl, {
         headers: headers,
+        signal: controller.signal,
       });
+
+      if (videoResponse.status === 401 || videoResponse.status === 403) {
+        const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
+        if (basicAuthHeader) {
+          const retryHeaders: Record<string, string> = {
+            ...headers,
+            Authorization: basicAuthHeader,
+          };
+          delete retryHeaders["x-runtime-guid"];
+
+          console.warn("[recordings/download] Retrying media fetch with Basic auth");
+          videoResponse = await fetch(downloadUrl, {
+            headers: retryHeaders,
+            signal: controller.signal,
+          });
+        }
+      }
+
+      if (requestTimeout) {
+        clearTimeout(requestTimeout);
+        requestTimeout = null;
+      }
 
       if (!videoResponse.ok) {
         console.error(`[recordings/download] Video fetch failed: ${videoResponse.status}`);
@@ -62,16 +92,37 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Return download URL with auth header for client (legacy mode)
-    return NextResponse.json({
-      downloadUrl,
-      authHeader: headers["Authorization"] || headers["x-runtime-guid"] || "",
-    });
+    // Embed Basic-auth credentials in the URL so the browser authenticates on redirect
+    let redirectUrl = downloadUrl;
+    if (username && password) {
+      try {
+        const urlObj = new URL(downloadUrl);
+        urlObj.username = username;
+        urlObj.password = password;
+        redirectUrl = urlObj.toString();
+      } catch {
+        // fall back to bare URL
+      }
+    }
+
+    return NextResponse.redirect(redirectUrl);
   } catch (error) {
+    if ((error as any)?.name === "AbortError") {
+      console.error("[recordings/download] Upstream timeout");
+      return NextResponse.json(
+        { error: "Download request timed out", details: "Upstream server did not respond in time" },
+        { status: 504 }
+      );
+    }
+
     console.error("[recordings/download] Exception:", error);
     return NextResponse.json(
       { error: "Failed to generate download URL" },
       { status: 500 }
     );
+  } finally {
+    if (requestTimeout) {
+      clearTimeout(requestTimeout);
+    }
   }
 }
