@@ -5,6 +5,7 @@ import { AuthProvider } from "@/contexts/auth-context";
 
 import { FullscreenHandler } from "@/components/utils/FullscreenHandler";
 import { GlobalDeviceMonitor } from "@/components/monitoring/GlobalDeviceMonitor";
+import DisableConsoleClient from "@/components/DisableConsoleClient";
 import NotificationSystem from "@/components/ui/NotificationSystem";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={inter.className}>
+        <DisableConsoleClient />
         <FullscreenHandler />
         <AuthProvider>
           <GlobalDeviceMonitor />

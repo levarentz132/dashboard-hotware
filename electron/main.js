@@ -58,10 +58,35 @@ function logtoFile(msg) {
     try {
         fs.appendFileSync(LOG_PATH, logLine);
     } catch (e) {
-        console.error('Failed to write log:', e);
+        // Avoid using console here to prevent recursion when we override console later
+        try { fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Failed to write log: ${e.message}\n`); } catch {}
     }
-    console.log(msg); // Keep console logging
 }
+
+// Route all console calls to the log file (to reduce noisy stdout)
+// We set a safe proxy that uses `logtoFile` so that existing console.* calls are persisted
+function routeConsoleToFile() {
+    const methods = ['log', 'info', 'warn', 'error', 'debug', 'trace', 'table'];
+    methods.forEach((m) => {
+        try {
+            console[m] = (...args) => {
+                try {
+                    const text = args.map((a) => {
+                        try { return typeof a === 'string' ? a : JSON.stringify(a); } catch { return String(a); }
+                    }).join(' ');
+                    logtoFile(`[console.${m}] ${text}`);
+                } catch (e) {
+                    // swallow
+                }
+            };
+        } catch (e) {
+            // ignore
+        }
+    });
+}
+
+// Activate routing immediately
+routeConsoleToFile();
 
 logtoFile('-----------------------------------');
 logtoFile(`App starting. User Data: ${app.getPath('userData')}`);

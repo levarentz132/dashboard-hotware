@@ -66,34 +66,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (data.user?.system_id) {
           nxAPI.setSystemId(data.user.system_id);
         }
-        // Log saved session info for debugging
-        try {
-          console.log("[Auth] Saved session user:", data.user);
-          if (typeof window !== 'undefined') {
-            console.log("[Auth] localStorage keys:", Object.keys(window.localStorage));
-            console.log("[Auth] document.cookie:", document.cookie);
-            console.log("[Auth] nxAPI systemId:", (nxAPI as any).getSystemId ? (nxAPI as any).getSystemId() : null);
-          }
-        } catch (e) {
-          /* ignore logging errors */
-        }
         setState({
           user: data.user,
           isAuthenticated: true,
           isLoading: false,
           error: null,
         });
-        // Log saved login info for debugging
-        try {
-          console.log("[Auth] Saved login user:", data.user);
-          if (typeof window !== 'undefined') {
-            console.log("[Auth] localStorage keys:", Object.keys(window.localStorage));
-            console.log("[Auth] document.cookie:", document.cookie);
-            console.log("[Auth] nxAPI systemId:", (nxAPI as any).getSystemId ? (nxAPI as any).getSystemId() : null);
-          }
-        } catch (e) {
-          /* ignore logging errors */
-        }
+        // (debug logs removed)
       } else if (data.dbError || response.status === 503) {
         // Database error - keep current auth state, don't logout
         // The JWT token is still valid per middleware
