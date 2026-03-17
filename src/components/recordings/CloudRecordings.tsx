@@ -44,6 +44,7 @@ export default function CloudRecordings() {
 
   const [error, setError] = useState<string>("");
   const [orgCameraIds, setOrgCameraIds] = useState<string[] | null>(null);
+  const [devicesReady, setDevicesReady] = useState(false);
   const [requiresCloudAuth, setRequiresCloudAuth] = useState(false);
   const [sourceUsername, setSourceUsername] = useState("");
   const [sourcePassword, setSourcePassword] = useState("");
@@ -332,6 +333,7 @@ export default function CloudRecordings() {
     setLoadingDevices(true);
     setError("");
     setDevices([]);
+    setDevicesReady(false);
     setSelectedDevice("");
 
     try {
@@ -359,19 +361,27 @@ export default function CloudRecordings() {
       } catch (e) {
         console.warn('[CloudRecordings] Failed to log device/orgCameraIds mapping', e);
       }
-      // Keep all devices in the list but mark ones not in orgCameraIds as disabled.
-      setDevices(data || []);
+      // Filter devices based on effective orgCameraIds before setting state so the UI
+      // never briefly shows unfiltered cameras.
+      const allDevices = Array.isArray(data) ? data : [];
       const effectiveIdsForCheck = getEffectiveOrgCameraIds();
+      console.log('[CloudRecordings] loadDevices - effectiveIdsForCheck:', effectiveIdsForCheck);
+      // If we don't have an allowed-camera list (cookie/session), do not show any devices
+      // to avoid exposing unfiltered cameras. Require explicit allowed list to display devices.
+      let devicesToSet: any[] = [];
       if (Array.isArray(effectiveIdsForCheck) && effectiveIdsForCheck.length > 0) {
-        const allowedExists = (data || []).some((d: any) => effectiveIdsForCheck.includes(String(d.id).replace(/[{}]/g, "").toLowerCase()));
-        if (!allowedExists) {
+        devicesToSet = allDevices.filter((d: any) => effectiveIdsForCheck.includes(String(d.id).replace(/[{}]/g, "").toLowerCase()));
+        if (devicesToSet.length === 0) {
           setError("No allowed cameras available for your account in this system.");
         }
       } else {
-        if ((data || []).length === 0) {
-          setError("No cameras found in this system. The system may be offline or have no cameras.");
-        }
+        // No effective IDs available: log and keep devices empty
+        console.warn('[CloudRecordings] No org_camera_ids available; hiding all devices until list is available');
+        setError("Account camera list unavailable. Please ensure you are logged in or cookies are enabled.");
       }
+      console.log(`[CloudRecordings] loadDevices - all=${allDevices.length}, filtered=${devicesToSet.length}`);
+      setDevices(devicesToSet);
+      setDevicesReady(true);
     } catch (err: any) {
       if (err instanceof CloudAuthError || err?.requiresAuth) {
         setError("Authentication required for selected source. Please check source username and password.");

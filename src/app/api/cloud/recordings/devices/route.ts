@@ -100,6 +100,33 @@ export async function GET(request: NextRequest) {
     } catch (e) {
       console.warn("[recordings/devices] Failed to apply org_camera_ids filter:", e);
     }
+    
+      // Fallback: if external /me did not provide org_camera_ids, check for a client-visible
+      // `org_camera_ids` cookie (set by login) and apply that as the allowed list.
+      try {
+        const cookieVal = request.cookies.get('org_camera_ids')?.value;
+        if (cookieVal) {
+          let parsed: any = undefined;
+          try {
+            parsed = JSON.parse(cookieVal);
+          } catch (e1) {
+            try {
+              parsed = JSON.parse(decodeURIComponent(cookieVal));
+            } catch (e2) {
+              // attempt CSV fallback
+              parsed = cookieVal.split(/\s*,\s*/).map((s) => s.replace(/^"|"$/g, ''));
+            }
+          }
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const allowedSet = new Set(parsed.map((id: any) => String(id).toLowerCase()));
+            const filtered = cameras.filter((d: any) => allowedSet.has(String(d.id).toLowerCase()));
+            console.log(`[recordings/devices] Cameras after org_camera_ids cookie filter: ${filtered.length}`);
+            return NextResponse.json(filtered);
+          }
+        }
+      } catch (e) {
+        console.warn('[recordings/devices] Failed to parse org_camera_ids cookie fallback:', e);
+      }
 
     return NextResponse.json(cameras);
   } catch (error) {
