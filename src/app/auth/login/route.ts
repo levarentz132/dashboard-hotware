@@ -255,6 +255,17 @@ export async function POST(request: NextRequest) {
         };
         console.log(`[Login] User profile enriched from /me for ${finalUser.username}`);
       }
+      // Preserve org_camera_ids from the original login response if /me did not include them
+      try {
+        const extIds = externalData?.user && (externalData.user.org_camera_ids ?? externalData.user.orgCameraIds);
+        const finalIds = finalUser && (finalUser.org_camera_ids ?? (finalUser as any).orgCameraIds);
+        if ((!Array.isArray(finalIds) || finalIds.length === 0) && Array.isArray(extIds) && extIds.length > 0) {
+          (finalUser as any).org_camera_ids = extIds;
+          console.log(`[Login] Preserved org_camera_ids from external login response (${(extIds || []).length} ids)`);
+        }
+      } catch (e) {
+        // ignore preservation errors
+      }
     } catch (profileError) {
       console.warn("[Login] Could not enrich profile from /me:", profileError);
       // Proceed with basic user info from login
@@ -284,6 +295,35 @@ export async function POST(request: NextRequest) {
         maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
         path: "/",
       });
+    }
+
+    // Optionally expose org_camera_ids to client JS via a non-HttpOnly cookie
+    try {
+      const ids = finalUser && (finalUser.org_camera_ids ?? finalUser.orgCameraIds);
+      if (Array.isArray(ids) && ids.length > 0) {
+        // Debug: log cookie details to help diagnose client acceptance
+        try {
+          console.log(`[Login] org_camera_ids cookie set attempt. secure=${isSecureContext()}, value=${JSON.stringify(ids).slice(0,200)}`);
+        } catch (e) {
+          console.log('[Login] org_camera_ids cookie set attempt (failed to stringify)');
+        }
+        response.cookies.set('org_camera_ids', JSON.stringify(ids), {
+          httpOnly: false,
+          secure: isSecureContext(),
+          sameSite: 'lax',
+          maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+          path: '/',
+        });
+      }
+      else {
+        try {
+          console.log(`[Login] no org_camera_ids present on finalUser. keys=${finalUser ? Object.keys(finalUser).join(',') : 'no-user'}`);
+        } catch (e) {
+          console.log('[Login] no org_camera_ids present on finalUser (failed to list keys)');
+        }
+      }
+    } catch (e) {
+      console.warn('[Login] Failed to set org_camera_ids cookie:', e);
     }
 
     // 2. Establish VMS Relay Session (Dual-Login)

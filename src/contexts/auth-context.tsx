@@ -66,6 +66,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (data.user?.system_id) {
           nxAPI.setSystemId(data.user.system_id);
         }
+        // Persist org_camera_ids (handle alternate key `orgCameraIds`) to sessionStorage for quick access
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            const ids = data.user?.org_camera_ids ?? data.user?.orgCameraIds ?? null;
+            if (Array.isArray(ids)) {
+              const normalized = ids.map((id: any) => String(id).toLowerCase());
+              window.sessionStorage.setItem('org_camera_ids', JSON.stringify(normalized));
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
         setState({
           user: data.user,
           isAuthenticated: true,
@@ -161,6 +173,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Force sidebar to be collapsed when entering the app
           if (typeof window !== 'undefined') {
             localStorage.setItem("sidebar-collapsed", "true");
+            try {
+              const ids = data.user?.org_camera_ids ?? data.user?.orgCameraIds ?? null;
+              if (Array.isArray(ids)) {
+                const normalized = ids.map((id: any) => String(id).toLowerCase());
+                window.sessionStorage.setItem('org_camera_ids', JSON.stringify(normalized));
+              }
+            } catch (e) {}
           }
           setState({
             user: data.user,
