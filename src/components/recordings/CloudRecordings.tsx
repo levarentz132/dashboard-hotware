@@ -43,6 +43,7 @@ export default function CloudRecordings() {
   const [loadingDevices, setLoadingDevices] = useState(false);
 
   const [error, setError] = useState<string>("");
+  const [orgCameraIds, setOrgCameraIds] = useState<string[] | null>(null);
   const [requiresCloudAuth, setRequiresCloudAuth] = useState(false);
   const [sourceUsername, setSourceUsername] = useState("");
   const [sourcePassword, setSourcePassword] = useState("");
@@ -124,6 +125,24 @@ export default function CloudRecordings() {
 
   // Load systems on mount
   useEffect(() => {
+    // Fetch /api/auth/me to get org_camera_ids (if provided)
+    (async () => {
+      try {
+        const resp = await fetch("/api/auth/me", { credentials: 'include' });
+        if (resp.ok) {
+          const data = await resp.json();
+          const allowed = data?.user?.org_camera_ids ?? data?.user?.orgCameraIds ?? null;
+          if (Array.isArray(allowed)) setOrgCameraIds(allowed.map((id: any) => String(id).toLowerCase()));
+          else setOrgCameraIds(null);
+        } else {
+          setOrgCameraIds(null);
+        }
+      } catch (e) {
+        console.warn('[CloudRecordings] Unable to fetch /api/auth/me', e);
+        setOrgCameraIds(null);
+      }
+    })();
+
     // First check if we have a cloud session - if not, show login immediately
     if (!hasCloudSession()) {
       setRequiresCloudAuth(true);
@@ -179,10 +198,20 @@ export default function CloudRecordings() {
 
     try {
       const data = await fetchCloudDevices(systemId, getSourceAuth());
-      setDevices(data);
-      if (data.length === 0) {
-        setError("No cameras found in this system. The system may be offline or have no cameras.");
+      // If orgCameraIds is defined, filter devices to only allowed ones
+      let finalDevices = data;
+      if (orgCameraIds && Array.isArray(orgCameraIds) && orgCameraIds.length > 0) {
+        finalDevices = (data || []).filter((d: any) => orgCameraIds.includes(String(d.id).toLowerCase()));
+        if (finalDevices.length === 0) {
+          setError("No allowed cameras available for your account in this system.");
+        }
+      } else {
+        if ((data || []).length === 0) {
+          setError("No cameras found in this system. The system may be offline or have no cameras.");
+        }
       }
+
+      setDevices(finalDevices);
     } catch (err: any) {
       if (err instanceof CloudAuthError || err?.requiresAuth) {
         setError("Authentication required for selected source. Please check source username and password.");

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchFromCloudApi, validateSystemId, buildCloudUrl, buildCloudHeaders } from "@/lib/cloud-api";
 import { normalizeNxDevices } from "@/lib/nx-normalization";
+import { AUTH_CONFIG } from "@/lib/auth/constants";
+import { getExternalMe } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -68,6 +70,23 @@ export async function GET(request: NextRequest) {
     });
 
     console.log(`[recordings/devices] Cameras after filter: ${cameras.length}`);
+
+    // Apply org_camera_ids filter if provided by external auth
+    try {
+      const token = request.cookies.get(AUTH_CONFIG.COOKIE_NAME)?.value;
+      if (token) {
+        const me = await getExternalMe(token).catch(() => null);
+        const allowed = me?.user?.org_camera_ids ?? me?.user?.orgCameraIds ?? undefined;
+        if (Array.isArray(allowed) && allowed.length > 0) {
+          const allowedSet = new Set(allowed.map((id: any) => String(id).toLowerCase()));
+          const filtered = cameras.filter((d: any) => allowedSet.has(String(d.id).toLowerCase()));
+          console.log(`[recordings/devices] Cameras after org_camera_ids filter: ${filtered.length}`);
+          return NextResponse.json(filtered);
+        }
+      }
+    } catch (e) {
+      console.warn("[recordings/devices] Failed to apply org_camera_ids filter:", e);
+    }
 
     return NextResponse.json(cameras);
   } catch (error) {

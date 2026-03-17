@@ -42,6 +42,8 @@ export interface UserPublic {
   organizations?: Organization[]; // New: organizations the user belongs to
   organization?: Organization; // Single organization from /me
   privileges?: Privilege[]; // New: user's access privileges
+  // List of allowed camera IDs for this user's organization (if provided by external API)
+  org_camera_ids?: string[];
   is_active: boolean;
   created_at: Date | string;
   last_login?: Date | string | null;

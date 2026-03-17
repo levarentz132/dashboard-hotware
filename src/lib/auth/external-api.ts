@@ -2,7 +2,7 @@
 // Handles communication with external license API
 
 export const EXTERNAL_AUTH_API = {
-  URL: "http://108.136.167.58:3000", // Base URL: http://16.78.105.192:3000
+  URL: process.env.EXTERNAL_AUTH_API_URL, // Base URL: http://16.78.105.192:3000
   TIMEOUT: 10000, // 10 seconds
 };
 
@@ -144,9 +144,17 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<an
     } else {
       // Not JSON
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[External API] Error ${response.status} from ${endpoint}:`, errorText);
-        throw new Error(`API error ${response.status}: ${errorText || response.statusText}`);
+          const errorText = await response.text().catch(() => undefined);
+          console.error(`[External API] Error ${response.status} from ${endpoint}:`, errorText);
+
+          // Return structured error object so callers (login/session) can handle it gracefully.
+          return {
+            success: false,
+            message: (errorText && errorText.toString()) || response.statusText || `HTTP ${response.status}`,
+            error_code: `HTTP_${response.status}`,
+            status: response.status,
+            raw: errorText,
+          } as any;
       }
 
       // Return as text for public keys or other non-json responses
