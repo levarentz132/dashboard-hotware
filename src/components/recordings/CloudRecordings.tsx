@@ -285,6 +285,13 @@ export default function CloudRecordings() {
     return d ? String(d.id) : String(normalizedId);
   };
 
+  // Compute effective ids and filtered device list for rendering
+  const effectiveIdsForRender = getEffectiveOrgCameraIds();
+  const filteredDevices = Array.isArray(effectiveIdsForRender) && effectiveIdsForRender.length > 0
+    ? devices.filter((device) => effectiveIdsForRender.includes(normalizeId(device.id)))
+    : devices;
+  const hiddenCount = devices.length - filteredDevices.length;
+
   function handleSelectDevice(value: string) {
     console.log('[CloudRecordings] select attempt:', value);
     if (!value) {
@@ -568,43 +575,29 @@ export default function CloudRecordings() {
             {devices.length > 0 && (
               <div className="space-y-2">
                 <Label>Camera</Label>
-                <Select
-                  value={selectedDevice}
-                  onValueChange={handleSelectDevice}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a camera" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(() => {
-                      const effectiveIds = getEffectiveOrgCameraIds();
-                      console.log('[CloudRecordings] rendering device list, effective orgCameraIds:', effectiveIds);
-                      // If orgCameraIds are present, only include allowed devices in the Select
-                      const filtered = Array.isArray(effectiveIds) && effectiveIds.length > 0
-                        ? devices.filter((device) => effectiveIds.includes(normalizeId(device.id)))
-                        : devices;
-                      return filtered.map((device) => (
+                {filteredDevices.length > 0 ? (
+                  <Select
+                    value={selectedDevice}
+                    onValueChange={handleSelectDevice}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a camera" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredDevices.map((device) => (
                         <SelectItem key={device.id} value={normalizeId(device.id)}>
                           {device.name || device.id}
                         </SelectItem>
-                      ));
-                    })()}
-                  </SelectContent>
-                </Select>
-                {(() => {
-                  const effectiveIds = getEffectiveOrgCameraIds();
-                  const hiddenCount = Array.isArray(effectiveIds) && effectiveIds.length > 0
-                    ? devices.filter((d) => !effectiveIds.includes(normalizeId(d.id))).length
-                    : 0;
-                  if (hiddenCount > 0) {
-                    return (
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {hiddenCount} camera(s) hidden due to account restrictions
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                    {hiddenCount > 0
+                      ? `${hiddenCount} camera(s) hidden due to account restrictions`
+                      : "No cameras available in this system."}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
