@@ -132,8 +132,42 @@ export default function CloudRecordings() {
         if (resp.ok) {
           const data = await resp.json();
           const allowed = data?.user?.org_camera_ids ?? data?.user?.orgCameraIds ?? null;
-          if (Array.isArray(allowed)) setOrgCameraIds(allowed.map((id: any) => String(id).toLowerCase()));
-          else setOrgCameraIds(null);
+          // Normalize IDs: strip surrounding braces and lowercase
+          const normalizeId = (v: any) => String(v || "").replace(/[{}]/g, "").toLowerCase();
+          if (Array.isArray(allowed)) {
+            setOrgCameraIds(allowed.map((id: any) => normalizeId(id)));
+          } else {
+            // Fallback: check sessionStorage (AuthProvider may have stored it) or cookie
+            try {
+              if (typeof window !== 'undefined' && window.sessionStorage) {
+                const stored = window.sessionStorage.getItem('org_camera_ids');
+                if (stored) {
+                  const parsed = JSON.parse(stored);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    setOrgCameraIds(parsed.map((id: any) => normalizeId(id)));
+                    return;
+                  }
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            try {
+              const cookieVal = Cookies.get('org_camera_ids');
+              if (cookieVal) {
+                const parsed = JSON.parse(cookieVal);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  setOrgCameraIds(parsed.map((id: any) => normalizeId(id)));
+                  return;
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            setOrgCameraIds(null);
+          }
         } else {
           setOrgCameraIds(null);
         }
@@ -183,6 +217,103 @@ export default function CloudRecordings() {
     };
   };
 
+  const normalizeId = (v: any) => String(v || "").replace(/[{}]/g, "").toLowerCase();
+
+  const getEffectiveOrgCameraIds = () => {
+    // Prefer cookie (server-set) first, then in-memory state, then sessionStorage
+    try {
+      const cookieVal = Cookies.get('org_camera_ids');
+      if (cookieVal) {
+        console.log('[CloudRecordings] raw org_camera_ids cookie:', cookieVal);
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(cookieVal);
+        } catch (e1) {
+          try {
+            // Some server code URL-encodes the JSON; try decode
+            parsed = JSON.parse(decodeURIComponent(cookieVal));
+          } catch (e2) {
+            // If it's a plain non-JSON string (CSV), try to split
+            if (typeof cookieVal === 'string') {
+              parsed = cookieVal.split(/\s*,\s*/).map((s) => s.replace(/^"|"$/g, ''));
+            }
+          }
+        }
+
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const normalized = parsed.map((id: any) => normalizeId(id));
+          console.log('[CloudRecordings] parsed org_camera_ids cookie ->', normalized);
+          return normalized;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    try {
+      if (Array.isArray(orgCameraIds) && orgCameraIds.length > 0) return orgCameraIds;
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const stored = window.sessionStorage.getItem('org_camera_ids');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed.map((id: any) => normalizeId(id));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return null;
+  };
+
+  // Initialize orgCameraIds from cookie early so UI can render disabled items immediately
+  useEffect(() => {
+    try {
+      const cookieVal = Cookies.get('org_camera_ids');
+      if (cookieVal) {
+        const parsed = JSON.parse(cookieVal);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setOrgCameraIds(parsed.map((id: any) => normalizeId(id)));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+  const getOriginalDeviceId = (normalizedId: string) => {
+    const d = devices.find((dev: any) => normalizeId(dev.id) === String(normalizedId));
+    return d ? String(d.id) : String(normalizedId);
+  };
+
+  function handleSelectDevice(value: string) {
+    console.log('[CloudRecordings] select attempt:', value);
+    if (!value) {
+      setSelectedDevice("");
+      return;
+    }
+
+    // value will be the normalized id
+    const device = devices.find((d: any) => normalizeId(d.id) === String(value));
+    if (!device) {
+      setSelectedDevice(value);
+      return;
+    }
+
+    const idNorm = normalizeId(device.id);
+    const effectiveIds = getEffectiveOrgCameraIds();
+    const isDisabled = Array.isArray(effectiveIds) && effectiveIds.length > 0 && !effectiveIds.includes(idNorm);
+
+    if (isDisabled) {
+      console.log('[CloudRecordings] selection blocked by org_camera_ids (effective):', effectiveIds);
+      setError("You are not allowed to select this camera.");
+      return; // don't change selection
+    }
+
+    console.log('[CloudRecordings] selection allowed:', idNorm);
+    setError("");
+    setSelectedDevice(value);
+  }
+
   const loadDevices = async (systemId: string) => {
     if (!systemId) return;
 
@@ -198,11 +329,35 @@ export default function CloudRecordings() {
 
     try {
       const data = await fetchCloudDevices(systemId, getSourceAuth());
-      // If orgCameraIds is defined, filter devices to only allowed ones
-      let finalDevices = data;
-      if (orgCameraIds && Array.isArray(orgCameraIds) && orgCameraIds.length > 0) {
-        finalDevices = (data || []).filter((d: any) => orgCameraIds.includes(String(d.id).toLowerCase()));
-        if (finalDevices.length === 0) {
+      // Debug: log devices and match against orgCameraIds (normalized)
+      try {
+        const normalizeId = (v: any) => String(v || "").replace(/[{}]/g, "").toLowerCase();
+        console.log("[CloudRecordings] loadDevices raw devices:", data);
+        const effectiveIds = getEffectiveOrgCameraIds();
+        console.log("[CloudRecordings] effective orgCameraIds:", effectiveIds);
+        // Also log raw cookie again for clarity
+        try {
+          const rawCookie = Cookies.get('org_camera_ids');
+          console.log('[CloudRecordings] raw org_camera_ids cookie (loadDevices):', rawCookie);
+        } catch (e) {
+          /* ignore */
+        }
+        if (Array.isArray(data)) {
+          data.forEach((d: any) => {
+            const idNorm = normalizeId(d.id);
+            const allowed = Array.isArray(effectiveIds) ? effectiveIds.includes(idNorm) : null;
+            console.log(`[CloudRecordings] device ${d.id} (normalized ${idNorm}) -> allowed=${allowed}`);
+          });
+        }
+      } catch (e) {
+        console.warn('[CloudRecordings] Failed to log device/orgCameraIds mapping', e);
+      }
+      // Keep all devices in the list but mark ones not in orgCameraIds as disabled.
+      setDevices(data || []);
+      const effectiveIdsForCheck = getEffectiveOrgCameraIds();
+      if (Array.isArray(effectiveIdsForCheck) && effectiveIdsForCheck.length > 0) {
+        const allowedExists = (data || []).some((d: any) => effectiveIdsForCheck.includes(String(d.id).replace(/[{}]/g, "").toLowerCase()));
+        if (!allowedExists) {
           setError("No allowed cameras available for your account in this system.");
         }
       } else {
@@ -210,8 +365,6 @@ export default function CloudRecordings() {
           setError("No cameras found in this system. The system may be offline or have no cameras.");
         }
       }
-
-      setDevices(finalDevices);
     } catch (err: any) {
       if (err instanceof CloudAuthError || err?.requiresAuth) {
         setError("Authentication required for selected source. Please check source username and password.");
@@ -245,7 +398,7 @@ export default function CloudRecordings() {
 
       const data = await fetchRecordedTimePeriods(
         selectedSystem,
-        selectedDevice,
+        getOriginalDeviceId(selectedDevice),
         startMs,
         endMs,
         getSourceAuth()
@@ -272,7 +425,7 @@ export default function CloudRecordings() {
   const handleDownload = (startTimeMs: number, durationMs: number) => {
     const params = new URLSearchParams({
       systemId: selectedSystem,
-      deviceId: selectedDevice,
+      deviceId: getOriginalDeviceId(selectedDevice),
       startTime: String(startTimeMs),
       endTime: String(startTimeMs + durationMs),
     });
@@ -417,19 +570,41 @@ export default function CloudRecordings() {
                 <Label>Camera</Label>
                 <Select
                   value={selectedDevice}
-                  onValueChange={setSelectedDevice}
+                  onValueChange={handleSelectDevice}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a camera" />
                   </SelectTrigger>
                   <SelectContent>
-                    {devices.map((device) => (
-                      <SelectItem key={device.id} value={device.id}>
-                        {device.name || device.id}
-                      </SelectItem>
-                    ))}
+                    {(() => {
+                      const effectiveIds = getEffectiveOrgCameraIds();
+                      console.log('[CloudRecordings] rendering device list, effective orgCameraIds:', effectiveIds);
+                      // If orgCameraIds are present, only include allowed devices in the Select
+                      const filtered = Array.isArray(effectiveIds) && effectiveIds.length > 0
+                        ? devices.filter((device) => effectiveIds.includes(normalizeId(device.id)))
+                        : devices;
+                      return filtered.map((device) => (
+                        <SelectItem key={device.id} value={normalizeId(device.id)}>
+                          {device.name || device.id}
+                        </SelectItem>
+                      ));
+                    })()}
                   </SelectContent>
                 </Select>
+                {(() => {
+                  const effectiveIds = getEffectiveOrgCameraIds();
+                  const hiddenCount = Array.isArray(effectiveIds) && effectiveIds.length > 0
+                    ? devices.filter((d) => !effectiveIds.includes(normalizeId(d.id))).length
+                    : 0;
+                  if (hiddenCount > 0) {
+                    return (
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {hiddenCount} camera(s) hidden due to account restrictions
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             )}
           </CardContent>

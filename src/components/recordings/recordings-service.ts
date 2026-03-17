@@ -104,7 +104,14 @@ export async function fetchCloudDevices(
     }
 
     const data = await response.json();
-    return Array.isArray(data) ? data : [];
+    // Debug: log device response for troubleshooting
+    try {
+      console.log("[recordings-service] fetchCloudDevices response:", Array.isArray(data) ? data : data?.devices || data);
+    } catch (e) {
+      console.log("[recordings-service] fetchCloudDevices response (failed to stringify)");
+    }
+
+    return Array.isArray(data) ? data : (data?.devices || []);
   } catch (error) {
     console.error("[recordings-service] fetchCloudDevices error:", error);
     throw error;

@@ -44,7 +44,20 @@ export async function GET(request: NextRequest) {
     }
 
     const devices = await response.json();
+    // Debug: log raw response (truncated) and sample IDs for matching
+    try {
+      const asString = JSON.stringify(devices);
+      console.log(`[recordings/devices] Raw response (truncated): ${asString.slice(0, 2000)}`);
+    } catch (e) {
+      console.log('[recordings/devices] Raw response present but failed to stringify');
+    }
     console.log(`[recordings/devices] Raw devices count: ${Array.isArray(devices) ? devices.length : 'not array'}`);
+    try {
+      const sample = (Array.isArray(devices) ? devices : devices?.devices || []).slice(0, 10).map((d: any) => ({ id: d.id, name: d.name, physicalId: d.physicalId }));
+      console.log('[recordings/devices] Sample device items:', sample);
+    } catch (e) {
+      console.log('[recordings/devices] Failed to extract sample device items');
+    }
     
     const normalized = normalizeNxDevices(devices);
     console.log(`[recordings/devices] Normalized devices count: ${normalized.length}`);
