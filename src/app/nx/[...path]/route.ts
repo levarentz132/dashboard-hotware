@@ -20,7 +20,9 @@ async function handleRequest(request: NextRequest, method: string) {
         path = '/' + path;
     }
 
-    const targetUrl = `https://localhost:7001${path}${url.search}`;
+    const host = request.headers.get('x-vms-host') || 'localhost';
+    const port = request.headers.get('x-vms-port') || '7001';
+    const targetUrl = `https://${host}:${port}${path}${url.search}`;
 
     try {
         console.log(`[NX Proxy] Proxying ${method} ${path} to ${targetUrl}`);

@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle } from "lucide-react";
 import { NxAuthentication } from "@/components/auth/nx-authentication";
 import Cookies from "js-cookie";
+import VmsSettingsPopover from "@/components/common/VmsSettingsPopover";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -94,8 +95,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6 relative overflow-hidden">      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-100/30 rounded-full blur-[120px] pointer-events-none" />
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6 relative overflow-hidden">
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-100/30 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-100/30 rounded-full blur-[120px] pointer-events-none" />
+
+      {/* Top-right VMS Settings button */}
+      <div className="absolute top-4 right-4 z-50">
+        <VmsSettingsPopover />
+      </div>
 
       <NxAuthentication />
 

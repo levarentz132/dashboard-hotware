@@ -34,7 +34,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const localUrl = `https://127.0.0.1:7001/api/createEvent?timestamp=${encodeURIComponent(timestamp)}&caption=${encodeURIComponent(caption)}`;
+    const vmsHost = request.headers.get('x-vms-host') || '127.0.0.1';
+    const vmsPort = request.headers.get('x-vms-port') || '7001';
+    const localUrl = `https://${vmsHost}:${vmsPort}/api/createEvent?timestamp=${encodeURIComponent(timestamp)}&caption=${encodeURIComponent(caption)}`;
 
     console.log(`[Create Event] Creating event for ${systemName}: ${caption}`);
 

@@ -25,6 +25,41 @@ export interface CloudApiError {
   status?: number;
 }
 
+/**
+ * Helper to get cloud credentials from request context
+ */
+export function getCloudCredentials(request: NextRequest) {
+  const dynamicConfig = getDynamicConfig(request);
+  const username = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
+  let password = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+
+  // Handle encrypted password if present
+  const encrypted = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED;
+  if (encrypted && typeof window === 'undefined') {
+    try {
+      const crypto = require('crypto');
+      const os = require('os');
+      const machineId = os.hostname() + os.platform() + os.arch();
+      const key = crypto.createHash('sha256').update(machineId).digest();
+      const parts = encrypted.split(':');
+      if (parts.length === 3) {
+        const iv = Buffer.from(parts[0], 'hex');
+        const authTag = Buffer.from(parts[1], 'hex');
+        const cipherText = parts[2];
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(authTag);
+        let decrypted = decipher.update(cipherText, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        password = decrypted;
+      }
+    } catch (e) {
+      console.warn('[Cloud Credentials] Decryption failed, fallback to plain text');
+    }
+  }
+
+  return { username, password };
+}
+
 export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams, request?: NextRequest, systemName?: string): string {
   const id = (systemId || API_CONFIG.systemId)?.trim().toLowerCase();
   const cleanId = id?.replace(/[{}]/g, "");
@@ -63,8 +98,13 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
 
   if (isDirectAddress || isConfiguredLocal) {
     // Resolve host and port
-    let host = isDirectAddress ? cleanId : (API_CONFIG.serverHost || 'localhost');
-    let port = API_CONFIG.serverPort || '7001';
+    // Read from localStorage dynamically (on client) because API_CONFIG is a module-level
+    // snapshot that never updates after the initial import.
+    const storedHost = typeof window !== 'undefined' ? localStorage.getItem('nx-server-host') : null;
+    const storedPort = typeof window !== 'undefined' ? localStorage.getItem('nx-server-port') : null;
+
+    let host = isDirectAddress ? cleanId : (storedHost || API_CONFIG.serverHost || 'localhost');
+    let port = storedPort || API_CONFIG.serverPort || '7001';
 
     // If host already contains a port, don't override it
     if (host.includes(':')) {

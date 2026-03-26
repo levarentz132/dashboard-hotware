@@ -172,6 +172,20 @@ class NxWitnessAPI {
       headers['X-Electron-Cloud-Token'] = extConfig.NX_CLOUD_TOKEN || '';
     }
 
+    // Add VMS target headers for the proxy.
+    // Always read directly from localStorage so the latest saved values are used
+    // without requiring a page reload (API_CONFIG is only a snapshot from module load time).
+    const vmsHost =
+      (typeof window !== 'undefined' && localStorage.getItem('nx-server-host')) ||
+      API_CONFIG.serverHost ||
+      'localhost';
+    const vmsPort =
+      (typeof window !== 'undefined' && localStorage.getItem('nx-server-port')) ||
+      API_CONFIG.serverPort ||
+      '7001';
+    headers['x-vms-host'] = vmsHost;
+    headers['x-vms-port'] = vmsPort;
+
     return headers;
   }
 

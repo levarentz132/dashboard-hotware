@@ -330,9 +330,11 @@ export async function POST(request: NextRequest) {
         }
 
         if (vmsUsername && vmsPassword) {
+          const vmsHost = request.headers.get('x-vms-host') || 'localhost';
+          const vmsPort = request.headers.get('x-vms-port') || '7001';
           const relayLoginUrl = system_id
             ? `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`
-            : `https://localhost:7001/rest/v3/login/sessions`; // Fallback for local
+            : `https://${vmsHost}:${vmsPort}/rest/v3/login/sessions`; // Fallback for local
 
           console.log(`[Dual-Login] Attempting relay login for ${identificationId} with VMS user: ${vmsUsername}`);
 

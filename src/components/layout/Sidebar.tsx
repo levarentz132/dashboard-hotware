@@ -70,6 +70,7 @@ const navigationItems: NavItem[] = [
   // { id: "automation", label: "Automation", icon: Cpu, module: "automation" },
   { id: "users", label: "User Management", icon: Users, module: "user_management" },
   { id: "subaccounts", label: "Role Management", icon: UserPlus, module: "user_management" },
+  { id: "settings", label: "Service Settings", icon: Settings, module: "dashboard" },
 ];
 
 export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose, hideHeader = false, className, disableCollapse = false }: SidebarProps) {
@@ -142,7 +143,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     if (isAdmin(user)) return true;
 
     // Explicitly hide sensitive management items from non-admins
-    if (item.id === 'debug' || item.id === 'subaccounts') return false;
+    if (item.id === 'debug' || item.id === 'subaccounts' || item.id === 'settings') return false;
 
     // If item has a module requirement, check privileges
     if (item.module) {

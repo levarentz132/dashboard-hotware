@@ -126,6 +126,11 @@ export function getDynamicConfig(request?: Request | NextRequest) {
   return null;
 }
 
+const getLocalSetting = (key: string, defaultValue: string | undefined) => {
+  if (typeof window === 'undefined') return defaultValue;
+  return localStorage.getItem(key) || defaultValue;
+};
+
 // Nx Witness API Configuration
 export const API_CONFIG = {
   // Use Next.js API proxy to avoid CORS issues
@@ -139,8 +144,8 @@ export const API_CONFIG = {
   cloudPasswordHash: extConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD,
   password: process.env.NEXT_PUBLIC_NX_PASSWORD,
   systemId: extConfig?.NEXT_PUBLIC_NX_SYSTEM_ID || process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
-  serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST,
-  serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT,
+  serverHost: getLocalSetting('nx-server-host', process.env.NEXT_PUBLIC_NX_SERVER_HOST || 'localhost'),
+  serverPort: getLocalSetting('nx-server-port', process.env.NEXT_PUBLIC_NX_SERVER_PORT || '7001'),
   // Fallback URLs to try (now through proxy)
   fallbackURLs: ["/api/nx"],
 };

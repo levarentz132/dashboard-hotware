@@ -109,11 +109,15 @@ export default function AuditLog() {
 
     return headers;
   }, []);
+  const localHost = API_CONFIG.serverHost || '127.0.0.1';
+  const localPort = API_CONFIG.serverPort || '7001';
+  const localId = `${localHost}:${localPort}`;
+
   // Cloud systems state - Initialized with local system (Local-First)
-  // Using 127.0.0.1:7001 ensures the proxy targets the local server directly via HTTPS
+  // Using the configured host/port ensures the proxy targets the local server directly
   const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([
     {
-      id: "127.0.0.1:7001",
+      id: localId,
       name: "Local System",
       stateOfHealth: "online",
       accessRole: "owner"
@@ -121,7 +125,7 @@ export default function AuditLog() {
   ]);
 
   const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>({
-    id: "127.0.0.1:7001",
+    id: localId,
     name: "Local System",
     stateOfHealth: "online",
     accessRole: "owner"
@@ -179,9 +183,9 @@ export default function AuditLog() {
           // Merge: Start with fetched systems
           let systems = [...fetchedSystems];
 
-          // Ensure local system (127.0.0.1:7001) is always there
-          const localEntry = prev.find(s => s.id === "127.0.0.1:7001") || prev[0];
-          if (!systems.find(s => s.id === "127.0.0.1:7001" || s.name === "Local System")) {
+          // Ensure local system is always there
+          const localEntry = prev.find(s => s.id === localId) || prev[0];
+          if (!systems.find(s => s.id === localId || s.name === "Local System")) {
             systems.unshift(localEntry);
           }
 

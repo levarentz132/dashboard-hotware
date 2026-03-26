@@ -18,6 +18,7 @@ import Automation from "@/components/automation/Automation";
 import AuditLog from "@/components/audits/AuditLog";
 import UserManagement from "@/components/users/UserManagement";
 import SubAccountManagement from "@/components/rolemanagement/RoleManagement";
+import VmsSettings from "@/components/common/VmsSettings";
 import Link from "next/link";
 import { ArrowRight, Camera, Eye, Shield, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -34,6 +35,7 @@ const SECTION_MODULE_MAP: Record<string, string> = {
   users: "user_management",
   subaccounts: "user_management",
   automation: "automation",
+  settings: "dashboard",
 };
 
 function PageContent() {
@@ -60,7 +62,7 @@ function PageContent() {
       const requiredModule = SECTION_MODULE_MAP[section];
 
       // Explicitly block non-admins from sensitive management sections
-      if (section === 'debug' || section === 'subaccounts') {
+      if (section === 'debug' || section === 'subaccounts' || section === 'settings') {
         setActiveSection("unauthorized");
         return;
       }
@@ -112,6 +114,8 @@ function PageContent() {
         return <UserManagement />;
       case "subaccounts":
         return <SubAccountManagement />;
+      case "settings":
+        return <VmsSettings />;
       case "unauthorized":
         return (
           <div className="h-full flex flex-col items-center justify-center p-8 bg-white rounded-2xl shadow-sm border border-slate-200">
