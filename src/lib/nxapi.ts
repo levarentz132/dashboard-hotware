@@ -32,6 +32,10 @@ export interface NxCamera {
     password: string;
   };
   logicalId?: string;
+  schedule?: {
+    isEnabled: boolean;
+    tasks: any[];
+  };
 }
 
 export interface NxEvent {
@@ -416,6 +420,14 @@ class NxWitnessAPI {
     }
   }
 
+  async updateDevice(id: string, deviceData: any): Promise<any> {
+    const normalizedId = id.replace(/[{}]/g, "");
+    return await this.apiRequest<any>(`/devices/${normalizedId}`, {
+      method: "PATCH",
+      body: JSON.stringify(deviceData),
+    });
+  }
+
   // System methods
   async getSystemInfo(): Promise<NxSystemInfo | null> {
     try {
@@ -563,7 +575,7 @@ class NxWitnessAPI {
       // Check if it's a 404 - server doesn't support this endpoint
       const errorMsg = String(error);
       const is404 = errorMsg.includes('404') || errorMsg.includes('Not Found');
-      
+
       if (is404) {
         console.debug("[createGenericEvent] v4 endpoint not available, trying legacy...");
       } else {
@@ -586,7 +598,7 @@ class NxWitnessAPI {
       } catch (fallbackError) {
         const fallbackMsg = String(fallbackError);
         const isFallback404 = fallbackMsg.includes('404') || fallbackMsg.includes('Not Found');
-        
+
         if (isFallback404) {
           // Server doesn't support generic events - this is expected for some deployments
           console.debug("[createGenericEvent] Server does not support generic events API");

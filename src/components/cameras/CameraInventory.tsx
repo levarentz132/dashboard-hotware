@@ -32,6 +32,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { isAdmin } from "@/lib/auth";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
+import RecordingScheduleDialog from "./RecordingScheduleDialog";
 
 
 interface CloudSystem {
@@ -82,6 +83,9 @@ export default function CameraInventory() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterVendor, setFilterVendor] = useState<string>("all");
+
+  const [selectedCameraForSchedule, setSelectedCameraForSchedule] = useState<CameraDevice | null>(null);
+  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
 
   const systemId = selectedSystemId;
 
@@ -239,10 +243,10 @@ export default function CameraInventory() {
   const isLoadingContent = loading;
 
   const camerasBySystem = useMemo(() => {
-    return dataBySystem.map(sys => ({
+    return (dataBySystem || []).map(sys => ({
       systemId: sys.systemId,
       systemName: sys.systemName,
-      cameras: sys.items,
+      cameras: sys.items || [],
       stateOfHealth: sys.stateOfHealth
     }));
   }, [dataBySystem]);
@@ -283,9 +287,13 @@ export default function CameraInventory() {
     );
   };
 
+  const handleCameraClick = (camera: CameraDevice) => {
+    setSelectedCameraForSchedule(camera);
+    setIsScheduleDialogOpen(true);
+  };
 
   const displayCameras = useMemo(() => {
-    return camerasBySystem.flatMap((sys) => sys.cameras);
+    return (camerasBySystem || []).flatMap((sys: any) => (sys.cameras || []).map((c: any) => ({ ...c, systemId: sys.systemId })));
   }, [camerasBySystem]);
 
   // Get unique vendors for filter
@@ -681,7 +689,8 @@ export default function CameraInventory() {
                                   {filteredSystemCameras.map((camera) => (
                                     <div
                                       key={`${systemData.systemId}-${camera.id}`}
-                                      className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px]"
+                                      onClick={() => handleCameraClick(camera)}
+                                      className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px] cursor-pointer"
                                     >
                                       {/* Header */}
                                       <div className="flex items-start justify-between mb-2">
@@ -761,7 +770,11 @@ export default function CameraInventory() {
             {!loading && viewMode === "grid" && filteredCameras.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 p-3 md:p-6">
                 {filteredCameras.map((camera) => (
-                  <div key={camera.id} className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white">
+                  <div
+                    key={camera.id}
+                    onClick={() => handleCameraClick(camera)}
+                    className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer"
+                  >
                     <div className="flex items-start justify-between mb-2 md:mb-3">
                       <div className="flex items-center space-x-2 min-w-0 flex-1">
                         <Camera className="w-4 h-4 md:w-5 md:h-5 text-gray-600 flex-shrink-0" />
@@ -811,7 +824,11 @@ export default function CameraInventory() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredCameras.map((camera) => (
-                        <tr key={camera.id} className="hover:bg-gray-50">
+                        <tr
+                          key={camera.id}
+                          onClick={() => handleCameraClick(camera)}
+                          className="hover:bg-gray-50 cursor-pointer"
+                        >
                           <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center">
                               <Camera className="w-5 h-5 text-gray-600 mr-3" />
@@ -846,7 +863,11 @@ export default function CameraInventory() {
                 {/* Mobile Card View for List Mode */}
                 <div className="md:hidden space-y-3 p-3">
                   {filteredCameras.map((camera) => (
-                    <div key={camera.id} className="bg-white border rounded-lg p-3">
+                    <div
+                      key={camera.id}
+                      onClick={() => handleCameraClick(camera)}
+                      className="bg-white border rounded-lg p-3 cursor-pointer"
+                    >
                       <div className="flex items-start justify-between">
                         <div className="flex items-center space-x-2 min-w-0 flex-1">
                           <Camera className="w-4 h-4 text-gray-600 flex-shrink-0" />
@@ -883,6 +904,16 @@ export default function CameraInventory() {
           </div>
         </>
       )}
+
+      <RecordingScheduleDialog
+        open={isScheduleDialogOpen}
+        onOpenChange={setIsScheduleDialogOpen}
+        camera={selectedCameraForSchedule}
+        onSuccess={() => {
+          if (viewMode === "cloud") refetchSync();
+          else refetchSingle();
+        }}
+      />
     </div>
   );
 }
