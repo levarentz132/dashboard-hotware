@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
     Dialog,
     DialogContent,
@@ -9,7 +9,14 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle, Clock } from "lucide-react";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Loader2, AlertCircle, Clock, Video, Activity, Zap } from "lucide-react";
 import nxAPI from "@/lib/nxapi";
 
 interface RecordingScheduleDialogProps {
@@ -19,8 +26,23 @@ interface RecordingScheduleDialogProps {
     onSuccess: () => void;
 }
 
+type RecordingType = "always" | "motion" | "motionLow";
+
+interface ScheduleCell {
+    type: RecordingType;
+    fps: string;
+    quality: string;
+}
+
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+const RECORDING_TYPES = [
+    { id: "always", label: "Always", color: "bg-green-600", border: "border-green-400" },
+    { id: "motion", label: "Motion", color: "bg-yellow-500", border: "border-yellow-300" },
+    { id: "motionLow", label: "Motion + LowRes", color: "bg-orange-500", border: "border-orange-300" },
+];
+
 
 export default function RecordingScheduleDialog({
     open,
@@ -29,9 +51,15 @@ export default function RecordingScheduleDialog({
     onSuccess,
 }: RecordingScheduleDialogProps) {
     const [isEnabled, setIsEnabled] = useState(false);
-    const [schedule, setSchedule] = useState<boolean[][]>(
-        Array.from({ length: 7 }, () => Array(24).fill(false))
+    const [schedule, setSchedule] = useState<(ScheduleCell | null)[][]>(
+        Array.from({ length: 7 }, () => Array(24).fill(null))
     );
+
+    // Brush settings
+    const [activeType, setActiveType] = useState<RecordingType>("always");
+    const [globalFps, setGlobalFps] = useState("15");
+    const [globalQuality, setGlobalQuality] = useState("high");
+
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -39,13 +67,12 @@ export default function RecordingScheduleDialog({
     // Selection state
     const [dragStart, setDragStart] = useState<{ d: number; h: number } | null>(null);
     const [dragCurrent, setDragCurrent] = useState<{ d: number; h: number } | null>(null);
-    const [dragValue, setDragValue] = useState(false);
+    const [isRemoving, setIsRemoving] = useState(false);
 
-    // Stop dragging when mouse is released anywhere
+    // Commit selection
     useEffect(() => {
         const handleMouseUp = () => {
             if (dragStart && dragCurrent) {
-                // Commit selection
                 const minD = Math.min(dragStart.d, dragCurrent.d);
                 const maxD = Math.max(dragStart.d, dragCurrent.d);
                 const minH = Math.min(dragStart.h, dragCurrent.h);
@@ -55,7 +82,11 @@ export default function RecordingScheduleDialog({
                     const next = prev.map(row => [...row]);
                     for (let d = minD; d <= maxD; d++) {
                         for (let h = minH; h <= maxH; h++) {
-                            next[d][h] = dragValue;
+                            next[d][h] = isRemoving ? null : {
+                                type: activeType,
+                                fps: globalFps,
+                                quality: globalQuality
+                            };
                         }
                     }
                     return next;
@@ -69,9 +100,9 @@ export default function RecordingScheduleDialog({
             window.addEventListener("mouseup", handleMouseUp);
             return () => window.removeEventListener("mouseup", handleMouseUp);
         }
-    }, [dragStart, dragCurrent, dragValue]);
+    }, [dragStart, dragCurrent, isRemoving, activeType, globalFps, globalQuality]);
 
-    // Fetch full camera details with schedule on open
+    // Load from VMS
     useEffect(() => {
         if (camera && open) {
             const fetchDetails = async () => {
@@ -80,30 +111,37 @@ export default function RecordingScheduleDialog({
                 try {
                     const originalSystemId = nxAPI.getSystemId();
                     if (camera.systemId) nxAPI.setSystemId(camera.systemId);
-
                     const details = await nxAPI.getCameraById(camera.id);
-
                     if (camera.systemId) nxAPI.setSystemId(originalSystemId);
 
                     if (details) {
                         setIsEnabled(details.schedule?.isEnabled ?? false);
-                        const newSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
-
+                        const newSchedule = Array.from({ length: 7 }, () => Array<ScheduleCell | null>(24).fill(null));
                         const tasks = details.schedule?.tasks || [];
+
                         tasks.forEach((task: any) => {
+                            let type: RecordingType | null = null;
                             if (task.recordingType === "always" || task.recordingType === "alwaysRecord") {
-                                const rawDay = Number(task.dayOfWeek);
-                                const isSun = rawDay === 0 || rawDay === 7;
-                                const dIdx = isSun ? 0 : rawDay;
+                                type = "always";
+                            } else if (task.recordingType === "motionOnly" || (task.recordingType === "metadataOnly" && task.metadataTypes?.includes("motion"))) {
+                                type = "motion";
+                            } else if (task.recordingType === "motionAndLowRes" || (task.recordingType === "metadataAndLowQuality" && task.metadataTypes?.includes("motion"))) {
+                                type = "motionLow";
+                            }
 
-                                if (dIdx >= 0 && dIdx < 7) {
-                                    for (let h = 0; h < 24; h++) {
-                                        const hStart = h * 3600;
-                                        const hEnd = (h + 1) * 3600;
+                            if (type) {
+                                const day = (task.dayOfWeek === 0 || task.dayOfWeek === 7) ? 0 : task.dayOfWeek;
+                                const cell: ScheduleCell = {
+                                    type,
+                                    fps: (task.fps || 15).toString(),
+                                    quality: task.streamQuality || "high"
+                                };
 
-                                        if (task.startTime < hEnd && task.endTime > hStart) {
-                                            newSchedule[dIdx][h] = true;
-                                        }
+                                for (let h = 0; h < 24; h++) {
+                                    const hStart = h * 3600;
+                                    const hEnd = (h + 1) * 3600;
+                                    if (task.startTime < hEnd && task.endTime > hStart) {
+                                        if (day < 7) newSchedule[day][h] = cell;
                                     }
                                 }
                             }
@@ -111,7 +149,6 @@ export default function RecordingScheduleDialog({
                         setSchedule(newSchedule);
                     }
                 } catch (err) {
-                    console.error("Failed to fetch camera details:", err);
                     setError("Could not load camera settings.");
                 } finally {
                     setLoading(false);
@@ -121,17 +158,38 @@ export default function RecordingScheduleDialog({
         }
     }, [camera, open]);
 
+    const toggleDay = (day: number) => {
+        const anyOff = schedule[day].some(v => v?.type !== activeType);
+        setSchedule(prev => {
+            const next = [...prev];
+            next[day] = Array(24).fill(anyOff ? { type: activeType, fps: globalFps, quality: globalQuality } : null);
+            return next;
+        });
+    };
+
+    const toggleHour = (hour: number) => {
+        const anyOff = schedule.some(row => row[hour]?.type !== activeType);
+        setSchedule(prev => prev.map(row => {
+            const nextRow = [...row];
+            nextRow[hour] = anyOff ? { type: activeType, fps: globalFps, quality: globalQuality } : null;
+            return nextRow;
+        }));
+    };
+
+    const toggleAll = () => {
+        const anyEmpty = schedule.some(row => row.some(v => v === null));
+        setSchedule(Array.from({ length: 7 }, () => Array(24).fill(anyEmpty ? { type: activeType, fps: globalFps, quality: globalQuality } : null)));
+    };
+
     const onMouseDown = (day: number, hour: number) => {
-        const newValue = !schedule[day][hour];
-        setDragValue(newValue);
+        const clickingCurrent = schedule[day][hour]?.type === activeType;
+        setIsRemoving(clickingCurrent);
         setDragStart({ d: day, h: hour });
         setDragCurrent({ d: day, h: hour });
     };
 
     const onMouseEnter = (day: number, hour: number) => {
-        if (dragStart) {
-            setDragCurrent({ d: day, h: hour });
-        }
+        if (dragStart) setDragCurrent({ d: day, h: hour });
     };
 
     const isInDragRange = (day: number, hour: number) => {
@@ -143,71 +201,52 @@ export default function RecordingScheduleDialog({
         return day >= minD && day <= maxD && hour >= minH && hour <= maxH;
     };
 
-    const toggleDay = (day: number) => {
-        const allOn = schedule[day].every(v => v);
-        setSchedule(prev => {
-            const next = [...prev];
-            next[day] = Array(24).fill(!allOn);
-            return next;
-        });
-    };
-
-    const toggleHour = (hour: number) => {
-        const allOn = schedule.every(row => row[hour]);
-        setSchedule(prev => prev.map(row => {
-            const nextRow = [...row];
-            nextRow[hour] = !allOn;
-            return nextRow;
-        }));
-    };
-
-    const toggleAll = () => {
-        const anyOff = schedule.some(row => row.some(v => !v));
-        setSchedule(Array.from({ length: 7 }, () => Array(24).fill(anyOff)));
-    };
-
     const handleSave = async () => {
         if (!camera) return;
         setIsSaving(true);
         setError(null);
 
         const tasks: any[] = [];
+
         schedule.forEach((dayRow, dayIndex) => {
             let start: number | null = null;
-            dayRow.forEach((isOn, hourIndex) => {
-                if (isOn && start === null) start = hourIndex;
-                else if (!isOn && start !== null) {
-                    tasks.push({
-                        startTime: (start * 3600) + (dayIndex === 0 ? -3600 : 0),
-                        endTime: (hourIndex * 3600) + (dayIndex === 0 ? -3600 : 0),
-                        dayOfWeek: dayIndex,
-                        recordingType: "always",
-                        streamQuality: "high",
-                        fps: 15
-                    });
-                    start = null;
+            let currentProps: string | null = null; // Stringified cell properties to detect changes
+
+            const finishTask = (endHour: number, props: string) => {
+                if (start === null) return;
+                const cell = JSON.parse(props) as ScheduleCell;
+
+                let vmsType = "always";
+                let metadata = "none";
+                if (cell.type === "motion") { vmsType = "metadataOnly"; metadata = "motion"; }
+                else if (cell.type === "motionLow") { vmsType = "metadataAndLowQuality"; metadata = "motion"; }
+
+                tasks.push({
+                    startTime: (start * 3600) + (dayIndex === 0 && start === 0 ? -3600 : 0),
+                    endTime: (dayIndex === 0 && endHour === 24) ? 82800 : (endHour * 3600),
+                    dayOfWeek: dayIndex,
+                    recordingType: vmsType,
+                    metadataTypes: metadata,
+                    streamQuality: cell.quality,
+                    fps: parseInt(cell.fps),
+                });
+            };
+
+            dayRow.forEach((cell, hourIndex) => {
+                const props = cell ? JSON.stringify(cell) : null;
+                if (props !== currentProps) {
+                    if (currentProps !== null) finishTask(hourIndex, currentProps);
+                    start = cell !== null ? hourIndex : null;
+                    currentProps = props;
                 }
             });
-            if (start !== null) {
-                tasks.push({
-                    startTime: (start * 3600) + (dayIndex === 0 ? -3600 : 0),
-                    endTime: (dayIndex === 0 ? 86400 - 3600 : 86400),
-                    dayOfWeek: dayIndex,
-                    recordingType: "always",
-                    streamQuality: "high",
-                    fps: 15
-                });
-            }
+            if (currentProps !== null) finishTask(24, currentProps);
         });
 
         try {
             const originalSystemId = nxAPI.getSystemId();
             if (camera.systemId) nxAPI.setSystemId(camera.systemId);
-
-            await nxAPI.updateDevice(camera.id, {
-                schedule: { isEnabled, tasks }
-            });
-
+            await nxAPI.updateDevice(camera.id, { schedule: { isEnabled, tasks } });
             if (camera.systemId) nxAPI.setSystemId(originalSystemId);
             onSuccess();
             onOpenChange(false);
@@ -220,7 +259,7 @@ export default function RecordingScheduleDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-[80%] bg-[#0d1117] text-white border-[#30363d] p-0 overflow-hidden select-none">
+            <DialogContent className="max-w-[80%] bg-[#0d1117] text-white border-[#30363d] p-0 overflow-hidden select-none flex flex-col">
                 <style dangerouslySetInnerHTML={{
                     __html: `
           .dark-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -229,7 +268,7 @@ export default function RecordingScheduleDialog({
           .dark-scrollbar::-webkit-scrollbar-thumb:hover { background: #484f58; }
         `}} />
 
-                <DialogHeader className="p-6 pb-2 border-b border-[#30363d]">
+                <DialogHeader className="p-6 pb-2 border-b border-[#30363d] shrink-0">
                     <DialogTitle className="flex items-center justify-between text-xl">
                         <div className="flex items-center gap-3">
                             <Clock className="w-5 h-5 text-blue-400" />
@@ -242,7 +281,7 @@ export default function RecordingScheduleDialog({
                     </div>
                 </DialogHeader>
 
-                <div className="p-6 max-h-[75vh] overflow-y-auto dark-scrollbar">
+                <div className="p-6 overflow-y-auto dark-scrollbar flex-grow">
                     {loading ? (
                         <div className="py-20 flex flex-col items-center gap-3">
                             <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -257,75 +296,56 @@ export default function RecordingScheduleDialog({
                                 </div>
                             )}
 
-                            {/* Toggle Section */}
+                            {/* Status & Toggle */}
                             <div className="flex items-center justify-between mb-4 px-1">
                                 <div className="flex items-center gap-2">
                                     <div className={`w-2 h-2 rounded-full ${isEnabled ? "bg-green-500 animate-pulse" : "bg-gray-500"}`} />
-                                    <span className="text-sm font-medium text-gray-300">Recording Status</span>
+                                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-tighter">Recording Status</span>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <span className="text-sm font-medium text-gray-400">Recording Enable</span>
+                                    <span className="text-xs font-semibold text-gray-400 tracking-tighter uppercase">Recording Enable</span>
                                     <button
                                         onClick={() => setIsEnabled(!isEnabled)}
-                                        className={`w-14 h-7 rounded-full relative transition-colors duration-300 shadow-inner outline-none focus:ring-2 focus:ring-blue-500/20 border-2 ${isEnabled ? "bg-green-500 border-green-400/50" : "bg-[#2d333b] border-[#484f58]"}`}
+                                        className={`w-14 h-7 rounded-full relative transition-colors duration-300 border-2 ${isEnabled ? "bg-green-500 border-green-400/50" : "bg-[#2d333b] border-[#484f58]"}`}
                                     >
                                         <div
-                                            className="absolute left-[2px] top-1/2 -translate-y-1/2 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-300"
+                                            className="absolute left-[2px] top-1/2 -translate-y-1/2 w-5 h-5 bg-white rounded-full transition-transform duration-300 shadow"
                                             style={{ transform: `translateY(-50%) translateX(${isEnabled ? '28px' : '0px'})` }}
                                         />
                                     </button>
                                 </div>
                             </div>
 
-                            {/* Grid Section */}
+                            {/* Grid */}
                             <div className="bg-[#161b22] border border-[#30363d] rounded overflow-hidden">
                                 <div className="overflow-x-auto dark-scrollbar">
-                                    <div className="grid grid-cols-[80px_repeat(24,minmax(32px,1fr))] bg-[#30363d] gap-x-px min-w-[900px]">
-                                        {/* Header Row */}
-                                        <button
-                                            onClick={toggleAll}
-                                            className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold text-center hover:bg-gray-800 border-b border-[#30363d] z-10 sticky top-0"
-                                        >
-                                            ALL
-                                        </button>
+                                    <div className="grid grid-cols-[80px_repeat(24,minmax(40px,1fr))] bg-[#30363d] gap-px min-w-[1000px]">
+                                        <button onClick={toggleAll} className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold border-b border-[#30363d] z-10 sticky top-0">ALL</button>
                                         {HOURS.map(h => (
-                                            <button
-                                                key={`h-head-${h}`}
-                                                onClick={() => toggleHour(h)}
-                                                className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold hover:text-white border-b border-[#30363d] sticky top-0 z-10"
-                                            >
-                                                {h}
-                                            </button>
+                                            <button key={`h-${h}`} onClick={() => toggleHour(h)} className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold border-b border-[#30363d] sticky top-0 z-10">{h}</button>
                                         ))}
 
-                                        {/* Day Rows */}
                                         {DAYS.map((day, dIdx) => (
                                             <>
-                                                <button
-                                                    key={`day-${day}`}
-                                                    onClick={() => toggleDay(dIdx)}
-                                                    className={`bg-[#0d1117] p-2 text-xs font-bold text-left border-r border-[#30363d] border-b border-b-[#30363d] hover:bg-gray-800 transition-colors sticky left-0 z-10 ${day === "Sun" || day === "Sat" ? "text-red-400" : "text-gray-400"}`}
-                                                >
-                                                    {day}
-                                                </button>
+                                                <button key={`day-${day}`} onClick={() => toggleDay(dIdx)} className={`bg-[#0d1117] p-2 text-xs font-bold text-left border-r border-[#30363d] border-b border-b-[#30363d] hover:bg-gray-800 transition-colors sticky left-0 z-10 ${day === "Sun" || day === "Sat" ? "text-red-400" : "text-gray-400"}`}>{day}</button>
                                                 {HOURS.map(h => {
                                                     const isHighlighted = isInDragRange(dIdx, h);
-                                                    const isActive = isHighlighted ? dragValue : schedule[dIdx][h];
+                                                    const cell = schedule[dIdx][h];
 
-                                                    // Selection box borders
-                                                    let borderClasses = "";
-                                                    if (dragStart && dragCurrent && isHighlighted) {
-                                                        const minD = Math.min(dragStart.d, dragCurrent.d);
-                                                        const maxD = Math.max(dragStart.d, dragCurrent.d);
-                                                        const minH = Math.min(dragStart.h, dragCurrent.h);
-                                                        const maxH = Math.max(dragStart.h, dragCurrent.h);
+                                                    let bgClass = "bg-[#0d1117]";
+                                                    if (cell) {
+                                                        if (cell.type === "always") bgClass = "bg-green-600";
+                                                        else if (cell.type === "motion") bgClass = "bg-yellow-500";
+                                                        else bgClass = "bg-orange-500";
+                                                    }
 
-                                                        if (dIdx === minD) borderClasses += " border-t-blue-400 border-t-2";
-                                                        if (dIdx === maxD) borderClasses += " border-b-blue-400 border-b-2";
-                                                        if (h === minH) borderClasses += " border-l-blue-400 border-l-2";
-                                                        if (h === maxH) borderClasses += " border-r-blue-400 border-r-2";
-                                                    } else {
-                                                        borderClasses = "border-r border-[#30363d]/30 border-b border-b-[#30363d]/20";
+                                                    let lassoClass = "";
+                                                    if (isHighlighted) {
+                                                        if (isRemoving) lassoClass = "bg-gray-400/30 border-gray-400";
+                                                        else {
+                                                            const mode = RECORDING_TYPES.find(t => t.id === activeType);
+                                                            lassoClass = `${mode?.color}/40 ${mode?.border}`;
+                                                        }
                                                     }
 
                                                     return (
@@ -333,10 +353,16 @@ export default function RecordingScheduleDialog({
                                                             key={`${dIdx}-${h}`}
                                                             onMouseDown={() => onMouseDown(dIdx, h)}
                                                             onMouseEnter={() => onMouseEnter(dIdx, h)}
-                                                            className={`aspect-[1.5/1] cursor-pointer transition-all duration-75 relative z-0 ${borderClasses} ${schedule[dIdx][h] ? "bg-green-600 shadow-inner" : "bg-[#0d1117] hover:bg-[#1c2128]"}`}
+                                                            className={`aspect-[1/1] cursor-pointer transition-all duration-75 relative z-0 border-r border-[#30363d]/10 border-b border-b-[#30363d]/10 flex flex-col items-center justify-center gap-0.5 ${bgClass}`}
                                                         >
+                                                            {cell && (
+                                                                <>
+                                                                    <span className="text-[10px] font-bold leading-none">{cell.fps}</span>
+                                                                    <span className="text-[7px] font-bold leading-none uppercase opacity-90">{cell.quality}</span>
+                                                                </>
+                                                            )}
                                                             {isHighlighted && (
-                                                                <div className={`absolute inset-0 z-10 pointer-events-none border ${dragValue ? "bg-green-400/30 border-green-400" : "bg-gray-400/30 border-gray-400"}`} />
+                                                                <div className={`absolute inset-0 z-10 pointer-events-none border-2 ${lassoClass}`} />
                                                             )}
                                                         </div>
                                                     );
@@ -347,25 +373,62 @@ export default function RecordingScheduleDialog({
                                 </div>
                             </div>
 
-                            <div className="mt-8 flex justify-center gap-12">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-5 h-5 bg-green-600 rounded border border-blue-400/50" />
-                                    <span className="text-xs text-gray-400">Record Always</span>
+                            {/* Footer Settings */}
+                            <div className="mt-8 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-8 items-end px-1">
+                                <div className="space-y-4">
+                                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Recording Mode</label>
+                                    <div className="flex gap-4">
+                                        {RECORDING_TYPES.map((type) => (
+                                            <button
+                                                key={type.id}
+                                                onClick={() => setActiveType(type.id as RecordingType)}
+                                                className={`flex items-center justify-between px-6 py-2 rounded-lg border-2 transition-all gap-8 min-w-[140px] ${activeType === type.id ? `border-blue-400 bg-[#161b22] text-white shadow-lg` : "border-[#30363d] bg-[#0d1117] text-gray-400 hover:bg-gray-800"}`}
+                                            >
+                                                <span className="text-sm font-medium">{type.label}</span>
+                                                <div className={`w-3 h-3 rounded-full ${type.color}`} />
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <div className="w-5 h-5 bg-[#0d1117] border border-[#30363d] rounded" />
-                                    <span className="text-xs text-gray-400">Do Not Record</span>
+
+                                <div className="flex gap-4">
+                                    <div className="w-[120px] space-y-3">
+                                        <label className="text-[11px] font-bold text-gray-500 uppercase">Quality</label>
+                                        <Select value={globalQuality} onValueChange={setGlobalQuality}>
+                                            <SelectTrigger className="bg-[#0d1117] border-[#30363d] text-xs h-9">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
+                                                <SelectItem value="low">Low</SelectItem>
+                                                <SelectItem value="medium">Medium</SelectItem>
+                                                <SelectItem value="high">High</SelectItem>
+                                                <SelectItem value="best">Best</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="w-[120px] space-y-3">
+                                        <label className="text-[11px] font-bold text-gray-500 uppercase">FPS</label>
+                                        <Select value={globalFps} onValueChange={setGlobalFps}>
+                                            <SelectTrigger className="bg-[#0d1117] border-[#30363d] text-xs h-9">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
+                                                {[1, 5, 10, 15, 20, 25, 30].map(f => (
+                                                    <SelectItem key={f} value={f.toString()}>{f} FPS</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
                             </div>
                         </>
                     )}
                 </div>
 
-                <DialogFooter className="p-6 pt-2 border-t border-[#30363d] bg-[#0d1117]">
+                <DialogFooter className="p-6 pt-4 border-t border-[#30363d] bg-[#0d1117] shrink-0">
                     <Button variant="ghost" onClick={() => onOpenChange(false)} className="text-gray-400 hover:text-white">Cancel</Button>
                     <Button onClick={handleSave} disabled={isSaving || loading} className="bg-blue-600 hover:bg-blue-500 text-white min-w-[140px]">
-                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                        {isSaving ? "Saving..." : "Save Changes"}
+                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : "Save Changes"}
                     </Button>
                 </DialogFooter>
             </DialogContent>
