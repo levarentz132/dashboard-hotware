@@ -686,7 +686,7 @@ export default function AlarmConsole() {
       const sid = Cookies.get("nx_server_id") || localUser.serverId || "local";
 
       // 1. Try v4 endpoint first
-      const response = await fetch("/nx/rest/v3/events/log", {
+      const response = await fetch("/nx/api/getEvents", {
         headers: {
           "x-runtime-guid": localUser.token,
           "Accept": "application/json"
@@ -704,21 +704,21 @@ export default function AlarmConsole() {
       }
 
       // 2. Fallback to v3 if v4 failed or returned no items
-      if (items.length === 0) {
-        console.log(`[AlarmConsole] v4 failed or empty, trying v3 fallback for local server`);
-        const v3Response = await fetch("/nx/api/getEvents", {
-          headers: {
-            "x-runtime-guid": localUser.token,
-            "Accept": "application/json"
-          }
-        });
+      // if (items.length === 0) {
+      //   console.log(`[AlarmConsole] v4 failed or empty, trying v3 fallback for local server`);
+      //   const v3Response = await fetch("/nx/api/getEvents", {
+      //     headers: {
+      //       "x-runtime-guid": localUser.token,
+      //       "Accept": "application/json"
+      //     }
+      //   });
 
-        if (v3Response.ok) {
-          const v3Data = await v3Response.json();
-          const v3Events = v3Data.reply || [];
-          items = normalizeNxEvents(v3Events);
-        }
-      }
+      //   if (v3Response.ok) {
+      //     const v3Data = await v3Response.json();
+      //     const v3Events = v3Data.reply || [];
+      //     items = normalizeNxEvents(v3Events);
+      //   }
+      // }
 
       if (items.length === 0 && !response.ok) return null;
 
@@ -2066,24 +2066,6 @@ export default function AlarmConsole() {
                 <EventSkeleton />
                 <EventSkeleton />
               </>
-            )}
-
-            {/* Auth Required State - for cloud systems */}
-            {!loading && !loadingCloudServers && requiresAuth && (
-              <Card className="border-blue-200 bg-blue-50">
-                <CardContent className="flex flex-col items-center justify-center p-6 sm:p-8 text-center">
-                  <Cloud className="h-10 w-10 sm:h-12 sm:w-12 mb-4 text-blue-500" />
-                  <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">Login Required</h3>
-                  <p className="text-sm text-gray-600 mb-4 max-w-md">
-                    Cloud system <strong>{getCurrentCloudSystemName()}</strong> requires authentication. Please login to
-                    view event logs.
-                  </p>
-                  <Button onClick={openLoginDialog} className="gap-2">
-                    <LogIn className="h-4 w-4" />
-                    Login to Cloud System
-                  </Button>
-                </CardContent>
-              </Card>
             )}
 
             {/* Error State - General */}
