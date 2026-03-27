@@ -35,6 +35,12 @@ export interface NxCamera {
   schedule?: {
     isEnabled: boolean;
     tasks: any[];
+    minArchivePeriodS?: number;
+    maxArchivePeriodS?: number;
+  };
+  motion?: {
+    recordBeforeS?: number;
+    recordAfterS?: number;
   };
 }
 

@@ -64,6 +64,27 @@ export default function RecordingScheduleDialog({
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Archive & Motion Settings
+    const [minArchive, setMinArchive] = useState({ value: 30, unit: "Day", auto: true });
+    const [maxArchive, setMaxArchive] = useState({ value: 30, unit: "Day", auto: true });
+    const [preRecording, setPreRecording] = useState(5);
+    const [postRecording, setPostRecording] = useState(5);
+
+    const units = ["Minute", "Hour", "Day"];
+    const unitSpeeds = { "Minute": 60, "Hour": 3600, "Day": 86400 };
+
+    const toValueUnit = (seconds: number) => {
+        if (seconds <= 0) return { value: 1, unit: "Day", auto: true };
+        if (seconds % 86400 === 0) return { value: seconds / 86400, unit: "Day", auto: false };
+        if (seconds % 3600 === 0) return { value: seconds / 3600, unit: "Hour", auto: false };
+        return { value: Math.ceil(seconds / 60), unit: "Minute", auto: false };
+    };
+
+    const toSeconds = (val: number, unit: string, auto: boolean) => {
+        if (auto) return 0;
+        return val * (unitSpeeds[unit as keyof typeof unitSpeeds] || 1);
+    };
+
     // Selection state
     const [dragStart, setDragStart] = useState<{ d: number; h: number } | null>(null);
     const [dragCurrent, setDragCurrent] = useState<{ d: number; h: number } | null>(null);
@@ -137,16 +158,27 @@ export default function RecordingScheduleDialog({
                                     quality: task.streamQuality || "high"
                                 };
 
+                                const isSun = day === 0;
                                 for (let h = 0; h < 24; h++) {
-                                    const hStart = h * 3600;
-                                    const hEnd = (h + 1) * 3600;
+                                    const hStart = isSun ? (h * 3600) - 3600 : h * 3600;
+                                    const hEnd = isSun ? ((h + 1) * 3600) - 3600 : (h + 1) * 3600;
                                     if (task.startTime < hEnd && task.endTime > hStart) {
-                                        if (day < 7) newSchedule[day][h] = cell;
+                                        newSchedule[day][h] = cell;
                                     }
                                 }
                             }
                         });
                         setSchedule(newSchedule);
+
+                        // Load Archive & Motion
+                        if (details.schedule) {
+                            setMinArchive(toValueUnit(details.schedule.minArchivePeriodS || 0));
+                            setMaxArchive(toValueUnit(details.schedule.maxArchivePeriodS || 0));
+                        }
+                        if (details.motion) {
+                            setPreRecording(details.motion.recordBeforeS || 0);
+                            setPostRecording(details.motion.recordAfterS || 0);
+                        }
                     }
                 } catch (err) {
                     setError("Could not load camera settings.");
@@ -221,9 +253,10 @@ export default function RecordingScheduleDialog({
                 if (cell.type === "motion") { vmsType = "metadataOnly"; metadata = "motion"; }
                 else if (cell.type === "motionLow") { vmsType = "metadataAndLowQuality"; metadata = "motion"; }
 
+                const isSun = dayIndex === 0;
                 tasks.push({
-                    startTime: (start * 3600) + (dayIndex === 0 && start === 0 ? -3600 : 0),
-                    endTime: (dayIndex === 0 && endHour === 24) ? 82800 : (endHour * 3600),
+                    startTime: isSun ? (start * 3600) - 3600 : start * 3600,
+                    endTime: isSun ? (endHour * 3600) - 3600 : endHour * 3600,
                     dayOfWeek: dayIndex,
                     recordingType: vmsType,
                     metadataTypes: metadata,
@@ -246,7 +279,20 @@ export default function RecordingScheduleDialog({
         try {
             const originalSystemId = nxAPI.getSystemId();
             if (camera.systemId) nxAPI.setSystemId(camera.systemId);
-            await nxAPI.updateDevice(camera.id, { schedule: { isEnabled, tasks } });
+
+            await nxAPI.updateDevice(camera.id, {
+                schedule: {
+                    isEnabled,
+                    tasks,
+                    minArchivePeriodS: toSeconds(minArchive.value, minArchive.unit, minArchive.auto),
+                    maxArchivePeriodS: toSeconds(maxArchive.value, maxArchive.unit, maxArchive.auto),
+                },
+                motion: {
+                    recordBeforeS: Math.max(3, preRecording),
+                    recordAfterS: Math.max(3, postRecording),
+                }
+            });
+
             if (camera.systemId) nxAPI.setSystemId(originalSystemId);
             onSuccess();
             onOpenChange(false);
@@ -281,7 +327,7 @@ export default function RecordingScheduleDialog({
                     </div>
                 </DialogHeader>
 
-                <div className="p-6 overflow-y-auto dark-scrollbar flex-grow">
+                <div className="p-6 overflow-y-auto dark-scrollbar flex-grow space-y-8">
                     {loading ? (
                         <div className="py-20 flex flex-col items-center gap-3">
                             <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -373,54 +419,170 @@ export default function RecordingScheduleDialog({
                                 </div>
                             </div>
 
-                            {/* Footer Settings */}
-                            <div className="mt-8 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-8 items-end px-1">
-                                <div className="space-y-4">
-                                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Recording Mode</label>
-                                    <div className="flex gap-4">
-                                        {RECORDING_TYPES.map((type) => (
-                                            <button
-                                                key={type.id}
-                                                onClick={() => setActiveType(type.id as RecordingType)}
-                                                className={`flex items-center justify-between px-6 py-2 rounded-lg border-2 transition-all gap-8 min-w-[140px] ${activeType === type.id ? `border-blue-400 bg-[#161b22] text-white shadow-lg` : "border-[#30363d] bg-[#0d1117] text-gray-400 hover:bg-gray-800"}`}
-                                            >
-                                                <span className="text-sm font-medium">{type.label}</span>
-                                                <div className={`w-3 h-3 rounded-full ${type.color}`} />
-                                            </button>
-                                        ))}
+                            {/* Settings Section */}
+                            <div className="space-y-12">
+                                <div className="flex flex-col md:flex-row gap-8 items-start justify-between px-1">
+                                    <div className="space-y-4">
+                                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Recording Mode</label>
+                                        <div className="flex gap-2 flex-col w-48">
+                                            {RECORDING_TYPES.map((type) => (
+                                                <button
+                                                    key={type.id}
+                                                    onClick={() => setActiveType(type.id as RecordingType)}
+                                                    className={`flex items-center justify-between px-4 py-1.5 rounded-lg border-2 transition-all gap-4 ${activeType === type.id ? `border-blue-400 bg-[#161b22] text-white shadow-lg` : "border-[#30363d] bg-[#0d1117] text-gray-400 hover:bg-gray-800"}`}
+                                                >
+                                                    <span className="text-sm font-medium">{type.label}</span>
+                                                    <div className={`w-2.5 h-2.5 rounded-full ${type.color}`} />
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div className="flex gap-4">
-                                    <div className="w-[120px] space-y-3">
-                                        <label className="text-[11px] font-bold text-gray-500 uppercase">Quality</label>
-                                        <Select value={globalQuality} onValueChange={setGlobalQuality}>
-                                            <SelectTrigger className="bg-[#0d1117] border-[#30363d] text-xs h-9">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
-                                                <SelectItem value="low">Low</SelectItem>
-                                                <SelectItem value="medium">Medium</SelectItem>
-                                                <SelectItem value="high">High</SelectItem>
-                                                <SelectItem value="best">Best</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 px-1">
+                                        <div className="space-y-6 pr-6">
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Keep Archive For...</label>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-4">
+                                                    <span className="text-sm text-gray-400">Min</span>
+                                                    <div className="flex items-center gap-2 w-48">
+                                                        <input
+                                                            type="number"
+                                                            disabled={minArchive.auto}
+                                                            value={minArchive.auto ? "--" : minArchive.value}
+                                                            onChange={(e) => setMinArchive(p => ({ ...p, value: parseInt(e.target.value) || 0 }))}
+                                                            className="w-full bg-[#0d1117] border border-[#30363d] rounded h-9 px-3 text-sm focus:border-blue-500/50 outline-none disabled:opacity-50"
+                                                        />
+                                                        <Select
+                                                            disabled={minArchive.auto}
+                                                            value={minArchive.unit}
+                                                            onValueChange={(v) => setMinArchive(p => ({ ...p, unit: v }))}
+                                                        >
+                                                            <SelectTrigger className="w-[85px] bg-[#0d1117] border-[#30363d] h-9 text-xs">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
+                                                                {units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <label className="flex items-center gap-2 cursor-pointer group">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={minArchive.auto}
+                                                            onChange={(e) => setMinArchive(p => ({ ...p, auto: e.target.checked }))}
+                                                            className="w-4 h-4 rounded border-[#30363d] bg-transparent text-blue-500 focus:ring-0 cursor-pointer"
+                                                        />
+                                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors">Auto</span>
+                                                    </label>
+                                                </div>
+
+                                                <div className="flex items-center gap-4">
+                                                    <span className="text-sm text-gray-400">Max</span>
+                                                    <div className="flex items-center gap-2 w-48">
+                                                        <input
+                                                            type="number"
+                                                            disabled={maxArchive.auto}
+                                                            value={maxArchive.auto ? "--" : maxArchive.value}
+                                                            onChange={(e) => setMaxArchive(p => ({ ...p, value: parseInt(e.target.value) || 0 }))}
+                                                            className="w-full bg-[#0d1117] border border-[#30363d] rounded h-9 px-3 text-sm focus:border-blue-500/50 outline-none disabled:opacity-50"
+                                                        />
+                                                        <Select
+                                                            disabled={maxArchive.auto}
+                                                            value={maxArchive.unit}
+                                                            onValueChange={(v) => setMaxArchive(p => ({ ...p, unit: v }))}
+                                                        >
+                                                            <SelectTrigger className="w-[85px] bg-[#0d1117] border-[#30363d] h-9 text-xs">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
+                                                                {units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <label className="flex items-center gap-2 cursor-pointer group">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={maxArchive.auto}
+                                                            onChange={(e) => setMaxArchive(p => ({ ...p, auto: e.target.checked }))}
+                                                            className="w-4 h-4 rounded border-[#30363d] bg-transparent text-blue-500 focus:ring-0 cursor-pointer"
+                                                        />
+                                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors">Auto</span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-6 pl-6">
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Motion & Objects Recording</label>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-4">
+                                                    <span className="w-28 text-sm text-gray-400">Pre-Recording</span>
+                                                    <div className="flex items-center bg-[#0d1117] border border-[#30363d] rounded h-9 px-3 gap-2 w-48">
+                                                        <input
+                                                            type="number"
+                                                            value={preRecording}
+                                                            onChange={(e) => setPreRecording(parseInt(e.target.value) || 0)}
+                                                            className="w-full bg-transparent outline-none text-sm"
+                                                        />
+                                                        <span className="text-xs text-gray-500">s</span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-4">
+                                                    <span className="w-28 text-sm text-gray-400">Post-Recording</span>
+                                                    <div className="flex items-center bg-[#0d1117] border border-[#30363d] rounded h-9 px-3 gap-2 w-48">
+                                                        <input
+                                                            type="number"
+                                                            value={postRecording}
+                                                            onChange={(e) => setPostRecording(parseInt(e.target.value) || 0)}
+                                                            className="w-full bg-transparent outline-none text-sm"
+                                                        />
+                                                        <span className="text-xs text-gray-500">s</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="w-[120px] space-y-3">
-                                        <label className="text-[11px] font-bold text-gray-500 uppercase">FPS</label>
-                                        <Select value={globalFps} onValueChange={setGlobalFps}>
-                                            <SelectTrigger className="bg-[#0d1117] border-[#30363d] text-xs h-9">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
-                                                {[1, 5, 10, 15, 20, 25, 30].map(f => (
-                                                    <SelectItem key={f} value={f.toString()}>{f} FPS</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+
+                                    <div className="flex gap-6">
+                                        <div className="w-[120px] space-y-3">
+                                            <label className="text-[11px] font-bold text-gray-500 uppercase">Quality</label>
+                                            <Select value={globalQuality} onValueChange={setGlobalQuality}>
+                                                <SelectTrigger className="bg-[#0d1117] border-[#30363d] text-xs h-9">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
+                                                    <SelectItem value="low">Low</SelectItem>
+                                                    <SelectItem value="medium">Medium</SelectItem>
+                                                    <SelectItem value="high">High</SelectItem>
+                                                    <SelectItem value="best">Best</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="w-[120px] space-y-3">
+                                            <label className="text-[11px] font-bold text-gray-500 uppercase">FPS</label>
+                                            <Select value={globalFps} onValueChange={setGlobalFps}>
+                                                <SelectTrigger className="bg-[#0d1117] border-[#30363d] text-xs h-9">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent className="bg-[#161b22] border-[#30363d] text-white">
+                                                    {[1, 5, 10, 15, 20, 25, 30].map(f => (
+                                                        <SelectItem key={f} value={f.toString()}>{f} FPS</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+
+
                         </>
                     )}
                 </div>
