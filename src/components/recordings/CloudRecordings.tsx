@@ -168,11 +168,14 @@ export default function CloudRecordings() {
   // Initial load – fetch system name first, THEN load cameras
   useEffect(() => {
     (async () => {
+      const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
+      nxAPI.setSystemId(localSystemId); // CRITICAL: Ensure nxAPI has the system ID for local requests
       try {
         const info = await nxAPI.getSystemInfo();
         if (info?.name) setLocalSystemName(info.name);
-      } catch (e) {}
-      const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
+      } catch (e) {
+        console.warn("[CloudRecordings] Could not fetch system info:", e);
+      }
       setSelectedSystem(localSystemId);
       loadSystems();
     })();
@@ -217,17 +220,11 @@ export default function CloudRecordings() {
       const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
       const mappedLocal = localCams.map(cam => ({
         id: cam.id, name: cam.name, typeId: cam.typeId,
-        systemId: localSystemId, systemName: localSystemName,
+        systemId: localSystemId, systemName: "", // Hiding local system name text as requested
       }));
       setDevices(mappedLocal);
       setDevicesReady(true);
-      if (mappedLocal.length > 0) {
-        setSelectedDevice(normalizeId(mappedLocal[0].id));
-        setSelectedSystem(localSystemId);
-        setScheduleCamera(normalizeId(mappedLocal[0].id));
-        setScheduleSystem(localSystemId);
-        setRecentCamera(normalizeId(mappedLocal[0].id));
-      }
+      // Removed auto-selection of first camera to allow user to explicitly "Choose Camera" first. 
     } catch (e) {
       console.warn("[CloudRecordings] Local camera fetch failed:", e);
     }
@@ -273,6 +270,9 @@ export default function CloudRecordings() {
     if (device.systemId) setSelectedSystem(device.systemId);
     setSearchError("");
     setSelectedDevice(value);
+    
+    // Auto-load recent recordings immediately after camera selection
+    handleSearchRecentRecordings(value, date);
   }
 
   function handleScheduleSelectDevice(value: string) {
@@ -292,6 +292,7 @@ export default function CloudRecordings() {
     setSearchLoading(true);
     setSearchError("");
     setRecordings([]);
+    setRecentRecordings([]); // Clear recent list
     try {
       const [startHour, startMin] = startTime.split(":").map(Number);
       const [endHour, endMin] = endTime.split(":").map(Number);
@@ -515,17 +516,21 @@ export default function CloudRecordings() {
   };
 
   // ---- Recent Recordings ----
-  const handleSearchRecentRecordings = async () => {
-    if (!recentCamera || !recentDate) { setRecentError("Please select a camera and date."); return; }
-    const dev = devices.find(d => normalizeId(d.id) === recentCamera);
+  const handleSearchRecentRecordings = async (overrideDevice?: string, overrideDate?: Date) => {
+    const targetDevice = overrideDevice || selectedDevice;
+    const targetDate = overrideDate || date;
+
+    if (!targetDevice || !targetDate) { setRecentError("Please select a camera and date."); return; }
+    const dev = devices.find(d => normalizeId(d.id) === targetDevice);
     if (!dev) { setRecentError("Camera not found."); return; }
     setRecentLoading(true);
     setRecentError("");
+    setRecordings([]); // Clear specific search
     try {
-      const startMs = new Date(recentDate).setHours(0, 0, 0, 0);
-      const endMs = new Date(recentDate).setHours(23, 59, 59, 999);
+      const startMs = new Date(targetDate).setHours(0, 0, 0, 0);
+      const endMs = new Date(targetDate).setHours(23, 59, 59, 999);
       const data = await fetchRecordedTimePeriods(
-        dev.systemId, getOriginalDeviceId(recentCamera), startMs, endMs, undefined
+        dev.systemId, getOriginalDeviceId(targetDevice), startMs, endMs, undefined
       );
       const periods = Array.isArray(data) ? data : data?.reply || [];
       const mapped: RecentRecording[] = periods.map((p: any, i: number) => ({
@@ -535,7 +540,7 @@ export default function CloudRecordings() {
         startTimeMs: p.startTimeMs || 0,
         durationMs: p.durationMs || 0,
         systemId: dev.systemId,
-        deviceId: getOriginalDeviceId(recentCamera),
+        deviceId: getOriginalDeviceId(targetDevice),
       }));
       setRecentRecordings(mapped);
       if (mapped.length === 0) setRecentError("No recordings found for this camera on the selected date.");
@@ -629,40 +634,29 @@ export default function CloudRecordings() {
 
       {!requiresCloudAuth && (
         <Tabs defaultValue="search" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="search" className="flex items-center gap-2">
-              <Search className="h-4 w-4" /> Search Recordings
+              <Search className="h-4 w-4" /> Recordings
             </TabsTrigger>
             <TabsTrigger value="schedule" className="flex items-center gap-2">
               <Clock className="h-4 w-4" /> Schedule Recording
             </TabsTrigger>
-            <TabsTrigger value="recent" className="flex items-center gap-2">
-              <List className="h-4 w-4" /> Recent Recordings
-            </TabsTrigger>
           </TabsList>
 
-          {/* =================== SEARCH TAB =================== */}
-          <TabsContent value="search" className="space-y-6">
-            <div className="grid gap-6 md:grid-cols-2">
-              {/* Camera */}
-              <Card>
+          {/* =================== RECORDINGS TAB (merged) =================== */}
+          <TabsContent value="search">
+            <div className="grid gap-6 md:grid-cols-[320px_1fr]">
+
+              {/* LEFT: Search Controls */}
+              <Card className="h-fit">
                 <CardHeader>
-                  <CardTitle>Select Camera</CardTitle>
-                  <CardDescription>Choose a camera to search recordings</CardDescription>
+                  <CardTitle>Search Recordings</CardTitle>
+                  <CardDescription>Choose camera, date and time</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <CameraSelect value={selectedDevice} onValueChange={handleSelectDevice} />
-                </CardContent>
-              </Card>
 
-              {/* Time Selection */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Select Time Range</CardTitle>
-                  <CardDescription>Choose date and time for recordings</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Date Picker */}
+                  {/* Date */}
                   <div className="space-y-2">
                     <Label>Date</Label>
                     <Popover>
@@ -673,13 +667,13 @@ export default function CloudRecordings() {
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={date} onSelect={setDate} initialFocus />
+                        <Calendar mode="single" selected={date} onSelect={(d) => { setDate(d); if (selectedDevice && d) handleSearchRecentRecordings(selectedDevice, d); }} initialFocus />
                       </PopoverContent>
                     </Popover>
                   </div>
 
                   {/* Time Range */}
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label>Start Time</Label>
                       <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
@@ -692,64 +686,122 @@ export default function CloudRecordings() {
 
                   {searchError && <p className="text-sm text-destructive">{searchError}</p>}
 
-                  <Button onClick={handleSearchRecordings} disabled={searchLoading || !selectedDevice || !date} className="w-full">
-                    {searchLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Searching...</>) : "Search Recordings"}
+                  <Button onClick={handleSearchRecordings} disabled={searchLoading || recentLoading || !selectedDevice || !date} className="w-full">
+                    {searchLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Searching...</>) : (<><Search className="mr-2 h-4 w-4" />Search Specific Range</>)}
                   </Button>
                 </CardContent>
               </Card>
-            </div>
 
-            {/* Results */}
-            {recordings.length > 0 && searchedRange && (
-              <Card>
+              {/* RIGHT: Results */}
+              <Card className="min-h-[420px]">
                 <CardHeader>
-                  <CardTitle>Recording Segments</CardTitle>
-                  <CardDescription>
-                    Found {recordings.length} segment(s): {new Date(searchedRange.startMs).toLocaleString()} – {new Date(searchedRange.endMs).toLocaleTimeString()}
-                  </CardDescription>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <CardTitle>
+                        {recordings.length > 0 && searchedRange
+                          ? `${recordings.length} Segment${recordings.length !== 1 ? "s" : ""} Found`
+                          : recentRecordings.length > 0
+                          ? "Recent Recordings"
+                          : "Results"}
+                      </CardTitle>
+                      <CardDescription>
+                        {recordings.length > 0 && searchedRange
+                          ? `${new Date(searchedRange.startMs).toLocaleString()} – ${new Date(searchedRange.endMs).toLocaleTimeString()}`
+                          : recentRecordings.length > 0
+                          ? `${filteredRecentRecordings.length} of ${recentRecordings.length} shown`
+                          : "Search results will appear here"}
+                      </CardDescription>
+                    </div>
+                    {/* Filter bar for recent recordings */}
+                    {recentRecordings.length > 0 && recordings.length === 0 && (
+                      <div className="relative w-52 shrink-0">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                        <Input className="pl-9" placeholder="Filter..." value={recentSearch} onChange={e => setRecentSearch(e.target.value)} />
+                      </div>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div className="p-3 border rounded-md bg-primary/5">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">Download Selected Time Range</div>
-                          <div className="text-sm text-muted-foreground">
-                            {new Date(searchedRange.startMs).toLocaleString()} – {new Date(searchedRange.endMs).toLocaleTimeString()} ({formatDuration(searchedRange.endMs - searchedRange.startMs)})
+                  {/* Search results */}
+                  {recordings.length > 0 && searchedRange && (
+                    <div className="space-y-3">
+                      {/* Download entire range shortcut */}
+                      <div className="p-3 border rounded-md bg-primary/5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-medium text-sm">Full Selected Range</div>
+                            <div className="text-xs text-muted-foreground">
+                              {new Date(searchedRange.startMs).toLocaleString()} – {new Date(searchedRange.endMs).toLocaleTimeString()} · {formatDuration(searchedRange.endMs - searchedRange.startMs)}
+                            </div>
                           </div>
+                          <Button size="sm" onClick={() => handleDownload(searchedRange.startMs, searchedRange.endMs - searchedRange.startMs)}>
+                            <Download className="mr-2 h-4 w-4" /> Download
+                          </Button>
                         </div>
-                        <Button onClick={() => handleDownload(searchedRange.startMs, searchedRange.endMs - searchedRange.startMs)}>
-                          <Download className="mr-2 h-4 w-4" /> Download
-                        </Button>
+                      </div>
+
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Individual segments</div>
+                      <div className="space-y-2">
+                        {recordings.map((rec, idx) => {
+                          const segStartMs = rec.startTimeMs || 0;
+                          const segDurationMs = rec.durationMs || 0;
+                          const segEndMs = segStartMs + segDurationMs;
+                          return (
+                            <div key={idx} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
+                              <div>
+                                <div className="font-medium text-sm">{new Date(segStartMs).toLocaleString()} – {new Date(segEndMs).toLocaleTimeString()}</div>
+                                <div className="text-xs text-muted-foreground">{formatDuration(segDurationMs)}</div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={() => handlePreview(segStartMs, segDurationMs)} className="gap-1.5">
+                                  <Eye className="h-4 w-4" /> Preview
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => handleDownload(segStartMs, segDurationMs)}>
+                                  <Download className="mr-1.5 h-4 w-4" /> Download
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
+                  )}
 
-                    <div className="text-sm font-medium text-muted-foreground">Or download full segments:</div>
-                    {recordings.map((rec, idx) => {
-                      const segStartMs = rec.startTimeMs || 0;
-                      const segDurationMs = rec.durationMs || 0;
-                      const segEndMs = segStartMs + segDurationMs;
-                      return (
-                        <div key={idx} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
+                  {/* Recent recordings (shown when no active search) */}
+                  {recordings.length === 0 && recentRecordings.length > 0 && (
+                    <div className="space-y-2">
+                      {filteredRecentRecordings.map(rec => (
+                        <div key={rec.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
                           <div>
-                            <div className="font-medium">{new Date(segStartMs).toLocaleString()} – {new Date(segEndMs).toLocaleTimeString()}</div>
-                            <div className="text-sm text-muted-foreground">Duration: {formatDuration(segDurationMs)}</div>
+                            <div className="font-medium text-sm">{rec.cameraName}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {new Date(rec.startTimeMs).toLocaleString()} · {formatDuration(rec.durationMs)}
+                            </div>
+                            {rec.systemName && <div className="text-xs text-muted-foreground/70">{rec.systemName}</div>}
                           </div>
                           <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={() => handlePreview(segStartMs, segDurationMs)} className="gap-2">
+                            <Button variant="outline" size="sm" onClick={() => handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)} className="gap-1.5">
                               <Eye className="h-4 w-4" /> Preview
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => handleDownload(segStartMs, segDurationMs)}>
-                              <Download className="mr-2 h-4 w-4" /> Download
+                            <Button variant="outline" size="sm" onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)}>
+                              <Download className="mr-1.5 h-4 w-4" /> Download
                             </Button>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Empty state */}
+                  {recordings.length === 0 && recentRecordings.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground gap-3">
+                      <Search className="h-10 w-10 opacity-20" />
+                      <p className="text-sm">Select a camera and date, then click<br />Search Recordings to see results.</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-            )}
+            </div>
           </TabsContent>
 
           {/* =================== SCHEDULE TAB =================== */}
@@ -862,7 +914,7 @@ export default function CloudRecordings() {
                               <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium capitalize", statusColor[r.status])}>
                                 {r.status}
                               </span>
-                              {r.status === "pending" && (
+                              {(r.status === "pending" || r.status === "recording") && (
                                 <button onClick={() => cancelSchedule(r.id)} className="text-muted-foreground hover:text-destructive transition-colors" title="Cancel">
                                   <X className="h-4 w-4" />
                                 </button>
@@ -885,136 +937,10 @@ export default function CloudRecordings() {
               </Card>
             </div>
           </TabsContent>
-
-          {/* =================== RECENT RECORDINGS TAB =================== */}
-          <TabsContent value="recent" className="space-y-6">
-            {/* Search controls */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Search Recent Recordings</CardTitle>
-                <CardDescription>Browse saved recordings by camera and date</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="md:col-span-1">
-                    <CameraSelect value={recentCamera} onValueChange={setRecentCamera} label="Camera" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Date</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !recentDate && "text-muted-foreground")}>
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {recentDate ? format(recentDate, "PPP") : "Pick a date"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={recentDate} onSelect={setRecentDate} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <div className="flex items-end">
-                    <Button onClick={handleSearchRecentRecordings} disabled={recentLoading || !recentCamera} className="w-full">
-                      {recentLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading...</>) : (<><RefreshCw className="mr-2 h-4 w-4" />Load Recordings</>)}
-                    </Button>
-                  </div>
-                </div>
-                {recentError && <p className="text-sm text-destructive">{recentError}</p>}
-              </CardContent>
-            </Card>
-
-            {/* Filter & results */}
-            {recentRecordings.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Results</CardTitle>
-                      <CardDescription>{filteredRecentRecordings.length} of {recentRecordings.length} recordings</CardDescription>
-                    </div>
-                    <div className="relative w-56">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                      <Input
-                        className="pl-9"
-                        placeholder="Filter results..."
-                        value={recentSearch}
-                        onChange={e => setRecentSearch(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {filteredRecentRecordings.map(rec => (
-                      <div key={rec.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
-                        <div>
-                          <div className="font-medium">{rec.cameraName}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {new Date(rec.startTimeMs).toLocaleString()} · {formatDuration(rec.durationMs)}
-                          </div>
-                          {rec.systemName && <div className="text-xs text-muted-foreground">{rec.systemName}</div>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" onClick={() => handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)} className="gap-2">
-                            <Eye className="h-4 w-4" /> Preview
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)}>
-                            <Download className="mr-2 h-4 w-4" /> Download
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
         </Tabs>
       )}
 
-      {/* Preview Dialog */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ImageIcon className="h-5 w-5 text-blue-500" />
-              Recording Preview
-            </DialogTitle>
-            <DialogDescription>Preview from {previewSelection?.deviceName}</DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center justify-center py-4 bg-black/5 rounded-lg border border-dashed">
-            {previewImages[0] && (
-              <div className="max-w-xl w-full">
-                <div className="aspect-video bg-muted rounded-md overflow-hidden border shadow-lg relative group">
-                  <img
-                    src={previewImages[0]}
-                    alt="Recording Preview"
-                    className="w-full h-full object-cover"
-                    onError={e => {
-                      (e.target as HTMLImageElement).src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgwIiBoZWlnaHQ9IjI3MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMmUyZTMwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZpbGw9IiM2NjYiIGZvbnQtc2l6ZT0iMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmZyYW1lIG5vbi1hdmFpbGFibGU8L3RleHQ+PC9zdmc+";
-                    }}
-                  />
-                  <a
-                    href={previewImages[0]}
-                    download={`snapshot-${previewSelection?.deviceName}-${previewSelection?.startTime}.jpg`}
-                    target="_blank"
-                    className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Download Image"
-                  >
-                    <Download className="h-4 w-4" />
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="flex justify-end pt-2 gap-2">
-            <Button variant="outline" onClick={() => window.open(previewImages[0], "_blank")}>
-              <Download className="mr-2 h-4 w-4" /> Save Image
-            </Button>
-            <Button onClick={() => setPreviewOpen(false)}>Close</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Preview Dialog removed – preview now opens in a new browser tab */}
     </div>
   );
 }
