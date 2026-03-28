@@ -21,26 +21,43 @@ export async function GET(request: NextRequest) {
 
     console.log(`[recordings/download] Params: systemId=${systemId}, deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}, stream=${stream}`);
 
+    const isImage = endTime ? parseInt(endTime) === parseInt(startTime as string) : false;
+
     // Build download URL params
     const params = new URLSearchParams();
-    params.set("pos", startTime);
-    if (endTime) {
-      const duration = parseInt(endTime) - parseInt(startTime);
-      params.set("duration", String(duration));
-      console.log(`[recordings/download] Duration: ${duration}ms`);
+    let endpoint = "";
+    
+    if (isImage) {
+      params.set("pos", startTime as string);
+      params.set("duration", "1"); // Request minimal duration for a single frame
+      endpoint = `/media/${deviceId}.mpjpeg`;
+    } else {
+      params.set("pos", startTime as string);
+      if (endTime) {
+        const duration = parseInt(endTime) - parseInt(startTime as string);
+        params.set("duration", String(duration));
+        console.log(`[recordings/download] Duration: ${duration}ms`);
+      }
+      endpoint = `/media/${deviceId}.mp4`;
     }
 
     const username = searchParams.get("username");
     const password = searchParams.get("password");
 
-    const downloadUrl = buildCloudUrl(systemId, `/media/${deviceId}.mp4`, params, request, systemName || undefined);
+    const downloadUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
     console.log(`[recordings/download] Generated URL: ${downloadUrl}`);
-    const headers = buildCloudHeaders(request, systemId);
+    
+    // Explicitly define generic headers type
+    const headers: Record<string, string> = buildCloudHeaders(request, systemId);
+    if (isImage) {
+      headers["Accept"] = "multipart/x-mixed-replace, image/jpeg, image/*";
+      delete headers["Content-Type"];
+    }
 
     // If stream=true OR preview=true, proxy the actual video content with auth
     if (stream === "true" || preview === "true") {
       const isPreview = preview === "true";
-      console.log(`[recordings/download] ${isPreview ? "Previewing" : "Streaming"} video with auth headers`);
+      console.log(`[recordings/download] ${isPreview ? "Previewing" : "Streaming"} media with auth headers`);
 
       const controller = new AbortController();
       requestTimeout = setTimeout(() => controller.abort(), 85000);
@@ -80,8 +97,11 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const filename = `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
-      // Preview: inline so browser plays it. Download: attachment to save file.
+      const filename = isImage 
+        ? `screenshot_${deviceId.substring(0, 8)}_${startTime}.jpg`
+        : `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
+      
+      // Preview: inline so browser plays/shows it. Download: attachment to save file.
       const disposition = isPreview
         ? `inline; filename="${filename}"`
         : `attachment; filename="${filename}"`;
@@ -89,7 +109,7 @@ export async function GET(request: NextRequest) {
       return new NextResponse(videoResponse.body, {
         status: 200,
         headers: {
-          "Content-Type": videoResponse.headers.get("Content-Type") || "video/mp4",
+          "Content-Type": isImage ? "image/jpeg" : (videoResponse.headers.get("Content-Type") || "video/mp4"),
           "Content-Disposition": disposition,
           "Content-Length": videoResponse.headers.get("Content-Length") || "",
           "Accept-Ranges": "bytes",

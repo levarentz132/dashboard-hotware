@@ -320,7 +320,7 @@ export default function CloudRecordings() {
       systemId: sys || "127.0.0.1",
       deviceId: dev,
       startTime: String(startTimeMs),
-      endTime: String(startTimeMs + (durationMs || 300000)),
+      endTime: String(durationMs !== undefined ? startTimeMs + durationMs : startTimeMs + 300000),
       preview: "true",  // inline Content-Disposition – browser plays, not saves
     });
     window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
@@ -349,8 +349,14 @@ export default function CloudRecordings() {
       const device = devices.find(d => normalizeId(d.id) === scheduleCamera);
       const now = Date.now();
       const [sh, sm] = scheduleScreenshotTime.split(":").map(Number);
-      const targetMs = new Date(scheduleDate).setHours(sh, sm, 0, 0);
-      const delay = targetMs - now;
+      let targetMs = new Date(scheduleDate).setHours(sh, sm, 0, 0);
+      let delay = targetMs - now;
+
+      // Ensure past or immediate scheduling captures exactly right now
+      if (delay <= 0) {
+        targetMs = now;
+        delay = 0;
+      }
 
       const newEntry: ScheduledRecording = {
         id: `sched-${Date.now()}`,
@@ -358,27 +364,71 @@ export default function CloudRecordings() {
         cameraName: device?.name || "Camera",
         systemId: scheduleSystem,
         systemName: device?.systemName || "",
-        date: scheduleDate,
-        startTime: scheduleScreenshotTime,
-        endTime: scheduleScreenshotTime,
+        date: new Date(targetMs),
+        startTime: format(targetMs, "HH:mm"),
+        endTime: format(targetMs, "HH:mm"),
         type: "screenshot",
-        screenshotTime: scheduleScreenshotTime,
-        status: delay > 0 ? "pending" : "completed",
+        screenshotTime: format(targetMs, "HH:mm:ss"),
+        status: delay > 0 ? "pending" : "recording",
+      };
+
+      const captureAction = async () => {
+        const cameraDeviceId = getOriginalDeviceId(scheduleCamera);
+        let originalSchedule: any = null;
+        try {
+          const cam = await nxAPI.getCameraById(cameraDeviceId);
+          originalSchedule = cam?.schedule || null;
+        } catch (e) {}
+
+        const targetDate = new Date(targetMs);
+        const dayOfWeek = targetDate.getDay();
+        const nxDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+        // Turn on recording dynamically for the entire surrounding day to prevent browser vs server clock synchronization drift from causing missed frames immediately.
+        try {
+          await nxAPI.updateDevice(cameraDeviceId, {
+            schedule: {
+              isEnabled: true,
+              tasks: [{ dayOfWeek: nxDay, startTime: 0, length: 86400, recordingType: "always", metadataTypes: "motion,objects" }]
+            }
+          });
+        } catch(err) { console.error("[CloudRecordings] Snapshot quick-record block failed", err); }
+
+        // Wait 8.5 seconds to fully ensure the stream connects and commits frames to the VMS disk archive
+        setTimeout(async () => {
+          try {
+            if (originalSchedule) await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
+            else await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
+          } catch(err) {}
+
+          // Create the snapshot record targeting 4 seconds AFTER the recording schedule kicks on.
+          // This ensures we are querying the VMS buffer after the camera has fully established its RTSP stream and written frames to disk.
+          const newRec: RecentRecording = {
+            id: `snap-${Date.now()}`,
+            cameraName: device?.name || "Camera",
+            systemName: device?.systemName || "",
+            startTimeMs: targetMs + 4000,
+            durationMs: 1000,
+            systemId: scheduleSystem,
+            deviceId: cameraDeviceId,
+          };
+          setRecentRecordings(prev => [newRec, ...prev]);
+          setRecordings(prev => prev.length > 0 ? [newRec, ...prev] : prev);
+          setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "completed" } : r));
+        }, 8500);
       };
 
       if (delay > 0) {
         const timer = setTimeout(() => {
-          handlePreview(targetMs, undefined, scheduleSystem, getOriginalDeviceId(scheduleCamera));
-          setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "completed" } : r));
+          setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "recording" } : r));
+          captureAction();
         }, delay);
         scheduleTimers.current.set(newEntry.id, timer);
         setScheduledRecordings(prev => [...prev, newEntry]);
-        setScheduleSuccess(`Screenshot scheduled for ${format(scheduleDate, "PPP")} at ${scheduleScreenshotTime}`);
+        setScheduleSuccess(`Screenshot scheduled for ${format(new Date(targetMs), "PPP")} at ${format(targetMs, "HH:mm:ss")}`);
       } else {
-        // Past time – capture now
-        handlePreview(targetMs, undefined, scheduleSystem, getOriginalDeviceId(scheduleCamera));
-        setScheduledRecordings(prev => [...prev, { ...newEntry, status: "completed" }]);
-        setScheduleSuccess("Screenshot captured immediately (time has passed).");
+        setScheduledRecordings(prev => [...prev, newEntry]);
+        setScheduleSuccess(`Capturing screenshot at current timestamp (${format(targetMs, "HH:mm:ss")})...`);
+        captureAction();
       }
       return;
     }
@@ -552,6 +602,8 @@ export default function CloudRecordings() {
   };
 
   const formatDuration = (ms: number) => {
+    if (ms === 0) return "Screenshot";
+    if (ms === 1000) return "1s Screenshot";
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
