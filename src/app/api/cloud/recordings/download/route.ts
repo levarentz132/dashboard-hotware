@@ -9,7 +9,8 @@ export async function GET(request: NextRequest) {
     const deviceId = searchParams.get("deviceId");
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
-    const stream = searchParams.get("stream"); // If 'true', proxy the actual video
+    const stream = searchParams.get("stream");
+    const preview = searchParams.get("preview"); // If 'true', serve inline for browser playback
 
     if (!systemId || !deviceId || !startTime) {
       return NextResponse.json(
@@ -36,9 +37,10 @@ export async function GET(request: NextRequest) {
     console.log(`[recordings/download] Generated URL: ${downloadUrl}`);
     const headers = buildCloudHeaders(request, systemId);
 
-    // If stream=true, proxy the actual video content with auth
-    if (stream === "true") {
-      console.log(`[recordings/download] Streaming video with auth headers`);
+    // If stream=true OR preview=true, proxy the actual video content with auth
+    if (stream === "true" || preview === "true") {
+      const isPreview = preview === "true";
+      console.log(`[recordings/download] ${isPreview ? "Previewing" : "Streaming"} video with auth headers`);
 
       const controller = new AbortController();
       requestTimeout = setTimeout(() => controller.abort(), 85000);
@@ -78,16 +80,19 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // Generate filename from device ID and timestamp
       const filename = `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
+      // Preview: inline so browser plays it. Download: attachment to save file.
+      const disposition = isPreview
+        ? `inline; filename="${filename}"`
+        : `attachment; filename="${filename}"`;
 
-      // Stream the response back with proper headers for download
       return new NextResponse(videoResponse.body, {
         status: 200,
         headers: {
-          "Content-Type": "video/mp4",
-          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Type": videoResponse.headers.get("Content-Type") || "video/mp4",
+          "Content-Disposition": disposition,
           "Content-Length": videoResponse.headers.get("Content-Length") || "",
+          "Accept-Ranges": "bytes",
         },
       });
     }

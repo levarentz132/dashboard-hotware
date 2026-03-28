@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -14,18 +15,19 @@ import {
 } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogDescription 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription
 } from "@/components/ui/dialog";
-import { Image as ImageIcon, Eye } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 import {
   fetchCloudSystems,
   fetchCloudDevices,
@@ -36,208 +38,167 @@ import {
   BasicAuthCredentials,
 } from "./recordings-service";
 import nxAPI from "@/lib/nxapi";
-import { API_CONFIG } from "@/lib/config";
+
+// ---- Types ----
+interface ScheduledRecording {
+  id: string;
+  cameraId: string;
+  cameraName: string;
+  systemId: string;
+  systemName: string;
+  date: Date;
+  startTime: string;
+  endTime: string;
+  type: "video" | "screenshot";
+  screenshotTime?: string;
+  status: "pending" | "recording" | "completed" | "failed";
+  startedAt?: number;
+}
+
+interface RecentRecording {
+  id: string;
+  cameraName: string;
+  systemName: string;
+  startTimeMs: number;
+  durationMs: number;
+  systemId: string;
+  deviceId: string;
+}
 
 export default function CloudRecordings() {
+  // ---- Shared state ----
   const [systems, setSystems] = useState<CloudSystem[]>([]);
-  const [devices, setDevices] = useState<CloudDevice[]>([]);
+  const [devices, setDevices] = useState<(CloudDevice & { systemId: string; systemName: string })[]>([]);
   const [selectedSystem, setSelectedSystem] = useState<string>("127.0.0.1");
   const [selectedDevice, setSelectedDevice] = useState<string>("");
-  const [date, setDate] = useState<Date | undefined>(new Date());
   const [localSystemName, setLocalSystemName] = useState<string>("");
+  const [loadingSystems, setLoadingSystems] = useState(true);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [devicesReady, setDevicesReady] = useState(false);
+  const [requiresCloudAuth, setRequiresCloudAuth] = useState(false);
+  const [globalError, setGlobalError] = useState<string>("");
+
+  // ---- Search tab state ----
+  const [date, setDate] = useState<Date | undefined>(new Date());
   const [startTime, setStartTime] = useState<string>("00:00");
   const [endTime, setEndTime] = useState<string>("23:59");
   const [recordings, setRecordings] = useState<any[]>([]);
   const [searchedRange, setSearchedRange] = useState<{ startMs: number; endMs: number } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingSystems, setLoadingSystems] = useState(true);
-  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string>("");
 
-  const [error, setError] = useState<string>("");
-  const [orgCameraIds, setOrgCameraIds] = useState<string[] | null>(null);
-  const [devicesReady, setDevicesReady] = useState(false);
-  const [requiresCloudAuth, setRequiresCloudAuth] = useState(false);
-  const [sourceUsername, setSourceUsername] = useState("");
-  const [sourcePassword, setSourcePassword] = useState("");
-
+  // ---- Preview state ----
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<any>(null);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
 
-  // Cloud OAuth configuration
-  const CLOUD_HOST = 'https://nxvms.com';
-  const CLIENT_ID = 'api-tool';
+  // ---- Schedule tab state ----
+  const [scheduleType, setScheduleType] = useState<"video" | "screenshot">("video");
+  const [scheduleDate, setScheduleDate] = useState<Date | undefined>(new Date());
+  const [scheduleStart, setScheduleStart] = useState<string>("");
+  const [scheduleEnd, setScheduleEnd] = useState<string>("");
+  const [scheduleScreenshotTime, setScheduleScreenshotTime] = useState<string>("");
+  const [scheduledRecordings, setScheduledRecordings] = useState<ScheduledRecording[]>([]);
+  const [scheduleError, setScheduleError] = useState<string>("");
+  const [scheduleSuccess, setScheduleSuccess] = useState<string>("");
+  const [scheduleCamera, setScheduleCamera] = useState<string>("");
+  const [scheduleSystem, setScheduleSystem] = useState<string>("");
+  const scheduleTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const originalSchedules = useRef<Map<string, any>>(new Map());
 
-  // Check for cloud session cookie
+  // ---- Recent Recordings tab state ----
+  const [recentRecordings, setRecentRecordings] = useState<RecentRecording[]>([]);
+  const [recentSearch, setRecentSearch] = useState<string>("");
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [recentDate, setRecentDate] = useState<Date | undefined>(new Date());
+  const [recentError, setRecentError] = useState<string>("");
+  const [recentCamera, setRecentCamera] = useState<string>("");
+
+  // ---- Cloud OAuth ----
+  const CLOUD_HOST = "https://nxvms.com";
+  const CLIENT_ID = "api-tool";
+
   const hasCloudSession = useCallback(() => {
     const session = Cookies.get("nx_cloud_session");
     if (!session) return false;
     try {
       const parsed = JSON.parse(session);
       return !!(parsed?.accessToken);
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }, []);
 
-  // Handle NX Cloud OAuth login
   const handleCloudLogin = useCallback(() => {
     const redirectUrl = new URL(window.location.href);
-    redirectUrl.search = ''; // Clear any existing query params
+    redirectUrl.search = "";
     const authUrl = new URL(`${CLOUD_HOST}/authorize`);
-    authUrl.searchParams.set('redirect_url', redirectUrl.toString());
-    authUrl.searchParams.set('client_id', CLIENT_ID);
+    authUrl.searchParams.set("redirect_url", redirectUrl.toString());
+    authUrl.searchParams.set("client_id", CLIENT_ID);
     window.location.href = authUrl.toString();
   }, []);
 
-  // Handle OAuth callback and exchange code for token
+  // Handle OAuth callback
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    
+    const code = params.get("code");
     if (code) {
-      // Exchange code for token
       const exchangeToken = async () => {
         try {
           const response = await fetch(`${CLOUD_HOST}/oauth/token/`, {
             method: "POST",
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              code,
-              grant_type: 'authorization_code',
-              response_type: 'token'
-            })
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, grant_type: "authorization_code", response_type: "token" }),
           });
-
           if (response.ok) {
             const tokens = await response.json();
             if (tokens.access_token) {
-              // Store token in cookie
-              const sessionData = {
-                accessToken: tokens.access_token,
-                refreshToken: tokens.refresh_token,
-                email: tokens.user_email
-              };
-              Cookies.set("nx_cloud_session", JSON.stringify(sessionData), { expires: 365, path: '/' });
+              Cookies.set("nx_cloud_session", JSON.stringify({ accessToken: tokens.access_token, refreshToken: tokens.refresh_token, email: tokens.user_email }), { expires: 365, path: "/" });
               setRequiresCloudAuth(false);
-              
-              // Clear URL params and reload systems
               const url = new URL(window.location.href);
-              url.searchParams.delete('code');
-              window.history.replaceState({}, '', url.toString());
-              
+              url.searchParams.delete("code");
+              window.history.replaceState({}, "", url.toString());
               loadSystems();
             }
           }
-        } catch (err) {
-          console.error("[CloudRecordings] Token exchange error:", err);
-          setError("Failed to complete cloud login. Please try again.");
-        }
+        } catch (err) { console.error("[CloudRecordings] Token exchange error:", err); }
       };
-
       exchangeToken();
     }
   }, []);
 
-  // Load local system info and systems
+  // Initial load – fetch system name first, THEN load cameras
   useEffect(() => {
     (async () => {
       try {
         const info = await nxAPI.getSystemInfo();
         if (info?.name) setLocalSystemName(info.name);
       } catch (e) {}
+      const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
+      setSelectedSystem(localSystemId);
+      loadSystems();
     })();
+  }, []);
 
-    // Fetch /api/auth/me to get org_camera_ids (if provided)
-    (async () => {
-      try {
-        const resp = await fetch("/api/auth/me", { credentials: 'include' });
-        if (resp.ok) {
-          const data = await resp.json();
-          const allowed = data?.user?.org_camera_ids ?? data?.user?.orgCameraIds ?? null;
-          // Normalize IDs: strip surrounding braces and lowercase
-          const normalizeId = (v: any) => String(v || "").replace(/[{}]/g, "").toLowerCase();
-          if (Array.isArray(allowed)) {
-            setOrgCameraIds(allowed.map((id: any) => normalizeId(id)));
-          } else {
-            // Fallback: check sessionStorage (AuthProvider may have stored it) or cookie
-            try {
-              if (typeof window !== 'undefined' && window.sessionStorage) {
-                const stored = window.sessionStorage.getItem('org_camera_ids');
-                if (stored) {
-                  const parsed = JSON.parse(stored);
-                  if (Array.isArray(parsed) && parsed.length > 0) {
-                    setOrgCameraIds(parsed.map((id: any) => normalizeId(id)));
-                    return;
-                  }
-                }
-              }
-            } catch (e) {
-              // ignore
-            }
-
-            try {
-              const cookieVal = Cookies.get('org_camera_ids');
-              if (cookieVal) {
-                const parsed = JSON.parse(cookieVal);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  setOrgCameraIds(parsed.map((id: any) => normalizeId(id)));
-                  return;
-                }
-              }
-            } catch (e) {
-              // ignore
-            }
-
-            setOrgCameraIds(null);
-          }
-        } else {
-          setOrgCameraIds(null);
-        }
-      } catch (e) {
-        console.warn('[CloudRecordings] Unable to fetch /api/auth/me', e);
-        setOrgCameraIds(null);
-      }
-    })();
-
-    // Prefer local system ID if configured, otherwise fallback to localhost
-    const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
-    setSelectedSystem(localSystemId);
-    
-    if (!hasCloudSession() && !localSystemId) {
-      setRequiresCloudAuth(true);
-      setLoadingSystems(false);
-      return;
-    }
-    loadSystems();
-  }, [hasCloudSession]);
+  const normalizeId = (v: any) => String(v || "").replace(/[{}]/g, "").toLowerCase();
 
   const loadSystems = async () => {
     setLoadingSystems(true);
-    setError("");
+    setGlobalError("");
     setRequiresCloudAuth(false);
-    
     try {
       const data = await fetchCloudSystems();
       setSystems(data);
-      
-      // After loading systems, immediately load cameras from ALL of them
       loadAllCameras(data);
     } catch (err: any) {
       if (err instanceof CloudAuthError || err.requiresAuth) {
-        // Only show cloud auth error if we don't have a local session fallback
         const localUserCookie = Cookies.get("local_nx_user");
         if (!localUserCookie) {
           setRequiresCloudAuth(true);
-          setLoadingSystems(false); 
+          setLoadingSystems(false);
           return;
         } else {
-          // We have a local user, so we can probably proceed with loading local cameras at least
           loadAllCameras([]);
         }
       } else {
-        console.warn("[CloudRecordings] loadSystems failed:", err);
-        // Try to load whatever we can (e.g. local)
         loadAllCameras([]);
       }
     } finally {
@@ -249,268 +210,406 @@ export default function CloudRecordings() {
     setLoadingDevices(true);
     setDevices([]);
     setDevicesReady(false);
-    
-    // 1. Fetch Local Cameras FIRST (High speed)
+
+    // 1. LOCAL FIRST – immediate
     try {
       const localCams = await nxAPI.getCameras();
       const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
-      
       const mappedLocal = localCams.map(cam => ({
-        id: cam.id,
-        name: cam.name,
-        typeId: cam.typeId,
-        systemId: localSystemId,
-        systemName: localSystemName
+        id: cam.id, name: cam.name, typeId: cam.typeId,
+        systemId: localSystemId, systemName: localSystemName,
       }));
-
-      // Immediately show local cameras to make the UI interactive
       setDevices(mappedLocal);
       setDevicesReady(true);
-      
       if (mappedLocal.length > 0) {
         setSelectedDevice(normalizeId(mappedLocal[0].id));
         setSelectedSystem(localSystemId);
+        setScheduleCamera(normalizeId(mappedLocal[0].id));
+        setScheduleSystem(localSystemId);
+        setRecentCamera(normalizeId(mappedLocal[0].id));
       }
     } catch (e) {
       console.warn("[CloudRecordings] Local camera fetch failed:", e);
     }
 
-    // 2. Fetch Cloud Systems in Parallel with incremental updates
-    // We don't wait for these to be done before showing local cameras
+    // 2. CLOUD – incremental with timeout
     cloudSystems.forEach(async (system) => {
       try {
         const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "").replace(/[{}]/g, "").toLowerCase();
         if (system.id.replace(/[{}]/g, "").toLowerCase() === localSystemId) return;
-
-        // Add a small 10s timeout per system to prevent long blocks
         const data = await Promise.race([
           fetchCloudDevices(system.id),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000)),
         ]) as any[];
-
         if (Array.isArray(data)) {
           const cloudMapped = data.map((cam: any) => ({
-            id: cam.id,
-            name: cam.name,
-            typeId: cam.typeId,
-            systemId: system.id,
-            systemName: system.name
+            id: cam.id, name: cam.name, typeId: cam.typeId,
+            systemId: system.id, systemName: system.name,
           }));
-          
           setDevices(prev => {
-            // Check for duplicates
             const existingIds = new Set(prev.map(d => normalizeId(d.id)));
             const newOnes = cloudMapped.filter(d => !existingIds.has(normalizeId(d.id)));
             return [...prev, ...newOnes];
           });
         }
       } catch (e) {
-        console.warn(`[CloudRecordings] Failed to fetch cameras for ${system.name}:`, e);
+        console.warn(`[CloudRecordings] Failed to fetch cameras from ${system.name}:`, e);
       }
     });
 
     setLoadingDevices(false);
   };
 
-  const getOriginalDeviceId = (normalizedId: string) => {
-    const d = devices.find((dev: any) => normalizeId(dev.id) === String(normalizedId));
+  const getOriginalDeviceId = (normalizedId: string, devList?: any[]) => {
+    const list = devList || devices;
+    const d = list.find((dev: any) => normalizeId(dev.id) === String(normalizedId));
     return d ? String(d.id) : String(normalizedId);
   };
 
-  const getSourceAuth = (): BasicAuthCredentials | undefined => {
-    if (!sourceUsername.trim() || !sourcePassword) return undefined;
-    return {
-      username: sourceUsername.trim(),
-      password: sourcePassword,
-    };
-  };
-
-  const normalizeId = (v: any) => String(v || "").replace(/[{}]/g, "").toLowerCase();
-
-  const getEffectiveOrgCameraIds = () => {
-    // Prefer cookie (server-set) first, then in-memory state, then sessionStorage
-    try {
-      const cookieVal = Cookies.get('org_camera_ids');
-      if (cookieVal) {
-        console.log('[CloudRecordings] raw org_camera_ids cookie:', cookieVal);
-        let parsed: any = null;
-        try {
-          parsed = JSON.parse(cookieVal);
-        } catch (e1) {
-          try {
-            // Some server code URL-encodes the JSON; try decode
-            parsed = JSON.parse(decodeURIComponent(cookieVal));
-          } catch (e2) {
-            // If it's a plain non-JSON string (CSV), try to split
-            if (typeof cookieVal === 'string') {
-              parsed = cookieVal.split(/\s*,\s*/).map((s) => s.replace(/^"|"$/g, ''));
-            }
-          }
-        }
-
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const normalized = parsed.map((id: any) => normalizeId(id));
-          console.log('[CloudRecordings] parsed org_camera_ids cookie ->', normalized);
-          return normalized;
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-
-    try {
-      if (Array.isArray(orgCameraIds) && orgCameraIds.length > 0) return orgCameraIds;
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        const stored = window.sessionStorage.getItem('org_camera_ids');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed.map((id: any) => normalizeId(id));
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-
-    return null;
-  };
-
-  // Initialize orgCameraIds from cookie early so UI can render disabled items immediately
-  useEffect(() => {
-    try {
-      const cookieVal = Cookies.get('org_camera_ids');
-      if (cookieVal) {
-        const parsed = JSON.parse(cookieVal);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setOrgCameraIds(parsed.map((id: any) => normalizeId(id)));
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-  }, []);
   function handleSelectDevice(value: string) {
-    if (!value) {
-      setSelectedDevice("");
-      return;
-    }
-
-    // value will be the normalized id
+    if (!value) { setSelectedDevice(""); return; }
     const device = devices.find((d: any) => normalizeId(d.id) === String(value)) as any;
-    if (!device) {
-      setSelectedDevice(value);
-      return;
-    }
-
-    // Automatically update the systemId when a camera is selected
-    if (device.systemId) {
-      console.log(`[CloudRecordings] Switching to system ${device.systemName} for camera ${device.name}`);
-      setSelectedSystem(device.systemId);
-    }
-
-    setError("");
+    if (!device) { setSelectedDevice(value); return; }
+    if (device.systemId) setSelectedSystem(device.systemId);
+    setSearchError("");
     setSelectedDevice(value);
   }
 
-  // Remove the old loadDevices in favor of loadAllCameras
+  function handleScheduleSelectDevice(value: string) {
+    if (!value) { setScheduleCamera(""); return; }
+    const device = devices.find((d: any) => normalizeId(d.id) === String(value)) as any;
+    if (!device) { setScheduleCamera(value); return; }
+    if (device.systemId) setScheduleSystem(device.systemId);
+    setScheduleCamera(value);
+  }
 
-
+  // ---- Search Recordings ----
   const handleSearchRecordings = async () => {
     if (!selectedSystem || !selectedDevice || !date) {
-      setError("Please select a system, device, and date.");
+      setSearchError("Please select a camera and date.");
       return;
     }
-
-    setLoading(true);
-    setError("");
+    setSearchLoading(true);
+    setSearchError("");
     setRecordings([]);
-
     try {
       const [startHour, startMin] = startTime.split(":").map(Number);
       const [endHour, endMin] = endTime.split(":").map(Number);
-
       const startMs = new Date(date).setHours(startHour, startMin, 0, 0);
       const endMs = new Date(date).setHours(endHour, endMin, 59, 999);
-
-      // Store the searched range for download options
       setSearchedRange({ startMs, endMs });
-
       const data = await fetchRecordedTimePeriods(
-        selectedSystem,
-        getOriginalDeviceId(selectedDevice),
-        startMs,
-        endMs,
-        undefined // No manual basic auth anymore
+        selectedSystem, getOriginalDeviceId(selectedDevice), startMs, endMs, undefined
       );
-
-      // Parse response - could be array or object with reply
       const periods = Array.isArray(data) ? data : data?.reply || [];
       setRecordings(periods);
-
-      if (periods.length === 0) {
-        setError("No recordings found for the selected time range.");
-      }
+      if (periods.length === 0) setSearchError("No recordings found for the selected time range.");
     } catch (err: any) {
-      if (err instanceof CloudAuthError || err?.requiresAuth) {
-        setError("Authentication required for selected source. Please check source username and password.");
-      } else {
-        setError(err.message || "Failed to search recordings");
-      }
+      setSearchError(err.message || "Failed to search recordings");
     } finally {
-      setLoading(false);
+      setSearchLoading(false);
     }
   };
-  const handlePreview = (startTimeMs: number) => {
-    if (!selectedSystem || !selectedDevice) return;
-    
-    const imagePath = `/api/cloud/recordings/thumbnail?systemId=${encodeURIComponent(selectedSystem || "127.0.0.1")}&deviceId=${encodeURIComponent(getOriginalDeviceId(selectedDevice))}&timeMs=${startTimeMs}`;
-    
-    setPreviewSelection({
-      startTime: startTimeMs,
-      deviceName: devices.find(d => normalizeId(d.id) === selectedDevice)?.name || "Camera",
-    });
-    setPreviewImages([imagePath]); // Put in array for single image support
-    setPreviewOpen(true);
-  };
 
-  const handleDownload = (startTimeMs: number, durationMs: number) => {
+  const handlePreview = (startTimeMs: number, durationMs?: number, sysId?: string, devId?: string) => {
+    const sys = sysId || selectedSystem;
+    const dev = devId || getOriginalDeviceId(selectedDevice);
+    // Open the video inline in a new browser tab (no download)
     const params = new URLSearchParams({
-      systemId: selectedSystem || "127.0.0.1",
-      deviceId: getOriginalDeviceId(selectedDevice),
+      systemId: sys || "127.0.0.1",
+      deviceId: dev,
       startTime: String(startTimeMs),
-      endTime: String(startTimeMs + durationMs),
+      endTime: String(startTimeMs + (durationMs || 300000)),
+      preview: "true",  // inline Content-Disposition – browser plays, not saves
     });
     window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
+  };
+
+  const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string) => {
+    const params = new URLSearchParams({
+      systemId: sysId || selectedSystem || "127.0.0.1",
+      deviceId: devId || getOriginalDeviceId(selectedDevice),
+      startTime: String(startTimeMs),
+      endTime: String(startTimeMs + durationMs),
+      stream: "true",  // Always proxy through Next.js so VMS token is applied server-side
+    });
+    window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
+  };
+
+  // ---- Schedule Recording ----
+  const handleScheduleRecording = () => {
+    setScheduleError("");
+    setScheduleSuccess("");
+    if (!scheduleCamera) { setScheduleError("Please select a camera."); return; }
+    if (!scheduleDate) { setScheduleError("Please select a date."); return; }
+
+    if (scheduleType === "screenshot") {
+      if (!scheduleScreenshotTime) { setScheduleError("Please enter the screenshot time."); return; }
+      const device = devices.find(d => normalizeId(d.id) === scheduleCamera);
+      const now = Date.now();
+      const [sh, sm] = scheduleScreenshotTime.split(":").map(Number);
+      const targetMs = new Date(scheduleDate).setHours(sh, sm, 0, 0);
+      const delay = targetMs - now;
+
+      const newEntry: ScheduledRecording = {
+        id: `sched-${Date.now()}`,
+        cameraId: scheduleCamera,
+        cameraName: device?.name || "Camera",
+        systemId: scheduleSystem,
+        systemName: device?.systemName || "",
+        date: scheduleDate,
+        startTime: scheduleScreenshotTime,
+        endTime: scheduleScreenshotTime,
+        type: "screenshot",
+        screenshotTime: scheduleScreenshotTime,
+        status: delay > 0 ? "pending" : "completed",
+      };
+
+      if (delay > 0) {
+        const timer = setTimeout(() => {
+          handlePreview(targetMs, undefined, scheduleSystem, getOriginalDeviceId(scheduleCamera));
+          setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "completed" } : r));
+        }, delay);
+        scheduleTimers.current.set(newEntry.id, timer);
+        setScheduledRecordings(prev => [...prev, newEntry]);
+        setScheduleSuccess(`Screenshot scheduled for ${format(scheduleDate, "PPP")} at ${scheduleScreenshotTime}`);
+      } else {
+        // Past time – capture now
+        handlePreview(targetMs, undefined, scheduleSystem, getOriginalDeviceId(scheduleCamera));
+        setScheduledRecordings(prev => [...prev, { ...newEntry, status: "completed" }]);
+        setScheduleSuccess("Screenshot captured immediately (time has passed).");
+      }
+      return;
+    }
+
+    // Video recording
+    if (!scheduleStart || !scheduleEnd) { setScheduleError("Please enter start and end times."); return; }
+    const [startH, startM] = scheduleStart.split(":").map(Number);
+    const [endH, endM] = scheduleEnd.split(":").map(Number);
+    const startMs = new Date(scheduleDate).setHours(startH, startM, 0, 0);
+    const endMs = new Date(scheduleDate).setHours(endH, endM, 59, 999);
+    const now = Date.now();
+
+    if (endMs <= startMs) { setScheduleError("End time must be after start time."); return; }
+
+    const device = devices.find(d => normalizeId(d.id) === scheduleCamera);
+    const newEntry: ScheduledRecording = {
+      id: `sched-${Date.now()}`,
+      cameraId: scheduleCamera,
+      cameraName: device?.name || "Camera",
+      systemId: scheduleSystem,
+      systemName: device?.systemName || "",
+      date: scheduleDate,
+      startTime: scheduleStart,
+      endTime: scheduleEnd,
+      type: "video",
+      status: startMs > now ? "pending" : "recording",
+    };
+
+    const startDelay = Math.max(0, startMs - now);
+    const endDelay = Math.max(0, endMs - now);
+    const cameraDeviceId = getOriginalDeviceId(scheduleCamera);
+
+    // Schedule START – enable recording on the VMS
+    const startTimer = setTimeout(async () => {
+      setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "recording", startedAt: Date.now() } : r));
+      try {
+        // Save original schedule
+        let originalSchedule: any = null;
+        try {
+          const cam = await nxAPI.getCameraById(cameraDeviceId);
+          originalSchedule = cam?.schedule || null;
+        } catch (e) { /* ignore – we'll just disable after */ }
+
+        // Store separately so type system is clean
+        originalSchedules.current.set(newEntry.id, originalSchedule);
+
+        const dayOfWeek = new Date(scheduleDate).getDay(); // 0=Sun
+        const startSec = startH * 3600 + startM * 60;
+        const endSec = endH * 3600 + endM * 60 + 59;
+
+        await nxAPI.updateDevice(cameraDeviceId, {
+          schedule: {
+            isEnabled: true,
+            tasks: [{
+              startTime: startSec,
+              endTime: endSec,
+              dayOfWeek,
+              recordingType: "always",
+              metadataTypes: "none",
+              streamQuality: "high",
+              fps: 15,
+            }],
+          }
+        });
+        console.log(`[CloudRecordings] ✅ Recording STARTED on VMS for ${device?.name} (${scheduleStart})`);
+      } catch (err) {
+        console.error("[CloudRecordings] Failed to enable VMS recording:", err);
+        setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "failed" } : r));
+      }
+    }, startDelay);
+
+    // Schedule STOP – restore original schedule and disable recording
+    const endTimer = setTimeout(async () => {
+      setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "completed" } : r));
+      try {
+        const originalSchedule = originalSchedules.current.get(newEntry.id);
+        originalSchedules.current.delete(newEntry.id);
+
+        if (originalSchedule) {
+          await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
+        } else {
+          await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
+        }
+        console.log(`[CloudRecordings] ✅ Recording STOPPED on VMS for ${device?.name} (${scheduleEnd})`);
+      } catch (err) {
+        console.error("[CloudRecordings] Failed to stop VMS recording:", err);
+      }
+
+      // Push to Recent Recordings
+      const recentEntry: RecentRecording = {
+        id: `rec-${Date.now()}`,
+        cameraName: device?.name || "Camera",
+        systemName: device?.systemName || "",
+        startTimeMs: startMs,
+        durationMs: endMs - startMs,
+        systemId: scheduleSystem,
+        deviceId: cameraDeviceId,
+      };
+      setRecentRecordings(prev => [recentEntry, ...prev]);
+    }, endDelay);
+
+    scheduleTimers.current.set(newEntry.id + "-start", startTimer);
+    scheduleTimers.current.set(newEntry.id + "-end", endTimer);
+    setScheduledRecordings(prev => [...prev, newEntry]);
+    setScheduleSuccess(`Recording scheduled: ${format(scheduleDate, "PPP")} ${scheduleStart} – ${scheduleEnd}`);
+  };
+
+  const cancelSchedule = async (id: string) => {
+    const t1 = scheduleTimers.current.get(id + "-start");
+    const t2 = scheduleTimers.current.get(id + "-end");
+    if (t1) clearTimeout(t1);
+    if (t2) clearTimeout(t2);
+
+    // If currently recording, stop it immediately on the VMS
+    const rec = scheduledRecordings.find(r => r.id === id);
+    if (rec?.status === "recording") {
+      try {
+        const originalSchedule = originalSchedules.current.get(id);
+        originalSchedules.current.delete(id);
+        const cameraDeviceId = getOriginalDeviceId(rec.cameraId);
+        if (originalSchedule) {
+          await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
+        } else {
+          await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
+        }
+        console.log(`[CloudRecordings] Recording cancelled on VMS for ${rec.cameraName}`);
+      } catch (err) {
+        console.error("[CloudRecordings] Failed to stop recording on cancel:", err);
+      }
+    }
+
+    scheduleTimers.current.delete(id + "-start");
+    scheduleTimers.current.delete(id + "-end");
+    setScheduledRecordings(prev => prev.filter(r => r.id !== id));
+  };
+
+  // ---- Recent Recordings ----
+  const handleSearchRecentRecordings = async () => {
+    if (!recentCamera || !recentDate) { setRecentError("Please select a camera and date."); return; }
+    const dev = devices.find(d => normalizeId(d.id) === recentCamera);
+    if (!dev) { setRecentError("Camera not found."); return; }
+    setRecentLoading(true);
+    setRecentError("");
+    try {
+      const startMs = new Date(recentDate).setHours(0, 0, 0, 0);
+      const endMs = new Date(recentDate).setHours(23, 59, 59, 999);
+      const data = await fetchRecordedTimePeriods(
+        dev.systemId, getOriginalDeviceId(recentCamera), startMs, endMs, undefined
+      );
+      const periods = Array.isArray(data) ? data : data?.reply || [];
+      const mapped: RecentRecording[] = periods.map((p: any, i: number) => ({
+        id: `recent-${i}-${p.startTimeMs}`,
+        cameraName: dev.name,
+        systemName: dev.systemName,
+        startTimeMs: p.startTimeMs || 0,
+        durationMs: p.durationMs || 0,
+        systemId: dev.systemId,
+        deviceId: getOriginalDeviceId(recentCamera),
+      }));
+      setRecentRecordings(mapped);
+      if (mapped.length === 0) setRecentError("No recordings found for this camera on the selected date.");
+    } catch (err: any) {
+      setRecentError(err.message || "Failed to fetch recent recordings.");
+    } finally {
+      setRecentLoading(false);
+    }
   };
 
   const formatDuration = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
-    if (hours > 0) {
-      return `${hours}h ${minutes % 60}m`;
-    }
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
     return `${minutes}m ${seconds % 60}s`;
   };
 
+  const filteredRecentRecordings = recentRecordings.filter(r =>
+    !recentSearch || r.cameraName.toLowerCase().includes(recentSearch.toLowerCase()) ||
+    r.systemName.toLowerCase().includes(recentSearch.toLowerCase()) ||
+    new Date(r.startTimeMs).toLocaleString().toLowerCase().includes(recentSearch.toLowerCase())
+  );
+
+  // ---- Camera Select (shared) ----
+  const CameraSelect = ({ value, onValueChange, label = "Camera" }: { value: string; onValueChange: (v: string) => void; label?: string }) => (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {loadingDevices ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading cameras...
+        </div>
+      ) : (
+        <Select value={value} onValueChange={onValueChange}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select a camera" />
+          </SelectTrigger>
+          <SelectContent className="max-h-[400px]">
+            {devices.map((device: any) => (
+              <SelectItem key={`${device.systemId}-${device.id}`} value={normalizeId(device.id)}>
+                <span className="font-medium">{device.name || device.id}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+
+  const statusColor: Record<string, string> = {
+    pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    recording: "bg-green-100 text-green-800 border-green-200 animate-pulse",
+    completed: "bg-blue-100 text-blue-800 border-blue-200",
+    failed: "bg-red-100 text-red-800 border-red-200",
+  };
+
+  // ======== RENDER ========
   return (
     <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Video className="h-8 w-8" />
         <div>
-          <h1 className="text-2xl font-bold">Cloud Recordings</h1>
-          <p className="text-muted-foreground">
-            Search and export video recordings from NX Cloud systems
-          </p>
+          <h1 className="text-2xl font-bold">Recordings</h1>
+          <p className="text-muted-foreground">Manage, schedule and review camera recordings</p>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md">
-          {error}
-        </div>
+      {/* Global errors */}
+      {globalError && (
+        <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md">{globalError}</div>
       )}
 
-      {/* Cloud Login Required Card */}
+      {/* Cloud auth gate */}
       {requiresCloudAuth && (
         <Card className="border-primary/50 bg-primary/5">
           <CardHeader>
@@ -518,270 +617,359 @@ export default function CloudRecordings() {
               <Cloud className="h-5 w-5" />
               NX Cloud Authentication Required
             </CardTitle>
-            <CardDescription>
-              Sign in to your NX Cloud account to access your connected systems and recordings.
-            </CardDescription>
+            <CardDescription>Sign in to your NX Cloud account to access connected systems.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button onClick={handleCloudLogin} className="gap-2">
-              <LogIn className="h-4 w-4" />
-              Sign in to NX Cloud
+              <LogIn className="h-4 w-4" /> Sign in to NX Cloud
             </Button>
           </CardContent>
         </Card>
       )}
 
       {!requiresCloudAuth && (
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* System & Device Selection */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Select Source</CardTitle>
-            <CardDescription>Choose a system and camera</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* System Select - Context display only */}
-            <div className="space-y-2">
-              <Label>System</Label>
-              <Select
-                value={selectedSystem}
-                disabled={true} 
-              >
-                <SelectTrigger className="bg-muted cursor-not-allowed">
-                  <SelectValue placeholder={loadingSystems ? "Loading systems..." : "Select a system"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={selectedSystem}>
-                    {localSystemName && (normalizeId(selectedSystem) === normalizeId(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1")) 
-                      ? localSystemName
-                      : (systems.find(s => normalizeId(s.id) === normalizeId(selectedSystem))?.name || selectedSystem)}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              {loadingDevices && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading all available cameras...
-                </div>
-              )}
+        <Tabs defaultValue="search" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="search" className="flex items-center gap-2">
+              <Search className="h-4 w-4" /> Search Recordings
+            </TabsTrigger>
+            <TabsTrigger value="schedule" className="flex items-center gap-2">
+              <Clock className="h-4 w-4" /> Schedule Recording
+            </TabsTrigger>
+            <TabsTrigger value="recent" className="flex items-center gap-2">
+              <List className="h-4 w-4" /> Recent Recordings
+            </TabsTrigger>
+          </TabsList>
+
+          {/* =================== SEARCH TAB =================== */}
+          <TabsContent value="search" className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Camera */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Select Camera</CardTitle>
+                  <CardDescription>Choose a camera to search recordings</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <CameraSelect value={selectedDevice} onValueChange={handleSelectDevice} />
+                </CardContent>
+              </Card>
+
+              {/* Time Selection */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Select Time Range</CardTitle>
+                  <CardDescription>Choose date and time for recordings</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Date Picker */}
+                  <div className="space-y-2">
+                    <Label>Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}>
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {date ? format(date, "PPP") : "Pick a date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar mode="single" selected={date} onSelect={setDate} initialFocus />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {/* Time Range */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Start Time</Label>
+                      <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>End Time</Label>
+                      <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+                    </div>
+                  </div>
+
+                  {searchError && <p className="text-sm text-destructive">{searchError}</p>}
+
+                  <Button onClick={handleSearchRecordings} disabled={searchLoading || !selectedDevice || !date} className="w-full">
+                    {searchLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Searching...</>) : "Search Recordings"}
+                  </Button>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* {selectedSystem && (
-              <>
-                <div className="space-y-2">
-                  <Label>Source Username</Label>
-                  <Input
-                    value={sourceUsername}
-                    onChange={(e) => setSourceUsername(e.target.value)}
-                    placeholder="Enter VMS username for this source"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Source Password</Label>
-                  <Input
-                    type="password"
-                    value={sourcePassword}
-                    onChange={(e) => setSourcePassword(e.target.value)}
-                    placeholder="Enter VMS password for this source"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => loadDevices(selectedSystem)}
-                  disabled={loadingDevices || !sourceUsername.trim() || !sourcePassword}
-                  className="w-full"
-                >
-                  {loadingDevices ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Connecting source...
-                    </>
-                  ) : (
-                    "Connect Source and Load Cameras"
-                  )}
-                </Button>
-              </>
-            )} */}
-
-            {/* Device Select - Unified Style */}
-            {devices.length > 0 && (
-              <div className="space-y-2">
-                <Label>Camera</Label>
-                <Select
-                  value={selectedDevice}
-                  onValueChange={handleSelectDevice}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a camera" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[400px]">
-                    {devices.map((device: any) => (
-                      <SelectItem key={`${device.systemId}-${device.id}`} value={normalizeId(device.id)}>
-                        <div className="flex flex-col items-start text-left">
-                          <span className="font-medium">{device.name || device.id}</span>
+            {/* Results */}
+            {recordings.length > 0 && searchedRange && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Recording Segments</CardTitle>
+                  <CardDescription>
+                    Found {recordings.length} segment(s): {new Date(searchedRange.startMs).toLocaleString()} – {new Date(searchedRange.endMs).toLocaleTimeString()}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="p-3 border rounded-md bg-primary/5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium">Download Selected Time Range</div>
+                          <div className="text-sm text-muted-foreground">
+                            {new Date(searchedRange.startMs).toLocaleString()} – {new Date(searchedRange.endMs).toLocaleTimeString()} ({formatDuration(searchedRange.endMs - searchedRange.startMs)})
+                          </div>
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                        <Button onClick={() => handleDownload(searchedRange.startMs, searchedRange.endMs - searchedRange.startMs)}>
+                          <Download className="mr-2 h-4 w-4" /> Download
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="text-sm font-medium text-muted-foreground">Or download full segments:</div>
+                    {recordings.map((rec, idx) => {
+                      const segStartMs = rec.startTimeMs || 0;
+                      const segDurationMs = rec.durationMs || 0;
+                      const segEndMs = segStartMs + segDurationMs;
+                      return (
+                        <div key={idx} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
+                          <div>
+                            <div className="font-medium">{new Date(segStartMs).toLocaleString()} – {new Date(segEndMs).toLocaleTimeString()}</div>
+                            <div className="text-sm text-muted-foreground">Duration: {formatDuration(segDurationMs)}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={() => handlePreview(segStartMs, segDurationMs)} className="gap-2">
+                              <Eye className="h-4 w-4" /> Preview
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleDownload(segStartMs, segDurationMs)}>
+                              <Download className="mr-2 h-4 w-4" /> Download
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
             )}
-          </CardContent>
-        </Card>
+          </TabsContent>
 
-        {/* Time Selection */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Select Time Range</CardTitle>
-            <CardDescription>Choose date and time for recordings</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Date Picker */}
-            <div className="space-y-2">
-              <Label>Date</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !date && "text-muted-foreground"
+          {/* =================== SCHEDULE TAB =================== */}
+          <TabsContent value="schedule" className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Schedule Form */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>New Scheduled Recording</CardTitle>
+                  <CardDescription>Set a camera and time window to auto-record</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <CameraSelect value={scheduleCamera} onValueChange={handleScheduleSelectDevice} />
+
+                  {/* Recording type */}
+                  <div className="space-y-2">
+                    <Label>Recording Type</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setScheduleType("video")}
+                        className={cn(
+                          "flex flex-col items-center gap-1 p-3 rounded-lg border-2 text-sm font-medium transition-all",
+                          scheduleType === "video" ? "border-primary bg-primary/5 text-primary" : "border-muted hover:border-primary/40"
+                        )}
+                      >
+                        <Video className="h-5 w-5" />
+                        Video Recording
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setScheduleType("screenshot")}
+                        className={cn(
+                          "flex flex-col items-center gap-1 p-3 rounded-lg border-2 text-sm font-medium transition-all",
+                          scheduleType === "screenshot" ? "border-primary bg-primary/5 text-primary" : "border-muted hover:border-primary/40"
+                        )}
+                      >
+                        <ImageIcon2 className="h-5 w-5" />
+                        Screenshot
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Date */}
+                  <div className="space-y-2">
+                    <Label>Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !scheduleDate && "text-muted-foreground")}>
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {scheduleDate ? format(scheduleDate, "PPP") : "Pick a date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar mode="single" selected={scheduleDate} onSelect={setScheduleDate} initialFocus />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {/* Times */}
+                  {scheduleType === "video" ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Start Time</Label>
+                        <Input type="time" value={scheduleStart} onChange={e => setScheduleStart(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>End Time</Label>
+                        <Input type="time" value={scheduleEnd} onChange={e => setScheduleEnd(e.target.value)} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label>Screenshot Time</Label>
+                      <Input type="time" value={scheduleScreenshotTime} onChange={e => setScheduleScreenshotTime(e.target.value)} />
+                    </div>
+                  )}
+
+                  {scheduleError && <p className="text-sm text-destructive">{scheduleError}</p>}
+                  {scheduleSuccess && <p className="text-sm text-green-600">{scheduleSuccess}</p>}
+
+                  <Button onClick={handleScheduleRecording} disabled={!scheduleCamera} className="w-full">
+                    {scheduleType === "video" ? (
+                      <><PlayCircle className="mr-2 h-4 w-4" />Schedule Recording</>
+                    ) : (
+                      <><Camera className="mr-2 h-4 w-4" />Schedule Screenshot</>
                     )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {date ? format(date, "PPP") : "Pick a date"}
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={date}
-                    onSelect={setDate}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
+                </CardContent>
+              </Card>
 
-            {/* Time Range */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Start Time</Label>
-                <Input
-                  type="time"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>End Time</Label>
-                <Input
-                  type="time"
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <Button
-              onClick={handleSearchRecordings}
-              disabled={loading || !selectedSystem || !selectedDevice || !date}
-              className="w-full"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Searching...
-                </>
-              ) : (
-                "Search Recordings"
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-      )}
-
-      {/* Results */}
-      {!requiresCloudAuth && recordings.length > 0 && searchedRange && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Recording Segments</CardTitle>
-            <CardDescription>
-              Found {recordings.length} recording segment(s) overlapping with your search: {new Date(searchedRange.startMs).toLocaleString()} - {new Date(searchedRange.endMs).toLocaleTimeString()}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {/* Download selected time range button */}
-              <div className="p-3 border rounded-md bg-primary/5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">Download Selected Time Range</div>
-                    <div className="text-sm text-muted-foreground">
-                      {new Date(searchedRange.startMs).toLocaleString()} - {new Date(searchedRange.endMs).toLocaleTimeString()}
-                      {" ("}{formatDuration(searchedRange.endMs - searchedRange.startMs)}{")"}    
+              {/* Scheduled queue */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Scheduled Queue</CardTitle>
+                  <CardDescription>Active and recent scheduled recordings</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {scheduledRecordings.length === 0 ? (
+                    <div className="text-sm text-muted-foreground py-8 text-center">
+                      No scheduled recordings yet.
                     </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {scheduledRecordings.map(r => (
+                        <div key={r.id} className="p-3 border rounded-md space-y-1">
+                          <div className="flex items-center justify-between">
+                            <div className="font-medium text-sm">{r.cameraName}</div>
+                            <div className="flex items-center gap-2">
+                              <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium capitalize", statusColor[r.status])}>
+                                {r.status}
+                              </span>
+                              {r.status === "pending" && (
+                                <button onClick={() => cancelSchedule(r.id)} className="text-muted-foreground hover:text-destructive transition-colors" title="Cancel">
+                                  <X className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {format(r.date, "MMM d, yyyy")} · {r.type === "screenshot" ? `Screenshot at ${r.screenshotTime}` : `${r.startTime} – ${r.endTime}`}
+                          </div>
+                          {r.type === "video" && r.status === "recording" && (
+                            <div className="flex items-center gap-1 text-xs text-green-600">
+                              <StopCircle className="h-3 w-3 animate-pulse" /> Recording in progress...
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* =================== RECENT RECORDINGS TAB =================== */}
+          <TabsContent value="recent" className="space-y-6">
+            {/* Search controls */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Search Recent Recordings</CardTitle>
+                <CardDescription>Browse saved recordings by camera and date</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="md:col-span-1">
+                    <CameraSelect value={recentCamera} onValueChange={setRecentCamera} label="Camera" />
                   </div>
-                  <Button
-                    onClick={() => handleDownload(searchedRange.startMs, searchedRange.endMs - searchedRange.startMs)}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Open Recording
-                  </Button>
+                  <div className="space-y-2">
+                    <Label>Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !recentDate && "text-muted-foreground")}>
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {recentDate ? format(recentDate, "PPP") : "Pick a date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar mode="single" selected={recentDate} onSelect={setRecentDate} initialFocus />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="flex items-end">
+                    <Button onClick={handleSearchRecentRecordings} disabled={recentLoading || !recentCamera} className="w-full">
+                      {recentLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading...</>) : (<><RefreshCw className="mr-2 h-4 w-4" />Load Recordings</>)}
+                    </Button>
+                  </div>
                 </div>
-              </div>
+                {recentError && <p className="text-sm text-destructive">{recentError}</p>}
+              </CardContent>
+            </Card>
 
-              {/* Individual segments */}
-              <div className="text-sm font-medium text-muted-foreground">Or download full segments:</div>
-              {recordings.map((rec, idx) => {
-                // Server normalizes timestamps to milliseconds as numbers
-                const segStartMs = rec.startTimeMs || 0;
-                const segDurationMs = rec.durationMs || 0;
-                const segEndMs = segStartMs + segDurationMs;
-                
-                // Log for debugging
-                console.log(`[Recording ${idx}]`, { segStartMs, segDurationMs, raw: rec });
-
-                return (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50"
-                  >
+            {/* Filter & results */}
+            {recentRecordings.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-medium">
-                        {new Date(segStartMs).toLocaleString()} - {new Date(segEndMs).toLocaleTimeString()}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        Full segment: {formatDuration(segDurationMs)}
-                      </div>
+                      <CardTitle>Results</CardTitle>
+                      <CardDescription>{filteredRecentRecordings.length} of {recentRecordings.length} recordings</CardDescription>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handlePreview(segStartMs)}
-                        className="gap-2 border-primary/20 hover:bg-primary/5"
-                      >
-                        <Eye className="h-4 w-4" />
-                        Preview
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDownload(segStartMs, segDurationMs)}
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        Open Segment
-                      </Button>
+                    <div className="relative w-56">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                      <Input
+                        className="pl-9"
+                        placeholder="Filter results..."
+                        value={recentSearch}
+                        onChange={e => setRecentSearch(e.target.value)}
+                      />
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {filteredRecentRecordings.map(rec => (
+                      <div key={rec.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
+                        <div>
+                          <div className="font-medium">{rec.cameraName}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {new Date(rec.startTimeMs).toLocaleString()} · {formatDuration(rec.durationMs)}
+                          </div>
+                          {rec.systemName && <div className="text-xs text-muted-foreground">{rec.systemName}</div>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)} className="gap-2">
+                            <Eye className="h-4 w-4" /> Preview
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)}>
+                            <Download className="mr-2 h-4 w-4" /> Download
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
       )}
 
       {/* Preview Dialog */}
@@ -792,24 +980,22 @@ export default function CloudRecordings() {
               <ImageIcon className="h-5 w-5 text-blue-500" />
               Recording Preview
             </DialogTitle>
-            <DialogDescription>
-              Preview from {previewSelection?.deviceName}
-            </DialogDescription>
+            <DialogDescription>Preview from {previewSelection?.deviceName}</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col items-center justify-center py-4 bg-black/5 rounded-lg border border-dashed">
             {previewImages[0] && (
-              <div className="max-w-xl w-full space-y-2">
+              <div className="max-w-xl w-full">
                 <div className="aspect-video bg-muted rounded-md overflow-hidden border shadow-lg relative group">
-                  <img 
-                    src={previewImages[0]} 
-                    alt="Recording Preview" 
+                  <img
+                    src={previewImages[0]}
+                    alt="Recording Preview"
                     className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgwIiBoZWlnaHQ9IjI3MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMmUyZTMwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZpbGw9IiM2NjYiIGZvbnQtc2l6ZT0iMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmZyYW1lIG5vbi1hdmFpbGFibGU8L3RleHQ+PC9zdmc+';
+                    onError={e => {
+                      (e.target as HTMLImageElement).src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgwIiBoZWlnaHQ9IjI3MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMmUyZTMwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZpbGw9IiM2NjYiIGZvbnQtc2l6ZT0iMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmZyYW1lIG5vbi1hdmFpbGFibGU8L3RleHQ+PC9zdmc+";
                     }}
                   />
-                  <a 
-                    href={previewImages[0]} 
+                  <a
+                    href={previewImages[0]}
                     download={`snapshot-${previewSelection?.deviceName}-${previewSelection?.startTime}.jpg`}
                     target="_blank"
                     className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
@@ -822,6 +1008,9 @@ export default function CloudRecordings() {
             )}
           </div>
           <div className="flex justify-end pt-2 gap-2">
+            <Button variant="outline" onClick={() => window.open(previewImages[0], "_blank")}>
+              <Download className="mr-2 h-4 w-4" /> Save Image
+            </Button>
             <Button onClick={() => setPreviewOpen(false)}>Close</Button>
           </div>
         </DialogContent>
