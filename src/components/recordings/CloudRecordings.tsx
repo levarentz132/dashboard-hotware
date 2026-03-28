@@ -18,6 +18,14 @@ import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn } from "lucide-rea
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription 
+} from "@/components/ui/dialog";
+import { Image as ImageIcon, Eye } from "lucide-react";
 import {
   fetchCloudSystems,
   fetchCloudDevices,
@@ -27,13 +35,16 @@ import {
   CloudAuthError,
   BasicAuthCredentials,
 } from "./recordings-service";
+import nxAPI from "@/lib/nxapi";
+import { API_CONFIG } from "@/lib/config";
 
 export default function CloudRecordings() {
   const [systems, setSystems] = useState<CloudSystem[]>([]);
   const [devices, setDevices] = useState<CloudDevice[]>([]);
-  const [selectedSystem, setSelectedSystem] = useState<string>("");
+  const [selectedSystem, setSelectedSystem] = useState<string>("127.0.0.1");
   const [selectedDevice, setSelectedDevice] = useState<string>("");
-  const [date, setDate] = useState<Date>();
+  const [date, setDate] = useState<Date | undefined>(new Date());
+  const [localSystemName, setLocalSystemName] = useState<string>("");
   const [startTime, setStartTime] = useState<string>("00:00");
   const [endTime, setEndTime] = useState<string>("23:59");
   const [recordings, setRecordings] = useState<any[]>([]);
@@ -48,6 +59,10 @@ export default function CloudRecordings() {
   const [requiresCloudAuth, setRequiresCloudAuth] = useState(false);
   const [sourceUsername, setSourceUsername] = useState("");
   const [sourcePassword, setSourcePassword] = useState("");
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSelection, setPreviewSelection] = useState<any>(null);
+  const [previewImages, setPreviewImages] = useState<string[]>([]);
 
   // Cloud OAuth configuration
   const CLOUD_HOST = 'https://nxvms.com';
@@ -124,8 +139,15 @@ export default function CloudRecordings() {
     }
   }, []);
 
-  // Load systems on mount
+  // Load local system info and systems
   useEffect(() => {
+    (async () => {
+      try {
+        const info = await nxAPI.getSystemInfo();
+        if (info?.name) setLocalSystemName(info.name);
+      } catch (e) {}
+    })();
+
     // Fetch /api/auth/me to get org_camera_ids (if provided)
     (async () => {
       try {
@@ -178,8 +200,11 @@ export default function CloudRecordings() {
       }
     })();
 
-    // First check if we have a cloud session - if not, show login immediately
-    if (!hasCloudSession()) {
+    // Prefer local system ID if configured, otherwise fallback to localhost
+    const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
+    setSelectedSystem(localSystemId);
+    
+    if (!hasCloudSession() && !localSystemId) {
       setRequiresCloudAuth(true);
       setLoadingSystems(false);
       return;
@@ -195,19 +220,101 @@ export default function CloudRecordings() {
     try {
       const data = await fetchCloudSystems();
       setSystems(data);
-      if (data.length === 0) {
-        setError("No systems found. You may not have any systems connected to your NX Cloud account.");
-      }
+      
+      // After loading systems, immediately load cameras from ALL of them
+      loadAllCameras(data);
     } catch (err: any) {
       if (err instanceof CloudAuthError || err.requiresAuth) {
-        setRequiresCloudAuth(true);
-        setError(""); // Clear any error when showing login prompt
+        // Only show cloud auth error if we don't have a local session fallback
+        const localUserCookie = Cookies.get("local_nx_user");
+        if (!localUserCookie) {
+          setRequiresCloudAuth(true);
+          setLoadingSystems(false); 
+          return;
+        } else {
+          // We have a local user, so we can probably proceed with loading local cameras at least
+          loadAllCameras([]);
+        }
       } else {
-        setError(err.message || "Failed to load systems");
+        console.warn("[CloudRecordings] loadSystems failed:", err);
+        // Try to load whatever we can (e.g. local)
+        loadAllCameras([]);
       }
     } finally {
       setLoadingSystems(false);
     }
+  };
+
+  const loadAllCameras = async (cloudSystems: CloudSystem[]) => {
+    setLoadingDevices(true);
+    setDevices([]);
+    setDevicesReady(false);
+    
+    // 1. Fetch Local Cameras FIRST (High speed)
+    try {
+      const localCams = await nxAPI.getCameras();
+      const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
+      
+      const mappedLocal = localCams.map(cam => ({
+        id: cam.id,
+        name: cam.name,
+        typeId: cam.typeId,
+        systemId: localSystemId,
+        systemName: localSystemName
+      }));
+
+      // Immediately show local cameras to make the UI interactive
+      setDevices(mappedLocal);
+      setDevicesReady(true);
+      
+      if (mappedLocal.length > 0) {
+        setSelectedDevice(normalizeId(mappedLocal[0].id));
+        setSelectedSystem(localSystemId);
+      }
+    } catch (e) {
+      console.warn("[CloudRecordings] Local camera fetch failed:", e);
+    }
+
+    // 2. Fetch Cloud Systems in Parallel with incremental updates
+    // We don't wait for these to be done before showing local cameras
+    cloudSystems.forEach(async (system) => {
+      try {
+        const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "").replace(/[{}]/g, "").toLowerCase();
+        if (system.id.replace(/[{}]/g, "").toLowerCase() === localSystemId) return;
+
+        // Add a small 10s timeout per system to prevent long blocks
+        const data = await Promise.race([
+          fetchCloudDevices(system.id),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
+        ]) as any[];
+
+        if (Array.isArray(data)) {
+          const cloudMapped = data.map((cam: any) => ({
+            id: cam.id,
+            name: cam.name,
+            typeId: cam.typeId,
+            systemId: system.id,
+            systemName: system.name
+          }));
+          
+          setDevices(prev => {
+            // Check for duplicates
+            const existingIds = new Set(prev.map(d => normalizeId(d.id)));
+            const newOnes = cloudMapped.filter(d => !existingIds.has(normalizeId(d.id)));
+            return [...prev, ...newOnes];
+          });
+        }
+      } catch (e) {
+        console.warn(`[CloudRecordings] Failed to fetch cameras for ${system.name}:`, e);
+      }
+    });
+
+    setLoadingDevices(false);
+  };
+
+  const getOriginalDeviceId = (normalizedId: string) => {
+    const d = devices.find((dev: any) => normalizeId(dev.id) === String(normalizedId));
+    return d ? String(d.id) : String(normalizedId);
   };
 
   const getSourceAuth = (): BasicAuthCredentials | undefined => {
@@ -281,117 +388,31 @@ export default function CloudRecordings() {
       // ignore
     }
   }, []);
-  const getOriginalDeviceId = (normalizedId: string) => {
-    const d = devices.find((dev: any) => normalizeId(dev.id) === String(normalizedId));
-    return d ? String(d.id) : String(normalizedId);
-  };
-
-  // Compute effective ids and filtered device list for rendering
-  const effectiveIdsForRender = getEffectiveOrgCameraIds();
-  const filteredDevices = Array.isArray(effectiveIdsForRender) && effectiveIdsForRender.length > 0
-    ? devices.filter((device) => effectiveIdsForRender.includes(normalizeId(device.id)))
-    : devices;
-  const hiddenCount = devices.length - filteredDevices.length;
-
   function handleSelectDevice(value: string) {
-    console.log('[CloudRecordings] select attempt:', value);
     if (!value) {
       setSelectedDevice("");
       return;
     }
 
     // value will be the normalized id
-    const device = devices.find((d: any) => normalizeId(d.id) === String(value));
+    const device = devices.find((d: any) => normalizeId(d.id) === String(value)) as any;
     if (!device) {
       setSelectedDevice(value);
       return;
     }
 
-    const idNorm = normalizeId(device.id);
-    const effectiveIds = getEffectiveOrgCameraIds();
-    const isDisabled = Array.isArray(effectiveIds) && effectiveIds.length > 0 && !effectiveIds.includes(idNorm);
-
-    if (isDisabled) {
-      console.log('[CloudRecordings] selection blocked by org_camera_ids (effective):', effectiveIds);
-      setError("You are not allowed to select this camera.");
-      return; // don't change selection
+    // Automatically update the systemId when a camera is selected
+    if (device.systemId) {
+      console.log(`[CloudRecordings] Switching to system ${device.systemName} for camera ${device.name}`);
+      setSelectedSystem(device.systemId);
     }
 
-    console.log('[CloudRecordings] selection allowed:', idNorm);
     setError("");
     setSelectedDevice(value);
   }
 
-  const loadDevices = async (systemId: string) => {
-    if (!systemId) return;
+  // Remove the old loadDevices in favor of loadAllCameras
 
-    if (!sourceUsername.trim() || !sourcePassword) {
-      setError("Please enter source username and password.");
-      return;
-    }
-    
-    setLoadingDevices(true);
-    setError("");
-    setDevices([]);
-    setDevicesReady(false);
-    setSelectedDevice("");
-
-    try {
-      const data = await fetchCloudDevices(systemId, getSourceAuth());
-      // Debug: log devices and match against orgCameraIds (normalized)
-      try {
-        const normalizeId = (v: any) => String(v || "").replace(/[{}]/g, "").toLowerCase();
-        console.log("[CloudRecordings] loadDevices raw devices:", data);
-        const effectiveIds = getEffectiveOrgCameraIds();
-        console.log("[CloudRecordings] effective orgCameraIds:", effectiveIds);
-        // Also log raw cookie again for clarity
-        try {
-          const rawCookie = Cookies.get('org_camera_ids');
-          console.log('[CloudRecordings] raw org_camera_ids cookie (loadDevices):', rawCookie);
-        } catch (e) {
-          /* ignore */
-        }
-        if (Array.isArray(data)) {
-          data.forEach((d: any) => {
-            const idNorm = normalizeId(d.id);
-            const allowed = Array.isArray(effectiveIds) ? effectiveIds.includes(idNorm) : null;
-            console.log(`[CloudRecordings] device ${d.id} (normalized ${idNorm}) -> allowed=${allowed}`);
-          });
-        }
-      } catch (e) {
-        console.warn('[CloudRecordings] Failed to log device/orgCameraIds mapping', e);
-      }
-      // Filter devices based on effective orgCameraIds before setting state so the UI
-      // never briefly shows unfiltered cameras.
-      const allDevices = Array.isArray(data) ? data : [];
-      const effectiveIdsForCheck = getEffectiveOrgCameraIds();
-      console.log('[CloudRecordings] loadDevices - effectiveIdsForCheck:', effectiveIdsForCheck);
-      // If we don't have an allowed-camera list (cookie/session), do not show any devices
-      // to avoid exposing unfiltered cameras. Require explicit allowed list to display devices.
-      let devicesToSet: any[] = [];
-      if (Array.isArray(effectiveIdsForCheck) && effectiveIdsForCheck.length > 0) {
-        devicesToSet = allDevices.filter((d: any) => effectiveIdsForCheck.includes(String(d.id).replace(/[{}]/g, "").toLowerCase()));
-        if (devicesToSet.length === 0) {
-          setError("No allowed cameras available for your account in this system.");
-        }
-      } else {
-        // No effective IDs available: log and keep devices empty
-        console.warn('[CloudRecordings] No org_camera_ids available; hiding all devices until list is available');
-        setError("Account camera list unavailable. Please ensure you are logged in or cookies are enabled.");
-      }
-      console.log(`[CloudRecordings] loadDevices - all=${allDevices.length}, filtered=${devicesToSet.length}`);
-      setDevices(devicesToSet);
-      setDevicesReady(true);
-    } catch (err: any) {
-      if (err instanceof CloudAuthError || err?.requiresAuth) {
-        setError("Authentication required for selected source. Please check source username and password.");
-      } else {
-        setError(err.message || "Failed to load devices. The system may be offline.");
-      }
-    } finally {
-      setLoadingDevices(false);
-    }
-  };
 
   const handleSearchRecordings = async () => {
     if (!selectedSystem || !selectedDevice || !date) {
@@ -418,7 +439,7 @@ export default function CloudRecordings() {
         getOriginalDeviceId(selectedDevice),
         startMs,
         endMs,
-        getSourceAuth()
+        undefined // No manual basic auth anymore
       );
 
       // Parse response - could be array or object with reply
@@ -438,18 +459,26 @@ export default function CloudRecordings() {
       setLoading(false);
     }
   };
+  const handlePreview = (startTimeMs: number) => {
+    if (!selectedSystem || !selectedDevice) return;
+    
+    const imagePath = `/api/cloud/recordings/thumbnail?systemId=${encodeURIComponent(selectedSystem || "127.0.0.1")}&deviceId=${encodeURIComponent(getOriginalDeviceId(selectedDevice))}&timeMs=${startTimeMs}`;
+    
+    setPreviewSelection({
+      startTime: startTimeMs,
+      deviceName: devices.find(d => normalizeId(d.id) === selectedDevice)?.name || "Camera",
+    });
+    setPreviewImages([imagePath]); // Put in array for single image support
+    setPreviewOpen(true);
+  };
 
   const handleDownload = (startTimeMs: number, durationMs: number) => {
     const params = new URLSearchParams({
-      systemId: selectedSystem,
+      systemId: selectedSystem || "127.0.0.1",
       deviceId: getOriginalDeviceId(selectedDevice),
       startTime: String(startTimeMs),
       endTime: String(startTimeMs + durationMs),
     });
-    if (sourceUsername.trim()) {
-      params.set("username", sourceUsername.trim());
-      params.set("password", sourcePassword);
-    }
     window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
   };
 
@@ -511,39 +540,33 @@ export default function CloudRecordings() {
             <CardDescription>Choose a system and camera</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* System Select */}
+            {/* System Select - Context display only */}
             <div className="space-y-2">
               <Label>System</Label>
               <Select
                 value={selectedSystem}
-                onValueChange={(value) => {
-                  setSelectedSystem(value);
-                  setSelectedDevice("");
-                  setDevices([]);
-                  setRecordings([]);
-                }}
-                disabled={loadingSystems}
+                disabled={true} 
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted cursor-not-allowed">
                   <SelectValue placeholder={loadingSystems ? "Loading systems..." : "Select a system"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {systems.map((system) => (
-                    <SelectItem key={system.id} value={system.id}>
-                      {system.name || system.id}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value={selectedSystem}>
+                    {localSystemName && (normalizeId(selectedSystem) === normalizeId(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1")) 
+                      ? localSystemName
+                      : (systems.find(s => normalizeId(s.id) === normalizeId(selectedSystem))?.name || selectedSystem)}
+                  </SelectItem>
                 </SelectContent>
               </Select>
               {loadingDevices && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading cameras...
+                  Loading all available cameras...
                 </div>
               )}
             </div>
 
-            {selectedSystem && (
+            {/* {selectedSystem && (
               <>
                 <div className="space-y-2">
                   <Label>Source Username</Label>
@@ -579,35 +602,29 @@ export default function CloudRecordings() {
                   )}
                 </Button>
               </>
-            )}
+            )} */}
 
-            {/* Device Select */}
+            {/* Device Select - Unified Style */}
             {devices.length > 0 && (
               <div className="space-y-2">
                 <Label>Camera</Label>
-                {filteredDevices.length > 0 ? (
-                  <Select
-                    value={selectedDevice}
-                    onValueChange={handleSelectDevice}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a camera" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredDevices.map((device) => (
-                        <SelectItem key={device.id} value={normalizeId(device.id)}>
-                          {device.name || device.id}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">
-                    {hiddenCount > 0
-                      ? `${hiddenCount} camera(s) hidden due to account restrictions`
-                      : "No cameras available in this system."}
-                  </div>
-                )}
+                <Select
+                  value={selectedDevice}
+                  onValueChange={handleSelectDevice}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a camera" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[400px]">
+                    {devices.map((device: any) => (
+                      <SelectItem key={`${device.systemId}-${device.id}`} value={normalizeId(device.id)}>
+                        <div className="flex flex-col items-start text-left">
+                          <span className="font-medium">{device.name || device.id}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
           </CardContent>
@@ -669,7 +686,7 @@ export default function CloudRecordings() {
 
             <Button
               onClick={handleSearchRecordings}
-              disabled={loading || !selectedSystem || !selectedDevice || !date || !sourceUsername.trim() || !sourcePassword}
+              disabled={loading || !selectedSystem || !selectedDevice || !date}
               className="w-full"
             >
               {loading ? (
@@ -740,14 +757,25 @@ export default function CloudRecordings() {
                         Full segment: {formatDuration(segDurationMs)}
                       </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDownload(segStartMs, segDurationMs)}
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Open Segment
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePreview(segStartMs)}
+                        className="gap-2 border-primary/20 hover:bg-primary/5"
+                      >
+                        <Eye className="h-4 w-4" />
+                        Preview
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDownload(segStartMs, segDurationMs)}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Open Segment
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
@@ -755,6 +783,49 @@ export default function CloudRecordings() {
           </CardContent>
         </Card>
       )}
+
+      {/* Preview Dialog */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ImageIcon className="h-5 w-5 text-blue-500" />
+              Recording Preview
+            </DialogTitle>
+            <DialogDescription>
+              Preview from {previewSelection?.deviceName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-4 bg-black/5 rounded-lg border border-dashed">
+            {previewImages[0] && (
+              <div className="max-w-xl w-full space-y-2">
+                <div className="aspect-video bg-muted rounded-md overflow-hidden border shadow-lg relative group">
+                  <img 
+                    src={previewImages[0]} 
+                    alt="Recording Preview" 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgwIiBoZWlnaHQ9IjI3MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMmUyZTMwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZpbGw9IiM2NjYiIGZvbnQtc2l6ZT0iMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmZyYW1lIG5vbi1hdmFpbGFibGU8L3RleHQ+PC9zdmc+';
+                    }}
+                  />
+                  <a 
+                    href={previewImages[0]} 
+                    download={`snapshot-${previewSelection?.deviceName}-${previewSelection?.startTime}.jpg`}
+                    target="_blank"
+                    className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Download Image"
+                  >
+                    <Download className="h-4 w-4" />
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end pt-2 gap-2">
+            <Button onClick={() => setPreviewOpen(false)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
