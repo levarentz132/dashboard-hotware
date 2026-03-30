@@ -132,7 +132,10 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     const cleanId = systemId.replace(/[{}]/g, "");
     const bracedId = `{${cleanId}}`;
 
-    localToken = request.cookies.get(`nx-cloud-${cleanId}`)?.value ||
+    // 0. Priority: Explicit token in query params
+    localToken = request.nextUrl.searchParams.get("token") ||
+      request.nextUrl.searchParams.get("vms_token") ||
+      request.cookies.get(`nx-cloud-${cleanId}`)?.value ||
       request.cookies.get(`nx-cloud-${bracedId}`)?.value ||
       request.cookies.get(`nx-cloud-${systemId}`)?.value;
 

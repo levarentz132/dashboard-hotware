@@ -462,7 +462,17 @@ export default function CloudRecordings() {
   const handlePreview = (startTimeMs: number) => {
     if (!selectedSystem || !selectedDevice) return;
     
-    const imagePath = `/api/cloud/recordings/thumbnail?systemId=${encodeURIComponent(selectedSystem || "127.0.0.1")}&deviceId=${encodeURIComponent(getOriginalDeviceId(selectedDevice))}&timeMs=${startTimeMs}`;
+    // Retrieve local session token to bypass auth if needed
+    let token = "";
+    const cookie = Cookies.get("local_nx_user");
+    if (cookie) {
+      try {
+        const user = JSON.parse(cookie);
+        token = user.token || "";
+      } catch (e) {}
+    }
+
+    const imagePath = `/api/cloud/recordings/thumbnail?systemId=${encodeURIComponent(selectedSystem || "127.0.0.1")}&deviceId=${encodeURIComponent(getOriginalDeviceId(selectedDevice))}&timeMs=${startTimeMs}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
     
     setPreviewSelection({
       startTime: startTimeMs,
@@ -473,12 +483,25 @@ export default function CloudRecordings() {
   };
 
   const handleDownload = (startTimeMs: number, durationMs: number) => {
+    // Retrieve local session token to bypass auth if needed
+    let token = "";
+    const cookie = Cookies.get("local_nx_user");
+    if (cookie) {
+      try {
+        const user = JSON.parse(cookie);
+        token = user.token || "";
+      } catch (e) {}
+    }
+
     const params = new URLSearchParams({
       systemId: selectedSystem || "127.0.0.1",
       deviceId: getOriginalDeviceId(selectedDevice),
       startTime: String(startTimeMs),
       endTime: String(startTimeMs + durationMs),
+      preview: "true"
     });
+    if (token) params.set("token", token);
+    
     window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
   };
 
