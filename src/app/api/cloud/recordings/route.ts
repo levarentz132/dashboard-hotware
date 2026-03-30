@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
+import fs from "fs";
+import path from "path";
 
 export async function GET(request: NextRequest) {
   try {
@@ -94,9 +96,37 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    console.log(`[recordings] Extracted ${allPeriods.length} periods from ${replyItems.length} reply items`);
-    if (allPeriods.length > 0) {
-      console.log("[recordings] First period:", allPeriods[0]);
+    // 2. Fetch local screenshots from data folder as requested
+    try {
+      const screenshotsDir = path.join(process.cwd(), "data", "recorded_screenshots", deviceId);
+      if (fs.existsSync(screenshotsDir)) {
+        const files = fs.readdirSync(screenshotsDir);
+        for (const file of files) {
+          if (file.endsWith(".png")) {
+            const timestamp = parseInt(file.replace(".png", ""), 10);
+            const startLimit = startTime ? parseInt(startTime, 10) : 0;
+            const endLimit = endTime ? parseInt(endTime, 10) : Infinity;
+
+            if (timestamp >= startLimit && timestamp <= endLimit) {
+              // Check if we already have a record for this exact millisecond
+              const exists = allPeriods.some(p => p.startTimeMs === timestamp && p.durationMs === 0);
+              if (!exists) {
+                allPeriods.push({
+                  startTimeMs: timestamp,
+                  durationMs: 0,
+                  isScreenshot: true,
+                  isLocal: true,
+                  serverId: "local-storage",
+                });
+              }
+            }
+          }
+        }
+        // Sort by start time descending (newest first)
+        allPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
+      }
+    } catch (err) {
+      console.warn("[recordings] Failed to scan local screenshots:", err);
     }
     
     return NextResponse.json(allPeriods);

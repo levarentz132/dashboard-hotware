@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
+import fs from "fs";
+import path from "path";
+import { promisify } from "util";
+
+const writeFile = promisify(fs.writeFile);
+const mkdir = promisify(fs.mkdir);
 
 export async function GET(request: NextRequest) {
   let requestTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -21,16 +27,20 @@ export async function GET(request: NextRequest) {
 
     console.log(`[recordings/download] Params: systemId=${systemId}, deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}, stream=${stream}`);
 
-    const isImage = endTime ? parseInt(endTime) === parseInt(startTime as string) : false;
+    // Standardize screenshot detection: if endTime is missing OR equal to startTime OR duration is 0
+    const isImage = !endTime || parseInt(endTime) === parseInt(startTime as string) || (parseInt(endTime) - parseInt(startTime as string)) === 0;
 
     // Build download URL params
     const params = new URLSearchParams();
     let endpoint = "";
     
     if (isImage) {
-      params.set("pos", startTime as string);
-      params.set("duration", "1"); // Request minimal duration for a single frame
-      endpoint = `/media/${deviceId}.mpjpeg`;
+      // Use the new v3 image endpoint for precise PNG screenshots as requested
+      const isoTime = new Date(parseInt(startTime as string)).toISOString();
+      params.set("time", isoTime);
+      params.set("format", "png");
+      params.set("roundMethod", "precise");
+      endpoint = `/rest/v3/devices/${deviceId}/image`;
     } else {
       params.set("pos", startTime as string);
       if (endTime) {
@@ -98,9 +108,25 @@ export async function GET(request: NextRequest) {
       }
 
       const filename = isImage 
-        ? `screenshot_${deviceId.substring(0, 8)}_${startTime}.jpg`
+        ? `screenshot_${deviceId.substring(0, 8)}_${startTime}.png`
         : `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
       
+      // If it's a screenshot, save a local copy to the data folder as requested
+      if (isImage) {
+        try {
+          const buffer = await videoResponse.clone().arrayBuffer();
+          const screenshotsDir = path.join(process.cwd(), "data", "recorded_screenshots", deviceId);
+          if (!fs.existsSync(screenshotsDir)) {
+            fs.mkdirSync(screenshotsDir, { recursive: true });
+          }
+          const localPath = path.join(screenshotsDir, `${startTime}.png`);
+          await writeFile(localPath, Buffer.from(buffer));
+          console.log(`[recordings/download] Saved screenshot copy to: ${localPath}`);
+        } catch (saveErr) {
+          console.error("[recordings/download] Failed to save local screenshot copy:", saveErr);
+        }
+      }
+
       // Preview: inline so browser plays/shows it. Download: attachment to save file.
       const disposition = isPreview
         ? `inline; filename="${filename}"`
@@ -109,7 +135,7 @@ export async function GET(request: NextRequest) {
       return new NextResponse(videoResponse.body, {
         status: 200,
         headers: {
-          "Content-Type": isImage ? "image/jpeg" : (videoResponse.headers.get("Content-Type") || "video/mp4"),
+          "Content-Type": isImage ? "image/png" : (videoResponse.headers.get("Content-Type") || "video/mp4"),
           "Content-Disposition": disposition,
           "Content-Length": videoResponse.headers.get("Content-Length") || "",
           "Accept-Ranges": "bytes",

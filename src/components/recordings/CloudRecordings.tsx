@@ -63,6 +63,7 @@ interface RecentRecording {
   durationMs: number;
   systemId: string;
   deviceId: string;
+  isScreenshot?: boolean;
 }
 
 export default function CloudRecordings() {
@@ -407,9 +408,10 @@ export default function CloudRecordings() {
             cameraName: device?.name || "Camera",
             systemName: device?.systemName || "",
             startTimeMs: targetMs + 4000,
-            durationMs: 1000,
+            durationMs: 0,
             systemId: scheduleSystem,
             deviceId: cameraDeviceId,
+            isScreenshot: true,
           };
           setRecentRecordings(prev => [newRec, ...prev]);
           setRecordings(prev => prev.length > 0 ? [newRec, ...prev] : prev);
@@ -801,7 +803,12 @@ export default function CloudRecordings() {
                           return (
                             <div key={idx} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
                               <div>
-                                <div className="font-medium text-sm">{new Date(segStartMs).toLocaleString()} – {new Date(segEndMs).toLocaleTimeString()}</div>
+                                <div className="font-medium text-sm flex items-center gap-1.5">
+                                  {rec.isScreenshot && <Camera className="h-3.5 w-3.5 text-blue-500" />}
+                                  {rec.isScreenshot 
+                                    ? new Date(segStartMs).toLocaleString() 
+                                    : `${new Date(segStartMs).toLocaleString()} – ${new Date(segEndMs).toLocaleTimeString()}`}
+                                </div>
                                 <div className="text-xs text-muted-foreground">{formatDuration(segDurationMs)}</div>
                               </div>
                               <div className="flex items-center gap-2">
@@ -825,7 +832,10 @@ export default function CloudRecordings() {
                       {filteredRecentRecordings.map(rec => (
                         <div key={rec.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
                           <div>
-                            <div className="font-medium text-sm">{rec.cameraName}</div>
+                            <div className="font-medium text-sm flex items-center gap-1.5">
+                              {rec.isScreenshot && <Camera className="h-3.5 w-3.5 text-blue-500" />}
+                              {rec.cameraName}
+                            </div>
                             <div className="text-xs text-muted-foreground">
                               {new Date(rec.startTimeMs).toLocaleString()} · {formatDuration(rec.durationMs)}
                             </div>
