@@ -685,49 +685,26 @@ export default function AlarmConsole() {
       const localUser = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_server_id") || localUser.serverId || "local";
 
-      // 1. Try v4 endpoint first
-      const response = await fetch("/nx/api/getEvents", {
+      // Use the centralized cloud events endpoint even for local
+      // This automatically handles v4/v3 fallback and uses unified auth logic
+      const response = await fetch(`/api/cloud/events?systemId=${encodeURIComponent(sid)}`, {
         headers: {
-          "x-runtime-guid": localUser.token,
-          "Accept": "application/json"
+          "Accept": "application/json",
+          ...getElectronHeaders()
         }
       });
 
-      let items: EventLog[] = [];
-
       if (response.ok) {
-        const data = await response.json();
-        const rawItems = Array.isArray(data) ? data : [];
-        if (rawItems.length > 0) {
-          items = normalizeNxEvents(rawItems);
-        }
+        const items = await response.json();
+        return {
+          systemId: sid,
+          systemName: "Local Server",
+          items: Array.isArray(items) ? items : [],
+          stateOfHealth: "online"
+        };
       }
-
-      // 2. Fallback to v3 if v4 failed or returned no items
-      // if (items.length === 0) {
-      //   console.log(`[AlarmConsole] v4 failed or empty, trying v3 fallback for local server`);
-      //   const v3Response = await fetch("/nx/api/getEvents", {
-      //     headers: {
-      //       "x-runtime-guid": localUser.token,
-      //       "Accept": "application/json"
-      //     }
-      //   });
-
-      //   if (v3Response.ok) {
-      //     const v3Data = await v3Response.json();
-      //     const v3Events = v3Data.reply || [];
-      //     items = normalizeNxEvents(v3Events);
-      //   }
-      // }
-
-      if (items.length === 0 && !response.ok) return null;
-
-      return {
-        systemId: sid,
-        systemName: "Local Server",
-        items,
-        stateOfHealth: "online"
-      };
+      
+      return null;
     } catch (e) {
       console.error("[AlarmConsole] Local fetch failed:", e);
       return null;

@@ -126,28 +126,28 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
   const cloudAuth = getCloudAuthHeader(request);
   let localToken: string | undefined;
 
-  // 1. For system-specific calls, try to find a GUID session token
-  if (!isGlobal && systemId) {
-    // Try both with and without curly braces
+  // 1. Always check for a session token regardless of whether it's global or local system
+  // (Standard practice: try system-specific first, then fall back to generic local user session)
+  if (systemId) {
     const cleanId = systemId.replace(/[{}]/g, "");
     const bracedId = `{${cleanId}}`;
 
     localToken = request.cookies.get(`nx-cloud-${cleanId}`)?.value ||
       request.cookies.get(`nx-cloud-${bracedId}`)?.value ||
       request.cookies.get(`nx-cloud-${systemId}`)?.value;
+  }
 
-    // Fallback to global local session if system-specific is missing
-    if (!localToken || localToken === 'undefined') {
-      const localUserCookie = request.cookies.get("local_nx_user")?.value;
-      if (localUserCookie) {
-        try {
-          const user = JSON.parse(decodeURIComponent(localUserCookie));
-          if (user.token) {
-            localToken = user.token;
-            console.log(`[Cloud Auth] Found fallback token from local_nx_user cookie for ${systemId}`);
-          }
-        } catch (e) { }
-      }
+  // Fallback to global local session if system-specific is missing or for global 'all' calls
+  if (!localToken || localToken === 'undefined') {
+    const localUserCookie = request.cookies.get("local_nx_user")?.value;
+    if (localUserCookie) {
+      try {
+        const user = JSON.parse(decodeURIComponent(localUserCookie));
+        if (user.token) {
+          localToken = user.token;
+          console.log(`[Cloud Auth] Found session token from local_nx_user for ${isGlobal ? 'global request' : systemId}`);
+        }
+      } catch (e) { }
     }
   }
 
@@ -169,32 +169,52 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     id.includes(':');
 
   // 2. Assign headers based on token type
-  // Always prefer local token (x-runtime-guid) if available, per user request
-  if (!isGlobal && localToken && localToken !== 'undefined') {
-    // Relay/Local Call + GUID session -> Use x-runtime-guid
+  if (isGlobal) {
+    // For global calls (e.g. /api/systems list or systemId=all), ALWAYS prefer the Cloud token (nxvms.com OAuth)
+    if (cloudAuth && cloudAuth !== 'undefined') {
+      headers["Authorization"] = cloudAuth.toLowerCase().startsWith('bearer ')
+        ? cloudAuth
+        : `Bearer ${cloudAuth}`;
+      console.log(`[Cloud Auth] Using CLOUD token as Bearer for GLOBAL (systemId=all) request`);
+    } else if (localToken && localToken !== 'undefined') {
+      const rawToken = localToken.toLowerCase().startsWith('bearer ')
+        ? localToken.substring(7).trim()
+        : localToken.trim();
+      headers["Authorization"] = `Bearer ${rawToken}`;
+      console.log(`[Cloud Auth] Using session token as Bearer for GLOBAL (systemId=all) request (Fallback)`);
+    }
+  } else if (localToken && localToken !== 'undefined') {
     const rawToken = localToken.toLowerCase().startsWith('bearer ')
       ? localToken.substring(7).trim()
       : localToken.trim();
 
+    // System-specific call -> Use x-runtime-guid AND provide Bearer as backup
     headers["x-runtime-guid"] = rawToken;
-    console.log(`[Cloud Auth] Using LOCAL (GUID) token for ${systemId}`);
+    
+    // If we are NOT using a cloud relay (it's a direct local /127.0.0.1 call), 
+    // or if we have no cloud token, we should also provide it as Bearer for REST v3/v4 consistency
+    if (!headers["Authorization"] || isLocal) {
+      headers["Authorization"] = `Bearer ${rawToken}`;
+    }
+    
+    console.log(`[Cloud Auth] Using local session token (sent as x-runtime-guid + Bearer) for ${systemId}`);
 
-    // Some relays also want the cloud token for authorized routing, 
-    // but the actual VMS request uses x-runtime-guid
+    // If we ARE on a relay, we MUST still keep the cloud token in Authorization for routing
     if (cloudAuth && !isLocal) {
       headers["Authorization"] = cloudAuth.toLowerCase().startsWith('bearer ')
         ? cloudAuth
         : `Bearer ${cloudAuth}`;
-      console.log(`[Cloud Auth] Also providing CLOUD token for relay routing to ${systemId}`);
+      console.log(`[Cloud Auth] Providing CLOUD token for relay routing to ${systemId}`);
     }
   } else if (cloudAuth && cloudAuth !== 'undefined') {
-    // Global call (must be Bearer) OR fallback for relay
+    // Fallback to cloud Bearer token
     headers["Authorization"] = cloudAuth.toLowerCase().startsWith('bearer ')
       ? cloudAuth
       : `Bearer ${cloudAuth}`;
 
     console.log(`[Cloud Auth] Using CLOUD (Bearer) token fallback for ${systemId}`);
   } else {
+    console.warn(`[Cloud Auth] No token found for ${systemId}. Cookies present:`, request.cookies.getAll().map(c => c.name).join(", "));
     // 3. Last resort fallback to cookies
     const cookies = request.headers.get("cookie") || "";
     if (cookies) {
