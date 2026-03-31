@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +16,8 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X } from "lucide-react";
-import { format } from "date-fns";
+import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X, Plus, Trash2, CalendarDays, Pencil, AlertCircle } from "lucide-react";
+import { format, addDays, nextDay, Day } from "date-fns";
 import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
 import {
@@ -27,6 +27,11 @@ import {
   DialogTitle,
   DialogDescription
 } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Image as ImageIcon } from "lucide-react";
 import {
   fetchCloudSystems,
@@ -38,6 +43,36 @@ import {
   BasicAuthCredentials,
 } from "./recordings-service";
 import nxAPI from "@/lib/nxapi";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import { showNotification } from "@/lib/notifications";
+
+const NoOverlayAlertDialogContent = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Portal>
+    <AlertDialogPrimitive.Overlay className="fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+    <AlertDialogPrimitive.Content
+      ref={ref}
+      className={cn(
+        "fixed left-[50%] top-[50%] z-[70] grid w-full max-w-sm translate-x-[-50%] translate-y-[-50%] gap-4 border bg-white p-6 shadow-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg text-slate-900 border-slate-200",
+        className
+      )}
+      {...props}
+    />
+  </AlertDialogPrimitive.Portal>
+))
+NoOverlayAlertDialogContent.displayName = "NoOverlayAlertDialogContent";
 
 // ---- Types ----
 interface ScheduledRecording {
@@ -51,8 +86,11 @@ interface ScheduledRecording {
   endTime: string;
   type: "video" | "screenshot";
   screenshotTime?: string;
-  status: "pending" | "recording" | "completed" | "failed";
+  status: "pending" | "recording" | "completed" | "failed" | "in progress";
   startedAt?: number;
+  recurrence?: "none" | "weekday" | "monthday";
+  recurrenceDay?: number;
+  batchId?: string;
 }
 
 interface RecentRecording {
@@ -64,6 +102,11 @@ interface RecentRecording {
   systemId: string;
   deviceId: string;
   isScreenshot?: boolean;
+}
+
+interface ScheduleTimeRange {
+  start: string;
+  end: string;
 }
 
 export default function CloudRecordings() {
@@ -93,19 +136,140 @@ export default function CloudRecordings() {
   const [previewSelection, setPreviewSelection] = useState<any>(null);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
 
-  // ---- Schedule tab state ----
+  // ---- Schedule state ----
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduleType, setScheduleType] = useState<"video" | "screenshot">("video");
-  const [scheduleDate, setScheduleDate] = useState<Date | undefined>(new Date());
-  const [scheduleStart, setScheduleStart] = useState<string>("");
-  const [scheduleEnd, setScheduleEnd] = useState<string>("");
-  const [scheduleScreenshotTime, setScheduleScreenshotTime] = useState<string>("");
+  const [scheduleDates, setScheduleDates] = useState<Date[]>([]); 
+  const [scheduleTimeRanges, setScheduleTimeRanges] = useState<ScheduleTimeRange[]>([{ start: "09:00", end: "10:00" }]);
+  const [scheduleDays, setScheduleDays] = useState<number[]>([]); // 0=Sun, 1=Mon...
+  const [scheduleMonthDay, setScheduleMonthDay] = useState<number | "">(""); 
+  const [scheduleScreenshotTime, setScheduleScreenshotTime] = useState<string>("12:00");
   const [scheduledRecordings, setScheduledRecordings] = useState<ScheduledRecording[]>([]);
   const [scheduleError, setScheduleError] = useState<string>("");
   const [scheduleSuccess, setScheduleSuccess] = useState<string>("");
   const [scheduleCamera, setScheduleCamera] = useState<string>("");
   const [scheduleSystem, setScheduleSystem] = useState<string>("");
+  const [scheduleBatchId, setScheduleBatchId] = useState<string | null>(null);
+  const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
+  const [pendingCancelIds, setPendingCancelIds] = useState<string[]>([]);
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      resetScheduleForm();
+    }
+    setIsScheduleOpen(open);
+  };
+
+  const resetScheduleForm = () => {
+    setScheduleCamera("");
+    setScheduleSystem("");
+    setScheduleDates([]);
+    setScheduleDays([]);
+    setScheduleMonthDay("");
+    setScheduleTimeRanges([{ start: "09:00", end: "10:00" }]);
+    setScheduleScreenshotTime("12:00");
+    setScheduleType("video");
+    setScheduleError("");
+    setScheduleSuccess("");
+    setScheduleBatchId(null);
+  };
+
+  const requestCancel = (ids: string[]) => {
+    if (ids.length === 0) return;
+    setPendingCancelIds(ids);
+    setIsCancelConfirmOpen(true);
+  };
+
+  const confirmCancelAction = async () => {
+    // Process all cancellations
+    for (const id of pendingCancelIds) {
+      await cancelSchedule(id);
+    }
+    setIsCancelConfirmOpen(false);
+    setPendingCancelIds([]);
+  };
+
   const scheduleTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const originalSchedules = useRef<Map<string, any>>(new Map());
+
+  // ---- Persistence Logic ----
+  const saveToPersistence = async (scheds: ScheduledRecording[], originals: any) => {
+    try {
+      await fetch("/api/cloud/recordings/scheduled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedules: scheds, originalSchedules: Object.fromEntries(originals) }),
+      });
+    } catch (e) { console.error("[Persistence] Save failed:", e); }
+  };
+
+  const loadFromPersistence = async () => {
+    try {
+      const res = await fetch("/api/cloud/recordings/scheduled");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.originalSchedules) {
+          Object.entries(data.originalSchedules).forEach(([id, sched]) => {
+            originalSchedules.current.set(id, sched);
+          });
+        }
+        if (data.schedules) {
+          const loadedScheds = data.schedules.map((s: any) => ({
+            ...s,
+            date: new Date(s.date)
+          })).filter((s: any) => s.status !== "completed" && s.status !== "failed");
+          setScheduledRecordings(loadedScheds);
+          // Re-reconcile timers for anything pending/recording
+          loadedScheds.forEach((rec: ScheduledRecording) => {
+            if (rec.status === "pending" || rec.status === "recording") {
+              reconcileTimer(rec);
+            }
+          });
+        }
+      }
+    } catch (e) { console.error("[Persistence] Load failed:", e); }
+  };
+
+  const reconcileTimer = (rec: ScheduledRecording) => {
+    // Logic to calculate remaining time and set timeouts
+    const [sh, sm] = rec.startTime.split(":").map(Number);
+    const [eh, em] = rec.endTime.split(":").map(Number);
+    const now = Date.now();
+    const startMs = new Date(rec.date).setHours(sh, sm, 0, 0);
+    const endMs = rec.type === "screenshot" ? startMs : new Date(rec.date).setHours(eh, em, 59, 999);
+
+    if (now >= endMs) {
+      if (rec.status === "recording") cancelSchedule(rec.id); // Stop it if it overstayed
+      return;
+    }
+
+    if (now < startMs) {
+      const timer = setTimeout(() => {
+        setScheduledRecordings(prev => prev.map(r => r.id === rec.id ? { ...r, status: r.type === "screenshot" ? "in progress" : "recording" } : r));
+      }, startMs - now);
+      scheduleTimers.current.set(rec.id + "-start", timer);
+    }
+
+    if (now < endMs && (rec.status === "recording" || now >= startMs)) {
+      const timer = setTimeout(() => {
+        showNotification({ type: 'success', title: 'Recording Done', message: `Recording for ${rec.cameraName} is finished.` });
+        if (rec.recurrence === "none") {
+          setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
+        }
+      }, endMs - now);
+      scheduleTimers.current.set(rec.id + "-end", timer);
+    }
+  };
+
+  useEffect(() => {
+    loadFromPersistence();
+  }, []);
+
+  useEffect(() => {
+    if (scheduledRecordings.length > 0) {
+      saveToPersistence(scheduledRecordings, originalSchedules.current);
+    }
+  }, [scheduledRecordings]);
 
   // ---- Recent Recordings tab state ----
   const [recentRecordings, setRecentRecordings] = useState<RecentRecording[]>([]);
@@ -271,7 +435,7 @@ export default function CloudRecordings() {
     if (device.systemId) setSelectedSystem(device.systemId);
     setSearchError("");
     setSelectedDevice(value);
-    
+
     // Auto-load recent recordings immediately after camera selection
     handleSearchRecentRecordings(value, date);
   }
@@ -339,203 +503,233 @@ export default function CloudRecordings() {
   };
 
   // ---- Schedule Recording ----
+  const addScheduleTimeRange = () => setScheduleTimeRanges([...scheduleTimeRanges, { start: "", end: "" }]);
+  const removeScheduleTimeRange = (index: number) => setScheduleTimeRanges(scheduleTimeRanges.filter((_, i) => i !== index));
+  const updateScheduleTimeRange = (index: number, key: "start" | "end", val: string) => {
+    const next = [...scheduleTimeRanges];
+    next[index][key] = val;
+    setScheduleTimeRanges(next);
+  };
+
+  const toggleScheduleDay = (day: number) => {
+    setScheduleDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+  };
+
   const handleScheduleRecording = () => {
     setScheduleError("");
     setScheduleSuccess("");
     if (!scheduleCamera) { setScheduleError("Please select a camera."); return; }
-    if (!scheduleDate) { setScheduleError("Please select a date."); return; }
 
-    if (scheduleType === "screenshot") {
-      if (!scheduleScreenshotTime) { setScheduleError("Please enter the screenshot time."); return; }
-      const device = devices.find(d => normalizeId(d.id) === scheduleCamera);
-      const now = Date.now();
-      const [sh, sm] = scheduleScreenshotTime.split(":").map(Number);
-      let targetMs = new Date(scheduleDate).setHours(sh, sm, 0, 0);
-      let delay = targetMs - now;
-
-      // Ensure past or immediate scheduling captures exactly right now
-      if (delay <= 0) {
-        targetMs = now;
-        delay = 0;
-      }
-
-      const newEntry: ScheduledRecording = {
-        id: `sched-${Date.now()}`,
-        cameraId: scheduleCamera,
-        cameraName: device?.name || "Camera",
-        systemId: scheduleSystem,
-        systemName: device?.systemName || "",
-        date: new Date(targetMs),
-        startTime: format(targetMs, "HH:mm"),
-        endTime: format(targetMs, "HH:mm"),
-        type: "screenshot",
-        screenshotTime: format(targetMs, "HH:mm:ss"),
-        status: delay > 0 ? "pending" : "recording",
-      };
-
-      const captureAction = async () => {
-        const cameraDeviceId = getOriginalDeviceId(scheduleCamera);
-        let originalSchedule: any = null;
-        try {
-          const cam = await nxAPI.getCameraById(cameraDeviceId);
-          originalSchedule = cam?.schedule || null;
-        } catch (e) {}
-
-        const targetDate = new Date(targetMs);
-        const dayOfWeek = targetDate.getDay();
-        const nxDay = dayOfWeek === 0 ? 7 : dayOfWeek;
-        // Turn on recording dynamically for the entire surrounding day to prevent browser vs server clock synchronization drift from causing missed frames immediately.
-        try {
-          await nxAPI.updateDevice(cameraDeviceId, {
-            schedule: {
-              isEnabled: true,
-              tasks: [{ dayOfWeek: nxDay, startTime: 0, length: 86400, recordingType: "always", metadataTypes: "motion,objects" }]
-            }
-          });
-        } catch(err) { console.error("[CloudRecordings] Snapshot quick-record block failed", err); }
-
-        // Wait 8.5 seconds to fully ensure the stream connects and commits frames to the VMS disk archive
-        setTimeout(async () => {
-          try {
-            if (originalSchedule) await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
-            else await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
-          } catch(err) {}
-
-          // Create the snapshot record targeting 4 seconds AFTER the recording schedule kicks on.
-          // This ensures we are querying the VMS buffer after the camera has fully established its RTSP stream and written frames to disk.
-          const newRec: RecentRecording = {
-            id: `snap-${Date.now()}`,
-            cameraName: device?.name || "Camera",
-            systemName: device?.systemName || "",
-            startTimeMs: targetMs + 4000,
-            durationMs: 0,
-            systemId: scheduleSystem,
-            deviceId: cameraDeviceId,
-            isScreenshot: true,
-          };
-          setRecentRecordings(prev => [newRec, ...prev]);
-          setRecordings(prev => prev.length > 0 ? [newRec, ...prev] : prev);
-          setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "completed" } : r));
-        }, 8500);
-      };
-
-      if (delay > 0) {
-        const timer = setTimeout(() => {
-          setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "recording" } : r));
-          captureAction();
-        }, delay);
-        scheduleTimers.current.set(newEntry.id, timer);
-        setScheduledRecordings(prev => [...prev, newEntry]);
-        setScheduleSuccess(`Screenshot scheduled for ${format(new Date(targetMs), "PPP")} at ${format(targetMs, "HH:mm:ss")}`);
-      } else {
-        setScheduledRecordings(prev => [...prev, newEntry]);
-        setScheduleSuccess(`Capturing screenshot at current timestamp (${format(targetMs, "HH:mm:ss")})...`);
-        captureAction();
-      }
-      return;
-    }
-
-    // Video recording
-    if (!scheduleStart || !scheduleEnd) { setScheduleError("Please enter start and end times."); return; }
-    const [startH, startM] = scheduleStart.split(":").map(Number);
-    const [endH, endM] = scheduleEnd.split(":").map(Number);
-    const startMs = new Date(scheduleDate).setHours(startH, startM, 0, 0);
-    const endMs = new Date(scheduleDate).setHours(endH, endM, 59, 999);
-    const now = Date.now();
-
-    if (endMs <= startMs) { setScheduleError("End time must be after start time."); return; }
-
+    const batchId = scheduleBatchId || `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     const device = devices.find(d => normalizeId(d.id) === scheduleCamera);
-    const newEntry: ScheduledRecording = {
-      id: `sched-${Date.now()}`,
-      cameraId: scheduleCamera,
-      cameraName: device?.name || "Camera",
-      systemId: scheduleSystem,
-      systemName: device?.systemName || "",
-      date: scheduleDate,
-      startTime: scheduleStart,
-      endTime: scheduleEnd,
-      type: "video",
-      status: startMs > now ? "pending" : "recording",
-    };
-
-    const startDelay = Math.max(0, startMs - now);
-    const endDelay = Math.max(0, endMs - now);
     const cameraDeviceId = getOriginalDeviceId(scheduleCamera);
 
-    // Schedule START – enable recording on the VMS
-    const startTimer = setTimeout(async () => {
-      setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "recording", startedAt: Date.now() } : r));
-      try {
-        // Save original schedule
-        let originalSchedule: any = null;
-        try {
-          const cam = await nxAPI.getCameraById(cameraDeviceId);
-          originalSchedule = cam?.schedule || null;
-        } catch (e) { /* ignore – we'll just disable after */ }
-
-        // Store separately so type system is clean
-        originalSchedules.current.set(newEntry.id, originalSchedule);
-
-        const dayOfWeek = new Date(scheduleDate).getDay(); // 0=Sun
-        const startSec = startH * 3600 + startM * 60;
-        const endSec = endH * 3600 + endM * 60 + 59;
-
-        await nxAPI.updateDevice(cameraDeviceId, {
-          schedule: {
-            isEnabled: true,
-            tasks: [{
-              startTime: startSec,
-              endTime: endSec,
-              dayOfWeek,
-              recordingType: "always",
-              metadataTypes: "none",
-              streamQuality: "high",
-              fps: 15,
-            }],
-          }
+    // List of targets (dates and ranges)
+    const scheduleTargets: { date: Date; start: string; end: string }[] = [];
+ 
+    if (scheduleDays.length > 0) {
+      // Recurring days: target the *next* occurrence for each selected day
+      const now = new Date();
+      scheduleDays.forEach(dayIndex => {
+        let targetDate = nextDay(now, dayIndex as Day);
+        scheduleTimeRanges.forEach(range => {
+          scheduleTargets.push({ date: targetDate, start: range.start, end: range.end });
         });
-        console.log(`[CloudRecordings] ✅ Recording STARTED on VMS for ${device?.name} (${scheduleStart})`);
-      } catch (err) {
-        console.error("[CloudRecordings] Failed to enable VMS recording:", err);
-        setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "failed" } : r));
-      }
-    }, startDelay);
-
-    // Schedule STOP – restore original schedule and disable recording
-    const endTimer = setTimeout(async () => {
-      setScheduledRecordings(prev => prev.map(r => r.id === newEntry.id ? { ...r, status: "completed" } : r));
-      try {
-        const originalSchedule = originalSchedules.current.get(newEntry.id);
-        originalSchedules.current.delete(newEntry.id);
-
-        if (originalSchedule) {
-          await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
-        } else {
-          await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
+      });
+    } else if (scheduleMonthDay !== "" && scheduleMonthDay > 0 && scheduleMonthDay <= 31) {
+      // Monthly recurrence
+      const now = new Date();
+      const targetDayNum = Number(scheduleMonthDay);
+      let year = now.getFullYear();
+      let monthIdx = now.getMonth();
+      let targetDate = new Date(year, monthIdx, targetDayNum);
+      
+      // If today is past the target time OR it rolled over (not valid for this month)
+      if (targetDate < now || targetDate.getDate() !== targetDayNum) {
+        while (true) {
+          monthIdx++;
+          targetDate = new Date(year, monthIdx, targetDayNum);
+          if (targetDate.getDate() === targetDayNum) break;
         }
-        console.log(`[CloudRecordings] ✅ Recording STOPPED on VMS for ${device?.name} (${scheduleEnd})`);
-      } catch (err) {
-        console.error("[CloudRecordings] Failed to stop VMS recording:", err);
+      }
+      
+      scheduleTimeRanges.forEach(range => {
+        // Apply the base day date to the time ranges
+        const finalDate = new Date(targetDate);
+        // ... (setting hours could be done here if needed but scheduleTargets expects a date object and separate start/end strings)
+        scheduleTargets.push({ date: finalDate, start: range.start, end: range.end });
+      });
+    } else {
+      // Multiple specific dates
+      if (scheduleDates.length === 0) { setScheduleError("Please select dates, weekdays, or a month day."); return; }
+      scheduleDates.forEach(tDate => {
+        if (scheduleType === "screenshot") {
+          scheduleTargets.push({ date: tDate, start: scheduleScreenshotTime, end: scheduleScreenshotTime });
+        } else {
+          scheduleTimeRanges.forEach(range => {
+            scheduleTargets.push({ date: tDate, start: range.start, end: range.end });
+          });
+        }
+      });
+    }
+
+    if (scheduleTargets.length === 0) { setScheduleError("No valid times provided."); return; }
+
+    scheduleTargets.forEach(target => {
+      const { date: tDate, start: tStart, end: tEnd } = target;
+      const [sh, sm] = tStart.split(":").map(Number);
+      const [eh, em] = tEnd.split(":").map(Number);
+
+      const startMs = new Date(tDate).setHours(sh, sm, 0, 0);
+      const endMs = scheduleType === "screenshot" ? startMs : new Date(tDate).setHours(eh, em, 59, 999);
+      const nowMs = Date.now();
+
+      if (endMs < startMs) return; // Ignore invalid ranges
+
+      const entryId = `sched-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const newEntry: ScheduledRecording = {
+        id: entryId,
+        cameraId: scheduleCamera,
+        cameraName: device?.name || "Sensor",
+        systemId: scheduleSystem,
+        systemName: device?.systemName || "",
+        date: tDate,
+        startTime: tStart,
+        endTime: tEnd,
+        type: scheduleType,
+        status: startMs > nowMs ? "pending" : (scheduleType === "screenshot" ? "in progress" : "recording"),
+        recurrence: scheduleDays.length > 0 ? "weekday" : (scheduleMonthDay !== "" ? "monthday" : "none"),
+        recurrenceDay: scheduleDays.length > 0 ? undefined : (scheduleMonthDay !== "" ? Number(scheduleMonthDay) : undefined),
+        batchId,
+      };
+
+      if (scheduleType === "screenshot") {
+        newEntry.screenshotTime = tStart;
+        const delay = Math.max(0, startMs - nowMs);
+
+        const captureAction = async () => {
+          let originalSchedule: any = null;
+          try {
+            const cam = await nxAPI.getCameraById(cameraDeviceId);
+            originalSchedule = cam?.schedule || null;
+          } catch (e) { }
+
+          const dayOfWeek = tDate.getDay();
+          const nxDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+          try {
+            await nxAPI.updateDevice(cameraDeviceId, {
+              schedule: { isEnabled: true, tasks: [{ dayOfWeek: nxDay, startTime: 0, length: 86400, recordingType: "always", metadataTypes: "motion,objects" }] }
+            });
+          } catch (err) {
+            setScheduledRecordings(prev => prev.map(r => r.id === entryId ? { ...r, status: "failed" } : r));
+            return;
+          }
+
+          setTimeout(async () => {
+            try {
+              if (originalSchedule) await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
+              else await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
+
+              const newRec: RecentRecording = {
+                id: `snap-${Date.now()}`,
+                cameraName: device?.name || "Camera",
+                systemName: device?.systemName || "",
+                startTimeMs: startMs + 4000,
+                durationMs: 0,
+                systemId: scheduleSystem,
+                deviceId: cameraDeviceId,
+                isScreenshot: true,
+              };
+              setRecentRecordings(prev => [newRec, ...prev]);
+              showNotification({ type: 'success', title: 'Snapshot Captured', message: `Snapshot for ${device?.name || "Camera"} is done.` });
+              if (!newEntry.recurrence || newEntry.recurrence === "none") {
+                setScheduledRecordings(prev => prev.filter(r => r.id !== entryId));
+              }
+            } catch (err) {
+              showNotification({ type: 'error', title: 'Snapshot Failed', message: `Snapshot for ${device?.name || "Camera"} failed.` });
+              setScheduledRecordings(prev => prev.filter(r => r.id !== entryId));
+            }
+          }, 8500);
+        };
+
+        if (delay > 0) {
+          const timer = setTimeout(() => {
+            setScheduledRecordings(prev => prev.map(r => r.id === entryId ? { ...r, status: "in progress" } : r));
+            captureAction();
+          }, delay);
+          scheduleTimers.current.set(entryId, timer);
+        } else {
+          captureAction();
+        }
+      } else {
+        // Video
+        const startDelay = Math.max(0, startMs - nowMs);
+        const endDelay = Math.max(0, endMs - nowMs);
+
+        const startTimer = setTimeout(async () => {
+          setScheduledRecordings(prev => prev.map(r => r.id === entryId ? { ...r, status: "recording", startedAt: Date.now() } : r));
+          try {
+            let originalSchedule = null;
+            try {
+              const cam = await nxAPI.getCameraById(cameraDeviceId);
+              originalSchedule = cam?.schedule || null;
+            } catch (e) { }
+            originalSchedules.current.set(entryId, originalSchedule);
+
+            const dayOfWeek = tDate.getDay();
+            const startSec = sh * 3600 + sm * 60;
+            const endSec = eh * 3600 + em * 60 + 59;
+
+            await nxAPI.updateDevice(cameraDeviceId, {
+              schedule: {
+                isEnabled: true,
+                tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", metadataTypes: "none", streamQuality: "high", fps: 15 }]
+              }
+            });
+          } catch (err) {
+            setScheduledRecordings(prev => prev.map(r => r.id === entryId ? { ...r, status: "failed" } : r));
+          }
+        }, startDelay);
+
+        const endTimer = setTimeout(async () => {
+          try {
+            const originalSchedule = originalSchedules.current.get(entryId);
+            originalSchedules.current.delete(entryId);
+            if (originalSchedule) await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
+            else await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
+
+            // Only mark completed if API calls succeeded
+            showNotification({ type: 'success', title: 'Recording Done', message: `Recording for ${device?.name || "Camera"} is finished.` });
+            if (!newEntry.recurrence || newEntry.recurrence === "none") {
+              setScheduledRecordings(prev => prev.filter(r => r.id !== entryId));
+            }
+          } catch (err) {
+             showNotification({ type: 'error', title: 'Recording Failed', message: `Recording for ${device?.name || "Camera"} failed.` });
+             setScheduledRecordings(prev => prev.filter(r => r.id !== entryId));
+             return;
+          }
+
+          const recentEntry: RecentRecording = {
+            id: `rec-${Date.now()}`,
+            cameraName: device?.name || "Camera",
+            systemName: device?.systemName || "",
+            startTimeMs: startMs,
+            durationMs: endMs - startMs,
+            systemId: scheduleSystem,
+            deviceId: cameraDeviceId,
+          };
+          setRecentRecordings(prev => [recentEntry, ...prev]);
+        }, endDelay);
+
+        scheduleTimers.current.set(entryId + "-start", startTimer);
+        scheduleTimers.current.set(entryId + "-end", endTimer);
       }
 
-      // Push to Recent Recordings
-      const recentEntry: RecentRecording = {
-        id: `rec-${Date.now()}`,
-        cameraName: device?.name || "Camera",
-        systemName: device?.systemName || "",
-        startTimeMs: startMs,
-        durationMs: endMs - startMs,
-        systemId: scheduleSystem,
-        deviceId: cameraDeviceId,
-      };
-      setRecentRecordings(prev => [recentEntry, ...prev]);
-    }, endDelay);
+      setScheduledRecordings(prev => [...prev, newEntry]);
+    });
 
-    scheduleTimers.current.set(newEntry.id + "-start", startTimer);
-    scheduleTimers.current.set(newEntry.id + "-end", endTimer);
-    setScheduledRecordings(prev => [...prev, newEntry]);
-    setScheduleSuccess(`Recording scheduled: ${format(scheduleDate, "PPP")} ${scheduleStart} – ${scheduleEnd}`);
+    setScheduleSuccess(`Sucessfully scheduled ${scheduleTargets.length} task(s).`);
+    setTimeout(() => setIsScheduleOpen(false), 1500);
   };
 
   const cancelSchedule = async (id: string) => {
@@ -620,17 +814,16 @@ export default function CloudRecordings() {
   );
 
   // ---- Camera Select (shared) ----
-  const CameraSelect = ({ value, onValueChange, label = "Camera" }: { value: string; onValueChange: (v: string) => void; label?: string }) => (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+  const CameraSelect = ({ value, onValueChange }: { value: string; onValueChange: (v: string) => void }) => (
+    <div className="w-full">
       {loadingDevices ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading cameras...
+          <Loader2 className="h-4 w-4 animate-spin" /> Retrieving...
         </div>
       ) : (
         <Select value={value} onValueChange={onValueChange}>
           <SelectTrigger>
-            <SelectValue placeholder="Select a camera" />
+            <SelectValue placeholder="Select" />
           </SelectTrigger>
           <SelectContent className="max-h-[400px]">
             {devices.map((device: any) => (
@@ -647,362 +840,485 @@ export default function CloudRecordings() {
   const statusColor: Record<string, string> = {
     pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
     recording: "bg-green-100 text-green-800 border-green-200 animate-pulse",
+    "in progress": "bg-indigo-100 text-indigo-800 border-indigo-200 animate-pulse",
     completed: "bg-blue-100 text-blue-800 border-blue-200",
     failed: "bg-red-100 text-red-800 border-red-200",
+    active: "bg-sky-100 text-sky-800 border-sky-200",
   };
 
   // ======== RENDER ========
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
   return (
     <div className="container mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Video className="h-8 w-8" />
-        <div>
-          <h1 className="text-2xl font-bold">Recordings</h1>
-          <p className="text-muted-foreground">Manage, schedule and review camera recordings</p>
+      {/* Header with Integrated Search/Filter */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-muted/30 p-4 rounded-xl border">
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-xl font-bold leading-none">Recordings</h1>
+          </div>
+        </div>
+
+        {/* Global Action Bar */}
+        <div className="flex items-center gap-3">
+          <Button onClick={() => { resetScheduleForm(); setIsScheduleOpen(true); }} className="h-9 gap-2 shadow-sm">
+            <Plus className="h-4 w-4" /> New Schedule
+          </Button>
         </div>
       </div>
 
-      {/* Global errors */}
-      {globalError && (
-        <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md">{globalError}</div>
-      )}
+      {!requiresCloudAuth ? (
+        <div className="grid gap-6 grid-cols-3">
+          {/* LEFT: Recording Results (Major) */}
+          <div className="space-y-4 col-span-2">
+            <Card className="min-h-[600px] border-none shadow-none bg-transparent">
+              <div className="flex items-center gap-3 mb-6 pb-6 border-b">
+                <div className="w-48">
+                  <CameraSelect value={selectedDevice} onValueChange={handleSelectDevice} />
+                </div>
 
-      {/* Cloud auth gate */}
-      {requiresCloudAuth && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className={cn("justify-start font-normal h-9", !date && "text-muted-foreground")}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {date ? format(date, "MMM d, yyyy") : "Date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar mode="single" selected={date} onSelect={(d) => { setDate(d); if (selectedDevice && d) handleSearchRecentRecordings(selectedDevice, d); }} initialFocus />
+                  </PopoverContent>
+                </Popover>
+
+                {recentLoading && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground animate-pulse ml-auto">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Synchronizing...
+                  </div>
+                )}
+              </div>
+              <CardContent className="px-0 pt-0">
+                {recentLoading ? (
+                  <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                    <p className="text-sm">Fetching recorded segments...</p>
+                  </div>
+                ) : filteredRecentRecordings.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    {filteredRecentRecordings.map(rec => (
+                      <div key={rec.id} className="group flex items-center justify-between p-3 border rounded-xl hover:bg-muted/40 transition-all">
+                        <div className="flex items-center gap-4">
+                          <div className={cn("p-2 rounded-lg", rec.isScreenshot ? "bg-blue-500/10" : "bg-primary/10")}>
+                            {rec.isScreenshot ? <Camera className="h-5 w-5 text-blue-500" /> : <Video className="h-5 w-5 text-primary" />}
+                          </div>
+                          <div>
+                            <div className="font-semibold text-sm flex items-center gap-2">
+                              {rec.cameraName}
+                              {rec.isScreenshot && <Badge variant="outline" className="text-[10px] h-4 px-1 bg-blue-50 border-blue-200 text-blue-600">SNAPSHOT</Badge>}
+                            </div>
+                            <div className="text-xs text-muted-foreground flex items-center gap-2">
+                              <span className="font-medium text-foreground/80">{new Date(rec.startTimeMs).toLocaleString()}</span>
+                              <span className="opacity-40">|</span>
+                              <span>{formatDuration(rec.durationMs)}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="sm" onClick={() => handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)} className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary">
+                            <Eye className="h-3.5 w-3.5" /> Preview
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)} className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary">
+                            <Download className="h-3.5 w-3.5" /> Download
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground gap-4 border-2 border-dashed rounded-2xl">
+                    <div className="bg-muted p-4 rounded-full">
+                      <Search className="h-8 w-8 opacity-40" />
+                    </div>
+                    <div>
+                      <p className="font-medium">No recordings found</p>
+                      <p className="text-sm">Try selecting a different camera or date above.</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* RIGHT: Scheduled Queue */}
+          <div className="space-y-4 col-span-1">
+            <Card className="h-fit sticky top-6">
+              <CardHeader className="pb-3 border-b">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-orange-500" />
+                    Scheduled Queue
+                  </CardTitle>
+                  {scheduledRecordings.length > 0 && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => requestCancel(scheduledRecordings.map(r => r.id))}
+                      className="h-7 text-[10px] uppercase font-bold tracking-widest text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    >
+                      Clear All
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4 px-3">
+                {scheduledRecordings.length === 0 ? (
+                  <div className="text-xs text-muted-foreground py-8 text-center italic">
+                    No active schedules
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {Object.values(scheduledRecordings.reduce((acc: Record<string, ScheduledRecording[]>, r) => {
+                      // Group by batchId if available, otherwise by fallback key
+                      const key = r.batchId || `${r.cameraId}-${r.startTime}-${r.endTime}-${r.type}`;
+                      if (!acc[key]) acc[key] = [];
+                      acc[key].push(r);
+                      return acc;
+                    }, {})).map((group, gIdx) => {
+                      const first = group[0];
+                      const sortedDates = [...group].map(r => new Date(r.date)).sort((a, b) => a.getTime() - b.getTime());
+                      const isRecurring = group.some(r => r.recurrence && r.recurrence !== "none");
+                      const anyRecording = group.some((r: ScheduledRecording) => r.status === "recording" || r.status === "in progress");
+                      const allCompleted = group.every(r => r.status === "completed" || r.status === "failed");
+                      const mainStatus = anyRecording 
+                        ? (group.some(r => r.status === "recording") ? "recording" : "in progress") 
+                        : (isRecurring ? "active" : (allCompleted ? "completed" : "pending"));
+                      const dateList = sortedDates.map(d => format(d, "MMM d"));
+                      const displayDates = dateList.length > 2 ? `${dateList.slice(0, 2).join(", ")}...` : dateList.join(", ");
+
+                      const handleEdit = (e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        setScheduleCamera(first.cameraId);
+                        setScheduleSystem(first.systemId);
+                        setScheduleType(first.type);
+                        setScheduleBatchId(first.batchId || null);
+                        setScheduleDates(group.map(r => new Date(r.date)));
+                        if (first.type === "video") {
+                          setScheduleTimeRanges([{ start: first.startTime, end: first.endTime }]);
+                        } else {
+                          setScheduleScreenshotTime(first.startTime);
+                        }
+                        setIsScheduleOpen(true);
+                      };
+
+                      return (
+                        <Collapsible key={gIdx} className="group overflow-hidden rounded-2xl border bg-white border-slate-200 transition-all hover:border-primary/50 hover:shadow-xl shadow-sm">
+                          <CollapsibleTrigger asChild>
+                            <div className="relative cursor-pointer p-5 select-none">
+                              {/* Glowing side indicator */}
+                              <div className={cn("absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all group-hover:w-1.5", 
+                                mainStatus === "recording" ? "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]" : 
+                                mainStatus === "in progress" ? "bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]" :
+                                mainStatus === "active" ? "bg-sky-500 shadow-[0_0_10px_rgba(14,165,233,0.2)]" :
+                                mainStatus === "pending" ? "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.2)]" : "bg-slate-300")} />
+
+                              <div className="flex items-start justify-between gap-4 pl-3">
+                                <div className="space-y-1.5 min-w-0 flex-1">
+                                  <div className="flex items-center gap-3">
+                                    <h4 className="text-sm font-bold uppercase tracking-tight truncate text-slate-800 group-hover:text-primary transition-colors">{first.cameraName}</h4>
+                                    <div className="px-2 py-0.5 rounded text-[9px] uppercase tracking-widest border bg-slate-900 text-white border-slate-900">
+                                      {first.type}
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-4 text-xs text-slate-500">
+                                    <span className="flex items-center gap-1.5"><CalendarIcon className="h-3.5 w-3.5 opacity-60" /> {displayDates}</span>
+                                    <span className="opacity-20 px-1">|</span>
+                                    <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 opacity-60" /> {first.type === "screenshot" ? first.screenshotTime : `${first.startTime} - ${first.endTime}`}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col items-end gap-3 shrink-0">
+                                  <div className="flex items-center gap-2">
+                                    <div className={cn("text-[8px] px-1.5 py-0.5 rounded-full border uppercase tracking-widest bg-slate-100 text-slate-600 border-slate-200", statusColor[mainStatus])}>
+                                      {mainStatus}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100 text-slate-400 hover:text-primary" onClick={handleEdit}>
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-destructive/10 text-slate-400 hover:text-destructive" onClick={(e) => { e.stopPropagation(); requestCancel(group.map(r => r.id)); }}>
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              { (mainStatus === "recording" || mainStatus === "in progress") && (
+                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary/10">
+                                  <div className={cn("h-full w-full animate-pulse", mainStatus === "recording" ? "bg-green-500" : "bg-indigo-500")} />
+                                </div>
+                              )}
+                            </div>
+                          </CollapsibleTrigger>
+
+                          <CollapsibleContent className="bg-slate-50/80 border-t border-slate-100 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-300">
+                             <div className="p-4 space-y-2">
+                               {sortedDates.map((d, dIdx) => (
+                                 <div key={dIdx} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-white border border-slate-200 shadow-sm hover:border-primary/30 transition-all group/item">
+                                   <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] text-slate-500 border border-slate-200 shadow-inner font-bold">#{dIdx + 1}</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-semibold text-slate-800">{format(d, "EEEE")}</span>
+                                        <span className="text-[10px] text-slate-500 font-medium">{format(d, "MMMM d, yyyy")}</span>
+                                      </div>
+                                   </div>
+                                   <div className="flex items-center gap-2">
+                                      <div className={cn("text-[8px] px-1.5 py-0.5 rounded-md border uppercase tracking-widest font-bold", statusColor[group[dIdx].status])}>
+                                        {group[dIdx].status}
+                                      </div>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-all" onClick={() => requestCancel([group[dIdx].id])}>
+                                        <X className="h-3.5 w-3.5" />
+                                      </Button>
+                                   </div>
+                                 </div>
+                               ))}
+                             </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : (
         <Card className="border-primary/50 bg-primary/5">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Cloud className="h-5 w-5" />
-              NX Cloud Authentication Required
+            <CardTitle className="flex items-center gap-2 font-bold">
+              <Cloud className="h-5 w-5" /> Cloud Access Required
             </CardTitle>
-            <CardDescription>Sign in to your NX Cloud account to access connected systems.</CardDescription>
+            <CardDescription>You need to be authenticated with NX Cloud to manage remote recordings.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={handleCloudLogin} className="gap-2">
+            <Button onClick={handleCloudLogin} className="gap-2 font-bold px-8">
               <LogIn className="h-4 w-4" /> Sign in to NX Cloud
             </Button>
           </CardContent>
         </Card>
       )}
 
-      {!requiresCloudAuth && (
-        <Tabs defaultValue="search" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="search" className="flex items-center gap-2">
-              <Search className="h-4 w-4" /> Recordings
-            </TabsTrigger>
-            <TabsTrigger value="schedule" className="flex items-center gap-2">
-              <Clock className="h-4 w-4" /> Schedule Recording
-            </TabsTrigger>
-          </TabsList>
+      {/* NEW SCHEDULE DIALOG */}
+      <Dialog open={isScheduleOpen} onOpenChange={handleOpenChange}>
+        <DialogContent className="sm:max-w-[500px]" onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+                New Recording Schedule
+            </DialogTitle>
+            <DialogDescription>Setup recurring or one-time capture tasks.</DialogDescription>
+          </DialogHeader>
 
-          {/* =================== RECORDINGS TAB (merged) =================== */}
-          <TabsContent value="search">
-            <div className="grid gap-6 md:grid-cols-[320px_1fr]">
+          <div className="space-y-6 pt-4">
+            <CameraSelect value={scheduleCamera} onValueChange={handleScheduleSelectDevice} />
 
-              {/* LEFT: Search Controls */}
-              <Card className="h-fit">
-                <CardHeader>
-                  <CardTitle>Search Recordings</CardTitle>
-                  <CardDescription>Choose camera, date and time</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <CameraSelect value={selectedDevice} onValueChange={handleSelectDevice} />
+            <div className="space-y-2">
+              <Label>Task Type</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant={scheduleType === "video" ? "default" : "outline"} onClick={() => setScheduleType("video")} className="h-10 gap-2">
+                  <Video className="h-4 w-4" /> Video
+                </Button>
+                <Button variant={scheduleType === "screenshot" ? "default" : "outline"} onClick={() => setScheduleType("screenshot")} className="h-10 gap-2">
+                  <ImageIcon2 className="h-4 w-4" /> Snapshot
+                </Button>
+              </div>
+            </div>
 
-                  {/* Date */}
+            <div className="space-y-4 border-t pt-4">
+              <Label className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-primary" /> Recurrence / Frequency</Label>
+              
+              <Tabs defaultValue="weekly" className="w-full">
+                <TabsList className="grid w-full grid-cols-3 h-9">
+                  <TabsTrigger value="weekly" className="text-[10px] font-bold uppercase tracking-tighter">Weekly</TabsTrigger>
+                  <TabsTrigger value="specific" className="text-[10px] font-bold uppercase tracking-tighter">Specific Dates</TabsTrigger>
+                  <TabsTrigger value="monthly" className="text-[10px] font-bold uppercase tracking-tighter">Day of Month</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="weekly" className="pt-3">
                   <div className="space-y-2">
-                    <Label>Date</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}>
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {date ? format(date, "PPP") : "Pick a date"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={date} onSelect={(d) => { setDate(d); if (selectedDevice && d) handleSearchRecentRecordings(selectedDevice, d); }} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  {/* Time Range */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label>Start Time</Label>
-                      <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>End Time</Label>
-                      <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
-                    </div>
-                  </div>
-
-                  {searchError && <p className="text-sm text-destructive">{searchError}</p>}
-
-                  <Button onClick={handleSearchRecordings} disabled={searchLoading || recentLoading || !selectedDevice || !date} className="w-full">
-                    {searchLoading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Searching...</>) : (<><Search className="mr-2 h-4 w-4" />Search Specific Range</>)}
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* RIGHT: Results */}
-              <Card className="min-h-[420px]">
-                <CardHeader>
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <CardTitle>
-                        {recordings.length > 0 && searchedRange
-                          ? `${recordings.length} Segment${recordings.length !== 1 ? "s" : ""} Found`
-                          : recentRecordings.length > 0
-                          ? "Recent Recordings"
-                          : "Results"}
-                      </CardTitle>
-                      <CardDescription>
-                        {recordings.length > 0 && searchedRange
-                          ? `${new Date(searchedRange.startMs).toLocaleString()} – ${new Date(searchedRange.endMs).toLocaleTimeString()}`
-                          : recentRecordings.length > 0
-                          ? `${filteredRecentRecordings.length} of ${recentRecordings.length} shown`
-                          : "Search results will appear here"}
-                      </CardDescription>
-                    </div>
-                    {/* Filter bar for recent recordings */}
-                    {recentRecordings.length > 0 && recordings.length === 0 && (
-                      <div className="relative w-52 shrink-0">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                        <Input className="pl-9" placeholder="Filter..." value={recentSearch} onChange={e => setRecentSearch(e.target.value)} />
-                      </div>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {/* Search results */}
-                  {recordings.length > 0 && searchedRange && (
-                    <div className="space-y-3">
-                      {/* Download entire range shortcut */}
-                      <div className="p-3 border rounded-md bg-primary/5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <div className="font-medium text-sm">Full Selected Range</div>
-                            <div className="text-xs text-muted-foreground">
-                              {new Date(searchedRange.startMs).toLocaleString()} – {new Date(searchedRange.endMs).toLocaleTimeString()} · {formatDuration(searchedRange.endMs - searchedRange.startMs)}
-                            </div>
-                          </div>
-                          <Button size="sm" onClick={() => handleDownload(searchedRange.startMs, searchedRange.endMs - searchedRange.startMs)}>
-                            <Download className="mr-2 h-4 w-4" /> Download
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Individual segments</div>
-                      <div className="space-y-2">
-                        {recordings.map((rec, idx) => {
-                          const segStartMs = rec.startTimeMs || 0;
-                          const segDurationMs = rec.durationMs || 0;
-                          const segEndMs = segStartMs + segDurationMs;
-                          return (
-                            <div key={idx} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
-                              <div>
-                                <div className="font-medium text-sm flex items-center gap-1.5">
-                                  {rec.isScreenshot && <Camera className="h-3.5 w-3.5 text-blue-500" />}
-                                  {rec.isScreenshot 
-                                    ? new Date(segStartMs).toLocaleString() 
-                                    : `${new Date(segStartMs).toLocaleString()} – ${new Date(segEndMs).toLocaleTimeString()}`}
-                                </div>
-                                <div className="text-xs text-muted-foreground">{formatDuration(segDurationMs)}</div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={() => handlePreview(segStartMs, segDurationMs)} className="gap-1.5">
-                                  <Eye className="h-4 w-4" /> Preview
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => handleDownload(segStartMs, segDurationMs)}>
-                                  <Download className="mr-1.5 h-4 w-4" /> Download
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Recent recordings (shown when no active search) */}
-                  {recordings.length === 0 && recentRecordings.length > 0 && (
-                    <div className="space-y-2">
-                      {filteredRecentRecordings.map(rec => (
-                        <div key={rec.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50">
-                          <div>
-                            <div className="font-medium text-sm flex items-center gap-1.5">
-                              {rec.isScreenshot && <Camera className="h-3.5 w-3.5 text-blue-500" />}
-                              {rec.cameraName}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {new Date(rec.startTimeMs).toLocaleString()} · {formatDuration(rec.durationMs)}
-                            </div>
-                            {rec.systemName && <div className="text-xs text-muted-foreground/70">{rec.systemName}</div>}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={() => handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)} className="gap-1.5">
-                              <Eye className="h-4 w-4" /> Preview
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId)}>
-                              <Download className="mr-1.5 h-4 w-4" /> Download
-                            </Button>
-                          </div>
-                        </div>
+                    <span className="text-[10px] uppercase font-black text-muted-foreground tracking-widest pl-1">Select Weekdays</span>
+                    <div className="grid grid-cols-7 gap-1.5 p-2.5 border rounded-lg bg-muted/20">
+                      {dayNames.map((name, i) => (
+                        <button 
+                          key={name} 
+                          type="button"
+                          onClick={() => {
+                            toggleScheduleDay(i);
+                            setScheduleMonthDay(""); 
+                            setScheduleDates([]);
+                          }} 
+                          className={cn(
+                            "w-full h-10 rounded-md text-[10px] font-black transition-all border flex items-center justify-center", 
+                            scheduleDays.includes(i) 
+                              ? "bg-primary text-primary-foreground border-primary shadow-sm" 
+                              : "bg-background hover:border-primary/50 text-muted-foreground"
+                          )}
+                        >
+                          {name.substring(0, 1)}
+                        </button>
                       ))}
                     </div>
-                  )}
-
-                  {/* Empty state */}
-                  {recordings.length === 0 && recentRecordings.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground gap-3">
-                      <Search className="h-10 w-10 opacity-20" />
-                      <p className="text-sm">Select a camera and date, then click<br />Search Recordings to see results.</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* =================== SCHEDULE TAB =================== */}
-          <TabsContent value="schedule" className="space-y-6">
-            <div className="grid gap-6 md:grid-cols-2">
-              {/* Schedule Form */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>New Scheduled Recording</CardTitle>
-                  <CardDescription>Set a camera and time window to auto-record</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <CameraSelect value={scheduleCamera} onValueChange={handleScheduleSelectDevice} />
-
-                  {/* Recording type */}
-                  <div className="space-y-2">
-                    <Label>Recording Type</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setScheduleType("video")}
-                        className={cn(
-                          "flex flex-col items-center gap-1 p-3 rounded-lg border-2 text-sm font-medium transition-all",
-                          scheduleType === "video" ? "border-primary bg-primary/5 text-primary" : "border-muted hover:border-primary/40"
-                        )}
-                      >
-                        <Video className="h-5 w-5" />
-                        Video Recording
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setScheduleType("screenshot")}
-                        className={cn(
-                          "flex flex-col items-center gap-1 p-3 rounded-lg border-2 text-sm font-medium transition-all",
-                          scheduleType === "screenshot" ? "border-primary bg-primary/5 text-primary" : "border-muted hover:border-primary/40"
-                        )}
-                      >
-                        <ImageIcon2 className="h-5 w-5" />
-                        Screenshot
-                      </button>
-                    </div>
                   </div>
+                </TabsContent>
 
-                  {/* Date */}
-                  <div className="space-y-2">
-                    <Label>Date</Label>
+                <TabsContent value="specific" className="pt-3">
+                  <div className="flex items-center gap-3 bg-muted/20 p-3 rounded-lg border">
+                    <span className="text-xs font-bold text-muted-foreground shrink-0 uppercase tracking-tighter">on</span>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !scheduleDate && "text-muted-foreground")}>
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {scheduleDate ? format(scheduleDate, "PPP") : "Pick a date"}
+                        <Button variant="outline" className="flex-1 h-10 justify-between bg-white text-sm font-medium shadow-sm">
+                          {scheduleDates.length > 0 ? `${scheduleDates.length} date(s) selected` : "Pick specific date(s)"}
+                          <CalendarIcon className="h-4 w-4 opacity-50" />
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={scheduleDate} onSelect={setScheduleDate} initialFocus />
+                        <Calendar 
+                          mode="multiple" 
+                          selected={scheduleDates} 
+                          onSelect={(d) => {
+                            setScheduleDates(d || []);
+                            setScheduleDays([]);
+                            setScheduleMonthDay("");
+                          }}
+                          initialFocus
+                        />
                       </PopoverContent>
                     </Popover>
                   </div>
+                </TabsContent>
 
-                  {/* Times */}
-                  {scheduleType === "video" ? (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Start Time</Label>
-                        <Input type="time" value={scheduleStart} onChange={e => setScheduleStart(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>End Time</Label>
-                        <Input type="time" value={scheduleEnd} onChange={e => setScheduleEnd(e.target.value)} />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label>Screenshot Time</Label>
-                      <Input type="time" value={scheduleScreenshotTime} onChange={e => setScheduleScreenshotTime(e.target.value)} />
-                    </div>
-                  )}
-
-                  {scheduleError && <p className="text-sm text-destructive">{scheduleError}</p>}
-                  {scheduleSuccess && <p className="text-sm text-green-600">{scheduleSuccess}</p>}
-
-                  <Button onClick={handleScheduleRecording} disabled={!scheduleCamera} className="w-full">
-                    {scheduleType === "video" ? (
-                      <><PlayCircle className="mr-2 h-4 w-4" />Schedule Recording</>
-                    ) : (
-                      <><Camera className="mr-2 h-4 w-4" />Schedule Screenshot</>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* Scheduled queue */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Scheduled Queue</CardTitle>
-                  <CardDescription>Active and recent scheduled recordings</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {scheduledRecordings.length === 0 ? (
-                    <div className="text-sm text-muted-foreground py-8 text-center">
-                      No scheduled recordings yet.
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {scheduledRecordings.map(r => (
-                        <div key={r.id} className="p-3 border rounded-md space-y-1">
-                          <div className="flex items-center justify-between">
-                            <div className="font-medium text-sm">{r.cameraName}</div>
-                            <div className="flex items-center gap-2">
-                              <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium capitalize", statusColor[r.status])}>
-                                {r.status}
-                              </span>
-                              {(r.status === "pending" || r.status === "recording") && (
-                                <button onClick={() => cancelSchedule(r.id)} className="text-muted-foreground hover:text-destructive transition-colors" title="Cancel">
-                                  <X className="h-4 w-4" />
-                                </button>
-                              )}
-                            </div>
+                <TabsContent value="monthly" className="pt-3">
+                  <div className="flex items-center gap-3 bg-muted/20 p-3 rounded-lg border">
+                    <span className="text-xs font-bold text-muted-foreground shrink-0 uppercase tracking-tighter">every</span>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="flex-1 h-10 justify-between bg-white text-sm font-medium shadow-sm">
+                          {scheduleMonthDay !== "" ? `Day ${scheduleMonthDay}` : "Select day"}
+                          <CalendarDays className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-64 p-3" align="start">
+                        <div className="space-y-3">
+                          <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest pl-1">Select Day of Month</span>
+                          <div className="grid grid-cols-7 gap-1">
+                            {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                              <button 
+                                key={day} 
+                                type="button"
+                                onClick={() => {
+                                  setScheduleMonthDay(day);
+                                  setScheduleDays([]);
+                                  setScheduleDates([]);
+                                }} 
+                                className={cn(
+                                  "aspect-square rounded-md text-[10px] font-medium transition-all border flex items-center justify-center", 
+                                  scheduleMonthDay === day
+                                    ? "bg-primary text-primary-foreground border-primary" 
+                                    : "bg-background hover:border-primary/50 text-foreground"
+                                )}
+                              >
+                                {day}
+                              </button>
+                            ))}
                           </div>
-                          <div className="text-xs text-muted-foreground">
-                            {format(r.date, "MMM d, yyyy")} · {r.type === "screenshot" ? `Screenshot at ${r.screenshotTime}` : `${r.startTime} – ${r.endTime}`}
-                          </div>
-                          {r.type === "video" && r.status === "recording" && (
-                            <div className="flex items-center gap-1 text-xs text-green-600">
-                              <StopCircle className="h-3 w-3 animate-pulse" /> Recording in progress...
+                          {scheduleMonthDay !== "" && scheduleMonthDay > 28 && (
+                            <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-100 text-[9px] text-amber-700 flex items-start gap-1.5 animate-in fade-in slide-in-from-top-1">
+                              <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
+                              <span>Day {scheduleMonthDay} does not exist in all months. This schedule will skip months that lack this date {scheduleMonthDay === 31 ? "(e.g. Feb, Apr, Jun, Sep, Nov)" : scheduleMonthDay === 30 ? "(e.g. Feb)" : "(e.g. Feb in common years)"}.</span>
                             </div>
                           )}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </TabsContent>
+              </Tabs>
             </div>
-          </TabsContent>
-        </Tabs>
-      )}
 
-      {/* Preview Dialog removed – preview now opens in a new browser tab */}
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <Label>{scheduleType === "screenshot" ? "Capture Time" : "Time Ranges"}</Label>
+                {scheduleType === "video" && (
+                  <Button variant="ghost" size="sm" onClick={addScheduleTimeRange} className="h-7 text-xs gap-1 text-primary hover:bg-primary/5">
+                    <Plus className="h-3 w-3" /> Add Range
+                  </Button>
+                )}
+              </div>
+
+              {scheduleType === "screenshot" ? (
+                <Input type="time" value={scheduleScreenshotTime} onChange={e => setScheduleScreenshotTime(e.target.value)} className="h-10" />
+              ) : (
+                <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2">
+                  {scheduleTimeRanges.map((range, idx) => (
+                    <div key={idx} className="flex items-center gap-2 group animate-in fade-in slide-in-from-top-1">
+                      <Input type="time" value={range.start} onChange={e => updateScheduleTimeRange(idx, "start", e.target.value)} className="h-9" />
+                      <span className="text-muted-foreground text-xs font-bold">TO</span>
+                      <Input type="time" value={range.end} onChange={e => updateScheduleTimeRange(idx, "end", e.target.value)} className="h-9" />
+                      <Button variant="ghost" size="icon" onClick={() => removeScheduleTimeRange(idx)} disabled={scheduleTimeRanges.length === 1} className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {scheduleError && <div className="text-xs text-destructive p-2 bg-destructive/10 rounded-md font-medium">{scheduleError}</div>}
+            {scheduleSuccess && <div className="text-xs text-green-600 p-2 bg-green-600/10 rounded-md font-medium">{scheduleSuccess}</div>}
+
+            <div className="flex gap-3 pt-4">
+              <Button variant="outline" onClick={() => setIsScheduleOpen(false)} className="flex-1 font-bold">Cancel</Button>
+              <Button onClick={handleScheduleRecording} className="flex-1 font-bold gap-2">
+                <PlayCircle className="h-4 w-4" /> Save Schedule
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
+        <NoOverlayAlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-900 flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              {pendingCancelIds.length === scheduledRecordings.length && scheduledRecordings.length > 1 
+                ? "Clear complete queue?" 
+                : "Remove schedule recording?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600">
+              {pendingCancelIds.length > 1 
+                ? (pendingCancelIds.length === scheduledRecordings.length 
+                    ? "Are you sure you want to remove all items from your scheduled queue?" 
+                    : `Are you sure you want to delete all ${pendingCancelIds.length} recording dates in this group?`)
+                : "Are you sure you want to remove this specific recording date from the queue?"}
+              
+              {scheduledRecordings.some(r => pendingCancelIds.includes(r.id) && r.status === "recording") && (
+                <div className="mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded text-destructive font-medium text-xs">
+                  Warning: This includes active recordings that will be stopped immediately.
+                </div>
+              )}
+              
+              <div className="mt-2">This action cannot be undone.</div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-transparent border-slate-200 text-slate-500 hover:bg-slate-50">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmCancelAction} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Confirm Removal
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </NoOverlayAlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
+
