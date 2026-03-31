@@ -174,16 +174,18 @@ export default function CloudRecordings() {
     setScheduleBatchId(null);
   };
 
-  const requestCancel = (ids: string[]) => {
-    if (ids.length === 0) return;
-    setPendingCancelIds(ids);
+  const requestCancel = (ids: string | string[]) => {
+    const idArray = Array.isArray(ids) ? ids : [ids];
+    if (idArray.length === 0) return;
+    setPendingCancelIds(idArray);
     setIsCancelConfirmOpen(true);
   };
 
   const confirmCancelAction = async () => {
     // Process all cancellations
+    const isBatch = pendingCancelIds.length > 1;
     for (const id of pendingCancelIds) {
-      await cancelSchedule(id);
+      await cancelSchedule(id, isBatch);
     }
     setIsCancelConfirmOpen(false);
     setPendingCancelIds([]);
@@ -732,15 +734,43 @@ export default function CloudRecordings() {
     setTimeout(() => setIsScheduleOpen(false), 1500);
   };
 
-  const cancelSchedule = async (id: string) => {
+  const cancelSchedule = async (id: string, isBatch: boolean = false) => {
     const t1 = scheduleTimers.current.get(id + "-start");
     const t2 = scheduleTimers.current.get(id + "-end");
     if (t1) clearTimeout(t1);
     if (t2) clearTimeout(t2);
 
-    // If currently recording, stop it immediately on the VMS
     const rec = scheduledRecordings.find(r => r.id === id);
-    if (rec?.status === "recording") {
+    if (!rec) return;
+
+    // FOR RECURRING: If just removing one (not a batch delete), ROLL OVER instead of delete
+    if (!isBatch && rec.recurrence && rec.recurrence !== "none") {
+      console.log(`[CloudRecordings] Rolling over task ${id} for ${rec.cameraName} (User Cancel/Skip)`);
+      const targetDay = rec.recurrenceDay;
+      const nextDate = new Date(rec.date);
+      
+      let year = nextDate.getFullYear();
+      let monthIdx = nextDate.getMonth() + 1;
+      
+      if (rec.recurrence === "weekday") {
+        nextDate.setDate(nextDate.getDate() + 7);
+      } else {
+        // Monthday logic
+        let next = new Date(year, monthIdx, targetDay || 1);
+        while (targetDay && next.getDate() !== targetDay) {
+          monthIdx++;
+          next = new Date(year, monthIdx, targetDay);
+        }
+        nextDate.setTime(next.getTime());
+      }
+      
+      setScheduledRecordings(prev => prev.map(r => r.id === id ? { ...r, date: nextDate, status: "pending" } : r));
+      showNotification({ type: 'info', title: 'Schedule Rolled Over', message: `Skipped current date. Next: ${format(nextDate, "MMM d, yyyy")}` });
+      return;
+    }
+
+    // If currently recording, stop it immediately on the VMS
+    if (rec.status === "recording") {
       try {
         const originalSchedule = originalSchedules.current.get(id);
         originalSchedules.current.delete(id);
@@ -1075,8 +1105,19 @@ export default function CloudRecordings() {
                                       <div className={cn("text-[8px] px-1.5 py-0.5 rounded-md border uppercase tracking-widest font-bold", statusColor[group[dIdx].status])}>
                                         {group[dIdx].status}
                                       </div>
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-all" onClick={() => requestCancel([group[dIdx].id])}>
-                                        <X className="h-3.5 w-3.5" />
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className={cn(
+                                          "h-6 w-6 rounded-md transition-all",
+                                          isRecurring 
+                                            ? "text-sky-500/60 hover:text-sky-600 hover:bg-sky-50" 
+                                            : "text-destructive/60 hover:text-destructive hover:bg-destructive/10"
+                                        )} 
+                                        onClick={() => requestCancel([group[dIdx].id])}
+                                        title={isRecurring ? "Skip this occurrence" : "Remove this recording"}
+                                      >
+                                        <X className={isRecurring ? "h-3 w-3" : "h-3.5 w-3.5"} />
                                       </Button>
                                    </div>
                                  </div>
@@ -1286,37 +1327,58 @@ export default function CloudRecordings() {
       </Dialog>
 
       <AlertDialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
-        <NoOverlayAlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-slate-900 flex items-center gap-2">
-              <Trash2 className="h-5 w-5 text-destructive" />
-              {pendingCancelIds.length === scheduledRecordings.length && scheduledRecordings.length > 1 
-                ? "Clear complete queue?" 
-                : "Remove schedule recording?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-slate-600">
-              {pendingCancelIds.length > 1 
-                ? (pendingCancelIds.length === scheduledRecordings.length 
-                    ? "Are you sure you want to remove all items from your scheduled queue?" 
-                    : `Are you sure you want to delete all ${pendingCancelIds.length} recording dates in this group?`)
-                : "Are you sure you want to remove this specific recording date from the queue?"}
-              
-              {scheduledRecordings.some(r => pendingCancelIds.includes(r.id) && r.status === "recording") && (
-                <div className="mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded text-destructive font-medium text-xs">
-                  Warning: This includes active recordings that will be stopped immediately.
-                </div>
-              )}
-              
-              <div className="mt-2">This action cannot be undone.</div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="bg-transparent border-slate-200 text-slate-500 hover:bg-slate-50">Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmCancelAction} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Confirm Removal
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </NoOverlayAlertDialogContent>
+        {(() => {
+          const firstPendingRec = pendingCancelIds.length === 1 ? scheduledRecordings.find(r => r.id === pendingCancelIds[0]) : null;
+          const isSkip = !!(firstPendingRec?.recurrence && firstPendingRec.recurrence !== "none");
+          
+          return (
+            <NoOverlayAlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-slate-900 flex items-center gap-2">
+                  {isSkip ? (
+                    <>
+                      <Trash2 className="h-5 w-5 text-sky-500" />
+                      Skip recording day?
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-5 w-5 text-destructive" />
+                      {pendingCancelIds.length === scheduledRecordings.length && scheduledRecordings.length > 1 
+                        ? "Clear complete queue?" 
+                        : "Remove schedule recording?"}
+                    </>
+                  )}
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-slate-600">
+                  {pendingCancelIds.length > 1 
+                    ? (pendingCancelIds.length === scheduledRecordings.length 
+                        ? "Are you sure you want to remove all items from your scheduled queue?" 
+                        : `Are you sure you want to delete all ${pendingCancelIds.length} recording dates in this group?`)
+                    : (isSkip
+                        ? `Are you sure you want to skip this specific recording day (${firstPendingRec?.date ? format(new Date(firstPendingRec.date), "MMM d") : "this date"}) and roll over to the next month?`
+                        : "Are you sure you want to remove this specific recording date from the queue?")}
+                  
+                  {scheduledRecordings.some(r => pendingCancelIds.includes(r.id) && r.status === "recording") && (
+                    <div className="mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded text-destructive font-medium text-xs">
+                      Warning: This includes active recordings that will be stopped immediately.
+                    </div>
+                  )}
+                  
+                  <div className="mt-2 text-xs opacity-60">This action cannot be undone.</div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-transparent border-slate-200 text-slate-500 hover:bg-slate-50">Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={confirmCancelAction} className={cn(
+                  "text-white hover:opacity-90",
+                  isSkip ? "bg-sky-500" : "bg-destructive"
+                )}>
+                  {isSkip ? "Confirm Skip" : "Confirm Removal"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </NoOverlayAlertDialogContent>
+          );
+        })()}
       </AlertDialog>
     </div>
   );
