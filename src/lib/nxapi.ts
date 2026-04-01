@@ -241,10 +241,18 @@ class NxWitnessAPI {
     const requestPromise = (async () => {
       // Use /nx proxy for local server, /api/nx for cloud relay
       const isLocal = this.systemId === "local" || (typeof API_CONFIG !== 'undefined' && this.systemId === API_CONFIG.systemId);
-      const targetBaseURL = isLocal ? "/nx" : this.baseURL;
+      let targetBaseURL = isLocal ? "/nx" : this.baseURL;
+      let origin = "";
+      
+      if (typeof window !== 'undefined') {
+        origin = window.location.origin;
+      } else {
+        // Server-side: use environment variable or default to localhost
+        origin = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+      }
 
       // Build URL with systemId
-      const url = new URL(`${window.location.origin}${targetBaseURL}${endpoint}`);
+      const url = new URL(`${origin}${targetBaseURL}${endpoint}`);
       if (this.systemId && !isLocal) {
         url.searchParams.set("systemId", this.systemId);
       }

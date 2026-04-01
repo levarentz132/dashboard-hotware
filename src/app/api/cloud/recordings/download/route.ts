@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const { systemId, systemName } = validateSystemId(request);
-    const deviceId = searchParams.get("deviceId");
+    const deviceId = searchParams.get("deviceId")?.replace(/[{}]/g, "");
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
     const stream = searchParams.get("stream");
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     // Explicitly define generic headers type
     const headers: Record<string, string> = buildCloudHeaders(request, systemId);
     if (isImage) {
-      headers["Accept"] = "multipart/x-mixed-replace, image/jpeg, image/*";
+      headers["Accept"] = "image/png, image/jpeg, image/*;q=0.9, */*;q=0.8";
       delete headers["Content-Type"];
     }
 
@@ -132,10 +132,15 @@ export async function GET(request: NextRequest) {
         ? `inline; filename="${filename}"`
         : `attachment; filename="${filename}"`;
 
+      const responseContentType = videoResponse.headers.get("Content-Type");
+      const finalContentType = isImage 
+        ? (responseContentType && responseContentType.includes("image") ? responseContentType : "image/jpeg")
+        : (responseContentType || "video/mp4");
+
       return new NextResponse(videoResponse.body, {
         status: 200,
         headers: {
-          "Content-Type": isImage ? "image/png" : (videoResponse.headers.get("Content-Type") || "video/mp4"),
+          "Content-Type": finalContentType,
           "Content-Disposition": disposition,
           "Content-Length": videoResponse.headers.get("Content-Length") || "",
           "Accept-Ranges": "bytes",

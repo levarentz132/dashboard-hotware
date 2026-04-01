@@ -7,7 +7,8 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const { systemId, systemName } = validateSystemId(request);
-    const deviceId = searchParams.get("deviceId");
+    const deviceIdRaw = searchParams.get("deviceId") || "";
+    const deviceId = deviceIdRaw.replace(/[{}]/g, "");
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
 
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     // Build query params for recorded time periods
     const params = new URLSearchParams();
-    params.set("cameraId", deviceId);
+    params.set("cameraId", deviceIdRaw);
     if (startTime) params.set("startTime", startTime);
     if (endTime) params.set("endTime", endTime);
     params.set("detail", "2"); // Get detailed periods

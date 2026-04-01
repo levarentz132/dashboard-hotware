@@ -40,7 +40,7 @@ const startWatchdog = () => {
             await nxAPI.updateDevice(rec.cameraId, {
               schedule: {
                 isEnabled: true,
-                tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", metadataTypes: "none", streamQuality: "high", fps: 15 }]
+                tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }]
               }
             });
             // Update: Use 'in progress' for screenshots, 'recording' for video
@@ -61,6 +61,30 @@ const startWatchdog = () => {
             const original = originalSchedules[rec.id];
             if (original) await nxAPI.updateDevice(rec.cameraId, { schedule: original });
             else await nxAPI.updateDevice(rec.cameraId, { schedule: { isEnabled: false, tasks: [] } });
+            
+            // If it's a screenshot, trigger the capture and save logic
+            if (rec.type === "screenshot") {
+              const origin = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+              const captureTime = startMs + 5000; // 5s into the 15s recording window
+              console.log(`[Watchdog] Triggering screenshot capture for ${rec.cameraName} at ${new Date(captureTime).toISOString()}`);
+              
+              // We call the internal download API which has the logic to fetch and save to disk
+              // We pass preview=true to ensure it uses the 'precise' capture logic
+              try {
+                const params = new URLSearchParams({
+                  systemId: rec.systemId,
+                  deviceId: rec.cameraId,
+                  startTime: String(captureTime),
+                  preview: "true"
+                });
+                // We don't need to await the actual image data, the API handles saving to 'data/recorded_screenshots'
+                fetch(`${origin}/api/cloud/recordings/download?${params.toString()}`).catch(err => {
+                  console.error(`[Watchdog] Screenshot capture trigger failed for ${rec.cameraName}:`, err);
+                });
+              } catch (err) {
+                console.error(`[Watchdog] Screenshot capture error for ${rec.cameraName}:`, err);
+              }
+            }
             
             // Handle RECURRENCE: Roll over instead of marking completed + adding news
             if (rec.recurrence && rec.recurrence !== "none") {
