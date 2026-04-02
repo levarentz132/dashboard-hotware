@@ -49,6 +49,14 @@ export function getBasicAuthHeaderFromRequest(request: NextRequest): string | nu
   return `Basic ${base64Credentials}`;
 }
 
+export function getCloudCredentials(request: NextRequest) {
+  const dynamicConfig = getDynamicConfig(request);
+  return {
+    username: dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME,
+    password: dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD,
+  };
+}
+
 export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams, request?: NextRequest, systemName?: string): string {
   const id = (systemId || API_CONFIG.systemId)?.trim().toLowerCase();
   const cleanId = id?.replace(/[{}]/g, "");
@@ -89,6 +97,14 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
     // Resolve host and port
     let host = isDirectAddress ? cleanId : (API_CONFIG.serverHost || 'localhost');
     let port = API_CONFIG.serverPort || '7001';
+
+    // If redirected via cookie location
+    if (!isDirectAddress && request) {
+      const cookieIp = request.cookies.get("nx_location_ip")?.value;
+      const cookiePort = request.cookies.get("nx_location_port")?.value;
+      if (cookieIp) host = cookieIp;
+      if (cookiePort) port = cookiePort;
+    }
 
     // If host already contains a port, don't override it
     if (host.includes(':')) {

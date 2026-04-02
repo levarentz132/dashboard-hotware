@@ -141,7 +141,15 @@ const CLOUD_CACHE_TTL = 300000; // 5 minutes
 async function fetchLocalSystemsAsCloudSystems(): Promise<CloudSystem[]> {
   if (typeof window === 'undefined') return [];
 
-  const systemId = API_CONFIG.systemId || 'localhost:7001';
+  let systemId = API_CONFIG.systemId;
+  if (!systemId && typeof window !== 'undefined') {
+    const cookieIp = Cookies.get("nx_location_ip");
+    const cookiePort = Cookies.get("nx_location_port");
+    if (cookieIp && cookiePort) {
+      systemId = `${cookieIp}:${cookiePort}`;
+    }
+  }
+  if (!systemId) systemId = 'localhost:7001';
 
   // 1. Fetch both System Info and Servers
   const [infoRes, serversRes] = await Promise.allSettled([

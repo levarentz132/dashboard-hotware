@@ -68,6 +68,7 @@ export function NxAuthentication() {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [credentials, setCredentials] = useState({ username: "", password: "" });
+    const [nxLocation, setNxLocation] = useState({ ip: "localhost", port: "7001" });
 
     const CLOUD_HOST = 'https://nxvms.com';
     const CLIENT_ID = 'api-tool';
@@ -107,6 +108,12 @@ export function NxAuthentication() {
         }
 
         checkSession();
+        
+        // Sync NX location from cookies
+        const savedIp = Cookies.get("nx_location_ip");
+        const savedPort = Cookies.get("nx_location_port");
+        if (savedIp) setNxLocation(prev => ({ ...prev, ip: savedIp }));
+        if (savedPort) setNxLocation(prev => ({ ...prev, port: savedPort }));
     }, [checkSession]);
 
     // Cloud OAuth
@@ -467,7 +474,7 @@ export function NxAuthentication() {
                                 Local Login
                             </DialogTitle>
                             <DialogDescription className="text-blue-100/70 text-lg font-medium leading-relaxed">
-                                Connect to the local server at <code className="text-white bg-white/10 px-2 py-0.5 rounded-md">127.0.0.1</code>
+                                Connect to the local server at <code className="text-white bg-white/10 px-2 py-0.5 rounded-md">{nxLocation.ip}:{nxLocation.port}</code>
                             </DialogDescription>
                         </DialogHeader>
                     </div>

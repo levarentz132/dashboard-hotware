@@ -299,7 +299,7 @@ export async function POST(request: NextRequest) {
 
     // Optionally expose org_camera_ids to client JS via a non-HttpOnly cookie
     try {
-      const ids = finalUser && (finalUser.org_camera_ids ?? finalUser.orgCameraIds);
+      const ids = finalUser && ((finalUser as any).org_camera_ids ?? (finalUser as any).orgCameraIds);
       if (Array.isArray(ids) && ids.length > 0) {
         // Debug: log cookie details to help diagnose client acceptance
         try {
@@ -370,9 +370,12 @@ export async function POST(request: NextRequest) {
         }
 
         if (vmsUsername && vmsPassword) {
+          const nxLocationIp = request.cookies.get("nx_location_ip")?.value || "localhost";
+          const nxLocationPort = request.cookies.get("nx_location_port")?.value || "7001";
+          
           const relayLoginUrl = system_id
             ? `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`
-            : `https://localhost:7001/rest/v3/login/sessions`; // Fallback for local
+            : `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`; // Fallback for local
 
           console.log(`[Dual-Login] Attempting relay login for ${identificationId} with VMS user: ${vmsUsername}`);
 

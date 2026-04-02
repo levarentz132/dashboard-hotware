@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, Loader2, Camera, LogIn, User, Lock, AlertCircle } from "lucide-react";
 import { NxAuthentication } from "@/components/auth/nx-authentication";
 import Cookies from "js-cookie";
+import { NxLocationSettings } from "@/components/auth/nx-location-settings";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -98,6 +99,7 @@ export default function LoginPage() {
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-100/30 rounded-full blur-[120px] pointer-events-none" />
 
       <NxAuthentication />
+      <NxLocationSettings />
 
       <div className="w-full max-w-md relative z-10 transition-all duration-500 animate-in fade-in slide-in-from-bottom-5">
         <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8">

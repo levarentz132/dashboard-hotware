@@ -34,7 +34,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const localUrl = `https://127.0.0.1:7001/api/createEvent?timestamp=${encodeURIComponent(timestamp)}&caption=${encodeURIComponent(caption)}`;
+    const nxLocationIp = request.cookies.get("nx_location_ip")?.value || "127.0.0.1";
+    const nxLocationPort = request.cookies.get("nx_location_port")?.value || "7001";
+    
+    const localUrl = `https://${nxLocationIp}:${nxLocationPort}/api/createEvent?timestamp=${encodeURIComponent(timestamp)}&caption=${encodeURIComponent(caption)}`;
 
     console.log(`[Create Event] Creating event for ${systemName}: ${caption}`);
 

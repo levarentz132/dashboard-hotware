@@ -20,7 +20,10 @@ async function handleRequest(request: NextRequest, method: string) {
         path = '/' + path;
     }
 
-    const targetUrl = `https://localhost:7001${path}${url.search}`;
+    const nxLocationIp = request.cookies.get("nx_location_ip")?.value || "localhost";
+    const nxLocationPort = request.cookies.get("nx_location_port")?.value || "7001";
+    
+    const targetUrl = `https://${nxLocationIp}:${nxLocationPort}${path}${url.search}`;
 
     try {
         console.log(`[NX Proxy] Proxying ${method} ${path} to ${targetUrl}`);

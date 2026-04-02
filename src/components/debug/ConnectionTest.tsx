@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { API_CONFIG } from "@/lib/config";
+import Cookies from "js-cookie";
 
 export default function ConnectionTest() {
   const [results, setResults] = useState<Array<{ url: string; status: string; error?: string }>>([]);
@@ -15,11 +16,15 @@ export default function ConnectionTest() {
     setTesting(true);
     setResults([]);
 
+    const nxIp = Cookies.get("nx_location_ip") || "localhost";
+    const nxPort = Cookies.get("nx_location_port") || "7001";
+    const baseUrl = `https://${nxIp}:${nxPort}`;
+
     const urlsToTest = [
-      "https://localhost:7001",
-      "https://localhost:7001/rest/v3",
-      "https://localhost:7001/rest/v3/servers",
-      "https://localhost:7001/rest/v3/system/info",
+      baseUrl,
+      `${baseUrl}/rest/v3`,
+      `${baseUrl}/rest/v3/servers`,
+      `${baseUrl}/rest/v3/system/info`,
       API_CONFIG.baseURL,
     ];
 
@@ -60,8 +65,11 @@ export default function ConnectionTest() {
     setSystemInfoTesting(true);
     setSystemInfoResult(null);
 
+    const nxIp = Cookies.get("nx_location_ip") || "localhost";
+    const nxPort = Cookies.get("nx_location_port") || "7001";
+
     try {
-      const response = await fetch("https://localhost:7001/rest/v3/system/info", {
+      const response = await fetch(`https://${nxIp}:${nxPort}/rest/v3/system/info`, {
         method: "GET",
         mode: "cors",
         credentials: "include",
@@ -98,8 +106,11 @@ export default function ConnectionTest() {
     setServersTesting(true);
     setServersResult(null);
 
+    const nxIp = Cookies.get("nx_location_ip") || "localhost";
+    const nxPort = Cookies.get("nx_location_port") || "7001";
+
     try {
-      const response = await fetch("https://localhost:7001/rest/v3/servers", {
+      const response = await fetch(`https://${nxIp}:${nxPort}/rest/v3/servers`, {
         method: "GET",
         mode: "cors",
         credentials: "include",
@@ -169,7 +180,9 @@ export default function ConnectionTest() {
             <br />
             Username: {API_CONFIG.username}
             <br />
-            Server: {API_CONFIG.serverHost}:{API_CONFIG.serverPort}
+            Configured Server: {API_CONFIG.serverHost || 'unset'}:{API_CONFIG.serverPort || 'unset'}
+            <br />
+            Custom location: {Cookies.get("nx_location_ip") || "none"}:{Cookies.get("nx_location_port") || "none"}
           </div>
         </div>
 
