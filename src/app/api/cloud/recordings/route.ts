@@ -99,7 +99,15 @@ export async function GET(request: NextRequest) {
     
     // 2. Fetch local screenshots from data folder (date-based folder structure)
     try {
-      const screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+      let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+      try {
+        const settingsFile = path.join(process.cwd(), "data", "settings.json");
+        if (fs.existsSync(settingsFile)) {
+          const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+          if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
+        }
+      } catch (e) { }
+
       if (fs.existsSync(screenshotsBaseDir)) {
         const startLimit = startTime ? parseInt(startTime, 10) : 0;
         const endLimit = endTime ? parseInt(endTime, 10) : Infinity;

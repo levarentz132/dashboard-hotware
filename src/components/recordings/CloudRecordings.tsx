@@ -16,7 +16,7 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X, Plus, Trash2, CalendarDays, Pencil, AlertCircle } from "lucide-react";
+import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X, Plus, Trash2, CalendarDays, Pencil, AlertCircle, Settings } from "lucide-react";
 import { format, addDays, nextDay, Day } from "date-fns";
 import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
@@ -25,7 +25,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription
+  DialogDescription,
+  DialogFooter
 } from "@/components/ui/dialog";
 import {
   Collapsible,
@@ -157,6 +158,10 @@ export default function CloudRecordings() {
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [pendingCancelIds, setPendingCancelIds] = useState<string[]>([]);
   const [pendingCancelForceDelete, setPendingCancelForceDelete] = useState(false);
+  
+  // ---- Settings state ----
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [storagePath, setStoragePath] = useState("");
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -281,8 +286,35 @@ export default function CloudRecordings() {
     }
   };
 
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch("/api/cloud/recordings/settings");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.storagePath) setStoragePath(data.storagePath);
+      }
+    } catch { }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      const res = await fetch("/api/cloud/recordings/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storagePath }),
+      });
+      if (res.ok) {
+        setIsSettingsOpen(false);
+        showNotification({ type: 'success', title: 'Settings Saved', message: 'Storage path updated successfully.' });
+      }
+    } catch (err: any) {
+      showNotification({ type: 'error', title: 'Error', message: 'Failed to save settings.' });
+    }
+  };
+
   useEffect(() => {
     loadFromPersistence();
+    fetchSettings();
     // Poll every 10 seconds to get updates from the watchdog (like captured screenshots)
     const pollId = setInterval(loadFromPersistence, 10000);
     return () => clearInterval(pollId);
@@ -596,6 +628,13 @@ export default function CloudRecordings() {
 
     if (camerasToSchedule.length === 0) {
       setScheduleError("No cameras found to schedule.");
+      return;
+    }
+
+    if (scheduleType === "screenshot" && !storagePath) {
+      showNotification({ type: 'warning', title: 'Storage Required', message: 'Please configure a storage path in Settings before adding a snapshot task.' });
+      setIsScheduleOpen(false);
+      setIsSettingsOpen(true);
       return;
     }
 
@@ -1087,8 +1126,23 @@ export default function CloudRecordings() {
         </div>
 
         {/* Global Action Bar */}
-        <div className="flex items-center gap-3">
-          <Button onClick={() => { resetScheduleForm(); setIsScheduleOpen(true); }} className="h-9 gap-2 shadow-sm">
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={() => setIsSettingsOpen(true)} 
+            className="h-9 gap-2 shadow-sm border-slate-200 hover:bg-slate-50"
+            title="Snapshot Settings"
+          >
+            <Settings className="h-4 w-4 text-slate-500" />
+            Settings
+          </Button>
+          <Button onClick={() => { 
+            if (scheduleType === "screenshot" && !storagePath) {
+              showNotification({ type: 'warning', title: 'Action Required', message: 'Please set a storage path in Settings before scheduling snapshots.' });
+            }
+            resetScheduleForm(); 
+            setIsScheduleOpen(true); 
+          }} className="h-9 gap-2 shadow-sm">
             <Plus className="h-4 w-4" /> New Schedule
           </Button>
         </div>
@@ -1602,6 +1656,49 @@ export default function CloudRecordings() {
               />
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* SETTINGS DIALOG */}
+      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-4 w-4 text-primary" /> Screenshot Settings
+            </DialogTitle>
+            <DialogDescription>
+              Configure where snapshots are archived locally on the server.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Local Storage Path</Label>
+              <div className="flex gap-2">
+                <Input 
+                  placeholder="E.g. D:\RecordedSnapshots or /mnt/data/vms_snaps" 
+                  value={storagePath}
+                  onChange={(e) => setStoragePath(e.target.value)}
+                  className="flex-1 bg-slate-50 border-slate-200"
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                Enter an absolute path on the server. If empty, snapshots will use the internal "data" directory.
+              </p>
+            </div>
+
+            {!storagePath && (
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 flex items-start gap-3">
+                <div className="mt-0.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /></div>
+                <p className="text-[10px] text-amber-700 leading-tight">
+                  <span className="font-bold">Recommendation:</span> Choose a folder outside the application directory to preserve images during updates.
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="pt-4 mt-4 border-t">
+            <Button variant="ghost" onClick={() => setIsSettingsOpen(false)} className="h-9">Cancel</Button>
+            <Button onClick={handleSaveSettings} className="h-9 px-6 bg-slate-900 border-slate-900">Save Path</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -119,7 +119,17 @@ export async function POST(request: NextRequest) {
     const fileDateStr = `${YYYY}${MM}${DD}`; // Compact format as requested
     const baseFileName = `${safeCameraName}_${fileDateStr}_${HH}${mm}${SS}`;
 
-    const screenshotsDir = path.join(process.cwd(), "data", "recorded_screenshots", dateFolder);
+    // ---- Get Custom Storage Path ----
+    let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+    try {
+      const settingsFile = path.join(process.cwd(), "data", "settings.json");
+      if (fs.existsSync(settingsFile)) {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+        if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
+      }
+    } catch (e) { }
+
+    const screenshotsDir = path.join(screenshotsBaseDir, dateFolder);
     if (!fs.existsSync(screenshotsDir)) {
       fs.mkdirSync(screenshotsDir, { recursive: true });
     }
