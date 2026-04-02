@@ -6,133 +6,143 @@ import nxAPI from "@/lib/nxapi";
 const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
 
 // Background Watchdog (In-memory for the server session)
-let isWatchdogRunning = false;
+let isWatchdogLoopActive = false;
+
 const startWatchdog = () => {
-  if (isWatchdogRunning) return;
-  isWatchdogRunning = true;
   console.log("[Recording Watchdog] Initialized background monitor.");
   
   setInterval(async () => {
+    if (isWatchdogLoopActive) return;
+    isWatchdogLoopActive = true;
+
     try {
-      const dataStr = await fs.readFile(DATA_FILE, "utf-8").catch(() => "[]");
-      const { schedules = [], originalSchedules = {} } = JSON.parse(dataStr);
+      const dataStr = await fs.readFile(DATA_FILE, "utf-8").catch(() => JSON.stringify({ schedules: [], originalSchedules: {} }));
+      const parsed = JSON.parse(dataStr);
+      let { schedules = [], originalSchedules = {} } = parsed;
       let changed = false;
       const now = Date.now();
 
-      const newSchedules: any[] = [];
       const updatedSchedules = await Promise.all(schedules.map(async (rec: any) => {
+        // Only ignore terminal statuses
+        if (rec.status === "completed" || rec.status === "failed") return rec;
+
         // Calculate start/end times in MS
         const [sh, sm] = rec.startTime.split(":").map(Number);
-        const [eh, em] = rec.endTime.split(":").map(Number);
+        const [eh, em] = (rec.endTime || rec.startTime).split(":").map(Number);
         const date = new Date(rec.date);
         const startMs = date.setHours(sh, sm, 0, 0);
-        const endMs = rec.type === "screenshot" ? startMs + 15000 : date.setHours(eh, em, 59, 999);
+        // For snapshots, we use a 1-second video burst recording.
+        const endMs = rec.type === "screenshot" ? startMs + 1000 : date.setHours(eh, em, 59, 999);
 
-        // CASE 1: Transition Pending -> Recording / In Progress
+        // CASE 1: Transition Pending -> Screenshot/Recording
         if (rec.status === "pending" && now >= startMs && now < endMs) {
-          console.log(`[Watchdog] Starting task for ${rec.cameraName} (${rec.type})`);
+          // Both screenshots and videos now use the VMS recording method
+          console.log(`[Watchdog] Starting ${rec.type} recording for ${rec.cameraName}`);
           try {
             const dayOfWeek = new Date(rec.date).getDay();
             const startSec = sh * 3600 + sm * 60;
-            const endSec = eh * 3600 + em * 60 + 59;
+            const endSec = rec.type === "screenshot" ? startSec + 1 : eh * 3600 + em * 60 + 59;
 
             if (rec.systemId) nxAPI.setSystemId(rec.systemId);
             await nxAPI.updateDevice(rec.cameraId, {
-              schedule: {
-                isEnabled: true,
-                tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }]
-              }
+              schedule: { isEnabled: true, tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }] }
             });
-            // Update: Use 'in progress' for screenshots, 'recording' for video
-            rec.status = rec.type === "screenshot" ? "in progress" : "recording";
+
+            // Capture the original schedule for revert later
+            try {
+              const cam = await nxAPI.getCameraById(rec.cameraId);
+              if (cam?.schedule) {
+                originalSchedules[rec.id] = cam.schedule;
+              }
+            } catch (e) { }
+
+            rec.status = "recording";
             changed = true;
           } catch (e) {
             console.error(`[Watchdog] Failed to start:`, e);
             rec.status = "failed";
             changed = true;
           }
+          return rec;
         }
 
-        // CASE 2: Transition Recording / In Progress -> Completed
-        if ((rec.status === "recording" || rec.status === "in progress") && now >= endMs) {
-          console.log(`[Watchdog] Completing task for ${rec.cameraName}`);
+        // CASE 2: Transition Recording -> Completed (Video Only)
+        else if (rec.status === "recording" && now >= endMs) {
+          console.log(`[Watchdog] Completing ${rec.type} for ${rec.cameraName}`);
           try {
+            if (rec.type === "screenshot") {
+              // Trigger a PNG capture at the start timestamp of this segment
+              try {
+                const port = process.env.PORT || "3139";
+                await fetch(`http://localhost:${port}/api/cloud/recordings/screenshot`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    systemId: rec.systemId,
+                    deviceId: rec.cameraId,
+                    cameraName: rec.cameraName,
+                    timestampMs: startMs,
+                  }),
+                });
+              } catch (e) {
+                console.error(`[Watchdog] Snapshot save failed:`, e);
+              }
+            }
+
             if (rec.systemId) nxAPI.setSystemId(rec.systemId);
             const original = originalSchedules[rec.id];
             if (original) await nxAPI.updateDevice(rec.cameraId, { schedule: original });
             else await nxAPI.updateDevice(rec.cameraId, { schedule: { isEnabled: false, tasks: [] } });
             
-            // If it's a screenshot, trigger the capture and save logic
-            if (rec.type === "screenshot") {
-              const origin = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-              const captureTime = startMs + 5000; // 5s into the 15s recording window
-              console.log(`[Watchdog] Triggering screenshot capture for ${rec.cameraName} at ${new Date(captureTime).toISOString()}`);
-              
-              // We call the internal download API which has the logic to fetch and save to disk
-              // We pass preview=true to ensure it uses the 'precise' capture logic
-              try {
-                const params = new URLSearchParams({
-                  systemId: rec.systemId,
-                  deviceId: rec.cameraId,
-                  startTime: String(captureTime),
-                  preview: "true"
-                });
-                // We don't need to await the actual image data, the API handles saving to 'data/recorded_screenshots'
-                fetch(`${origin}/api/cloud/recordings/download?${params.toString()}`).catch(err => {
-                  console.error(`[Watchdog] Screenshot capture trigger failed for ${rec.cameraName}:`, err);
-                });
-              } catch (err) {
-                console.error(`[Watchdog] Screenshot capture error for ${rec.cameraName}:`, err);
-              }
-            }
-            
-            // Handle RECURRENCE: Roll over instead of marking completed + adding news
             if (rec.recurrence && rec.recurrence !== "none") {
-              console.log(`[Watchdog] Rolling over recurring task for ${rec.cameraName}`);
               const nextDate = new Date(rec.date);
-              if (rec.recurrence === "weekday") {
-                nextDate.setDate(nextDate.getDate() + 7);
-              } else if (rec.recurrence === "monthday") {
+              if (rec.recurrence === "weekday") nextDate.setDate(nextDate.getDate() + 7);
+              else if (rec.recurrence === "monthday") {
                 const targetDay = rec.recurrenceDay;
                 if (targetDay) {
                   let year = nextDate.getFullYear();
                   let monthIdx = nextDate.getMonth() + 1;
                   let next = new Date(year, monthIdx, targetDay);
-                  while (next.getDate() !== targetDay) {
-                    monthIdx++;
-                    next = new Date(year, monthIdx, targetDay);
-                  }
-                  next.setHours(nextDate.getHours(), nextDate.getMinutes(), 0, 0);
+                  while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
+                  next.setHours(sh, sm, 0, 0);
                   nextDate.setTime(next.getTime());
-                } else {
-                  nextDate.setMonth(nextDate.getMonth() + 1);
-                }
+                } else nextDate.setMonth(nextDate.getMonth() + 1);
               }
               rec.status = "pending";
               rec.date = nextDate.toISOString();
-              changed = true;
             } else {
               rec.status = "completed";
-              changed = true;
             }
+            changed = true;
           } catch (e) {
-            console.error(`[Watchdog] Failed to complete:`, e);
+            console.error(`[Watchdog] Task complete failed:`, e);
             rec.status = "failed";
             changed = true;
           }
         }
 
+        // CASE 3: Cleanup stale "in progress" or "recording" from the past
+        else if ((rec.status === "in progress" || rec.status === "recording") && now > endMs + 3600000) {
+          // If a task is more than an hour past its end but still marked active, mark it failed.
+          console.log(`[Watchdog] Cleaning up stale task ${rec.id}`);
+          rec.status = "failed";
+          changed = true;
+        }
+
         return rec;
       }));
 
-      if (changed || newSchedules.length > 0) {
-        await fs.writeFile(DATA_FILE, JSON.stringify({ schedules: [...updatedSchedules, ...newSchedules], originalSchedules }, null, 2));
+      if (changed) {
+        await fs.writeFile(DATA_FILE, JSON.stringify({ schedules: updatedSchedules, originalSchedules }, null, 2));
       }
     } catch (e) {
-      // Periodic check failed, will retry next interval
+      console.error("[Watchdog] Error in loop:", e);
+    } finally {
+      isWatchdogLoopActive = false;
     }
   }, 10000); // Check every 10 seconds
 };
+
 
 // Ensure watchdog starts when this module is used
 startWatchdog();

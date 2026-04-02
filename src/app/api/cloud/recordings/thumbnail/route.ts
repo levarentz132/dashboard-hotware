@@ -1,89 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildCloudUrl, buildCloudHeaders, validateSystemId } from "@/lib/cloud-api";
+import { buildCloudUrl, buildCloudHeaders, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
 
+/**
+ * GET /api/cloud/recordings/thumbnail?systemId=...&deviceId=...&timestampMs=...
+ * 
+ * Fetches a single frame (PNG) from the VMS at a specific timestamp.
+ */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const { systemId, systemName } = validateSystemId(request);
-    const deviceId = searchParams.get("deviceId");
-    const timeMs = searchParams.get("timeMs");
+    const systemId = searchParams.get("systemId");
+    const deviceId = searchParams.get("deviceId")?.replace(/[{}]/g, "");
+    const timestampMs = searchParams.get("timestampMs");
 
-    if (!systemId || !deviceId || !timeMs) {
+    if (!systemId || !deviceId || !timestampMs) {
       return NextResponse.json(
-        { error: "systemId, deviceId, and timeMs are required" },
+        { error: "systemId, deviceId, and timestampMs are required" },
         { status: 400 }
       );
     }
 
     const params = new URLSearchParams();
-    params.set("pos", timeMs);
-    params.set("duration", "1"); // Request minimal duration for a single frame
+    params.set("format", "png");
+    params.set("timestampMs", timestampMs);
+    const endpoint = `/rest/v3/devices/${deviceId}/image`;
 
-    // Using NX Media Engine mpjpeg API as .jpg is reported unavailable
-    const endpoint = `/media/${deviceId}.mpjpeg`;
-    const cloudUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
-    console.log(`[thumbnail] Requesting MPJPEG: ${cloudUrl}`);
-
+    const downloadUrl = buildCloudUrl(systemId, endpoint, params, request);
     const headers = buildCloudHeaders(request, systemId);
-    const imageHeaders = { ...headers };
-    imageHeaders["Accept"] = "multipart/x-mixed-replace, image/jpeg, image/*";
-    delete imageHeaders["Content-Type"];
+    headers["Accept"] = "image/png, image/jpeg, image/*;q=0.9, */*;q=0.8";
 
-    let response = await fetch(cloudUrl, {
-      method: "GET",
-      headers: imageHeaders,
-    });
+    let response = await fetch(downloadUrl, { headers });
 
-    // Handle authentication retry (similar to download endpoint)
+    // Retry with Basic auth if needed
     if (response.status === 401 || response.status === 403) {
-      const { getBasicAuthHeaderFromRequest } = await import("@/lib/cloud-api");
       const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
       if (basicAuthHeader) {
         const retryHeaders: Record<string, string> = {
-          ...imageHeaders,
+          ...headers,
           Authorization: basicAuthHeader,
         };
         delete retryHeaders["x-runtime-guid"];
-
-        console.warn("[thumbnail] Retrying with Basic auth");
-        response = await fetch(cloudUrl, {
-          method: "GET",
-          headers: retryHeaders,
-        });
+        response = await fetch(downloadUrl, { headers: retryHeaders });
       }
     }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      const log = `[thumbnail] Error ${response.status} from ${cloudUrl}: ${errorText}\nHeaders: ${JSON.stringify(imageHeaders)}`;
-      console.error(log);
-      // Write to a tmp file so I can read it
-      try {
-        const fs = await import("fs");
-        fs.appendFileSync("/tmp/thumbnail_error.log", log + "\n");
-      } catch (e) {}
-      
-      return NextResponse.json(
-        { error: `Failed to fetch thumbnail: ${response.status}` },
-        { status: response.status }
-      );
+        return NextResponse.json({ error: `Image fetch failed: ${response.status}` }, { status: response.status });
     }
 
-    const contentType = response.headers.get("Content-Type") || "image/jpeg";
-    console.log(`[thumbnail] Success: Content-Type=${contentType}`);
+    const buffer = Buffer.from(await response.arrayBuffer());
 
-    const blob = await response.blob();
-    return new NextResponse(blob, {
+    return new NextResponse(buffer, {
+      status: 200,
       headers: {
-        "Content-Type": response.headers.get("Content-Type") || "image/jpeg",
-        "Cache-Control": "public, max-age=3600",
+        "Content-Type": "image/png",
+        "Content-Length": String(buffer.length),
+        "Cache-Control": "public, max-age=86400",
       },
     });
   } catch (error) {
     console.error("[thumbnail] Exception:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

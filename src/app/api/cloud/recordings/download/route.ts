@@ -111,17 +111,39 @@ export async function GET(request: NextRequest) {
         ? `screenshot_${deviceId.substring(0, 8)}_${startTime}.png`
         : `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
       
-      // If it's a screenshot, save a local copy to the data folder as requested
+      // If it's a screenshot, save a local copy to the data folder using date-based structure
       if (isImage) {
         try {
           const buffer = await videoResponse.clone().arrayBuffer();
-          const screenshotsDir = path.join(process.cwd(), "data", "recorded_screenshots", deviceId);
+          const now = new Date();
+          const YYYY = now.getFullYear().toString();
+          const MM = (now.getMonth() + 1).toString().padStart(2, "0");
+          const DD = now.getDate().toString().padStart(2, "0");
+          const HH = now.getHours().toString().padStart(2, "0");
+          const mm = now.getMinutes().toString().padStart(2, "0");
+          const SS = now.getSeconds().toString().padStart(2, "0");
+          const dateFolder = `${YYYY}${MM}${DD}`;
+          const cameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
+            .replace(/[<>:"/\\|?*]/g, "_").trim();
+          const baseFileName = `${cameraName}_${dateFolder}_${HH}${mm}${SS}`;
+
+          const screenshotsDir = path.join(process.cwd(), "data", "recorded_screenshots", dateFolder);
           if (!fs.existsSync(screenshotsDir)) {
             fs.mkdirSync(screenshotsDir, { recursive: true });
           }
-          const localPath = path.join(screenshotsDir, `${startTime}.png`);
+
+          // Collision detection
+          let finalFileName = `${baseFileName}.png`;
+          let localPath = path.join(screenshotsDir, finalFileName);
+          let counter = 1;
+          while (fs.existsSync(localPath)) {
+            finalFileName = `${baseFileName}_${counter}.png`;
+            localPath = path.join(screenshotsDir, finalFileName);
+            counter++;
+          }
+
           await writeFile(localPath, Buffer.from(buffer));
-          console.log(`[recordings/download] Saved screenshot copy to: ${localPath}`);
+          console.log(`[recordings/download] Saved screenshot to: ${localPath}`);
         } catch (saveErr) {
           console.error("[recordings/download] Failed to save local screenshot copy:", saveErr);
         }
