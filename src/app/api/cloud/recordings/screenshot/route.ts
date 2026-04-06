@@ -59,12 +59,12 @@ export async function POST(request: NextRequest) {
         const camData = await camRes.json();
         originalSchedule = camData.schedule;
         
-        // Brief pulse: set current day to "Always" recording
         const now = new Date();
         const startSec = now.getHours() * 3600 + now.getMinutes() * 60;
-        const endSec = startSec + 60; // 1 minute pulse is safer than 1s for VMS logic
+        const endSec = startSec + 60; 
         const dayOfWeek = now.getDay();
         
+        console.log(`[screenshot] Enabling recording for 1s pulse...`);
         await fetch(vmsUrl, {
           method: "PATCH",
           headers: { ...vmsHeaders, "Content-Type": "application/json" },
@@ -76,8 +76,17 @@ export async function POST(request: NextRequest) {
           })
         });
         
-        // Wait 1.5s for the stream to initialize and reach the VMS buffer
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Wait 1s as requested
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        console.log(`[screenshot] Disabling recording after 1s pulse...`);
+        await fetch(vmsUrl, {
+          method: "PATCH",
+          headers: { ...vmsHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schedule: { isEnabled: false }
+          })
+        });
       }
     } catch (e) {
       console.warn("[screenshot] Wake-up pulse failed (continuing with best-effort capture):", e);
@@ -97,49 +106,54 @@ export async function POST(request: NextRequest) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
-    let imageResponse = await fetch(downloadUrl, {
-      headers,
-      signal: controller.signal,
-      cache: "no-store",
-    });
+    let imageResponse;
+    try {
+      imageResponse = await fetch(downloadUrl, {
+        headers,
+        signal: controller.signal,
+        cache: "no-store",
+      });
 
-    // Restore original schedule immediately after capture attempt
-    if (originalSchedule) {
-      try {
-        const nxIp = request.headers.get("x-nx-location-ip") || request.cookies.get("nx_location_ip")?.value;
-        const nxPort = request.headers.get("x-nx-location-port") || request.cookies.get("nx_location_port")?.value || "7001";
-        const vmsUrl = `https://${nxIp}:${nxPort}/rest/v3/devices/${cleanDeviceId}`;
-        const vmsHeaders = buildCloudHeaders(request, systemId);
-        
-        await fetch(vmsUrl, {
-          method: "PATCH",
-          headers: { ...vmsHeaders, "Content-Type": "application/json" },
-          body: JSON.stringify({ schedule: originalSchedule })
-        });
-        console.log("[screenshot] VMS schedule restored.");
-      } catch (e) {
-        console.warn("[screenshot] Schedule restoration failed:", e);
+      // Retry with Basic auth if needed
+      if (imageResponse.status === 401 || imageResponse.status === 403) {
+        const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
+        if (basicAuthHeader) {
+          const retryHeaders: Record<string, string> = {
+            ...headers,
+            Authorization: basicAuthHeader,
+          };
+          delete retryHeaders["x-runtime-guid"];
+          console.warn("[screenshot] Retrying with Basic auth");
+          imageResponse = await fetch(downloadUrl, {
+            headers: retryHeaders,
+            signal: controller.signal,
+          });
+        }
+      }
+    } finally {
+      clearTimeout(timeout);
+      
+      // Restore original schedule immediately after capture attempt (Success or Failure)
+      if (originalSchedule) {
+        try {
+          const nxIp = request.headers.get("x-nx-location-ip") || request.cookies.get("nx_location_ip")?.value;
+          const nxPort = request.headers.get("x-nx-location-port") || request.cookies.get("nx_location_port")?.value || "7001";
+          const vmsUrl = `https://${nxIp}:${nxPort}/rest/v3/devices/${cleanDeviceId}`;
+          const vmsHeaders = buildCloudHeaders(request, systemId);
+          
+          console.log(`[screenshot] Restoring original schedule (with isEnabled: false) for ${cleanDeviceId}`);
+          await fetch(vmsUrl, {
+            method: "PATCH",
+            headers: { ...vmsHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+              schedule: { ...originalSchedule, isEnabled: false } 
+            })
+          });
+        } catch (e) {
+          console.warn("[screenshot] Schedule restoration failed:", e);
+        }
       }
     }
-
-    // Retry with Basic auth if needed
-    if (imageResponse.status === 401 || imageResponse.status === 403) {
-      const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
-      if (basicAuthHeader) {
-        const retryHeaders: Record<string, string> = {
-          ...headers,
-          Authorization: basicAuthHeader,
-        };
-        delete retryHeaders["x-runtime-guid"];
-        console.warn("[screenshot] Retrying with Basic auth");
-        imageResponse = await fetch(downloadUrl, {
-          headers: retryHeaders,
-          signal: controller.signal,
-        });
-      }
-    }
-
-    clearTimeout(timeout);
 
     if (!imageResponse.ok) {
       const errorText = await imageResponse.text();

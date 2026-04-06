@@ -286,10 +286,30 @@ export default function CloudRecordings() {
     }
 
     if (now < endMs && (rec.status === "recording" || now >= startMs)) {
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
+        // IMPROVEMENT: Immediately patch the device to stop recording when the timer expires
+        // This ensures the recording stops at the exact same time the notification is shown.
+        try {
+          const cameraDeviceId = getOriginalDeviceId(rec.cameraId);
+          const prevSystemId = nxAPI.getSystemId();
+          nxAPI.setSystemId(rec.systemId);
+          await nxAPI.updateDevice(cameraDeviceId, {
+            schedule: { isEnabled: false }
+          });
+          if (prevSystemId) nxAPI.setSystemId(prevSystemId);
+          console.log(`[CloudRecordings] Recording stopped via UI timer for ${rec.cameraName}`);
+        } catch (err) {
+          console.error("[CloudRecordings] Failed to stop recording via UI timer:", err);
+        }
+
         showNotification({ type: 'success', title: 'Recording Done', message: `Recording for ${rec.cameraName} is finished.` });
+        
         if (rec.recurrence === "none") {
           setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
+        } else {
+          // For recurring: the watchdog will handle the date skip, 
+          // but we can trigger a reload to stay in sync.
+          loadFromPersistence();
         }
       }, endMs - now);
       scheduleTimers.current.set(rec.id + "-end", timer);
@@ -858,9 +878,12 @@ export default function CloudRecordings() {
         if (originalSchedule) {
           await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
         } else {
-          await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
+          // Use the specific patch requested to immediately stop and disable schedule
+          await nxAPI.updateDevice(cameraDeviceId, { 
+            schedule: { isEnabled: false } 
+          });
         }
-        console.log(`[CloudRecordings] Recording cancelled on VMS for ${rec.cameraName}`);
+        console.log(`[CloudRecordings] Recording cancelled/stopped for ${rec.cameraName}`);
       } catch (err) {
         console.error("[CloudRecordings] Failed to stop recording on cancel:", err);
       }
@@ -898,19 +921,23 @@ export default function CloudRecordings() {
         }));
         
         const flatResults = allResults.flat();
-        const mapped: RecentRecording[] = flatResults.map((p: any, i: number) => ({
-          id: `recent-${i}-${p.startTimeMs}`,
-          cameraName: p.dev.name,
-          systemName: p.dev.systemName,
-          startTimeMs: p.startTimeMs || 0,
-          durationMs: p.durationMs || 0,
-          systemId: p.dev.systemId,
-          deviceId: getOriginalDeviceId(p.dev.id, devices),
-          isScreenshot: (p.durationMs || 0) <= 2000 || p.isScreenshot,
-          isLocal: p.isLocal,
-          fileName: p.fileName,
-          dateFolder: p.dateFolder,
-        }));
+        const mapped: RecentRecording[] = flatResults.map((p: any, i: number) => {
+          const duration = p.durationMs || 0;
+          const isScreenshot = duration <= 2000 || p.isScreenshot;
+          return {
+            id: `recent-${i}-${p.startTimeMs}`,
+            cameraName: p.dev.name,
+            systemName: p.dev.systemName,
+            startTimeMs: p.startTimeMs || 0,
+            durationMs: duration,
+            systemId: p.dev.systemId,
+            deviceId: getOriginalDeviceId(p.dev.id, devices),
+            isScreenshot,
+            isLocal: p.isLocal,
+            fileName: p.fileName,
+            dateFolder: p.dateFolder,
+          };
+        });
         mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
         setRecentRecordings(mapped);
         if (mapped.length === 0) setRecentError("No recordings found for any camera on this date.");
@@ -937,19 +964,23 @@ export default function CloudRecordings() {
       // Get camera name for display metadata
       const dev = devices.find(d => normalizeId(d.id) === targetDevice && d.systemId === targetSystem);
       
-      const mapped: RecentRecording[] = periods.map((p: any, i: number) => ({
-        id: `recent-${i}-${p.startTimeMs}`,
-        cameraName: dev?.name || targetDevice,
-        systemName: dev?.systemName || targetSystem,
-        startTimeMs: p.startTimeMs || 0,
-        durationMs: p.durationMs || 0,
-        systemId: targetSystem,
-        deviceId: getOriginalDeviceId(targetDevice),
-        isScreenshot: (p.durationMs || 0) <= 2000 || p.isScreenshot,
-        isLocal: p.isLocal,
-        fileName: p.fileName,
-        dateFolder: p.dateFolder,
-      }));
+      const mapped: RecentRecording[] = periods.map((p: any, i: number) => {
+        const duration = p.durationMs || 0;
+        const isScreenshot = duration <= 2000 || p.isScreenshot;
+        return {
+          id: `recent-${i}-${p.startTimeMs}`,
+          cameraName: dev?.name || targetDevice,
+          systemName: dev?.systemName || targetSystem,
+          startTimeMs: p.startTimeMs || 0,
+          durationMs: duration,
+          systemId: targetSystem,
+          deviceId: getOriginalDeviceId(targetDevice),
+          isScreenshot,
+          isLocal: p.isLocal,
+          fileName: p.fileName,
+          dateFolder: p.dateFolder,
+        };
+      });
       setRecentRecordings(mapped);
       if (mapped.length === 0) setRecentError("No recordings found for this camera on the selected date.");
     } catch (err: any) {
@@ -960,7 +991,7 @@ export default function CloudRecordings() {
   };
 
   const formatDuration = (ms: number) => {
-    if (ms >= 0 && ms <= 2000) return "Snapshot";
+    if (ms <= 2000) return "Snapshot";
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
@@ -1119,8 +1150,10 @@ export default function CloudRecordings() {
                               {rec.isScreenshot && <Badge variant="outline" className="text-[10px] h-4 px-1 bg-blue-50 border-blue-200 text-blue-600">SNAPSHOT</Badge>}
                             </div>
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
-                              <span className="font-medium text-foreground/80">{new Date(rec.startTimeMs).toLocaleString()}</span>
-                              {!rec.isScreenshot && (
+                              <span className="font-medium text-foreground/80">
+                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                              </span>
+                              {!rec.isScreenshot && rec.durationMs > 2000 && (
                                 <>
                                   <span className="opacity-40">|</span>
                                   <span>{formatDuration(rec.durationMs)}</span>

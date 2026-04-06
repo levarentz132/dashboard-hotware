@@ -80,7 +80,17 @@ const startWatchdog = () => {
         JSON.stringify({ schedules: [], originalSchedules: {}, globalAuth: null })
       );
       const parsed = JSON.parse(dataStr);
-      const { schedules = [], originalSchedules = {}, globalAuth = null, nxLocationIp = null, nxLocationPort = null } = parsed;
+      const { 
+        schedules = [], 
+        originalSchedules = {}, 
+        globalAuth = null, 
+        nxLocationIp = "localhost", 
+        nxLocationPort = "7001" 
+      } = parsed;
+      
+      // Safety: Ensure we don't have literal "null" or empty strings
+      const ip = nxLocationIp && nxLocationIp !== "null" ? nxLocationIp : "localhost";
+      const port = nxLocationPort && nxLocationPort !== "null" ? nxLocationPort : "7001";
       let changed = false;
 
       const now = Date.now();
@@ -135,9 +145,11 @@ const startWatchdog = () => {
                   const errText = await screenshotRes.text();
                   console.error(`[Watchdog] ❌ Snapshot API failed (${screenshotRes.status}): ${errText}`);
                   rec.status = "failed";
+                  rec.record = false;
                 } else {
                   const result = await screenshotRes.json();
                   console.log(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
+                  rec.record = false;
 
                   if (rec.recurrence && rec.recurrence !== "none") {
                     const nextDate = new Date(rec.date);
@@ -168,6 +180,7 @@ const startWatchdog = () => {
               } catch (e) {
                 console.error(`[Watchdog] 🛑 Snapshot exception for ${rec.cameraName}:`, e);
                 rec.status = "failed";
+                rec.record = false;
                 changed = true;
               }
             }
@@ -185,17 +198,30 @@ const startWatchdog = () => {
             }
 
             console.log(`[Watchdog] Starting/Retrying video recording for ${rec.cameraName}`);
-            if (!globalAuth || !nxLocationIp) {
+            if (!globalAuth) {
               console.warn(`[Watchdog] No auth/location saved — cannot update VMS for ${rec.cameraName}.`);
               return rec;
             }
             try {
-              const ip = nxLocationIp;
-              const port = nxLocationPort || "7001";
               const cleanId = rec.cameraId.replace(/[{}]/g, "");
               const dayOfWeek = new Date(rec.date).getDay();
-              const startSec = sh * 3600 + sm * 60;
-              const endSec = eh * 3600 + em * 60 + 59;
+              
+              // Calculate seconds from start of day for 'in progress' tasks
+              const dNow = new Date();
+              const nowSecondsOfDay = dNow.getHours() * 3600 + dNow.getMinutes() * 60 + dNow.getSeconds();
+              
+              let startSec = sh * 3600 + sm * 60;
+              let endSec = eh * 3600 + em * 60 + 59;
+
+              if (rec.status === "in progress") {
+                // If in-progress, start NOW and limit to at most 1 minute, 
+                // but no further than the scheduled end (inclusive of the target minute's end)
+                startSec = nowSecondsOfDay;
+                endSec = Math.min(endSec, startSec + 60);
+                
+                // Update absolute endMs so CASE 2 triggers correctly at the end of this minute/window
+                rec.endMs = dNow.getTime() + (endSec - startSec) * 1000;
+              }
 
               try {
                 const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, globalAuth, ip, port);
@@ -204,19 +230,20 @@ const startWatchdog = () => {
                 console.warn(`[Watchdog] Could not fetch original schedule for ${rec.cameraName}:`, e);
               }
 
-              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
+              await vmsRequest("PATCH", `/rest/v4/devices/${cleanId}`, {
                 schedule: {
                   isEnabled: true,
-                  tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }],
                 },
               }, globalAuth, ip, port);
 
               console.log(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
               rec.status = "recording";
+              rec.record = true; 
               changed = true;
             } catch (e) {
               console.error(`[Watchdog] Failed to start video recording:`, e);
               rec.status = "failed";
+              rec.record = false;
               changed = true;
             }
             return rec;
@@ -225,31 +252,31 @@ const startWatchdog = () => {
           // ── VIDEO RECORDING: CASE 2 — Stop & Complete ──────────────────────
           else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress")) {
             console.log(`[Watchdog] Completing video recording for ${rec.cameraName}`);
-            if (!globalAuth || !nxLocationIp) {
+            if (!globalAuth) {
               console.warn(`[Watchdog] No auth/location saved — cannot revert VMS schedule for ${rec.cameraName}.`);
               rec.status = "completed"; // Still mark complete so UI updates
               changed = true;
               return rec;
             }
             try {
-              const ip = nxLocationIp;
-              const port = nxLocationPort || "7001";
               const cleanId = rec.cameraId.replace(/[{}]/g, "");
 
               // ── Step 1: DISABLE recording immediately ──────────────────────
               // Always disable first to guarantee the camera stops NOW,
               // regardless of what the original schedule says.
-              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
-                schedule: { isEnabled: false, tasks: [] }
+              await vmsRequest("PATCH", `/rest/v4/devices/${cleanId}`, {
+                schedule: { isEnabled: false }
               }, globalAuth, ip, port);
               console.log(`[Watchdog] Recording stopped for ${rec.cameraName}`);
 
-              // ── Step 2: Restore original schedule ─────────────────────────
+              // ── Step 2: Restore original schedule (with isEnabled: false) ───────────
               // Only restore if the original had tasks (don't re-enable a blank schedule)
               const original = originalSchedules[rec.id];
-              if (original && Array.isArray(original.tasks) && original.tasks.length > 0) {
-                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: original }, globalAuth, ip, port);
-                console.log(`[Watchdog] Restored original schedule for ${rec.cameraName}`);
+              if (original) {
+                // Force isEnabled: false at the end of our scheduled task
+                const updatedSchedule = { ...original, isEnabled: false };
+                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: updatedSchedule }, globalAuth, ip, port);
+                console.log(`[Watchdog] Restored original schedule (Disabled) for ${rec.cameraName}`);
               }
 
               delete originalSchedules[rec.id];
@@ -272,9 +299,11 @@ const startWatchdog = () => {
                   }
                 }
                 rec.status = "pending";
+                rec.record = false;
                 rec.date = nextDate.toISOString();
               } else {
                 rec.status = "completed";
+                rec.record = false;
               }
               changed = true;
             } catch (e) {
@@ -343,11 +372,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Persist NX location ───────────────────────────────────────────────────
-    // Read from body (sent by frontend) or fallback to cookies
-    const nxIp = body.nxLocationIp || request.cookies.get("nx_location_ip")?.value;
-    const nxPort = body.nxLocationPort || request.cookies.get("nx_location_port")?.value;
-    if (nxIp) body.nxLocationIp = nxIp;
-    if (nxPort) body.nxLocationPort = nxPort;
+    // Read from body (sent by frontend), fallback to cookies, or finally default to localhost:7001
+    const nxIp = body.nxLocationIp || request.cookies.get("nx_location_ip")?.value || "localhost";
+    const nxPort = body.nxLocationPort || request.cookies.get("nx_location_port")?.value || "7001";
+    body.nxLocationIp = nxIp;
+    body.nxLocationPort = nxPort;
 
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
     await fs.writeFile(DATA_FILE, JSON.stringify(body, null, 2), "utf-8");
