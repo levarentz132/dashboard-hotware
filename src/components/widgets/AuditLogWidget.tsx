@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { getElectronHeaders } from "@/lib/config";
+import Cookies from "js-cookie";
 
 interface CloudSystem {
   id: string;
@@ -197,11 +198,17 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
     [fetchAuditLogs, fetchDevices],
   );
 
+  const getTargetId = useCallback(() => {
+    if (systemId) return systemId;
+    const cookieIp = Cookies.get("nx_location_ip");
+    const cookiePort = Cookies.get("nx_location_port") || "7001";
+    return cookieIp ? `${cookieIp}:${cookiePort}` : "127.0.0.1:7001";
+  }, [systemId]);
+
   useEffect(() => {
     // Local-First: Default to local system if no systemId is provided
-    const targetId = systemId || "127.0.0.1:7001";
-    loadData(targetId);
-  }, [systemId, loadData]);
+    loadData(getTargetId());
+  }, [getTargetId, loadData]);
 
   // Stats
   const stats = useMemo(() => {
@@ -223,8 +230,7 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
   }, [auditLogs]);
 
   const handleRefresh = () => {
-    const targetId = systemId || "127.0.0.1:7001";
-    loadData(targetId);
+    loadData(getTargetId());
   };
 
   if (loading) {

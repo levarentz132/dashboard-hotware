@@ -110,21 +110,31 @@ export default function AuditLog() {
     return headers;
   }, []);
   // Cloud systems state - Initialized with local system (Local-First)
-  // Using 127.0.0.1:7001 ensures the proxy targets the local server directly via HTTPS
-  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([
-    {
-      id: "127.0.0.1:7001",
+  // Using custom location from cookies if available, otherwise defaults to 127.0.0.1:7001
+  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>(() => {
+    const cookieIp = Cookies.get("nx_location_ip");
+    const cookiePort = Cookies.get("nx_location_port") || "7001";
+    const localId = cookieIp ? `${cookieIp}:${cookiePort}` : "127.0.0.1:7001";
+    
+    return [{
+      id: localId,
       name: "Local System",
       stateOfHealth: "online",
       accessRole: "owner"
-    }
-  ]);
+    }];
+  });
 
-  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>({
-    id: "127.0.0.1:7001",
-    name: "Local System",
-    stateOfHealth: "online",
-    accessRole: "owner"
+  const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(() => {
+    const cookieIp = Cookies.get("nx_location_ip");
+    const cookiePort = Cookies.get("nx_location_port") || "7001";
+    const localId = cookieIp ? `${cookieIp}:${cookiePort}` : "127.0.0.1:7001";
+
+    return {
+      id: localId,
+      name: "Local System",
+      stateOfHealth: "online",
+      accessRole: "owner"
+    };
   });
 
   const [loadingSystems, setLoadingSystems] = useState(false);
@@ -179,9 +189,9 @@ export default function AuditLog() {
           // Merge: Start with fetched systems
           let systems = [...fetchedSystems];
 
-          // Ensure local system (127.0.0.1:7001) is always there
-          const localEntry = prev.find(s => s.id === "127.0.0.1:7001") || prev[0];
-          if (!systems.find(s => s.id === "127.0.0.1:7001" || s.name === "Local System")) {
+          // Ensure local system (custom or default) is always there
+          const localEntry = prev.find(s => s.name === "Local System") || prev[0];
+          if (!systems.find(s => s.name === "Local System")) {
             systems.unshift(localEntry);
           }
 
