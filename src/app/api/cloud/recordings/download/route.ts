@@ -44,9 +44,10 @@ export async function GET(request: NextRequest) {
     } else {
       params.set("pos", startTime as string);
       if (endTime) {
-        const duration = parseInt(endTime) - parseInt(startTime as string);
+        const duration = Math.max(0, parseInt(endTime) - parseInt(startTime as string));
         params.set("duration", String(duration));
-        console.log(`[recordings/download] Duration: ${duration}ms`);
+        params.set("end", endTime as string);
+        console.log(`[recordings/download] Timeframe: ${startTime} to ${endTime} (duration: ${duration}ms)`);
       }
       endpoint = `/media/${deviceId}.mp4`;
     }

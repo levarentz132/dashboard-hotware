@@ -36,13 +36,13 @@ export async function proxy(request: NextRequest) {
 
     // Check for auth token
     const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
-
     if (!token) {
-        // Allow Electron-verified requests to bypass JWT check for specific API routes
+        // Allow Electron or Watchdog-verified requests to bypass JWT check for specific API routes
         const isElectronAuth = request.headers.get('x-electron-cloud-password');
+        const isWatchdogAuth = request.headers.get('x-watchdog-auth');
         const isProxyRoute = pathname.startsWith('/nx') || pathname.startsWith('/api/nx') || pathname.startsWith('/api/cloud');
-
-        if (isElectronAuth && isProxyRoute) {
+        
+        if ((isElectronAuth || isWatchdogAuth) && isProxyRoute) {
             return NextResponse.next();
         }
 

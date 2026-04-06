@@ -79,11 +79,16 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
 
   let isConfiguredLocal = !!(cleanId === localSysId && API_CONFIG.serverHost);
 
-  // Check cookies for local system match
+  // Check cookies or watchdog headers for local system match
   if (!isDirectAddress && !isConfiguredLocal && request) {
     const localId = request.cookies.get("nx_system_id")?.value ||
       request.cookies.get("nx_server_id")?.value;
+    const headerIp = request.headers.get("x-nx-location-ip");
+    
     if (localId && localId.toLowerCase().replace(/[{}]/g, "") === cleanId) {
+      isConfiguredLocal = true;
+    } else if (headerIp) {
+      // If a watchdog location header is present, we treat it as a local-reachable system
       isConfiguredLocal = true;
     }
   }
@@ -98,12 +103,16 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
     let host = isDirectAddress ? cleanId : (API_CONFIG.serverHost || 'localhost');
     let port = API_CONFIG.serverPort || '7001';
 
-    // If redirected via cookie location
+    // If redirected via cookie or watchdog header (no cookies in server-to-server calls)
     if (!isDirectAddress && request) {
       const cookieIp = request.cookies.get("nx_location_ip")?.value;
       const cookiePort = request.cookies.get("nx_location_port")?.value;
-      if (cookieIp) host = cookieIp;
-      if (cookiePort) port = cookiePort;
+      const headerIp = request.headers.get("x-nx-location-ip") || undefined;
+      const headerPort = request.headers.get("x-nx-location-port") || undefined;
+      const effectiveIp = cookieIp || headerIp;
+      const effectivePort = cookiePort || headerPort;
+      if (effectiveIp) host = effectiveIp;
+      if (effectivePort) port = effectivePort;
     }
 
     // If host already contains a port, don't override it
@@ -164,6 +173,16 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
           console.log(`[Cloud Auth] Found session token from local_nx_user for ${isGlobal ? 'global request' : systemId}`);
         }
       } catch (e) { }
+    }
+  }
+
+  // Last-resort fallback: watchdog server-to-server calls pass auth via custom header
+  // because no browser cookies are available in those requests.
+  if (!localToken || localToken === 'undefined') {
+    const watchdogAuth = request.headers.get("x-watchdog-auth");
+    if (watchdogAuth) {
+      localToken = watchdogAuth;
+      console.log(`[Cloud Auth] Using x-watchdog-auth header for ${isGlobal ? 'global' : systemId}`);
     }
   }
 

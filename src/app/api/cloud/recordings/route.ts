@@ -151,7 +151,7 @@ export async function GET(request: NextRequest) {
             const match = file.match(/_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.png$/);
             if (!match) continue;
 
-            const [, , dateStr, timeStr] = match;
+            const [, dateStr, timeStr] = match;
             // Reconstruct timestamp from the filename
             let y, m, d;
             if (dateStr.includes("-")) {
@@ -168,7 +168,11 @@ export async function GET(request: NextRequest) {
 
             if (timestamp >= startLimit && timestamp <= endLimit) {
               // Check if we already have a record for this exact millisecond
-              const exists = allPeriods.some(p => p.startTimeMs === timestamp && p.durationMs === 0);
+              // Deduplicate: If an equivalent VMS period (snapshot-level or short clip) exists within ±5s, skip local file
+              const exists = allPeriods.some(p => {
+                const timeDiff = Math.abs(p.startTimeMs - timestamp);
+                return timeDiff < 5000 && (p.durationMs === 0 || p.durationMs <= 62000);
+              });
               if (!exists) {
                 allPeriods.push({
                   startTimeMs: timestamp,
@@ -178,37 +182,6 @@ export async function GET(request: NextRequest) {
                   serverId: "local-storage",
                   fileName: file,
                   dateFolder: dateFolder,
-                });
-              }
-            }
-          }
-        }
-
-        // Also scan legacy camera-ID based folders for backwards compatibility
-        const cameraFolders = fs.readdirSync(screenshotsBaseDir).filter(f => {
-          const fullPath = path.join(screenshotsBaseDir, f);
-          return fs.statSync(fullPath).isDirectory() && !/^\d{8}$/.test(f);
-        });
-
-        for (const camFolder of cameraFolders) {
-          // Only include if this folder matches the requested device
-          if (deviceId && camFolder !== deviceId) continue;
-          const folderPath = path.join(screenshotsBaseDir, camFolder);
-          const files = fs.readdirSync(folderPath).filter(f => f.endsWith(".png"));
-
-          for (const file of files) {
-            const timestamp = parseInt(file.replace(".png", ""), 10);
-            if (isNaN(timestamp)) continue;
-
-            if (timestamp >= startLimit && timestamp <= endLimit) {
-              const exists = allPeriods.some(p => p.startTimeMs === timestamp && p.durationMs === 0);
-              if (!exists) {
-                allPeriods.push({
-                  startTimeMs: timestamp,
-                  durationMs: 0,
-                  isScreenshot: true,
-                  isLocal: true,
-                  serverId: "local-storage",
                 });
               }
             }

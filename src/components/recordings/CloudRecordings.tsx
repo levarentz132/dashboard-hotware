@@ -85,6 +85,8 @@ interface ScheduledRecording {
   date: Date;
   startTime: string;
   endTime: string;
+  startMs: number;
+  endMs: number;
   type: "video" | "screenshot";
   screenshotTime?: string;
   status: "pending" | "recording" | "completed" | "failed" | "in progress";
@@ -207,10 +209,18 @@ export default function CloudRecordings() {
   // ---- Persistence Logic ----
   const saveToPersistence = async (scheds: ScheduledRecording[], originals: any) => {
     try {
+      const nxLocationIp = Cookies.get("nx_location_ip") || undefined;
+      const nxLocationPort = Cookies.get("nx_location_port") || undefined;
+      
       await fetch("/api/cloud/recordings/scheduled", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schedules: scheds, originalSchedules: Object.fromEntries(originals) }),
+        body: JSON.stringify({ 
+          schedules: scheds, 
+          originalSchedules: Object.fromEntries(originals),
+          nxLocationIp,
+          nxLocationPort
+        }),
       });
     } catch (e) { console.error("[Persistence] Save failed:", e); }
   };
@@ -649,9 +659,20 @@ export default function CloudRecordings() {
       const scheduleTargets: { date: Date; start: string; end: string }[] = [];
   
       if (scheduleDays.length > 0) {
-        // Recurring days: target the *next* occurrence for each selected day
+        // Recurring days
         const now = new Date();
+        const currentDay = now.getDay();
+        
         scheduleDays.forEach(dayIndex => {
+          // If today matches the selected day, we included today as a target
+          // This allows users to set a time like '11:00' when it's '12:00' and have it fire immediately.
+          if (dayIndex === currentDay) {
+            scheduleTimeRanges.forEach(range => {
+              scheduleTargets.push({ date: new Date(now), start: range.start, end: range.end });
+            });
+          }
+
+          // Also always schedule the *next* week's occurrence
           let targetDate = nextDay(now, dayIndex as Day);
           scheduleTimeRanges.forEach(range => {
             scheduleTargets.push({ date: targetDate, start: range.start, end: range.end });
@@ -665,18 +686,24 @@ export default function CloudRecordings() {
         let monthIdx = now.getMonth();
         let targetDate = new Date(year, monthIdx, targetDayNum);
         
+        // If today is the target day, include it
+        if (targetDate.getDate() === targetDayNum && targetDate.getMonth() === now.getMonth()) {
+           scheduleTimeRanges.forEach(range => {
+            scheduleTargets.push({ date: new Date(targetDate), start: range.start, end: range.end });
+          });
+        }
+
+        // Also schedule the next occurrence if today is passed or already added
         if (targetDate < now || targetDate.getDate() !== targetDayNum) {
           while (true) {
             monthIdx++;
             targetDate = new Date(year, monthIdx, targetDayNum);
             if (targetDate.getDate() === targetDayNum) break;
           }
+          scheduleTimeRanges.forEach(range => {
+            scheduleTargets.push({ date: new Date(targetDate), start: range.start, end: range.end });
+          });
         }
-        
-        scheduleTimeRanges.forEach(range => {
-          const finalDate = new Date(targetDate);
-          scheduleTargets.push({ date: finalDate, start: range.start, end: range.end });
-        });
       } else {
         // Multiple specific dates
         if (scheduleDates.length === 0) return;
@@ -701,104 +728,68 @@ export default function CloudRecordings() {
         const startMs = new Date(tDate).setHours(sh, sm, 0, 0);
         const endMs = scheduleType === "screenshot" ? startMs : new Date(tDate).setHours(eh, em, 59, 999);
         const nowMs = Date.now();
-
         if (endMs < startMs) return;
 
         const entryId = `sched-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
-        if (scheduleType === "screenshot") {
-          const delay = Math.max(0, startMs - nowMs);
+        // ── CASE: IMMEDIATE SNAPSHOT (Special Fast Path) ────────────────────
+        if (scheduleType === "screenshot" && (startMs <= nowMs + 10000)) {
+          const immediateEntryId = `snap-${Date.now()}`;
+          const snapshotEntry: ScheduledRecording = {
+            id: immediateEntryId,
+            cameraId: normalizeId(cameraDeviceId),
+            cameraName: device?.name || "Sensor",
+            systemId: systemId,
+            systemName: device?.systemName || "",
+            date: tDate,
+            startTime: tStart,
+            endTime: tEnd,
+            startMs: startMs,
+            endMs: endMs,
+            type: "screenshot",
+            status: "in progress",
+            batchId,
+          };
+          setScheduledRecordings(prev => [snapshotEntry, ...prev]);
+          totalTasksScheduled++;
 
-          if (delay <= 0) {
-            // ---- IMMEDIATE 5S RECORDING: Switch to recording method ----
-            totalTasksScheduled++;
-            const immediateEntryId = `snap-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-            const startSec = sh * 3600 + sm * 60;
-            const endSec = startSec + 1; 
-            
-            const newEntry: ScheduledRecording = {
-              id: immediateEntryId,
-              cameraId: normalizeId(device.id),
-              cameraName: device.name || "Camera",
-              systemId: systemId,
-              systemName: device.systemName || "",
-              date: tDate,
-              startTime: tStart,
-              endTime: tEnd, // Legacy displayed end time
-              type: "screenshot",
-              status: "recording",
-              recurrence: "none",
-              batchId,
-            };
-
-            setScheduledRecordings(prev => [newEntry, ...prev]);
-
-            (async () => {
-              try {
-                let originalSchedule = null;
-                try {
-                  const cam = await nxAPI.getCameraById(cameraDeviceId);
-                  originalSchedule = cam?.schedule || null;
-                } catch (e) { }
-                originalSchedules.current.set(immediateEntryId, originalSchedule);
-
-                const dayOfWeek = tDate.getDay();
-                await nxAPI.updateDevice(cameraDeviceId, {
-                  schedule: {
-                    isEnabled: true,
-                    tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }]
-                  }
-                });
-
-                // Revert after 1 second
-                setTimeout(async () => {
-                  try {
-                    const original = originalSchedules.current.get(immediateEntryId);
-                    if (original) await nxAPI.updateDevice(cameraDeviceId, { schedule: original });
-                    else await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
-                    originalSchedules.current.delete(immediateEntryId);
-                    
-                    // SAVE PNG LOCALLY - Call our screenshot API for the same moment
-                    try {
-                      await fetch("/api/cloud/recordings/screenshot", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          systemId: systemId,
-                          deviceId: cameraDeviceId,
-                          cameraName: device?.name || "Camera",
-                          timestampMs: Date.now(),
-                        })
-                      });
-                    } catch (err) { }
-
-                    setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
-                    showNotification({ type: 'success', title: 'Snapshot Captured', message: `Snapshot for ${device.name} is complete.` });
-                    
-                    // Auto-refresh the list
-                    setTimeout(() => handleSearchRecentRecordings(), 1500);
-                  } catch (e) { }
-                }, 1000);
-              } catch (err: any) {
-                setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
-                showNotification({ type: 'error', title: 'Snapshot Failed', message: err.message });
-              }
-            })();
-            return;
-          }
+          (async () => {
+            try {
+              await fetch("/api/cloud/recordings/screenshot", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  systemId: systemId,
+                  deviceId: cameraDeviceId,
+                  cameraName: device?.name || "Camera",
+                  timestampMs: Date.now(),
+                  scheduledStartTime: tStart, // Pass the original human-set time
+                })
+              });
+              setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
+              showNotification({ type: 'success', title: 'Snapshot Captured', message: `Snapshot for ${device?.name || "Camera"} is complete.` });
+              setTimeout(() => handleSearchRecentRecordings(), 1500);
+            } catch (err: any) {
+              setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
+              showNotification({ type: 'error', title: 'Snapshot Failed', message: err.message });
+            }
+          })();
+          return;
         }
 
-        // For everything else (Future Screenshot or ANY Video), create a queue entry
+        // ── CASE: FUTURE TASKS (Delegated to Watchdog) ──────────────────────
         const entryStatus = startMs > nowMs ? "pending" : (scheduleType === "screenshot" ? "in progress" : "recording");
         const newEntry: ScheduledRecording = {
           id: entryId,
-          cameraId: normalizeId(device.id),
+          cameraId: normalizeId(cameraDeviceId),
           cameraName: device?.name || "Sensor",
           systemId: systemId,
           systemName: device?.systemName || "",
           date: tDate,
           startTime: tStart,
           endTime: tEnd,
+          startMs: startMs,
+          endMs: endMs,
           type: scheduleType,
           status: entryStatus,
           recurrence: scheduleDays.length > 0 ? "weekday" : (scheduleMonthDay !== "" ? "monthday" : "none"),
@@ -809,71 +800,6 @@ export default function CloudRecordings() {
           newEntry.screenshotTime = tStart;
         }
 
-        if (scheduleType === "video") {
-          const startDelay = Math.max(0, startMs - nowMs);
-          const endDelay = Math.max(0, endMs - nowMs);
-
-          const startTimer = setTimeout(async () => {
-            setScheduledRecordings(prev => prev.map(r => r.id === entryId ? { ...r, status: "recording", startedAt: Date.now() } : r));
-            try {
-              let originalSchedule = null;
-              try {
-                const cam = await nxAPI.getCameraById(cameraDeviceId);
-                originalSchedule = cam?.schedule || null;
-              } catch (e) { }
-              originalSchedules.current.set(entryId, originalSchedule);
-
-              const dayOfWeek = tDate.getDay();
-              const startSec = sh * 3600 + sm * 60;
-              const endSec = eh * 3600 + em * 60 + 59;
-
-              await nxAPI.updateDevice(cameraDeviceId, {
-                schedule: {
-                  isEnabled: true,
-                  tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }]
-                }
-              });
-            } catch (err) {
-              setScheduledRecordings(prev => prev.map(r => r.id === entryId ? { ...r, status: "failed" } : r));
-            }
-          }, startDelay);
-
-          const endTimer = setTimeout(async () => {
-            try {
-              const originalSchedule = originalSchedules.current.get(entryId);
-              originalSchedules.current.delete(entryId);
-              if (originalSchedule) await nxAPI.updateDevice(cameraDeviceId, { schedule: originalSchedule });
-              else await nxAPI.updateDevice(cameraDeviceId, { schedule: { isEnabled: false, tasks: [] } });
-
-              showNotification({ type: 'success', title: 'Recording Done', message: `Recording for ${device?.name || "Camera"} is finished.` });
-              if (!newEntry.recurrence || newEntry.recurrence === "none") {
-                setScheduledRecordings(prev => prev.filter(r => r.id !== entryId));
-              }
-            } catch (err) {
-               showNotification({ type: 'error', title: 'Recording Failed', message: `Recording for ${device?.name || "Camera"} failed.` });
-               setScheduledRecordings(prev => prev.filter(r => r.id !== entryId));
-               return;
-            }
-
-            const recentEntry: RecentRecording = {
-              id: `rec-${Date.now()}`,
-              cameraName: device?.name || "Camera",
-              systemName: device?.systemName || "",
-              startTimeMs: startMs,
-              durationMs: endMs - startMs,
-              systemId: systemId,
-              deviceId: cameraDeviceId,
-            };
-            setRecentRecordings(prev => [recentEntry, ...prev]);
-
-            // Auto-refresh the local search results too
-            setTimeout(() => handleSearchRecentRecordings(), 1500);
-          }, endDelay);
-
-          scheduleTimers.current.set(entryId + "-start", startTimer);
-          scheduleTimers.current.set(entryId + "-end", endTimer);
-        }
-
         newScheduledEntries.push(newEntry);
         totalTasksScheduled++;
       });
@@ -881,13 +807,11 @@ export default function CloudRecordings() {
 
     if (totalTasksScheduled > 0) {
       setScheduledRecordings(prev => [...prev, ...newScheduledEntries]);
+      setScheduleSuccess(`Successfully scheduled ${totalTasksScheduled} task(s).`);
+      setTimeout(() => setIsScheduleOpen(false), 1500);
     } else {
       setScheduleError("No valid times or date selections provided.");
-      return;
     }
-
-    setScheduleSuccess(`Sucessfully scheduled ${totalTasksScheduled} task(s).`);
-    setTimeout(() => setIsScheduleOpen(false), 1500);
   };
 
   const cancelSchedule = async (id: string, isBatch: boolean = false) => {
@@ -1036,8 +960,7 @@ export default function CloudRecordings() {
   };
 
   const formatDuration = (ms: number) => {
-    if (ms === 0) return "Legacy Snapshot";
-    if (ms <= 2100) return `Snapshot`;
+    if (ms >= 0 && ms <= 2000) return "Snapshot";
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
@@ -1197,8 +1120,12 @@ export default function CloudRecordings() {
                             </div>
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
                               <span className="font-medium text-foreground/80">{new Date(rec.startTimeMs).toLocaleString()}</span>
-                              <span className="opacity-40">|</span>
-                              <span>{formatDuration(rec.durationMs)}</span>
+                              {!rec.isScreenshot && (
+                                <>
+                                  <span className="opacity-40">|</span>
+                                  <span>{formatDuration(rec.durationMs)}</span>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>

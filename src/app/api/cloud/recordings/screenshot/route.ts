@@ -41,18 +41,55 @@ export async function POST(request: NextRequest) {
 
     console.log(`[screenshot] Capturing PNG for ${safeCameraName} (${cleanDeviceId}) on system ${systemId}`);
 
-    // ---- 1. Fetch the live frame from VMS as PNG ----
-    // Try the REST v3 image endpoint first (gives current frame)
+    // ---- 1. (Optional) Wake up camera with a brief recording trigger ----
+    // We briefly patch the schedule to "Always" for today to ensure a live stream is pushed.
+    let originalSchedule = null;
+    try {
+      const nxIp = request.headers.get("x-nx-location-ip") || request.cookies.get("nx_location_ip")?.value || "localhost";
+      const nxPort = request.headers.get("x-nx-location-port") || request.cookies.get("nx_location_port")?.value || "7001";
+      
+      const vmsHeaders = buildCloudHeaders(request, systemId);
+      const vmsUrl = `https://${nxIp}:${nxPort}/rest/v3/devices/${cleanDeviceId}`;
+      
+      console.log(`[screenshot] Waking up camera via brief recording trigger on ${nxIp}:${nxPort}`);
+      
+      // Get current schedule to restore it later
+      const camRes = await fetch(vmsUrl, { headers: vmsHeaders });
+      if (camRes.ok) {
+        const camData = await camRes.json();
+        originalSchedule = camData.schedule;
+        
+        // Brief pulse: set current day to "Always" recording
+        const now = new Date();
+        const startSec = now.getHours() * 3600 + now.getMinutes() * 60;
+        const endSec = startSec + 60; // 1 minute pulse is safer than 1s for VMS logic
+        const dayOfWeek = now.getDay();
+        
+        await fetch(vmsUrl, {
+          method: "PATCH",
+          headers: { ...vmsHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schedule: {
+              isEnabled: true,
+              tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }]
+            }
+          })
+        });
+        
+        // Wait 1.5s for the stream to initialize and reach the VMS buffer
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    } catch (e) {
+      console.warn("[screenshot] Wake-up pulse failed (continuing with best-effort capture):", e);
+    }
+
+    // ---- 2. Fetch the live frame from VMS as PNG ----
     const params = new URLSearchParams();
     params.set("format", "png");
-    if (body.timestampMs) {
-      params.set("timestampMs", String(body.timestampMs));
-    }
     const endpoint = `/rest/v3/devices/${cleanDeviceId}/image`;
+    params.set("_", String(Date.now()));
 
     const downloadUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
-    console.log(`[screenshot] Fetching from: ${downloadUrl}`);
-
     const headers: Record<string, string> = buildCloudHeaders(request, systemId);
     headers["Accept"] = "image/png, image/jpeg, image/*;q=0.9, */*;q=0.8";
     delete headers["Content-Type"];
@@ -63,7 +100,27 @@ export async function POST(request: NextRequest) {
     let imageResponse = await fetch(downloadUrl, {
       headers,
       signal: controller.signal,
+      cache: "no-store",
     });
+
+    // Restore original schedule immediately after capture attempt
+    if (originalSchedule) {
+      try {
+        const nxIp = request.headers.get("x-nx-location-ip") || request.cookies.get("nx_location_ip")?.value;
+        const nxPort = request.headers.get("x-nx-location-port") || request.cookies.get("nx_location_port")?.value || "7001";
+        const vmsUrl = `https://${nxIp}:${nxPort}/rest/v3/devices/${cleanDeviceId}`;
+        const vmsHeaders = buildCloudHeaders(request, systemId);
+        
+        await fetch(vmsUrl, {
+          method: "PATCH",
+          headers: { ...vmsHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ schedule: originalSchedule })
+        });
+        console.log("[screenshot] VMS schedule restored.");
+      } catch (e) {
+        console.warn("[screenshot] Schedule restoration failed:", e);
+      }
+    }
 
     // Retry with Basic auth if needed
     if (imageResponse.status === 401 || imageResponse.status === 403) {
@@ -115,9 +172,22 @@ export async function POST(request: NextRequest) {
     const mm = targetDate.getMinutes().toString().padStart(2, "0");
     const SS = targetDate.getSeconds().toString().padStart(2, "0");
 
+    // Overwrite with scheduled time if provided (to match exact user-set time in UI)
+    let displayHH = HH;
+    let displaymm = mm;
+    let displaySS = SS;
+    if (body.scheduledStartTime) {
+      const parts = body.scheduledStartTime.split(":");
+      if (parts.length >= 2) {
+        displayHH = parts[0].padStart(2, "0");
+        displaymm = parts[1].padStart(2, "0");
+        displaySS = "00"; // Snapshots usually start at the exact minute mark
+      }
+    }
+
     const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
-    const fileDateStr = `${YYYY}${MM}${DD}`; // Compact format as requested
-    const baseFileName = `${safeCameraName}_${fileDateStr}_${HH}${mm}${SS}`;
+    const fileDateStr = `${YYYY}${MM}${DD}`; // Compact format
+    const baseFileName = `${safeCameraName}_${fileDateStr}_${displayHH}${displaymm}${displaySS}`;
 
     // ---- Get Custom Storage Path ----
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");

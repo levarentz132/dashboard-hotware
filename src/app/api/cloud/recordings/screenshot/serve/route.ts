@@ -25,7 +25,17 @@ export async function GET(request: NextRequest) {
     const safeDateFolder = dateFolder.replace(/[^0-9-]/g, "");
     const safeFileName = path.basename(fileName);
 
-    const filePath = path.join(process.cwd(), "data", "recorded_screenshots", safeDateFolder, safeFileName);
+    // Respect custom storage path if defined
+    let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+    try {
+      const settingsFile = path.join(process.cwd(), "data", "settings.json");
+      if (fs.existsSync(settingsFile)) {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+        if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
+      }
+    } catch (e) { }
+
+    const filePath = path.join(screenshotsBaseDir, safeDateFolder, safeFileName);
 
     if (!fs.existsSync(filePath)) {
       return NextResponse.json(
