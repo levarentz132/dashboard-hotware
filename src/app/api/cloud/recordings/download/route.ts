@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { promisify } from "util";
+import { spawn } from "child_process";
+import { Readable } from "stream";
 
 const writeFile = promisify(fs.writeFile);
 const mkdir = promisify(fs.mkdir);
@@ -33,7 +36,7 @@ export async function GET(request: NextRequest) {
     // Build download URL params
     const params = new URLSearchParams();
     let endpoint = "";
-    
+
     if (isImage) {
       // Use the new v3 image endpoint for precise PNG screenshots as requested
       const isoTime = new Date(parseInt(startTime as string)).toISOString();
@@ -44,10 +47,12 @@ export async function GET(request: NextRequest) {
     } else {
       params.set("pos", startTime as string);
       if (endTime) {
-        const duration = Math.max(0, parseInt(endTime) - parseInt(startTime as string));
-        params.set("duration", String(duration));
+        const durationMs = Math.max(0, parseInt(endTime) - parseInt(startTime as string));
+        // NX Witness /media/ endpoint expects duration in SECONDS for mp4/mkv exports
+        const durationSec = Math.ceil(durationMs / 1000);
+        params.set("duration", String(durationSec));
         params.set("end", endTime as string);
-        console.log(`[recordings/download] Timeframe: ${startTime} to ${endTime} (duration: ${duration}ms)`);
+        console.log(`[recordings/download] Timeframe: ${startTime} to ${endTime} (duration: ${durationSec}s)`);
       }
       endpoint = `/media/${deviceId}.mp4`;
     }
@@ -57,7 +62,7 @@ export async function GET(request: NextRequest) {
 
     const downloadUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
     console.log(`[recordings/download] Generated URL: ${downloadUrl}`);
-    
+
     // Explicitly define generic headers type
     const headers: Record<string, string> = buildCloudHeaders(request, systemId);
     if (isImage) {
@@ -72,7 +77,7 @@ export async function GET(request: NextRequest) {
 
       const controller = new AbortController();
       requestTimeout = setTimeout(() => controller.abort(), 85000);
-      
+
       let videoResponse = await fetch(downloadUrl, {
         headers: headers,
         signal: controller.signal,
@@ -108,10 +113,10 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const filename = isImage 
+      const filename = isImage
         ? `screenshot_${deviceId.substring(0, 8)}_${startTime}.png`
         : `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
-      
+
       // If it's a screenshot, save a local copy to the data folder using date-based structure
       if (isImage) {
         try {
@@ -156,9 +161,89 @@ export async function GET(request: NextRequest) {
         : `attachment; filename="${filename}"`;
 
       const responseContentType = videoResponse.headers.get("Content-Type");
-      const finalContentType = isImage 
+      const finalContentType = isImage
         ? (responseContentType && responseContentType.includes("image") ? responseContentType : "image/jpeg")
         : (responseContentType || "video/mp4");
+
+      // FFmpeg REMUXING: For video downloads, use FFmpeg to fix the container metadata.
+      // We skip this for previews to ensure instant playback without server-side processing.
+      if (!isImage && !isPreview && videoResponse.body) {
+        console.log(`[recordings/download] Remuxing video via FFmpeg to fix metadata (download)`);
+
+        // Use a temporary file for the output to support -movflags +faststart, 
+        // which requires a seekable output (not a pipe).
+        const tempId = Math.random().toString(36).substring(7);
+        const tempPath = path.join(os.tmpdir(), `fixed_recording_${tempId}.mp4`);
+
+        const ffmpeg = spawn("ffmpeg", [
+          "-fflags", "+genpts",
+          "-i", "pipe:0",
+
+          "-start_at_zero",
+          "-avoid_negative_ts", "make_zero",
+
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "23",
+          "-profile:v", "main",
+          "-level", "4.2",
+          "-pix_fmt", "yuv420p",
+
+          "-vf", "scale=in_range=pc:out_range=tv",
+          "-r", "30",                 // ✅ force stable FPS
+
+          "-c:a", "aac",
+          "-b:a", "128k",
+
+          "-movflags", "+faststart", // ✅ important
+          "-f", "mp4",
+          "-y",                       // overwrite if exists
+          tempPath
+        ]);
+
+        // Avoid process crash on early stdin close
+        ffmpeg.stdin.on("error", () => {});
+
+        const inputStream = Readable.fromWeb(videoResponse.body as any);
+        inputStream.pipe(ffmpeg.stdin);
+
+        // Wait for FFmpeg to finish processing the file
+        return await new Promise<NextResponse>((resolve) => {
+          ffmpeg.on('close', (code) => {
+            console.log(`[recordings/download] FFmpeg finished with code ${code}`);
+            
+            if (code !== 0) {
+              console.error(`[recordings/download] FFmpeg failed with code ${code}`);
+              resolve(NextResponse.json({ error: "FFmpeg conversion failed" }, { status: 500 }));
+              return;
+            }
+
+            // Stream the fixed file back to the client
+            const fileStream = fs.createReadStream(tempPath);
+            
+            // Clean up the temp file after it's been sent
+            fileStream.on('close', () => {
+              fs.unlink(tempPath, (err) => {
+                if (err) console.error("[recordings/download] Temp file cleanup error:", err);
+              });
+            });
+
+            resolve(new NextResponse(Readable.toWeb(fileStream) as any, {
+              status: 200,
+              headers: {
+                "Content-Type": "video/mp4",
+                "Content-Disposition": disposition,
+                "Cache-Control": "no-cache",
+              },
+            }));
+          });
+
+          ffmpeg.on('error', (err) => {
+            console.error("[recordings/download] FFmpeg spawn error:", err);
+            resolve(NextResponse.json({ error: "FFmpeg process error" }, { status: 500 }));
+          });
+        });
+      }
 
       return new NextResponse(videoResponse.body, {
         status: 200,
