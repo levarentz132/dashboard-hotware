@@ -37,13 +37,13 @@ export async function GET(request: NextRequest) {
     const params = new URLSearchParams();
     let endpoint = "";
 
+    // If it's a screenshot (point in time), force a 1s recording to ensure 
+    // we get fresh camera data and an updated thumbnail capability.
     if (isImage) {
-      // Use the new v3 image endpoint for precise PNG screenshots as requested
-      const isoTime = new Date(parseInt(startTime as string)).toISOString();
-      params.set("time", isoTime);
-      params.set("format", "png");
-      params.set("roundMethod", "precise");
-      endpoint = `/rest/v3/devices/${deviceId}/image`;
+      params.set("pos", startTime as string);
+      params.set("duration", "1");
+      endpoint = `/media/${deviceId}.mp4`;
+      // We will now treat this as a short video (1s) instead of a static image
     } else {
       params.set("pos", startTime as string);
       if (endTime) {
@@ -56,6 +56,10 @@ export async function GET(request: NextRequest) {
       }
       endpoint = `/media/${deviceId}.mp4`;
     }
+
+    // Force isImage to false if we are now serving the 1s record as requested
+    const effectiveIsImage = isImage && endpoint.includes("/image");
+
 
     const username = searchParams.get("username");
     const password = searchParams.get("password");
@@ -113,12 +117,12 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const filename = isImage
+      const filename = effectiveIsImage
         ? `screenshot_${deviceId.substring(0, 8)}_${startTime}.png`
         : `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
 
       // If it's a screenshot, save a local copy to the data folder using date-based structure
-      if (isImage) {
+      if (effectiveIsImage) {
         try {
           const buffer = await videoResponse.clone().arrayBuffer();
           const now = new Date();
@@ -161,13 +165,13 @@ export async function GET(request: NextRequest) {
         : `attachment; filename="${filename}"`;
 
       const responseContentType = videoResponse.headers.get("Content-Type");
-      const finalContentType = isImage
+      const finalContentType = effectiveIsImage
         ? (responseContentType && responseContentType.includes("image") ? responseContentType : "image/jpeg")
         : (responseContentType || "video/mp4");
 
       // FFmpeg REMUXING: For video downloads, use FFmpeg to fix the container metadata.
       // We skip this for previews to ensure instant playback without server-side processing.
-      if (!isImage && !isPreview && videoResponse.body) {
+      if (!effectiveIsImage && !isPreview && videoResponse.body) {
         console.log(`[recordings/download] Remuxing video via FFmpeg to fix metadata (download)`);
 
         // Use a temporary file for the output to support -movflags +faststart, 

@@ -60,11 +60,11 @@ export async function POST(request: NextRequest) {
         originalSchedule = camData.schedule;
         
         const now = new Date();
-        const startSec = now.getHours() * 3600 + now.getMinutes() * 60;
-        const endSec = startSec + 60; 
+        const startSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+        const endSec = startSec + 5; // 5s pulse covering the current moment for reliable Live capture
         const dayOfWeek = now.getDay();
         
-        console.log(`[screenshot] Enabling recording for 1s pulse...`);
+        console.log(`[screenshot] Enabling recording for 5s pulse...`);
         await fetch(vmsUrl, {
           method: "PATCH",
           headers: { ...vmsHeaders, "Content-Type": "application/json" },
@@ -76,8 +76,8 @@ export async function POST(request: NextRequest) {
           })
         });
         
-        // Wait 1s as requested
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait 3s to ensure the camera is active and the VMS has started the recording task
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         console.log(`[screenshot] Disabling recording after 1s pulse...`);
         await fetch(vmsUrl, {
@@ -96,7 +96,14 @@ export async function POST(request: NextRequest) {
     const params = new URLSearchParams();
     params.set("format", "png");
     const endpoint = `/rest/v3/devices/${cleanDeviceId}/image`;
+    
+    // Always use Live frame for capture to ensure 100% success rate, 
+    // but the pulse ensures the thumbnail index at HH:MM:00 is updated.
     params.set("_", String(Date.now()));
+    params.set("roundMethod", "precise");
+    if (body.scheduledStartTime) {
+      console.log(`[screenshot] Capturing fresh frame following ${body.scheduledStartTime}:00 pulse.`);
+    }
 
     const downloadUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
     const headers: Record<string, string> = buildCloudHeaders(request, systemId);
