@@ -116,6 +116,80 @@ interface ScheduleTimeRange {
   end: string;
 }
 
+// Moved outside to prevent re-creation on every render which causes dropdowns to close
+const CameraSelect = ({ 
+  value, 
+  onValueChange, 
+  devices, 
+  loadingDevices, 
+  normalizeId 
+}: { 
+  value: string; 
+  onValueChange: (v: string) => void;
+  devices: any[];
+  loadingDevices: boolean;
+  normalizeId: (id: any) => string;
+}) => (
+  <div className="w-full">
+    {loadingDevices ? (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+        <Loader2 className="h-4 w-4 animate-spin" /> Retrieving...
+      </div>
+    ) : (
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger>
+          <SelectValue placeholder="Select" />
+        </SelectTrigger>
+        <SelectContent className="max-h-[400px]">
+          <SelectItem value="all">
+            <span className="font-bold text-primary">All Cameras</span>
+          </SelectItem>
+          {devices.map((device: any) => (
+            <SelectItem key={`${device.systemId}-${device.id}`} value={`${device.systemId}:${normalizeId(device.id)}`}>
+              <span className="font-medium">{device.name || device.id}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )}
+  </div>
+);
+
+const ScheduleCameraSelect = ({ 
+  value, 
+  onValueChange, 
+  devices, 
+  loadingDevices, 
+  normalizeId 
+}: { 
+  value: string; 
+  onValueChange: (v: string) => void;
+  devices: any[];
+  loadingDevices: boolean;
+  normalizeId: (id: any) => string;
+}) => (
+  <div className="w-full">
+    {loadingDevices ? (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+        <Loader2 className="h-4 w-4 animate-spin" /> Retrieving...
+      </div>
+    ) : (
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger>
+          <SelectValue placeholder="Choose Camera" />
+        </SelectTrigger>
+        <SelectContent className="max-h-[400px]">
+          {devices.map((device: any) => (
+            <SelectItem key={`sched-${device.systemId}-${device.id}`} value={`${device.systemId}:${normalizeId(device.id)}`}>
+              <span className="font-medium">{device.name || device.id}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )}
+  </div>
+);
+
 export default function CloudRecordings() {
   // ---- Shared state ----
   const [systems, setSystems] = useState<CloudSystem[]>([]);
@@ -596,7 +670,7 @@ export default function CloudRecordings() {
   };
 
   const handlePreview = (time: number, duration: number, sysId: string, devId: string, isLegacy?: boolean, fileName?: string, dateFolder?: string) => {
-    if (duration <= 2000 || isLegacy) {
+    if (duration <= 5000 || isLegacy) {
       let url = "";
       if (isLegacy && fileName && dateFolder) {
         url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}`;
@@ -955,7 +1029,7 @@ export default function CloudRecordings() {
 
         const mapped: RecentRecording[] = deduplicated.map((p: any, i: number) => {
           const duration = p.durationMs || 0;
-          const isScreenshot = duration <= 2000 || p.isScreenshot;
+          const isScreenshot = duration <= 5000 || p.isScreenshot;
           return {
             id: `recent-${i}-${p.startTimeMs}`,
             cameraName: p.dev.name,
@@ -998,7 +1072,7 @@ export default function CloudRecordings() {
       
       const mapped: RecentRecording[] = periods.map((p: any, i: number) => {
         const duration = p.durationMs || 0;
-        const isScreenshot = duration <= 2000 || p.isScreenshot;
+        const isScreenshot = duration <= 5000 || p.isScreenshot;
         return {
           id: `recent-${i}-${p.startTimeMs}`,
           cameraName: dev?.name || targetDevice,
@@ -1023,7 +1097,7 @@ export default function CloudRecordings() {
   };
 
   const formatDuration = (ms: number) => {
-    if (ms <= 2000) return "Snapshot";
+    if (ms <= 5000) return "Snapshot";
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
@@ -1038,56 +1112,7 @@ export default function CloudRecordings() {
     new Date(r.startTimeMs).toLocaleString().toLowerCase().includes(recentSearch.toLowerCase())
   );
 
-  // ---- Camera Select (shared, includes All Cameras for search view) ----
-  const CameraSelect = ({ value, onValueChange }: { value: string; onValueChange: (v: string) => void }) => (
-    <div className="w-full">
-      {loadingDevices ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Retrieving...
-        </div>
-      ) : (
-        <Select value={value} onValueChange={onValueChange}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select" />
-          </SelectTrigger>
-          <SelectContent className="max-h-[400px]">
-            <SelectItem value="all">
-              <span className="font-bold text-primary">All Cameras</span>
-            </SelectItem>
-            {devices.map((device: any) => (
-              <SelectItem key={`${device.systemId}-${device.id}`} value={`${device.systemId}:${normalizeId(device.id)}`}>
-                <span className="font-medium">{device.name || device.id}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-    </div>
-  );
 
-  // ---- Camera Select for Schedule (no "All Cameras" — only individual cameras) ----
-  const ScheduleCameraSelect = ({ value, onValueChange }: { value: string; onValueChange: (v: string) => void }) => (
-    <div className="w-full">
-      {loadingDevices ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Retrieving...
-        </div>
-      ) : (
-        <Select value={value} onValueChange={onValueChange}>
-          <SelectTrigger>
-            <SelectValue placeholder="Choose Camera" />
-          </SelectTrigger>
-          <SelectContent className="max-h-[400px]">
-            {devices.map((device: any) => (
-              <SelectItem key={`sched-${device.systemId}-${device.id}`} value={`${device.systemId}:${normalizeId(device.id)}`}>
-                <span className="font-medium">{device.name || device.id}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-    </div>
-  );
 
   const statusColor: Record<string, string> = {
     pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -1141,7 +1166,13 @@ export default function CloudRecordings() {
             <Card className="min-h-[600px] border-none shadow-none bg-transparent">
               <div className="flex items-center gap-3 mb-6 pb-6 border-b">
                 <div className="w-48">
-                  <CameraSelect value={selectedDevice} onValueChange={handleSelectDevice} />
+                  <CameraSelect 
+                    value={selectedDevice} 
+                    onValueChange={handleSelectDevice}
+                    devices={devices}
+                    loadingDevices={loadingDevices}
+                    normalizeId={normalizeId}
+                  />
                 </div>
 
                 <Popover>
@@ -1185,7 +1216,7 @@ export default function CloudRecordings() {
                               <span className="font-medium text-foreground/80">
                                 {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                               </span>
-                              {!rec.isScreenshot && rec.durationMs > 2000 && (
+                              {!rec.isScreenshot && rec.durationMs > 5000 && (
                                 <>
                                   <span className="opacity-40">|</span>
                                   <span>{formatDuration(rec.durationMs)}</span>
@@ -1408,7 +1439,13 @@ export default function CloudRecordings() {
           </DialogHeader>
 
           <div className="space-y-6 pt-4">
-            <ScheduleCameraSelect value={scheduleCamera} onValueChange={handleScheduleSelectDevice} />
+            <ScheduleCameraSelect 
+              value={scheduleCamera} 
+              onValueChange={handleScheduleSelectDevice} 
+              devices={devices}
+              loadingDevices={loadingDevices}
+              normalizeId={normalizeId}
+            />
 
             <div className="space-y-2">
               <Label>Task Type</Label>

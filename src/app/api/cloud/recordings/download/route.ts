@@ -42,10 +42,12 @@ export async function GET(request: NextRequest) {
     if (isImage) {
       params.set("pos", startTime as string);
       params.set("duration", "1");
+      params.set("stream", "0"); // Force High Quality (Primary)
       endpoint = `/media/${deviceId}.mp4`;
       // We will now treat this as a short video (1s) instead of a static image
     } else {
       params.set("pos", startTime as string);
+      params.set("stream", "0"); // Force High Quality (Primary)
       if (endTime) {
         const durationMs = Math.max(0, parseInt(endTime) - parseInt(startTime as string));
         // NX Witness /media/ endpoint expects duration in SECONDS for mp4/mkv exports
@@ -187,8 +189,8 @@ export async function GET(request: NextRequest) {
           "-avoid_negative_ts", "make_zero",
 
           "-c:v", "libx264",
-          "-preset", "veryfast",
-          "-crf", "23",
+          "-preset", "fast",
+          "-crf", "18",
           "-profile:v", "main",
           "-level", "4.2",
           "-pix_fmt", "yuv420p",

@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
     // ---- 2. Fetch the live frame from VMS as PNG ----
     const params = new URLSearchParams();
     params.set("format", "png");
+    params.set("stream", "0"); // Force High Quality (Primary)
     const endpoint = `/rest/v3/devices/${cleanDeviceId}/image`;
     
     // Always use Live frame for capture to ensure 100% success rate, 

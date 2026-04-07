@@ -70,7 +70,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
     if (!n.deviceId || !n.systemId) return;
 
     // Based on CloudRecordings handlePreview logic
-    if (n.durationMs && n.durationMs <= 2000) {
+    if (n.durationMs && n.durationMs <= 5000) {
       // Snapshot preview - would need setPreviewSnapshot in global state or just direct URL
       const url = `/api/cloud/recordings/thumbnail?systemId=${n.systemId}&deviceId=${n.deviceId.replace(/[{}]/g, "")}&timestampMs=${n.startTimeMs}`;
       window.open(url, "_blank");
