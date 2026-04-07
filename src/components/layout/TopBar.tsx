@@ -40,28 +40,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
   // robust check for electron environment
   const isElectron = typeof window !== 'undefined' && (window as any).electron;
 
-  const [lastConnected, setLastConnected] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    if (lastConnected !== null && connected !== lastConnected) {
-      if (!connected) {
-        // System went offline
-        addPersistentNotification({
-          type: 'error',
-          title: 'System Offline',
-          message: 'Connection to the VMS system has been lost. Services may be limited.',
-        });
-      } else {
-        // System came back online
-        addPersistentNotification({
-          type: 'success',
-          title: 'System Online',
-          message: 'Connection to the VMS system has been restored.',
-        });
-      }
-    }
-    setLastConnected(connected);
-  }, [connected]);
 
   const fetchNotifications = async () => {
     const list = await getPersistentNotifications();
