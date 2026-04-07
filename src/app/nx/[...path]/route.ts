@@ -2,6 +2,7 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 import { NextRequest, NextResponse } from "next/server";
+import { API_CONFIG } from "@/lib/config";
 
 export async function GET(request: NextRequest) {
     return handleRequest(request, "GET");
@@ -9,6 +10,18 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     return handleRequest(request, "POST");
+}
+
+export async function PATCH(request: NextRequest) {
+    return handleRequest(request, "PATCH");
+}
+
+export async function PUT(request: NextRequest) {
+    return handleRequest(request, "PUT");
+}
+
+export async function DELETE(request: NextRequest) {
+    return handleRequest(request, "DELETE");
 }
 
 async function handleRequest(request: NextRequest, method: string) {
@@ -20,8 +33,8 @@ async function handleRequest(request: NextRequest, method: string) {
         path = '/' + path;
     }
 
-    const nxLocationIp = request.cookies.get("nx_location_ip")?.value || "localhost";
-    const nxLocationPort = request.cookies.get("nx_location_port")?.value || "7001";
+    const nxLocationIp = request.cookies.get("nx_location_ip")?.value || API_CONFIG.serverHost || "localhost";
+    const nxLocationPort = request.cookies.get("nx_location_port")?.value || API_CONFIG.serverPort || "7001";
     
     const targetUrl = `https://${nxLocationIp}:${nxLocationPort}${path}${url.search}`;
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
+import { API_CONFIG } from "@/lib/config";
 import fs from "fs";
 import path from "path";
 
@@ -18,7 +19,12 @@ export async function POST(request: NextRequest) {
     const { deviceId, cameraName } = body;
     
     // systemId comes from POST body; fall back to query params / headers
-    let systemId = body.systemId?.replace(/[{}]/g, "") || null;
+    let systemIdRaw = body.systemId;
+    if ((systemIdRaw === "127.0.0.1" || systemIdRaw === "localhost") && API_CONFIG.serverHost) {
+      systemIdRaw = API_CONFIG.serverHost;
+    }
+    
+    let systemId = systemIdRaw?.replace(/[{}]/g, "") || null;
     let systemName: string | null = null;
     if (!systemId) {
       const validated = validateSystemId(request);
@@ -45,16 +51,22 @@ export async function POST(request: NextRequest) {
     // We briefly patch the schedule to "Always" for today to ensure a live stream is pushed.
     let originalSchedule = null;
     try {
-      const nxIp = request.headers.get("x-nx-location-ip") || request.cookies.get("nx_location_ip")?.value || "localhost";
-      const nxPort = request.headers.get("x-nx-location-port") || request.cookies.get("nx_location_port")?.value || "7001";
-      
+      const vmsUrl = buildCloudUrl(systemId, `/rest/v3/devices/${cleanDeviceId}`, undefined, request);
       const vmsHeaders = buildCloudHeaders(request, systemId);
-      const vmsUrl = `https://${nxIp}:${nxPort}/rest/v3/devices/${cleanDeviceId}`;
       
-      console.log(`[screenshot] Waking up camera via brief recording trigger on ${nxIp}:${nxPort}`);
+      console.log(`[screenshot] Waking up camera via brief recording trigger on ${vmsUrl}`);
       
       // Get current schedule to restore it later
-      const camRes = await fetch(vmsUrl, { headers: vmsHeaders });
+      let camRes = await fetch(vmsUrl, { headers: vmsHeaders });
+      
+      // Retry with Basic auth if needed
+      if (camRes.status === 401 || camRes.status === 403) {
+        const basic = getBasicAuthHeaderFromRequest(request);
+        if (basic) {
+          camRes = await fetch(vmsUrl, { headers: { ...vmsHeaders, Authorization: basic } });
+        }
+      }
+
       if (camRes.ok) {
         const camData = await camRes.json();
         originalSchedule = camData.schedule;
@@ -65,7 +77,7 @@ export async function POST(request: NextRequest) {
         const dayOfWeek = now.getDay();
         
         console.log(`[screenshot] Enabling recording for 5s pulse...`);
-        await fetch(vmsUrl, {
+        let startPulseRes = await fetch(vmsUrl, {
           method: "PATCH",
           headers: { ...vmsHeaders, "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -75,18 +87,47 @@ export async function POST(request: NextRequest) {
             }
           })
         });
+
+        if (startPulseRes.status === 401 || startPulseRes.status === 403) {
+           const basic = getBasicAuthHeaderFromRequest(request);
+           if (basic) {
+             startPulseRes = await fetch(vmsUrl, {
+               method: "PATCH",
+               headers: { ...vmsHeaders, "Content-Type": "application/json", Authorization: basic },
+               body: JSON.stringify({
+                 schedule: {
+                   isEnabled: true,
+                   tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always" }]
+                 }
+               })
+             });
+           }
+        }
         
         // Wait 3s to ensure the camera is active and the VMS has started the recording task
         await new Promise(resolve => setTimeout(resolve, 3000));
 
         console.log(`[screenshot] Disabling recording after 1s pulse...`);
-        await fetch(vmsUrl, {
+        let stopPulseRes = await fetch(vmsUrl, {
           method: "PATCH",
           headers: { ...vmsHeaders, "Content-Type": "application/json" },
           body: JSON.stringify({
             schedule: { isEnabled: false }
           })
         });
+
+        if (stopPulseRes.status === 401 || stopPulseRes.status === 403) {
+           const basic = getBasicAuthHeaderFromRequest(request);
+           if (basic) {
+             stopPulseRes = await fetch(vmsUrl, {
+               method: "PATCH",
+               headers: { ...vmsHeaders, "Content-Type": "application/json", Authorization: basic },
+               body: JSON.stringify({
+                 schedule: { isEnabled: false }
+               })
+             });
+           }
+        }
       }
     } catch (e) {
       console.warn("[screenshot] Wake-up pulse failed (continuing with best-effort capture):", e);

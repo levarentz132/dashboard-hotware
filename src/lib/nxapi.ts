@@ -577,7 +577,7 @@ class NxWitnessAPI {
   }): Promise<any> {
     try {
       // 1. Try modern v4 endpoint first
-      return await this.apiRequest("/rest/v3/events/generic", {
+      return await this.apiRequest("/rest/v4/events/generic", {
         method: "POST",
         body: JSON.stringify({
           ...payload,

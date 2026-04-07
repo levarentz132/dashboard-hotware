@@ -100,15 +100,21 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
 
   if (isDirectAddress || isConfiguredLocal) {
     // Resolve host and port
-    let host = isDirectAddress ? cleanId : (API_CONFIG.serverHost || 'localhost');
+    // If it's a loopback/direct address, we use it as base host, but STILL allow cookie/config overrides
+    let host = (isDirectAddress && cleanId !== 'localhost' && cleanId !== '127.0.0.1') 
+      ? cleanId 
+      : (API_CONFIG.serverHost || 'localhost');
     let port = API_CONFIG.serverPort || '7001';
 
     // If redirected via cookie or watchdog header (no cookies in server-to-server calls)
-    if (!isDirectAddress && request) {
+    if (request) {
       const cookieIp = request.cookies.get("nx_location_ip")?.value;
       const cookiePort = request.cookies.get("nx_location_port")?.value;
-      const headerIp = request.headers.get("x-nx-location-ip") || undefined;
-      const headerPort = request.headers.get("x-nx-location-port") || undefined;
+      
+      const dynamicConfig = getDynamicConfig(request);
+      const headerIp = request.headers.get("x-nx-location-ip") || dynamicConfig?.NEXT_PUBLIC_NX_SERVER_HOST;
+      const headerPort = request.headers.get("x-nx-location-port") || dynamicConfig?.NEXT_PUBLIC_NX_SERVER_PORT;
+      
       const effectiveIp = cookieIp || headerIp;
       const effectivePort = cookiePort || headerPort;
       if (effectiveIp) host = effectiveIp;
@@ -318,6 +324,11 @@ export function validateSystemId(request: NextRequest): { systemId: string | nul
 
   if (!systemId) {
     systemId = request.headers.get('x-electron-system-id');
+  }
+
+  // If systemId is a loopback/local placeholder, try to use the preconfigured host as the systemId
+  if ((systemId === "127.0.0.1" || systemId === "localhost") && API_CONFIG.serverHost) {
+    systemId = API_CONFIG.serverHost;
   }
 
   // Always clean brackets from systemId

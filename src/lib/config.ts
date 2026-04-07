@@ -21,6 +21,8 @@ export function getElectronHeaders(): Record<string, string> {
     'X-Electron-Cloud-Password': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '',
     'X-Electron-Cloud-Password-Encrypted': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '',
     'X-Electron-Cloud-Token': extConfig.NX_CLOUD_TOKEN || '',
+    'X-Electron-Server-Host': extConfig.NEXT_PUBLIC_NX_SERVER_HOST || '',
+    'X-Electron-Server-Port': extConfig.NEXT_PUBLIC_NX_SERVER_PORT || '',
   };
 }
 
@@ -102,6 +104,8 @@ export function getDynamicConfig(request?: Request | NextRequest) {
       NEXT_PUBLIC_NX_CLOUD_PASSWORD: getH('x-electron-cloud-password'),
       NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED: getH('x-electron-cloud-password-encrypted'),
       NX_CLOUD_TOKEN: getH('x-electron-cloud-token'),
+      NEXT_PUBLIC_NX_SERVER_HOST: getH('x-electron-server-host'),
+      NEXT_PUBLIC_NX_SERVER_PORT: getH('x-electron-server-port'),
     };
 
     // DEBUG: Log detected electron headers
@@ -139,8 +143,8 @@ export const API_CONFIG = {
   cloudPasswordHash: extConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD,
   password: process.env.NEXT_PUBLIC_NX_PASSWORD,
   systemId: extConfig?.NEXT_PUBLIC_NX_SYSTEM_ID || process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
-  serverHost: process.env.NEXT_PUBLIC_NX_SERVER_HOST,
-  serverPort: process.env.NEXT_PUBLIC_NX_SERVER_PORT,
+  serverHost: extConfig?.NEXT_PUBLIC_NX_SERVER_HOST || process.env.NEXT_PUBLIC_NX_SERVER_HOST,
+  serverPort: extConfig?.NEXT_PUBLIC_NX_SERVER_PORT || process.env.NEXT_PUBLIC_NX_SERVER_PORT,
   // Fallback URLs to try (now through proxy)
   fallbackURLs: ["/api/nx"],
 };
