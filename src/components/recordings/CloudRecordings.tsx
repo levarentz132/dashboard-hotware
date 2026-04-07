@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { showNotification } from "@/lib/notifications";
+import { addPersistentNotification, getNotificationUserKey } from "@/lib/persistent-notifications";
 
 const NoOverlayAlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
@@ -219,7 +220,8 @@ export default function CloudRecordings() {
           schedules: scheds, 
           originalSchedules: Object.fromEntries(originals),
           nxLocationIp,
-          nxLocationPort
+          nxLocationPort,
+          notificationUserKey: getNotificationUserKey()
         }),
       });
     } catch (e) { console.error("[Persistence] Save failed:", e); }
@@ -302,7 +304,16 @@ export default function CloudRecordings() {
           console.error("[CloudRecordings] Failed to stop recording via UI timer:", err);
         }
 
-        showNotification({ type: 'success', title: 'Recording Done', message: `Recording for ${rec.cameraName} is finished.` });
+        addPersistentNotification({ 
+          type: 'success', 
+          title: 'Recording Done', 
+          message: `Recording for ${rec.cameraName} is finished and available for playback.`,
+          systemId: rec.systemId,
+          deviceId: rec.cameraId,
+          startTimeMs: rec.startMs,
+          endTimeMs: rec.endMs,
+          durationMs: rec.endMs - rec.startMs
+        });
         
         if (rec.recurrence === "none") {
           setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
@@ -335,10 +346,10 @@ export default function CloudRecordings() {
       });
       if (res.ok) {
         setIsSettingsOpen(false);
-        showNotification({ type: 'success', title: 'Settings Saved', message: 'Storage path updated successfully.' });
+        addPersistentNotification({ type: 'success', title: 'Settings Saved', message: 'Storage path updated successfully.' });
       }
     } catch (err: any) {
-      showNotification({ type: 'error', title: 'Error', message: 'Failed to save settings.' });
+      addPersistentNotification({ type: 'error', title: 'Error', message: 'Failed to save settings.' });
     }
   };
 
@@ -662,7 +673,7 @@ export default function CloudRecordings() {
     }
 
     if (scheduleType === "screenshot" && !storagePath) {
-      showNotification({ type: 'warning', title: 'Storage Required', message: 'Please configure a storage path in Settings before adding a snapshot task.' });
+      addPersistentNotification({ type: 'warning', title: 'Storage Required', message: 'Please configure a storage path in Settings before adding a snapshot task.' });
       setIsScheduleOpen(false);
       setIsSettingsOpen(true);
       return;
@@ -787,11 +798,19 @@ export default function CloudRecordings() {
                 })
               });
               setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
-              showNotification({ type: 'success', title: 'Snapshot Captured', message: `Snapshot for ${device?.name || "Camera"} is complete.` });
+              addPersistentNotification({ 
+                type: 'success', 
+                title: 'Snapshot Captured', 
+                message: `Snapshot for ${device?.name || "Camera"} is complete and stored in local archive.`,
+                systemId: systemId,
+                deviceId: cameraDeviceId,
+                startTimeMs: Date.now(),
+                durationMs: 0 // Indicates snapshot
+              });
               setTimeout(() => handleSearchRecentRecordings(), 1500);
             } catch (err: any) {
               setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
-              showNotification({ type: 'error', title: 'Snapshot Failed', message: err.message });
+              addPersistentNotification({ type: 'error', title: 'Snapshot Failed', message: err.message });
             }
           })();
           return;
@@ -865,7 +884,7 @@ export default function CloudRecordings() {
       }
       
       setScheduledRecordings(prev => prev.map(r => r.id === id ? { ...r, date: nextDate, status: "pending" } : r));
-      showNotification({ type: 'info', title: 'Skipped', message: `Skipped to ${format(nextDate, "MMM d, yyyy")}` });
+      addPersistentNotification({ type: 'info', title: 'Skipped', message: `Skipped to ${format(nextDate, "MMM d, yyyy")}` });
       return;
     }
 
@@ -1105,7 +1124,7 @@ export default function CloudRecordings() {
           </Button>
           <Button onClick={() => { 
             if (scheduleType === "screenshot" && !storagePath) {
-              showNotification({ type: 'warning', title: 'Action Required', message: 'Please set a storage path in Settings before scheduling snapshots.' });
+              addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a storage path in Settings before scheduling snapshots.' });
             }
             resetScheduleForm(); 
             setIsScheduleOpen(true); 

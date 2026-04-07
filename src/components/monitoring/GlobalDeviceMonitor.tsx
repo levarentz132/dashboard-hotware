@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { getElectronHeaders } from "@/lib/config";
 import { showNotification } from "@/lib/notifications";
+import { addPersistentNotification } from "@/lib/persistent-notifications";
 import nxAPI from "@/lib/nxapi";
 import Cookies from "js-cookie";
 
@@ -267,13 +268,14 @@ export function GlobalDeviceMonitor() {
 
               console.log(`[GlobalDeviceMonitor] ⚠️ LOW DISK SPACE: ${storage.name || storage.path} on ${systemName}: ${message}`);
 
-              // 1. Notify UI
-              showNotification({
+              // 1. Notify UI (Persistent)
+              addPersistentNotification({
                 type: 'warning',
                 title: 'Low Disk Space',
-                message: `${storage.name || storage.path} on ${systemName} is running low: ${message}`
+                message: `${storage.name || storage.path} on ${systemName} is running low: ${message}`,
+                systemId
               });
-
+              
               // 2. Trigger NX Event
               await triggerStorageEvent(
                 storage.name || 'Disk',
@@ -382,15 +384,27 @@ export function GlobalDeviceMonitor() {
               'online'
             );
 
-            showNotification({
+            addPersistentNotification({
               type: 'success',
               title: '🟢 Camera Online',
-              message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} is now back online`
+              message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} is now back online`,
+              systemId: currentSystem.systemId,
+              deviceId: currentDevice.id
             });
 
             lastNotifiedStatusRef.current[deviceKey] = 'online';
           } else if (!isFirstRun && !wasOffline && isNowOffline && lastNotified !== 'offline') {
-            // Device went offline - Only track state, no alert/notification for now
+            // Device went offline
+            console.log(`[GlobalDeviceMonitor] 🔴 ALERT: ${currentDevice.name} (${currentSystem.systemName}) went OFFLINE`);
+            
+            addPersistentNotification({
+              type: 'error',
+              title: '🔴 Camera Offline',
+              message: `${currentDevice.name || currentDevice.id} in ${currentSystem.systemName} has lost connection`,
+              systemId: currentSystem.systemId,
+              deviceId: currentDevice.id
+            });
+
             lastNotifiedStatusRef.current[deviceKey] = 'offline';
           } else if (previousStatus !== currentStatus) {
             // Track status for other transitions without notifying if it's just e.g. 'recording' -> 'online' (both online)

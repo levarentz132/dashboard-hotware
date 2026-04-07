@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Menu, Minus, Square, X, RefreshCw, Maximize, Minimize } from "lucide-react";
+import { Bell, Menu, Minus, Square, X, RefreshCw, Maximize, Minimize, AlertCircle } from "lucide-react";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import {
   Tooltip,
@@ -15,6 +15,17 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  getPersistentNotifications, 
+  markNotificationAsRead, 
+  clearAllNotifications, 
+  deleteNotification,
+  addPersistentNotification,
+  PersistentNotification
+} from "@/lib/persistent-notifications";
+import { cn } from "@/lib/utils";
+import { formatDistanceToNow } from "date-fns";
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -23,8 +34,90 @@ interface TopBarProps {
 export default function TopBar({ onMenuClick }: TopBarProps) {
   const { connected, loading: isSystemLoading } = useSystemInfo();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [notifications, setNotifications] = useState<PersistentNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
   // robust check for electron environment
   const isElectron = typeof window !== 'undefined' && (window as any).electron;
+
+  const [lastConnected, setLastConnected] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (lastConnected !== null && connected !== lastConnected) {
+      if (!connected) {
+        // System went offline
+        addPersistentNotification({
+          type: 'error',
+          title: 'System Offline',
+          message: 'Connection to the VMS system has been lost. Services may be limited.',
+        });
+      } else {
+        // System came back online
+        addPersistentNotification({
+          type: 'success',
+          title: 'System Online',
+          message: 'Connection to the VMS system has been restored.',
+        });
+      }
+    }
+    setLastConnected(connected);
+  }, [connected]);
+
+  const fetchNotifications = async () => {
+    const list = await getPersistentNotifications();
+    setNotifications(list);
+    setUnreadCount(list.filter(n => !n.read).length);
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 15000);
+    window.addEventListener('nx:notifications-updated', fetchNotifications);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('nx:notifications-updated', fetchNotifications);
+    };
+  }, []);
+
+  const formatTime = (ts: number) => {
+    try {
+      return formatDistanceToNow(ts, { addSuffix: true });
+    } catch (e) {
+      return "Just now";
+    }
+  };
+
+  const handlePreview = (n: PersistentNotification) => {
+    if (!n.deviceId || !n.systemId) return;
+
+    // Based on CloudRecordings handlePreview logic
+    if (n.durationMs && n.durationMs <= 2000) {
+      // Snapshot preview - would need setPreviewSnapshot in global state or just direct URL
+      const url = `/api/cloud/recordings/thumbnail?systemId=${n.systemId}&deviceId=${n.deviceId.replace(/[{}]/g, "")}&timestampMs=${n.startTimeMs}`;
+      window.open(url, "_blank");
+    } else {
+      const params = new URLSearchParams({
+        systemId: n.systemId || "127.0.0.1",
+        deviceId: n.deviceId,
+        startTime: String(n.startTimeMs),
+        endTime: String(n.endTimeMs || (n.startTimeMs ? n.startTimeMs + 300000 : 0)),
+        preview: "true",
+      });
+      window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
+    }
+  };
+
+  const handleDownload = (n: PersistentNotification) => {
+    if (!n.deviceId || !n.systemId) return;
+    const params = new URLSearchParams({
+      systemId: n.systemId || "127.0.0.1",
+      deviceId: n.deviceId,
+      startTime: String(n.startTimeMs),
+      endTime: String(n.endTimeMs || (n.startTimeMs ? n.startTimeMs + (n.durationMs || 1000) : 0)),
+      stream: "true",
+    });
+    window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
+  };
 
   // Toggle fullscreen
   const toggleFullscreen = async () => {
@@ -101,19 +194,109 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               )}
             </div>
 
-            {/* Notifications */}
-            <Popover>
+            {/* Notifications PERSISTENT Dropdown */}
+            <Popover onOpenChange={(open) => {
+              if (open) fetchNotifications();
+            }}>
               <PopoverTrigger asChild>
-                <button className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg relative">
-                  <Bell className="w-5 h-5" />
-                  <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center text-[10px] sm:text-xs">
-                    3
-                  </span>
+                <button className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg relative no-drag transition-colors group">
+                  <Bell className={cn("w-5 h-5", unreadCount > 0 ? "text-primary" : "text-gray-500")} />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center border-2 border-white px-1 shadow-sm">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
                 </button>
               </PopoverTrigger>
-              <PopoverContent className="w-72 p-0" align="end">
-                <div className="px-4 py-6 text-sm text-gray-500 text-center">
-                  No new notifications.
+              <PopoverContent className="w-[500px] p-0 shadow-2xl border-slate-200 overflow-hidden" align="end">
+                <div className="flex flex-col max-h-[500px]">
+                  <div className="px-4 py-3 border-b bg-slate-50 flex items-center justify-between">
+                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                       Notifications
+                       {unreadCount > 0 && <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{unreadCount} New</Badge>}
+                    </h3>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => clearAllNotifications()} className="h-7 text-[10px] uppercase font-bold text-slate-500 hover:text-destructive">
+                        Clear All
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="overflow-y-auto flex-1 py-1 bg-white scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                    {notifications.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 px-6 text-center space-y-3">
+                        <div className="p-3 bg-slate-50 rounded-full">
+                          <Bell className="w-8 h-8 text-slate-300" />
+                        </div>
+                        <p className="text-sm font-medium text-slate-500">No notifications yet.</p>
+                      </div>
+                    ) : (
+                      notifications.map((n) => (
+                        <div 
+                          key={n.id} 
+                          className={cn(
+                            "px-4 py-3 border-b last:border-0 hover:bg-slate-50/80 transition-colors group relative",
+                            !n.read ? "bg-blue-50/40 border-l-4 border-l-blue-500" : "border-l-4 border-l-transparent"
+                          )}
+                          onMouseEnter={() => !n.read && markNotificationAsRead(n.id)}
+                        >
+                          <div className="flex gap-3">
+                            <div className={cn(
+                              "mt-1 p-1.5 rounded-lg shrink-0",
+                              n.type === 'error' ? "bg-red-100 text-red-600" :
+                              n.type === 'warning' ? "bg-amber-100 text-amber-600" :
+                              n.type === 'success' ? "bg-green-100 text-green-600" : "bg-blue-100 text-blue-600"
+                            )}>
+                              {n.type === 'error' ? <AlertCircle className="w-4 h-4" /> :
+                               n.type === 'warning' ? <AlertCircle className="w-4 h-4" /> :
+                               n.type === 'success' ? <RefreshCw className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+                            </div>
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={cn("text-[13px] font-bold leading-tight", !n.read ? "text-slate-900" : "text-slate-700")}>
+                                  {n.title}
+                                </span>
+                                <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                                  {formatTime(n.timestamp)}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 leading-normal line-clamp-2">
+                                {n.message}
+                              </p>
+                              
+                              {/* Action Buttons for recording/snapshots */}
+                              {(n.deviceId && n.systemId) && (
+                                <div className="flex items-center gap-2 pt-2">
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
+                                    onClick={() => handlePreview(n)}
+                                  >
+                                    <RefreshCw className="w-3 h-3" /> Preview
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
+                                    onClick={() => handleDownload(n)}
+                                  >
+                                    <RefreshCw className="w-3 h-3" /> Download
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); deleteNotification(n.id); }}
+                              className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-destructive transition-all"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </PopoverContent>
             </Popover>

@@ -43,8 +43,10 @@ import { performAdminLogin } from "@/lib/auth-utils";
 import { cn } from "@/lib/utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
+import { format } from "date-fns";
 import { showNotification } from "@/lib/notifications";
+import { addPersistentNotification } from "@/lib/persistent-notifications";
+import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
@@ -578,7 +580,7 @@ export default function UserManagement() {
     });
 
     if (isAdmin) {
-      showNotification({
+      addPersistentNotification({
         type: "error",
         title: "Action Denied",
         message: "This user belongs to an Administrator group and cannot be deleted.",

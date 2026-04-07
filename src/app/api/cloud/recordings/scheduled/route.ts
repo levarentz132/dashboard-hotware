@@ -85,7 +85,8 @@ const startWatchdog = () => {
         originalSchedules = {}, 
         globalAuth = null, 
         nxLocationIp = "localhost", 
-        nxLocationPort = "7001" 
+        nxLocationPort = "7001",
+        notificationUserKey = null
       } = parsed;
       
       // Safety: Ensure we don't have literal "null" or empty strings
@@ -174,6 +175,24 @@ const startWatchdog = () => {
                     rec.endMs = nextDate.getTime() + (endMs - startMs);
                   } else {
                     rec.status = "completed";
+                    
+                    // Trigger persistent notification for WATCHDOG completion (screenshots)
+                    if (notificationUserKey) {
+                      const port = process.env.PORT || "3146";
+                      await fetch(`http://127.0.0.1:${port}/api/notifications`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                          username: notificationUserKey,
+                          type: "success",
+                          title: "Snapshot Done",
+                          message: `Scheduled snapshot for ${rec.cameraName} is finished.`,
+                          systemId: rec.systemId,
+                          deviceId: rec.cameraId,
+                          startTimeMs: startMs,
+                          durationMs: 0
+                        })
+                      }).catch(e => console.error("[Watchdog] Notification failed:", e.message));
+                    }
                   }
                 }
                 changed = true;
@@ -324,7 +343,14 @@ const startWatchdog = () => {
       if (changed) {
         await fs.writeFile(
           DATA_FILE,
-          JSON.stringify({ schedules: updatedSchedules, originalSchedules, globalAuth, nxLocationIp, nxLocationPort }, null, 2)
+          JSON.stringify({ 
+            schedules: updatedSchedules, 
+            originalSchedules, 
+            globalAuth, 
+            nxLocationIp, 
+            nxLocationPort,
+            notificationUserKey 
+          }, null, 2)
         );
       }
 
@@ -379,7 +405,10 @@ export async function POST(request: NextRequest) {
     body.nxLocationPort = nxPort;
 
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    await fs.writeFile(DATA_FILE, JSON.stringify(body, null, 2), "utf-8");
+    await fs.writeFile(DATA_FILE, JSON.stringify({
+      ...body,
+      notificationUserKey: body.notificationUserKey || request.cookies.get("local_nx_user")?.value || request.cookies.get("nx_cloud_session")?.value
+    }, null, 2), "utf-8");
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
