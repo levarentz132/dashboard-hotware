@@ -249,7 +249,7 @@ export async function POST(request: NextRequest) {
 
     const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
     const fileDateStr = `${YYYY}${MM}${DD}`; // Compact format
-    const baseFileName = `${safeCameraName}_${fileDateStr}_${displayHH}${displaymm}${displaySS}`;
+    const baseFileName = `${cleanDeviceId}__${safeCameraName}_${fileDateStr}_${displayHH}${displaymm}${displaySS}`;
 
     // ---- Get Custom Storage Path ----
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");

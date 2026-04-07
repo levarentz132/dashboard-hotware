@@ -134,25 +134,33 @@ export async function GET(request: NextRequest) {
           const files = fs.readdirSync(folderPath).filter(f => f.endsWith(".png"));
 
           for (const file of files) {
-            // Check for new ID-based naming first: {deviceId}__{cameraName}_{YYYYMMDD}_{HHMMSS}.png
-            // Else handle legacy naming: {cameraName}_{YYYY-MM-DD}_{HHMMSS}.png
+            // New format: {deviceId}__{cameraName}_{YYYYMMDD}_{HHMMSS}.png
+            // Legacy format: {cameraName}_{YYYY-MM-DD}_{HHMMSS}.png
             const idSplit = file.split("__");
+            let isMatch = false;
+            
             if (idSplit.length > 1) {
-              // This is a new format file. Does it belong to this camera?
+              // This is a new format file. Strict ID match.
               const fileDeviceId = idSplit[0].toLowerCase();
-              if (fileDeviceId !== deviceId.toLowerCase()) continue;
+              if (fileDeviceId === deviceId.toLowerCase()) {
+                isMatch = true;
+              }
             } else if (searchCameraName) {
-              // Legacy format. Does it start with our camera name + underscore?
+              // Legacy format. Match by camera name.
+              // Note: Only match if the file does NOT have a dual-separator (__) indicating it belongs to a different ID-based record.
               const safeSearchName = searchCameraName.replace(/[<>:"/\\|?*]/g, "_").trim();
-              if (!file.startsWith(safeSearchName + "_")) continue;
+              if (file.startsWith(safeSearchName + "_")) {
+                isMatch = true;
+              }
             }
 
+            if (!isMatch) continue;
+
             // Parse timestamp from filename
-            const match = file.match(/_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.png$/);
+            const match = file.match(/_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.(?:png|jpg)$/);
             if (!match) continue;
 
             const [, dateStr, timeStr] = match;
-            // Reconstruct timestamp from the filename
             let y, m, d;
             if (dateStr.includes("-")) {
               [y, m, d] = dateStr.split("-").map(Number);
@@ -167,29 +175,66 @@ export async function GET(request: NextRequest) {
             const timestamp = new Date(y, m - 1, d, hour, minute, second).getTime();
 
             if (timestamp >= startLimit && timestamp <= endLimit) {
-              // Check if we already have a record for this exact millisecond
-              // Deduplicate: If an equivalent VMS period (snapshot-level or short clip) exists within ±5s, skip local file
-              const exists = allPeriods.some(p => {
-                const timeDiff = Math.abs(p.startTimeMs - timestamp);
-                return timeDiff < 5000 && (p.durationMs === 0 || p.durationMs <= 62000);
+              // Deduplicate: If an equivalent VMS period (short clip/pulse) already exists within ±5s, 
+              // we hide the VMS record and keep the Local record (labeled SNAPSHOT).
+              // We'll perform the filtering AFTER scanning both VMS and local to keep logic simple.
+              allPeriods.push({
+                startTimeMs: timestamp,
+                durationMs: 0,
+                isScreenshot: true,
+                isLocal: true,
+                serverId: "local-storage",
+                fileName: file,
+                dateFolder: dateFolder,
               });
-              if (!exists) {
-                allPeriods.push({
-                  startTimeMs: timestamp,
-                  durationMs: 0,
-                  isScreenshot: true,
-                  isLocal: true,
-                  serverId: "local-storage",
-                  fileName: file,
-                  dateFolder: dateFolder,
-                });
-              }
             }
           }
         }
 
-        // Sort by start time descending (newest first)
-        allPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
+        // 3. Final Deduplication and Post-Processing
+        // We group entries by a 5-second window to resolve duplicates between VMS pulses, 
+        // new ID-based snapshots, and legacy name-based snapshots.
+        const finalPeriods: any[] = [];
+        const sortedCandidateList = [...allPeriods].sort((a, b) => {
+           // Sort priority within the 5s window:
+           // 1. Local ID-based (has fileName and __)
+           // 2. Local legacy (has fileName, no __)
+           // 3. VMS recording (no fileName)
+           if (a.isLocal && b.isLocal) {
+              const aHasId = (a.fileName || "").includes("__") ? 0 : 1;
+              const bHasId = (b.fileName || "").includes("__") ? 0 : 1;
+              return aHasId - bHasId;
+           }
+           if (a.isLocal) return -1;
+           if (b.isLocal) return 1;
+           return 0;
+        });
+
+        for (const candidate of sortedCandidateList) {
+          const isDuplicate = finalPeriods.some(p => {
+             // 1. Explicit filename check (Same download link)
+             if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
+
+             // 2. Time-based deduplication
+             const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
+             // If they are within 10 seconds of each other
+             if (timeDiff < 10000) {
+                // If we already have a local snapshot for this window, skip this VMS record (pulse)
+                if (p.isLocal && !candidate.isLocal && candidate.durationMs <= 10000) return true;
+                // If both are local snapshots for the same window, prioritize the ID-split over legacy
+                if (p.isLocal && candidate.isLocal) return true;
+             }
+             return false;
+          });
+
+          if (!isDuplicate) {
+            finalPeriods.push(candidate);
+          }
+        }
+
+        // Final sort by start time descending (newest first)
+        finalPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
+        allPeriods = finalPeriods;
       }
     } catch (err) {
       console.warn("[recordings] Failed to scan local screenshots:", err);

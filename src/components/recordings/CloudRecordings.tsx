@@ -921,7 +921,20 @@ export default function CloudRecordings() {
         }));
         
         const flatResults = allResults.flat();
-        const mapped: RecentRecording[] = flatResults.map((p: any, i: number) => {
+        
+        // Deduplicate: If multiple cameras (due to same name) returned the same legacy snapshot file,
+        // we should only show it once in the "All Cameras" view.
+        const seenFiles = new Set<string>();
+        const deduplicated = flatResults.filter(p => {
+          if (p.isScreenshot && p.fileName) {
+            const key = `${p.dateFolder || ""}/${p.fileName}`;
+            if (seenFiles.has(key)) return false;
+            seenFiles.add(key);
+          }
+          return true;
+        });
+
+        const mapped: RecentRecording[] = deduplicated.map((p: any, i: number) => {
           const duration = p.durationMs || 0;
           const isScreenshot = duration <= 2000 || p.isScreenshot;
           return {
