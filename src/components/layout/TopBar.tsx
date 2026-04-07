@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Menu, Minus, Square, X, RefreshCw, Maximize, Minimize, AlertCircle } from "lucide-react";
+import { Bell, Menu, Minus, Square, X, RefreshCw, Maximize, Minimize, AlertCircle, Eye, Download } from "lucide-react";
 import { useSystemInfo } from "@/hooks/useNxAPI-system";
 import {
   Tooltip,
@@ -219,59 +219,49 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
                           )}
                           onMouseEnter={() => !n.read && markNotificationAsRead(n.id)}
                         >
-                          <div className="flex gap-3">
-                            <div className={cn(
-                              "mt-1 p-1.5 rounded-lg shrink-0",
-                              n.type === 'error' ? "bg-red-100 text-red-600" :
-                              n.type === 'warning' ? "bg-amber-100 text-amber-600" :
-                              n.type === 'success' ? "bg-green-100 text-green-600" : "bg-blue-100 text-blue-600"
-                            )}>
-                              {n.type === 'error' ? <AlertCircle className="w-4 h-4" /> :
-                               n.type === 'warning' ? <AlertCircle className="w-4 h-4" /> :
-                               n.type === 'success' ? <RefreshCw className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+                          <div className="flex-1 space-y-1 pr-6">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={cn("text-[13px] font-bold leading-tight", !n.read ? "text-slate-900" : "text-slate-700")}>
+                                {n.title}
+                              </span>
+                              <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                                {formatTime(n.timestamp)}
+                              </span>
                             </div>
-                            <div className="flex-1 space-y-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className={cn("text-[13px] font-bold leading-tight", !n.read ? "text-slate-900" : "text-slate-700")}>
-                                  {n.title}
-                                </span>
-                                <span className="text-[10px] text-slate-400 whitespace-nowrap">
-                                  {formatTime(n.timestamp)}
-                                </span>
+                            <p className="text-xs text-slate-500 leading-normal line-clamp-2">
+                              {n.message}
+                            </p>
+                            
+                            {/* Action Buttons for recording/snapshots */}
+                            {(n.deviceId && n.systemId) && (
+                              <div className="flex items-center gap-2 pt-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
+                                  onClick={() => handlePreview(n)}
+                                >
+                                  <Eye className="w-3 h-3" /> Preview
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
+                                  onClick={() => handleDownload(n)}
+                                >
+                                  <Download className="w-3 h-3" /> Download
+                                </Button>
                               </div>
-                              <p className="text-xs text-slate-500 leading-normal line-clamp-2">
-                                {n.message}
-                              </p>
-                              
-                              {/* Action Buttons for recording/snapshots */}
-                              {(n.deviceId && n.systemId) && (
-                                <div className="flex items-center gap-2 pt-2">
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline" 
-                                    className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
-                                    onClick={() => handlePreview(n)}
-                                  >
-                                    <RefreshCw className="w-3 h-3" /> Preview
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline" 
-                                    className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
-                                    onClick={() => handleDownload(n)}
-                                  >
-                                    <RefreshCw className="w-3 h-3" /> Download
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); deleteNotification(n.id); }}
-                              className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-destructive transition-all"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
+                            )}
                           </div>
+
+                          {/* Delete Button (hover only, absolutely positioned outside the flex flow) */}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); deleteNotification(n.id); }}
+                            className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-destructive transition-all rounded-full hover:bg-destructive/10"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))
                     )}

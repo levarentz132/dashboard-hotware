@@ -1210,7 +1210,7 @@ export default function CloudRecordings() {
                           <div>
                             <div className="font-semibold text-sm flex items-center gap-2">
                               {rec.cameraName}
-                              {rec.isScreenshot && <Badge variant="outline" className="text-[10px] h-4 px-1 bg-blue-50 border-blue-200 text-blue-600">SNAPSHOT</Badge>}
+
                             </div>
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
                               <span className="font-medium text-foreground/80">
