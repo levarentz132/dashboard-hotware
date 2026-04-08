@@ -249,10 +249,12 @@ export async function POST(request: NextRequest) {
           ...user,
           ...profileData.user,
           id: Number(profileData.user.id),
-          role: profileData.user.role as any, // Cast to any to handle string/object
+          role: (profileData.user.role as any) || user.role,
+          system_id: profileData.user.system_id || user.system_id,
+          is_active: profileData.user.is_active ?? user.is_active,
           created_at: profileData.user.created_at || user.created_at,
-          last_login: profileData.user.last_login || user.last_login as any,
-        };
+          last_login: profileData.user.last_login || (user.last_login as any),
+        } as UserPublic;
         console.log(`[Login] User profile enriched from /me for ${finalUser.username}`);
       }
       // Preserve org_camera_ids from the original login response if /me did not include them

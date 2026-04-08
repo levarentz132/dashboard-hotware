@@ -241,10 +241,14 @@ export async function POST(request: NextRequest) {
     let displaySS = SS;
     if (body.scheduledStartTime) {
       const parts = body.scheduledStartTime.split(":");
-      if (parts.length >= 2) {
+      if (parts.length >= 3) {
         displayHH = parts[0].padStart(2, "0");
         displaymm = parts[1].padStart(2, "0");
-        displaySS = "00"; // Snapshots usually start at the exact minute mark
+        displaySS = parts[2].padStart(2, "0");
+      } else if (parts.length >= 2) {
+        displayHH = parts[0].padStart(2, "0");
+        displaymm = parts[1].padStart(2, "0");
+        displaySS = "00"; 
       }
     }
 

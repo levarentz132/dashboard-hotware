@@ -833,12 +833,24 @@ export default function CloudRecordings() {
         const startMs = new Date(tDate).setHours(sh, sm, 0, 0);
         const endMs = scheduleType === "screenshot" ? startMs : new Date(tDate).setHours(eh, em, 59, 999);
         const nowMs = Date.now();
+        
+        // Skip if already finished
+        if (endMs < nowMs && scheduleType !== "screenshot") return;
         if (endMs < startMs) return;
+
+        // ── ADJUSTMENT: If start is in the past, set to NOW ──────────────────
+        let effectiveStartMs = startMs;
+        let effectiveStartTime = tStart;
+        if (startMs < nowMs) {
+          effectiveStartMs = nowMs;
+          const dNow = new Date();
+          effectiveStartTime = `${String(dNow.getHours()).padStart(2, '0')}:${String(dNow.getMinutes()).padStart(2, '0')}:${String(dNow.getSeconds()).padStart(2, '0')}`;
+        }
 
         const entryId = `sched-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
         // ── CASE: IMMEDIATE SNAPSHOT (Special Fast Path) ────────────────────
-        if (scheduleType === "screenshot" && (startMs <= nowMs + 10000)) {
+        if (scheduleType === "screenshot" && (effectiveStartMs <= nowMs + 10000)) {
           const immediateEntryId = `snap-${Date.now()}`;
           const snapshotEntry: ScheduledRecording = {
             id: immediateEntryId,
@@ -847,9 +859,9 @@ export default function CloudRecordings() {
             systemId: systemId,
             systemName: device?.systemName || "",
             date: tDate,
-            startTime: tStart,
+            startTime: effectiveStartTime, 
             endTime: tEnd,
-            startMs: startMs,
+            startMs: effectiveStartMs,
             endMs: endMs,
             type: "screenshot",
             status: "in progress",
@@ -868,7 +880,7 @@ export default function CloudRecordings() {
                   deviceId: cameraDeviceId,
                   cameraName: device?.name || "Camera",
                   timestampMs: Date.now(),
-                  scheduledStartTime: tStart, // Pass the original human-set time
+                  scheduledStartTime: effectiveStartTime, // Pass the adjusted time
                 })
               });
               setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
@@ -891,7 +903,7 @@ export default function CloudRecordings() {
         }
 
         // ── CASE: FUTURE TASKS (Delegated to Watchdog) ──────────────────────
-        const entryStatus = startMs > nowMs ? "pending" : (scheduleType === "screenshot" ? "in progress" : "recording");
+        const entryStatus = effectiveStartMs > nowMs ? "pending" : (scheduleType === "screenshot" ? "in progress" : "recording");
         const newEntry: ScheduledRecording = {
           id: entryId,
           cameraId: normalizeId(cameraDeviceId),
@@ -899,9 +911,9 @@ export default function CloudRecordings() {
           systemId: systemId,
           systemName: device?.systemName || "",
           date: tDate,
-          startTime: tStart,
+          startTime: effectiveStartTime, // Use adjusted time if in the past
           endTime: tEnd,
-          startMs: startMs,
+          startMs: effectiveStartMs,
           endMs: endMs,
           type: scheduleType,
           status: entryStatus,
@@ -910,7 +922,7 @@ export default function CloudRecordings() {
           batchId,
         };
         if (scheduleType === "screenshot") {
-          newEntry.screenshotTime = tStart;
+          newEntry.screenshotTime = effectiveStartTime;
         }
 
         newScheduledEntries.push(newEntry);
@@ -1214,7 +1226,7 @@ export default function CloudRecordings() {
                             </div>
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
                               <span className="font-medium text-foreground/80">
-                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })}
                               </span>
                               {!rec.isScreenshot && rec.durationMs > 5000 && (
                                 <>
@@ -1232,10 +1244,15 @@ export default function CloudRecordings() {
                             onClick={() => handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder)} 
                             className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary"
                           >
-                            <Eye className="h-3.5 w-3.5" /> Preview
+                            <Eye className="h-3.5 w-3.5" /> {rec.isScreenshot ? "View Image" : "Preview"}
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder)} className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary">
-                            <Download className="h-3.5 w-3.5" /> Download
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isScreenshot || rec.isLocal, rec.fileName, rec.dateFolder)} 
+                            className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary"
+                          >
+                            <Download className="h-3.5 w-3.5" /> {rec.isScreenshot ? "Save Image" : "Download"}
                           </Button>
                         </div>
                       </div>

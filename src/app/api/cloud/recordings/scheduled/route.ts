@@ -103,13 +103,20 @@ const startWatchdog = () => {
           if (rec.status === "completed") return rec;
 
           // Calculate start/end times in MS
-          const [sh, sm] = rec.startTime.split(":").map(Number);
-          const [eh, em] = (rec.endTime || rec.startTime).split(":").map(Number);
+          const startParts = rec.startTime.split(":").map(Number);
+          const endParts = (rec.endTime || rec.startTime).split(":").map(Number);
+          
+          const sh = startParts[0];
+          const sm = startParts[1];
+          const ss = startParts[2] || 0; // Default to 0 seconds for start
+          
+          const eh = endParts[0];
+          const em = endParts[1];
+          const es = endParts[2] !== undefined ? endParts[2] : 59; // Default to 59s for end
+
           // Determine absolute start/end times
-          // Primary: use absolute timestamps passed from frontend (no timezone issues)
-          // Fallback: calculate using server's local time (only for legacy entries)
-          const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, 0, 0);
-          const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, 59, 999);
+          const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, ss, 0);
+          const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, es, 999);
 
           // ── SCREENSHOT FAST PATH ─────────────────────────────────────────────
           if (rec.type === "screenshot") {
@@ -163,7 +170,7 @@ const startWatchdog = () => {
                         let monthIdx = nextDate.getMonth() + 1;
                         let next = new Date(year, monthIdx, targetDay);
                         while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-                        next.setHours(sh, sm, 0, 0);
+                        next.setHours(sh, sm, ss, 0);
                         nextDate.setTime(next.getTime());
                       } else {
                         nextDate.setMonth(nextDate.getMonth() + 1);
@@ -311,7 +318,7 @@ const startWatchdog = () => {
                     let monthIdx = nextDate.getMonth() + 1;
                     let next = new Date(year, monthIdx, targetDay);
                     while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-                    next.setHours(sh, sm, 0, 0);
+                    next.setHours(sh, sm, ss, 0);
                     nextDate.setTime(next.getTime());
                   } else {
                     nextDate.setMonth(nextDate.getMonth() + 1);

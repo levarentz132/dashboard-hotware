@@ -43,7 +43,7 @@ export interface UserPublic {
   organization?: Organization; // Single organization from /me
   privileges?: Privilege[]; // New: user's access privileges
   // List of allowed camera IDs for this user's organization (if provided by external API)
-  org_camera_ids?: string[];
+  org_camera_ids?: string[] | number[];
   is_active: boolean;
   created_at: Date | string;
   last_login?: Date | string | null;

@@ -51,6 +51,8 @@ export interface ExternalAuthResponse {
     last_login?: string | null;
     is_active?: boolean;
     created_at?: string;
+    org_camera_ids?: string[] | number[];
+    orgCameraIds?: string[] | number[];
   };
   organization?: ExternalOrganization; // Single organization from /me
 }
