@@ -67,7 +67,7 @@ const navigationItems: NavItem[] = [
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle, module: "alarm_console" },
   { id: "recordings", label: "Recordings", icon: Video, href: "/recordings", module: "recordings" },
   { id: "audits", label: "User Logs", icon: Users, module: "user_logs" },
-  { id: "analytics", label: "Analytics", icon: BarChart3, module: "analytics" },
+  // { id: "analytics", label: "Analytics", icon: BarChart3, module: "analytics" },
   { id: "storage", label: "Storage", icon: Database, module: "storage" },
   // { id: "automation", label: "Automation", icon: Cpu, module: "automation" },
   { id: "users", label: "User Management", icon: Users, module: "user_management" },

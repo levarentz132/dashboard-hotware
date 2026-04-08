@@ -256,7 +256,7 @@ const startWatchdog = () => {
                 console.warn(`[Watchdog] Could not fetch original schedule for ${rec.cameraName}:`, e);
               }
 
-              await vmsRequest("PATCH", `/rest/v4/devices/${cleanId}`, {
+              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
                 schedule: {
                   isEnabled: true,
                 },
@@ -290,7 +290,7 @@ const startWatchdog = () => {
               // ── Step 1: DISABLE recording immediately ──────────────────────
               // Always disable first to guarantee the camera stops NOW,
               // regardless of what the original schedule says.
-              await vmsRequest("PATCH", `/rest/v4/devices/${cleanId}`, {
+              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
                 schedule: { isEnabled: false }
               }, globalAuth, ip, port);
               console.log(`[Watchdog] Recording stopped for ${rec.cameraName}`);
