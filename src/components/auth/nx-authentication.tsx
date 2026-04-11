@@ -109,7 +109,35 @@ export function NxAuthentication() {
 
         checkSession();
         
-        // Sync NX location from cookies
+        // Always try to fetch global server config for network clients
+        const fetchGlobalConfig = async () => {
+            try {
+                const res = await fetch("/api/config/nx");
+                const data = await res.json();
+                if (data.success && data.config) {
+                    const { NEXT_PUBLIC_NX_SERVER_HOST, NEXT_PUBLIC_NX_SERVER_PORT, NEXT_PUBLIC_NX_SYSTEM_ID } = data.config;
+                    
+                    // Update state if not already explicitly set in cookies by user (or if set to default localhost)
+                    const currentIp = Cookies.get("nx_location_ip");
+                    if ((!currentIp || currentIp === "localhost") && NEXT_PUBLIC_NX_SERVER_HOST) {
+                        setNxLocation(prev => ({ ...prev, ip: NEXT_PUBLIC_NX_SERVER_HOST }));
+                    }
+                    const currentPort = Cookies.get("nx_location_port");
+                    if ((!currentPort || currentPort === "7001") && NEXT_PUBLIC_NX_SERVER_PORT) {
+                        setNxLocation(prev => ({ ...prev, port: NEXT_PUBLIC_NX_SERVER_PORT }));
+                    }
+                    if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
+                        Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, { expires: 365, path: '/' });
+                    }
+                }
+            } catch (e) {
+                console.warn("[NxAuth] Failed to fetch global config fallback", e);
+            }
+        };
+
+        fetchGlobalConfig();
+        
+        // Sync NX location from cookies (user preference overrides)
         const savedIp = Cookies.get("nx_location_ip");
         const savedPort = Cookies.get("nx_location_port");
         if (savedIp) setNxLocation(prev => ({ ...prev, ip: savedIp }));

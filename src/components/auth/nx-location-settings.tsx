@@ -20,8 +20,28 @@ export function NxLocationSettings() {
     useEffect(() => {
         const savedIp = Cookies.get("nx_location_ip");
         const savedPort = Cookies.get("nx_location_port");
+        
         if (savedIp) setIp(savedIp);
         if (savedPort) setPort(savedPort);
+
+        // If not set or set to default 'localhost', try to fetch server-side global settings
+        if (!savedIp || savedIp === "localhost") {
+            const fetchGlobalConfig = async () => {
+                try {
+                    const res = await fetch("/api/config/nx");
+                    const data = await res.json();
+                    if (data.success && data.config?.NEXT_PUBLIC_NX_SERVER_HOST) {
+                        setIp(data.config.NEXT_PUBLIC_NX_SERVER_HOST);
+                        if (data.config.NEXT_PUBLIC_NX_SERVER_PORT) {
+                            setPort(data.config.NEXT_PUBLIC_NX_SERVER_PORT);
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[NxLocation] Failed to fetch global config", e);
+                }
+            };
+            fetchGlobalConfig();
+        }
     }, []);
 
     const handleSave = () => {

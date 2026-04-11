@@ -83,6 +83,12 @@ export async function POST(request: NextRequest) {
       console.log(`[Login] Using server_id from Electron header: ${server_id}`);
     }
 
+    // NEW: Final fallback to server-side dynamicConfig for network clients
+    if (!system_id && !server_id && dynamicConfig?.NEXT_PUBLIC_NX_SYSTEM_ID) {
+        system_id = dynamicConfig.NEXT_PUBLIC_NX_SYSTEM_ID.replace(/[{}]/g, "");
+        console.log(`[Login] Using global system_id fallback: ${system_id}`);
+    }
+
     const identificationId = system_id || server_id;
     console.log(`[Login Attempt] User: ${username}, SystemID: ${system_id || "None"}, ServerID: ${server_id || "None"}`);
 

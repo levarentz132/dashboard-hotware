@@ -91,8 +91,17 @@ function getServerSideConfig(): Record<string, string> {
 
   const fs = require('fs');
   const path = require('path');
-  const configPath = process.env.EXT_CONFIG_PATH;
+  let configPath = process.env.EXT_CONFIG_PATH;
   
+  // Dev Fallback: Try to find the Electron config file in the default AppData folder if running in dev mode
+  if (!configPath) {
+    const home = process.env.APPDATA || (process.platform === 'darwin' ? process.env.HOME + '/Library/Application Support' : process.env.HOME + '/.config');
+    const fallbackPath = path.join(home, 'hotware-dashboard', '.env.local');
+    if (fs.existsSync(fallbackPath)) {
+      configPath = fallbackPath;
+    }
+  }
+
   if (!configPath || !fs.existsSync(configPath)) {
     const envConfig = {
       NEXT_PUBLIC_NX_SYSTEM_ID: process.env.NEXT_PUBLIC_NX_SYSTEM_ID || '',
