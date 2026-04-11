@@ -563,6 +563,7 @@ function startNextDev() {
     const env = {
         ...process.env,
         PORT: currentPort,
+        HOSTNAME: '0.0.0.0',
         NODE_OPTIONS: '--max-old-space-size=1024'
     };
     launchServer('npm', ['run', 'dev'], cwd, env);
@@ -701,7 +702,7 @@ function startNextProd() {
             ...process.env,
             PORT: currentPort,
             NODE_ENV: 'production',
-            HOSTNAME: 'localhost',
+            HOSTNAME: '0.0.0.0',
             NODE_PATH: nodeModulesPath
         };
 
@@ -855,6 +856,25 @@ app.whenReady().then(async () => {
     // wait until server is ready
     const url = `http://localhost:${currentPort}`;
     const ready = await waitForServer(url);
+    
+    if (ready) {
+        const os = require('os');
+        const interfaces = os.networkInterfaces();
+        let networkUrl = '';
+        for (const name of Object.keys(interfaces)) {
+            for (const iface of interfaces[name]) {
+                if (iface.family === 'IPv4' && !iface.internal) {
+                    networkUrl = `http://${iface.address}:${currentPort}`;
+                    break;
+                }
+            }
+            if (networkUrl) break;
+        }
+        if (networkUrl) {
+            logtoFile(`[Electron] Dashboard is accessible on your network at: ${networkUrl}`);
+            console.log(`[Electron] External Network URL: ${networkUrl}`);
+        }
+    }
 
     if (!ready) {
         const msg = 'Next server failed to start (Timeout 30s)';

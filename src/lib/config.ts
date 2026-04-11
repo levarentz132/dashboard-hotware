@@ -32,7 +32,7 @@ export function isSecureContext(): boolean {
 
   // Check environment variable (set in Electron main process)
   const envHostname = process.env.HOSTNAME?.toLowerCase();
-  if (envHostname === "localhost" || envHostname === "127.0.0.1") return false;
+  if (envHostname === "localhost" || envHostname === "127.0.0.1" || envHostname === "0.0.0.0") return false;
 
   // Check client-side window object
   if (typeof window !== 'undefined') {
