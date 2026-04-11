@@ -73,6 +73,65 @@ function decryptPassword(encryptedData: string | null): string | null {
   }
 }
 
+let cachedConfig: Record<string, string> | null = null;
+let lastReadTime = 0;
+const CACHE_TTL = 2000; // Cache for 2 seconds to avoid excessive disk I/O
+
+/**
+ * Server-side helper to read persistent config from .env.local on disk.
+ * This ensures that even remote browsers receive the configuration set up by the host.
+ */
+function getServerSideConfig(): Record<string, string> {
+  if (typeof window !== 'undefined') return {};
+  
+  const now = Date.now();
+  if (cachedConfig && (now - lastReadTime < CACHE_TTL)) {
+    return cachedConfig;
+  }
+
+  const fs = require('fs');
+  const path = require('path');
+  const configPath = process.env.EXT_CONFIG_PATH;
+  
+  if (!configPath || !fs.existsSync(configPath)) {
+    const envConfig = {
+      NEXT_PUBLIC_NX_SYSTEM_ID: process.env.NEXT_PUBLIC_NX_SYSTEM_ID || '',
+      NEXT_PUBLIC_NX_USERNAME: process.env.NEXT_PUBLIC_NX_USERNAME || '',
+      NEXT_PUBLIC_NX_PASSWORD: process.env.NEXT_PUBLIC_NX_PASSWORD || '',
+      NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED: process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || '',
+      NEXT_PUBLIC_NX_CLOUD_USERNAME: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
+      NEXT_PUBLIC_NX_CLOUD_PASSWORD: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '',
+      NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '',
+      NX_CLOUD_TOKEN: process.env.NX_CLOUD_TOKEN || '',
+      NEXT_PUBLIC_NX_SERVER_HOST: process.env.NEXT_PUBLIC_NX_SERVER_HOST || '',
+      NEXT_PUBLIC_NX_SERVER_PORT: process.env.NEXT_PUBLIC_NX_SERVER_PORT || '',
+    };
+    cachedConfig = envConfig;
+    lastReadTime = now;
+    return envConfig;
+  }
+
+  try {
+    const content = fs.readFileSync(configPath, 'utf8');
+    const lines = content.split('\n');
+    const config: Record<string, string> = {};
+    lines.forEach((line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const [key, ...valueParts] = trimmed.split('=');
+      if (key && valueParts.length > 0) {
+        config[key.trim()] = valueParts.join('=').trim();
+      }
+    });
+    cachedConfig = config;
+    lastReadTime = now;
+    return config;
+  } catch (e) {
+    console.error('[Config] Failed to read disk config:', e);
+    return {};
+  }
+}
+
 /**
  * Helper to resolve config from headers (server-side) or window (client-side)
  */
@@ -81,53 +140,41 @@ export function getDynamicConfig(request?: Request | NextRequest) {
     return (window as any).electronConfig || null;
   }
 
+  // Use headers if available (Local Electron requests)
+  let headersConfig: any = null;
   if (request) {
     const headers = (request as any).headers;
     const isHeadersObject = typeof headers.get === 'function';
 
-    // Helper for case-insensitive lookup
     const getH = (key: string) => {
       if (isHeadersObject) return headers.get(key);
       const lowerKey = key.toLowerCase();
-      // For plain objects, we need to manually find the key
       const keys = Object.keys(headers);
       const actualKey = keys.find(k => k.toLowerCase() === lowerKey);
       return actualKey ? headers[actualKey] : null;
     };
 
-    const config = {
-      NEXT_PUBLIC_NX_SYSTEM_ID: getH('x-electron-system-id'),
-      NEXT_PUBLIC_NX_USERNAME: getH('x-electron-username'),
-      NEXT_PUBLIC_NX_PASSWORD: getH('x-electron-vms-password'),
-      NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED: getH('x-electron-vms-password-encrypted'),
-      NEXT_PUBLIC_NX_CLOUD_USERNAME: getH('x-electron-cloud-username'),
-      NEXT_PUBLIC_NX_CLOUD_PASSWORD: getH('x-electron-cloud-password'),
-      NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED: getH('x-electron-cloud-password-encrypted'),
-      NX_CLOUD_TOKEN: getH('x-electron-cloud-token'),
-      NEXT_PUBLIC_NX_SERVER_HOST: getH('x-electron-server-host'),
-      NEXT_PUBLIC_NX_SERVER_PORT: getH('x-electron-server-port'),
-    };
-
-    // DEBUG: Log detected electron headers
-    const electronHeaders: any = {};
-    if (isHeadersObject) {
-      headers.forEach((v: string, k: string) => {
-        if (k.toLowerCase().startsWith('x-electron-')) electronHeaders[k] = v ? '(set)' : '(empty)';
-      });
-    } else {
-      Object.keys(headers).forEach(k => {
-        if (k.toLowerCase().startsWith('x-electron-')) electronHeaders[k] = headers[k] ? '(set)' : '(empty)';
-      });
+    const hSystemId = getH('x-electron-system-id');
+    if (hSystemId) {
+      headersConfig = {
+        NEXT_PUBLIC_NX_SYSTEM_ID: hSystemId,
+        NEXT_PUBLIC_NX_USERNAME: getH('x-electron-username'),
+        NEXT_PUBLIC_NX_PASSWORD: getH('x-electron-vms-password'),
+        NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED: getH('x-electron-vms-password-encrypted'),
+        NEXT_PUBLIC_NX_CLOUD_USERNAME: getH('x-electron-cloud-username'),
+        NEXT_PUBLIC_NX_CLOUD_PASSWORD: getH('x-electron-cloud-password'),
+        NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED: getH('x-electron-cloud-password-encrypted'),
+        NX_CLOUD_TOKEN: getH('x-electron-cloud-token'),
+        NEXT_PUBLIC_NX_SERVER_HOST: getH('x-electron-server-host'),
+        NEXT_PUBLIC_NX_SERVER_PORT: getH('x-electron-server-port'),
+      };
     }
-
-    if (Object.keys(electronHeaders).length > 0 && !request.url.includes('api/nx')) {
-      console.log(`[DynamicConfig] Headers for ${request.url}:`, electronHeaders);
-    }
-
-    return config;
   }
 
-  return null;
+  // Fallback to disk configuration (Remote Network users or missing headers)
+  const diskConfig = getServerSideConfig();
+
+  return headersConfig || diskConfig;
 }
 
 // Nx Witness API Configuration
@@ -137,14 +184,17 @@ export const API_CONFIG = {
   // Direct server URL for server-side requests
   serverURL: process.env.NEXT_PUBLIC_API_URL,
   wsURL: process.env.NEXT_PUBLIC_WS_URL,
-  username: extConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME,
-  vmsPasswordHash: extConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD,
-  cloudUsername: extConfig?.NEXT_PUBLIC_NX_CLOUD_USERNAME || process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME,
-  cloudPasswordHash: extConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD,
-  password: process.env.NEXT_PUBLIC_NX_PASSWORD,
-  systemId: extConfig?.NEXT_PUBLIC_NX_SYSTEM_ID || process.env.NEXT_PUBLIC_NX_SYSTEM_ID,
-  serverHost: extConfig?.NEXT_PUBLIC_NX_SERVER_HOST || process.env.NEXT_PUBLIC_NX_SERVER_HOST,
-  serverPort: extConfig?.NEXT_PUBLIC_NX_SERVER_PORT || process.env.NEXT_PUBLIC_NX_SERVER_PORT,
+  
+  // Dynamic getters to ensure we always use the latest config (disk or headers)
+  get username() { return getDynamicConfig()?.NEXT_PUBLIC_NX_USERNAME; },
+  get vmsPasswordHash() { return getDynamicConfig()?.NEXT_PUBLIC_NX_PASSWORD; },
+  get cloudUsername() { return getDynamicConfig()?.NEXT_PUBLIC_NX_CLOUD_USERNAME; },
+  get cloudPasswordHash() { return getDynamicConfig()?.NEXT_PUBLIC_NX_CLOUD_PASSWORD; },
+  get password() { return getDynamicConfig()?.NEXT_PUBLIC_NX_PASSWORD; },
+  get systemId() { return getDynamicConfig()?.NEXT_PUBLIC_NX_SYSTEM_ID; },
+  get serverHost() { return getDynamicConfig()?.NEXT_PUBLIC_NX_SERVER_HOST; },
+  get serverPort() { return getDynamicConfig()?.NEXT_PUBLIC_NX_SERVER_PORT; },
+
   // Fallback URLs to try (now through proxy)
   fallbackURLs: ["/api/nx"],
 };
@@ -195,7 +245,7 @@ export const API_ENDPOINTS = {
 // NX Cloud Configuration for auto-login
 export const CLOUD_CONFIG = {
   // Secure Cloud Token (New)
-  token: extConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN,
+  get token() { return getDynamicConfig()?.NX_CLOUD_TOKEN; },
   // Enable auto-login when token is configured
   autoLoginEnabled: true,
   // Base URL for NX Cloud API

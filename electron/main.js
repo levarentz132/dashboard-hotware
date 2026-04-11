@@ -564,6 +564,7 @@ function startNextDev() {
         ...process.env,
         PORT: currentPort,
         HOSTNAME: '0.0.0.0',
+        EXT_CONFIG_PATH: CONFIG_PATH,
         NODE_OPTIONS: '--max-old-space-size=1024'
     };
     launchServer('npm', ['run', 'dev'], cwd, env);
@@ -703,6 +704,7 @@ function startNextProd() {
             PORT: currentPort,
             NODE_ENV: 'production',
             HOSTNAME: '0.0.0.0',
+            EXT_CONFIG_PATH: serverPath.includes('app.asar') ? path.join(app.getPath('userData'), '.env.local') : CONFIG_PATH,
             NODE_PATH: nodeModulesPath
         };
 
