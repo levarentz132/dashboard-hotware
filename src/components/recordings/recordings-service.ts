@@ -11,6 +11,7 @@ export interface CloudDevice {
   id: string;
   name: string;
   typeId?: string;
+  status?: string;
 }
 
 export interface RecordingPeriod {

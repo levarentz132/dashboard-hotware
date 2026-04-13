@@ -13,7 +13,7 @@
     "start": "next start",
     "lint": "next lint",
     "electron": "electron electron/main.js",
-    "dist": "npm run build && npx electron-builder --win",
+    "dist": "node scripts/clean.js && npm run build && npx electron-builder --win",
     "setup": "node scripts/setup.js"
   },
   "build": {

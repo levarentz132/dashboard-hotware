@@ -254,7 +254,7 @@ export async function POST(request: NextRequest) {
 
     const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
     const fileDateStr = `${YYYY}${MM}${DD}`; // Compact format
-    const baseFileName = `${cleanDeviceId}__${safeCameraName}_${fileDateStr}_${displayHH}${displaymm}${displaySS}`;
+    const baseFileName = `${safeCameraName}_${fileDateStr}_${displayHH}${displaymm}${displaySS}`;
 
     // ---- Get Custom Storage Path ----
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
@@ -343,7 +343,7 @@ export async function GET(request: NextRequest) {
         const stat = fs.statSync(filePath);
 
         // Parse camera name and timestamp from filename: CameraName_YYYY-MM-DD_HHMMSS.png or CameraName_YYYYMMDD_HHMMSS.png
-        const match = file.match(/^(.+?)_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.png$/);
+        const match = file.match(/^(.+)_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.png$/);
         const cameraName = match ? match[1] : file;
         const dateStr = match ? match[2] : folder;
         const timeStr = match ? match[3] : "000000";

@@ -232,8 +232,8 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
                               {n.message}
                             </p>
                             
-                            {/* Action Buttons for recording/snapshots */}
-                            {(n.deviceId && n.systemId) && (
+                            {/* Action Buttons for recording/snapshots - only show if we have timing data */}
+                            {(n.deviceId && n.systemId && n.startTimeMs) && (
                               <div className="flex items-center gap-2 pt-2">
                                 <Button 
                                   size="sm" 

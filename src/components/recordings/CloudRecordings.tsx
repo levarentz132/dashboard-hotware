@@ -116,79 +116,134 @@ interface ScheduleTimeRange {
   end: string;
 }
 
-// Moved outside to prevent re-creation on every render which causes dropdowns to close
-const CameraSelect = ({ 
+const SearchableCameraSelect = ({ 
   value, 
   onValueChange, 
   devices, 
   loadingDevices, 
-  normalizeId 
+  normalizeId,
+  placeholder = "Select Camera",
+  showAllOption = false
 }: { 
   value: string; 
   onValueChange: (v: string) => void;
   devices: any[];
   loadingDevices: boolean;
   normalizeId: (id: any) => string;
-}) => (
-  <div className="w-full">
-    {loadingDevices ? (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-        <Loader2 className="h-4 w-4 animate-spin" /> Retrieving...
-      </div>
-    ) : (
-      <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger>
-          <SelectValue placeholder="Select" />
-        </SelectTrigger>
-        <SelectContent className="max-h-[400px]">
-          <SelectItem value="all">
-            <span className="font-bold text-primary">All Cameras</span>
-          </SelectItem>
-          {devices.map((device: any) => (
-            <SelectItem key={`${device.systemId}-${device.id}`} value={`${device.systemId}:${normalizeId(device.id)}`}>
-              <span className="font-medium">{device.name || device.id}</span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    )}
-  </div>
-);
+  placeholder?: string;
+  showAllOption?: boolean;
+}) => {
+  const [searchTerm, setSearchTerm] = useState("");
+  
+  const filteredDevices = devices
+    .filter(d => (d.name || d.id || "").toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      const statusA = (a.status || "Offline").toLowerCase();
+      const statusB = (b.status || "Offline").toLowerCase();
+      const isOnlineA = statusA === "online" || statusA === "recording" || statusA === "connected";
+      const isOnlineB = statusB === "online" || statusB === "recording" || statusB === "connected";
+      
+      if (isOnlineA && !isOnlineB) return -1;
+      if (!isOnlineA && isOnlineB) return 1;
+      return (a.name || "").localeCompare(b.name || "");
+    });
 
-const ScheduleCameraSelect = ({ 
-  value, 
-  onValueChange, 
-  devices, 
-  loadingDevices, 
-  normalizeId 
-}: { 
-  value: string; 
-  onValueChange: (v: string) => void;
-  devices: any[];
-  loadingDevices: boolean;
-  normalizeId: (id: any) => string;
-}) => (
+  return (
   <div className="w-full">
     {loadingDevices ? (
       <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
         <Loader2 className="h-4 w-4 animate-spin" /> Retrieving...
       </div>
     ) : (
-      <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger>
-          <SelectValue placeholder="Choose Camera" />
+      <Select value={value} onValueChange={(val) => {
+        onValueChange(val);
+        setSearchTerm(""); // Reset search on select
+      }}>
+        <SelectTrigger className="bg-white/50 border-slate-200/60 rounded-xl hover:bg-white transition-all shadow-sm">
+          <SelectValue placeholder={placeholder} />
         </SelectTrigger>
-        <SelectContent className="max-h-[400px]">
-          {devices.map((device: any) => (
-            <SelectItem key={`sched-${device.systemId}-${device.id}`} value={`${device.systemId}:${normalizeId(device.id)}`}>
-              <span className="font-medium">{device.name || device.id}</span>
-            </SelectItem>
-          ))}
+        <SelectContent className="max-h-[400px] rounded-2xl border-slate-100 shadow-2xl p-0 overflow-hidden">
+          <div className="flex items-center px-3 pb-2 pt-2 sticky top-0 bg-white/95 backdrop-blur-sm z-10 border-b mb-1">
+            <Search className="mr-2 h-3.5 w-3.5 shrink-0 opacity-50 text-slate-500" />
+            <input
+              className="flex h-8 w-full rounded-md bg-transparent py-2 text-xs outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-50 font-medium"
+              placeholder="Search cameras..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+            {searchTerm && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 ml-1 text-slate-400 hover:text-slate-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSearchTerm("");
+                }}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+          
+          <div className="max-h-[300px] overflow-y-auto p-1 custom-scrollbar">
+            {showAllOption && (
+              <SelectItem value="all" className="rounded-lg focus:bg-blue-50 focus:text-blue-700 font-bold text-primary">
+                All Cameras
+              </SelectItem>
+            )}
+            
+            {filteredDevices.length > 0 ? (
+              filteredDevices.map((device: any) => {
+                const status = (device.status || "Offline").toLowerCase();
+                const isOnline = status === "online" || status === "recording" || status === "connected";
+                const isOffline = !isOnline;
+                
+                return (
+                  <SelectItem 
+                    key={`${device.systemId}-${device.id}`} 
+                    value={`${device.systemId}:${normalizeId(device.id)}`}
+                    disabled={isOffline}
+                    className={cn(
+                      "rounded-lg transition-colors py-2.5",
+                      isOffline ? "opacity-40 grayscale-[0.5] cursor-not-allowed bg-slate-50/50" : "focus:bg-blue-50 focus:text-blue-700 cursor-pointer"
+                    )}
+                  >
+                    <div className="flex items-center justify-between w-full gap-3 pr-2">
+                       <div className="flex flex-col min-w-0">
+                          <span className="font-bold text-[13px] truncate text-slate-700">{device.name || device.id}</span>
+                          {device.systemName && (
+                            <span className="text-[10px] text-slate-400 font-medium truncate">{device.systemName}</span>
+                          )}
+                       </div>
+                       <div className="flex items-center gap-1.5 shrink-0">
+                          <div className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-slate-300"}`} />
+                          <span className={cn(
+                            "text-[9px] font-black uppercase tracking-widest",
+                            isOnline ? "text-green-600" : "text-slate-400"
+                          )}>
+                            {device.status || "OFFLINE"}
+                          </span>
+                       </div>
+                    </div>
+                  </SelectItem>
+                );
+              })
+            ) : (
+                <div className="py-8 px-4 text-center">
+                   <Camera className="h-8 w-8 text-slate-200 mx-auto mb-2" />
+                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No matching cameras</p>
+                </div>
+            )}
+          </div>
         </SelectContent>
       </Select>
     )}
   </div>
-);
+  );
+};
 
 export default function CloudRecordings() {
   // ---- Shared state ----
@@ -562,7 +617,7 @@ export default function CloudRecordings() {
       const localCams = await nxAPI.getCameras();
       const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
       const mappedLocal = localCams.map(cam => ({
-        id: cam.id, name: cam.name, typeId: cam.typeId,
+        id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
         systemId: localSystemId, systemName: "", // Hiding local system name text as requested
       }));
       setDevices(mappedLocal);
@@ -583,7 +638,7 @@ export default function CloudRecordings() {
         ]) as any[];
         if (Array.isArray(data)) {
           const cloudMapped = data.map((cam: any) => ({
-            id: cam.id, name: cam.name, typeId: cam.typeId,
+            id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
             systemId: system.id, systemName: system.name,
           }));
           setDevices(prev => {
@@ -1178,12 +1233,14 @@ export default function CloudRecordings() {
             <Card className="min-h-[600px] border-none shadow-none bg-transparent">
               <div className="flex items-center gap-3 mb-6 pb-6 border-b">
                 <div className="w-48">
-                  <CameraSelect 
+                  <SearchableCameraSelect 
                     value={selectedDevice} 
                     onValueChange={handleSelectDevice}
                     devices={devices}
                     loadingDevices={loadingDevices}
                     normalizeId={normalizeId}
+                    showAllOption={true}
+                    placeholder="All Cameras"
                   />
                 </div>
 
@@ -1456,12 +1513,13 @@ export default function CloudRecordings() {
           </DialogHeader>
 
           <div className="space-y-6 pt-4">
-            <ScheduleCameraSelect 
+            <SearchableCameraSelect 
               value={scheduleCamera} 
               onValueChange={handleScheduleSelectDevice} 
               devices={devices}
               loadingDevices={loadingDevices}
               normalizeId={normalizeId}
+              placeholder="Choose Camera"
             />
 
             <div className="space-y-2">
