@@ -24,8 +24,8 @@ export function NxLocationSettings() {
         if (savedIp) setIp(savedIp);
         if (savedPort) setPort(savedPort);
 
-        // If not set or set to default 'localhost', try to fetch server-side global settings
-        if (!savedIp || savedIp === "localhost") {
+        // If not set, try to fetch server-side global settings
+        if (!savedIp) {
             const fetchGlobalConfig = async () => {
                 try {
                     const res = await fetch("/api/config/nx");
@@ -44,9 +44,25 @@ export function NxLocationSettings() {
         }
     }, []);
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        // Save locally for immediate feedback
         Cookies.set("nx_location_ip", ip, { expires: 365, path: "/" });
         Cookies.set("nx_location_port", port, { expires: 365, path: "/" });
+        
+        // Save to server for all network users
+        try {
+            await fetch("/api/config/nx", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    NEXT_PUBLIC_NX_SERVER_HOST: ip,
+                    NEXT_PUBLIC_NX_SERVER_PORT: port
+                })
+            });
+        } catch (e) {
+            console.error("Failed to sync shared server location", e);
+        }
+
         setIsOpen(false);
         // Refresh page to ensure all components/routes pick up the change
         window.location.reload();

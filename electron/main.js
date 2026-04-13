@@ -8,7 +8,6 @@ const net = require('net');
 
 let nextProcess;
 let mainWindow;
-let setupWindow;
 let cloudToken = null;
 let currentPort = 3130;
 let isInstallingUpdate = false;
@@ -210,28 +209,7 @@ if (!process.env.JWT_SECRET) {
     }
 }
 
-function createSetupWindow() {
-    setupWindow = new BrowserWindow({
-        width: 800,
-        height: 600,
-        fullscreen: true,
-        backgroundColor: '#0c0c0c',
-        webPreferences: {
-            preload: getPreloadPath(),
-            nodeIntegration: false,
-            contextIsolation: true,
-        },
-        autoHideMenuBar: true
-    });
 
-    setupWindow.setFullScreen(true);
-
-    const setupHtmlPath = isPackaged
-        ? path.join(process.resourcesPath, 'app.asar', 'electron', 'setup.html')
-        : path.join(__dirname, 'setup.html');
-
-    setupWindow.loadFile(setupHtmlPath);
-}
 
 function createMainWindow() {
     mainWindow = new BrowserWindow({
@@ -501,10 +479,7 @@ ipcMain.handle('setup:save', async (event, data) => {
     }
 });
 
-ipcMain.on('setup:launch', () => {
-    if (setupWindow) setupWindow.close();
-    createMainWindow();
-});
+
 
 
 let isServerStopping = false;
@@ -891,11 +866,7 @@ app.whenReady().then(async () => {
         return;
     }
 
-    if (process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME && process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD) {
-        createMainWindow();
-    } else {
-        createSetupWindow();
-    }
+    createMainWindow();
 
     // Check if we just updated
     try {
@@ -939,18 +910,18 @@ autoUpdater.on('update-available', (info) => {
         }).show();
     }
 
-    const win = mainWindow || setupWindow;
+    const win = mainWindow;
     if (win) win.webContents.send('update-available', info);
 });
 
 autoUpdater.on('update-not-available', (info) => {
     logtoFile('[AutoUpdater] No Update available.');
-    const win = mainWindow || setupWindow;
+    const win = mainWindow;
     if (win) win.webContents.send('update-not-available', info);
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
-    const win = mainWindow || setupWindow;
+    const win = mainWindow;
     if (win) {
         win.webContents.send('download-progress', progressObj);
         // Taskbar progress removed here as per user request to not track download
@@ -960,7 +931,7 @@ autoUpdater.on('download-progress', (progressObj) => {
 autoUpdater.on('update-downloaded', async (info) => {
     logtoFile(`[AutoUpdater] Update downloaded: ${info.version}`);
 
-    const win = mainWindow || setupWindow;
+    const win = mainWindow;
 
     const { response } = await dialog.showMessageBox(win, {
         type: 'info',
@@ -994,7 +965,7 @@ autoUpdater.on('error', (err) => {
     logtoFile(`[AutoUpdater] Error: ${err.message}`);
 
     // Clear taskbar progress on error
-    const win = mainWindow || setupWindow;
+    const win = mainWindow;
     if (win) {
         win.setProgressBar(-1);
         win.webContents.send('update-error', err.message);

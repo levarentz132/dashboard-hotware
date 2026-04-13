@@ -119,15 +119,33 @@ export function NxAuthentication() {
                     
                     // Update state if not already explicitly set in cookies by user (or if set to default localhost)
                     const currentIp = Cookies.get("nx_location_ip");
-                    if ((!currentIp || currentIp === "localhost") && NEXT_PUBLIC_NX_SERVER_HOST) {
+                    if (!currentIp && NEXT_PUBLIC_NX_SERVER_HOST) {
                         setNxLocation(prev => ({ ...prev, ip: NEXT_PUBLIC_NX_SERVER_HOST }));
                     }
                     const currentPort = Cookies.get("nx_location_port");
-                    if ((!currentPort || currentPort === "7001") && NEXT_PUBLIC_NX_SERVER_PORT) {
+                    if (!currentPort && NEXT_PUBLIC_NX_SERVER_PORT) {
                         setNxLocation(prev => ({ ...prev, port: NEXT_PUBLIC_NX_SERVER_PORT }));
                     }
                     if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
                         Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, { expires: 365, path: '/' });
+                    }
+
+                    // Also reflect Local status if server has credentials
+                    if (data.config.has_vms_credentials && !session && !Cookies.get("local_nx_user")) {
+                        setSession({
+                            token: "SERVER_MANAGED",
+                            username: "Admin (Shared)"
+                        });
+                    }
+
+                    // Also reflect Cloud status if server is connected
+                    if (data.config.has_cloud_token && data.config.NEXT_PUBLIC_NX_CLOUD_USERNAME && !cloudSession && !Cookies.get("nx_cloud_session")) {
+                        setCloudSession({
+                            accessToken: "SERVER_MANAGED",
+                            refreshToken: "",
+                            email: data.config.NEXT_PUBLIC_NX_CLOUD_USERNAME,
+                            systems: []
+                        });
                     }
                 }
             } catch (e) {

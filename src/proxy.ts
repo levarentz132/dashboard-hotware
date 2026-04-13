@@ -11,7 +11,7 @@ const REFRESH_COOKIE_NAME = AUTH_CONFIG.COOKIE_REFRESH_NAME;
 const publicRoutes = ["/login"];
 
 // API routes that don't require authentication
-const publicApiRoutes = ["/auth/login", "/auth/logout", "/auth/session", "/auth/refresh", "/nx"];
+const publicApiRoutes = ["/auth/login", "/auth/logout", "/auth/session", "/auth/refresh", "/nx", "/api/config/nx"];
 
 // Static assets and Next.js internals to skip
 const skipPaths = ["/_next", "/favicon.ico", "/images"];

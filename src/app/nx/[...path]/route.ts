@@ -33,8 +33,11 @@ async function handleRequest(request: NextRequest, method: string) {
         path = '/' + path;
     }
 
-    const nxLocationIp = request.cookies.get("nx_location_ip")?.value || API_CONFIG.serverHost || "localhost";
-    const nxLocationPort = request.cookies.get("nx_location_port")?.value || API_CONFIG.serverPort || "7001";
+    const cookieIp = request.cookies.get("nx_location_ip")?.value;
+    const nxLocationIp = cookieIp || (API_CONFIG.serverHost || "localhost");
+    
+    const cookiePort = request.cookies.get("nx_location_port")?.value;
+    const nxLocationPort = cookiePort || (API_CONFIG.serverPort || "7001");
     
     const targetUrl = `https://${nxLocationIp}:${nxLocationPort}${path}${url.search}`;
 
