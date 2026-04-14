@@ -250,10 +250,10 @@ export const API_ENDPOINTS = {
   modifyDevice: (id: string) => `/devices/${id}`,
   deleteDevice: (id: string) => `/devices/${id}`,
 
-  // Events and Rules (REST v3)
-  events: "/events",
-  rules: "/rules",
-  bookmarks: "/bookmarks",
+  // Events and Rules (Legacy /api)
+  events: "/api/getEvents",
+  rules: "/api/getRules",
+  bookmarks: "/api/getBookmarks",
 
   // System Information
   systemInfo: "/system/info",

@@ -576,51 +576,27 @@ class NxWitnessAPI {
     level?: string;
   }): Promise<any> {
     try {
-      // 1. Try modern v4 endpoint first
-      return await this.apiRequest("/rest/v4/events/generic", {
-        method: "POST",
-        body: JSON.stringify({
-          ...payload,
-          timestamp: payload.timestamp || new Date().toISOString(),
-          state: payload.state || "instant"
-        }),
+      const params = new URLSearchParams();
+      if (payload.timestamp) params.set("timestamp", payload.timestamp);
+      if (payload.caption) params.set("caption", payload.caption);
+      if (payload.description) params.set("description", payload.description);
+      if (payload.source) params.set("source", payload.source);
+      if (payload.state) params.set("state", payload.state);
+      // Note: level and deviceIds are not standard in the simplest v1 /api/createEvent
+
+      return await this.apiRequest(`/api/createEvent?${params.toString()}`, {
+        method: "GET",
       });
     } catch (error) {
-      // Check if it's a 404 - server doesn't support this endpoint
       const errorMsg = String(error);
       const is404 = errorMsg.includes('404') || errorMsg.includes('Not Found');
 
       if (is404) {
-        console.debug("[createGenericEvent] v4 endpoint not available, trying legacy...");
+        console.debug("[createGenericEvent] Server does not support generic events API");
       } else {
-        console.warn("[createGenericEvent] v4 failed, trying fallback /api/createEvent...", error);
+        console.error("[createGenericEvent] Request failed:", error);
       }
-
-      try {
-        // 2. Fallback to legacy endpoint (uses GET with query params)
-        const params = new URLSearchParams();
-        if (payload.timestamp) params.set("timestamp", payload.timestamp);
-        if (payload.caption) params.set("caption", payload.caption);
-        if (payload.description) params.set("description", payload.description);
-        if (payload.source) params.set("source", payload.source);
-        if (payload.state) params.set("state", payload.state);
-        // Note: level and deviceIds are not standard in the simplest v1 /api/createEvent
-
-        return await this.apiRequest(`/api/createEvent?${params.toString()}`, {
-          method: "GET",
-        });
-      } catch (fallbackError) {
-        const fallbackMsg = String(fallbackError);
-        const isFallback404 = fallbackMsg.includes('404') || fallbackMsg.includes('Not Found');
-
-        if (isFallback404) {
-          // Server doesn't support generic events - this is expected for some deployments
-          console.debug("[createGenericEvent] Server does not support generic events API");
-        } else {
-          console.error("[createGenericEvent] All versions failed:", fallbackError);
-        }
-        throw fallbackError;
-      }
+      throw error;
     }
   }
 
