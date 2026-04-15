@@ -112,9 +112,11 @@ export async function GET(request: NextRequest) {
       }
 
       if (!videoResponse.ok) {
-        console.error(`[recordings/download] Video fetch failed: ${videoResponse.status}`);
+        let errorText = "";
+        try { errorText = await videoResponse.text(); } catch (e) { errorText = "Could not read error body"; }
+        console.error(`[recordings/download] Video fetch failed: ${videoResponse.status}`, errorText);
         return NextResponse.json(
-          { error: `Video fetch failed: ${videoResponse.status}` },
+          { error: `Video fetch failed: ${videoResponse.status}`, details: errorText },
           { status: videoResponse.status }
         );
       }
@@ -208,7 +210,9 @@ export async function GET(request: NextRequest) {
         ]);
 
         // Avoid process crash on early stdin close
-        ffmpeg.stdin.on("error", () => {});
+        ffmpeg.stdin.on("error", (e) => {
+          console.error("[recordings/download] FFmpeg stdin error:", e);
+        });
 
         const inputStream = Readable.fromWeb(videoResponse.body as any);
         inputStream.pipe(ffmpeg.stdin);
@@ -220,7 +224,7 @@ export async function GET(request: NextRequest) {
             
             if (code !== 0) {
               console.error(`[recordings/download] FFmpeg failed with code ${code}`);
-              resolve(NextResponse.json({ error: "FFmpeg conversion failed" }, { status: 500 }));
+              resolve(NextResponse.json({ error: "FFmpeg process failed during conversion", code }, { status: 500 }));
               return;
             }
 
@@ -246,7 +250,11 @@ export async function GET(request: NextRequest) {
 
           ffmpeg.on('error', (err) => {
             console.error("[recordings/download] FFmpeg spawn error:", err);
-            resolve(NextResponse.json({ error: "FFmpeg process error" }, { status: 500 }));
+            // This usually means FFmpeg is not found in the path
+            resolve(NextResponse.json({ 
+              error: "FFmpeg process error - verify FFmpeg is installed and in system PATH",
+              details: err.message 
+            }, { status: 500 }));
           });
         });
       }

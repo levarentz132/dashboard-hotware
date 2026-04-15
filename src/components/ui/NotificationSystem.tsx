@@ -47,57 +47,9 @@ export default function NotificationSystem() {
     return () => window.removeEventListener(NOTIFICATION_EVENT_NAME, handleNotification)
   }, [])
 
-  // Check connection status periodically
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const { nxAPI } = await import('@/lib/nxapi')
-        const sid = nxAPI.getSystemId()
-        if (!sid) {
-          setConnectionStatus('unknown')
-          return
-        }
-
-        const isConnected = await nxAPI.testConnection()
-        const newStatus = isConnected ? 'connected' : 'disconnected'
-
-        // Only update if status actually changed
-        if (connectionStatus !== newStatus) {
-          setConnectionStatus(newStatus)
-
-          // Show notification on status change (but not on initial load)
-          if (connectionStatus !== 'unknown') {
-            addNotification({
-              type: isConnected ? 'success' : 'warning',
-              title: isConnected ? 'API Connected' : 'API Disconnected',
-              message: isConnected
-                ? 'Successfully connected to Nx Witness API with authentication'
-                : 'Lost connection to Nx Witness API - check server status'
-            })
-          }
-        }
-      } catch (error) {
-        if (connectionStatus !== 'disconnected') {
-          setConnectionStatus('disconnected')
-          addNotification({
-            type: 'error',
-            title: 'Connection Error',
-            message: 'Unable to reach Nx Witness server'
-          })
-        }
-      }
-    }
-
-    // Initial check
-    checkConnection()
-
-    // Check more frequently if disconnected
-    const interval = setInterval(
-      checkConnection,
-      connectionStatus === 'disconnected' ? 15000 : 45000 // 15s if disconnected, 45s if connected
-    )
-    return () => clearInterval(interval)
-  }, [connectionStatus])
+  // We've removed the redundant polling here as connection status is managed 
+  // by useSystemInfo in the TopBar and other components.
+  // This prevents the 'API Connected/Disconnected' notification spam.
 
   const getNotificationIcon = (type: ToastNotification['type']) => {
     switch (type) {

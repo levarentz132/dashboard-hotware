@@ -24,6 +24,9 @@ export interface ExternalOrganization {
   id: number;
   name: string;
   system_id: string;
+  license_status?: string;
+  license_expires_at?: string | null;
+  server_id?: string | null;
 }
 
 export interface ExternalAuthResponse {

@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     if (!username || !password) {
       return NextResponse.json(
         { error: "Cloud credentials not found" },
-        { status: 401 }
+        { status: 403 }
       );
     }
 
@@ -56,10 +56,11 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
+      const status = response.status === 401 ? 403 : response.status;
       console.error(`[Create Event] Failed: ${response.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Failed to create event: ${response.status}`, details: errorText },
-        { status: response.status }
+        { status }
       );
     }
 

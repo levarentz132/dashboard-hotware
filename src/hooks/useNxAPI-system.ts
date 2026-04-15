@@ -1,7 +1,7 @@
 "use client";
 
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 
 import { fetchCloudSystems, type CloudSystem } from "./use-async-data";
@@ -37,28 +37,36 @@ export function useSystemInfo(cloudId?: string) {
     }
   }, []);
 
-  const fetchSystemInfo = useCallback(async () => {
+  const isFetching = useRef(false);
+
+  const fetchSystemInfo = useCallback(async (forceLoading = true) => {
+    if (isFetching.current) return;
+    
     try {
-      setLoading(true);
+      isFetching.current = true;
+      if (forceLoading) setLoading(true);
       setError(null);
 
       // If we don't have a selected system ID, try to find one
-      if (!selectedCloudId) {
+      let currentId = selectedCloudId;
+      if (!currentId) {
         const systems = await fetchAvailableSystems();
         if (systems.length > 0) {
-          const onlineSystem = systems.find((s) => s.stateOfHealth === "online");
+          const onlineSystem = systems.find((s) => s.stateOfHealth === "online") || systems[0];
           if (onlineSystem) {
-            setSelectedCloudId(onlineSystem.id);
-            nxAPI.setSystemId(onlineSystem.id);
+            currentId = onlineSystem.id;
+            setSelectedCloudId(currentId);
+            nxAPI.setSystemId(currentId);
           }
         }
       } else {
         // Ensure nxAPI is synchronized
-        nxAPI.setSystemId(selectedCloudId);
+        nxAPI.setSystemId(currentId);
       }
 
       if (!nxAPI.getSystemId()) {
-        setLoading(false);
+        if (forceLoading) setLoading(false);
+        isFetching.current = false;
         return;
       }
 
@@ -69,6 +77,8 @@ export function useSystemInfo(cloudId?: string) {
         setSystemInfo(null);
         setConnected(false);
         setError("Cannot connect to Nx Witness server. Check cloud relay status.");
+        isFetching.current = false;
+        if (forceLoading) setLoading(false);
         return;
       }
 
@@ -93,6 +103,7 @@ export function useSystemInfo(cloudId?: string) {
       setConnected(false);
     } finally {
       setLoading(false);
+      isFetching.current = false;
     }
   }, [selectedCloudId, fetchAvailableSystems]);
 
@@ -103,7 +114,7 @@ export function useSystemInfo(cloudId?: string) {
 
       setConnected(isConnected);
       if (isConnected) {
-        await fetchSystemInfo();
+        await fetchSystemInfo(false);
       } else {
         setError("Connection test failed");
       }

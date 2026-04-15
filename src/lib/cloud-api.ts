@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDynamicConfig, getCloudAuthHeader, API_CONFIG } from "./config";
 
+// Disable SSL certificate validation for local/VMS requests as they are usually self-signed
+if (process.env.NODE_ENV === "development" || process.env.ALLOW_SELF_SIGNED === "true") {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
 /**
  * Common interface for cloud API request options
  */
@@ -128,12 +133,17 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
       port = parts[1] || port;
     }
 
-    // Determine protocol: default https unless clearly http (local only)
+    // Determine protocol: default https for everything EXCEPT local/direct addresses
+    // which we'll try with http first if they're not on the standard HTTPS port
     let protocol = 'https';
-    if (host === '127.0.0.1' || host === 'localhost') {
-      // For local VMS, we use https by default because of port 7001 usually being HTTPS
-      // But we'll use http if port is specifically 80 or something known
-      protocol = (port === '7001') ? 'https' : 'http';
+    if (isDirectAddress) {
+      if (port !== '7001') {
+        protocol = 'http';
+      } else {
+        // Port 7001 is technically HTTPS by default in NX Witness.
+        // If we use HTTP to an HTTPS port, we get ECONNRESET.
+        protocol = 'https'; 
+      }
     }
 
     const hostWithPort = `${host}:${port}`;
@@ -265,7 +275,7 @@ export function createAuthErrorResponse(systemId: string, systemName?: string): 
       systemName: systemName || systemId,
       requiresAuth: true,
     },
-    { status: 401 }
+    { status: 403 }
   );
 }
 
@@ -386,33 +396,45 @@ export async function fetchFromCloudApi<T>(
       });
     }
 
-    const isRelayDevicesEndpoint =
-      cloudUrl.includes(".relay.vmsproxy.com") && endpoint.startsWith("/rest/v3/devices");
+    // Check if this is an NX server endpoint (REST v3/v4 or legacy /api)
+    const isNxEndpoint = endpoint.startsWith("/rest/v3") || endpoint.startsWith("/rest/v4") || endpoint.startsWith("/api/");
+    const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
+    const isRelay = cloudUrl.includes(".relay.vmsproxy.com");
+    
+    // We retry for relay connections or local direct connections (non-cloud bound)
+    const isLocalOrRelay = isRelay || !isCloudBound || (systemName?.toLowerCase().includes("local server"));
 
-    // Retry once with Basic auth when relay token session is not accepted
-    if ((response.status === 401 || response.status === 403) && isRelayDevicesEndpoint) {
+    // Retry once with Basic auth when session token is rejected
+    if ((response.status === 401 || response.status === 403) && (isNxEndpoint || isLocalOrRelay)) {
       if (basicAuthHeader) {
         const retryHeaders: Record<string, string> = {
           ...headers,
           Authorization: basicAuthHeader,
         };
+        // Remove potentially conflicting session headers
         delete retryHeaders["x-runtime-guid"];
+        delete retryHeaders["x-nx-session"];
+        delete retryHeaders["x-runtime-session-guid"];
 
-        console.warn(`[Cloud API] Retrying relay devices with Basic auth for ${systemName || systemId}`);
+        console.warn(`[Cloud API] Session rejected. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
         response = await fetch(cloudUrl, {
           method: "GET",
           headers: retryHeaders,
           redirect: "manual",
         });
-      }
-    }
 
-    // Handle auth errors
-    if (response.status === 401 || response.status === 403) {
-      const errorText = await response.text();
-      console.warn(`[Cloud API] Auth error (${response.status}) for ${cloudUrl}:`, errorText);
+        // If still 401/403 after retry, then return the auth error
+        if (response.status === 401 || response.status === 403) {
+          return createAuthErrorResponse(systemId, systemName);
+        }
+      } else {
+        console.warn(`[Cloud API] Auth failed for ${systemId} and no Basic credentials available for retry.`);
+        return createAuthErrorResponse(systemId, systemName);
+      }
+    } else if (response.status === 401 || response.status === 403) {
       return createAuthErrorResponse(systemId, systemName);
     }
+
 
     // Handle other errors
     if (!response.ok) {
@@ -507,6 +529,7 @@ async function requestCloudApi<T>(
   try {
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request, systemName);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
+    const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
 
     // Stop calling if there's no auth material for a cloud request
     const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"]);
@@ -544,7 +567,40 @@ async function requestCloudApi<T>(
       });
     }
 
-    if (response.status === 401 || response.status === 403) {
+    // Check if this is an NX server endpoint (REST v3/v4 or legacy /api)
+    const isNxEndpoint = endpoint.startsWith("/rest/v3") || endpoint.startsWith("/rest/v4") || endpoint.startsWith("/api/");
+    const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
+    const isRelay = cloudUrl.includes(".relay.vmsproxy.com");
+    const isLocalOrRelay = isRelay || !isCloudBound || (systemName?.toLowerCase().includes("local server"));
+
+    // Retry once with Basic auth when session token is rejected
+    if ((response.status === 401 || response.status === 403) && (isNxEndpoint || isLocalOrRelay)) {
+      if (basicAuthHeader) {
+        const retryHeaders: Record<string, string> = {
+          ...headers,
+          Authorization: basicAuthHeader,
+        };
+        // Remove potentially conflicting session headers
+        delete retryHeaders["x-runtime-guid"];
+        delete retryHeaders["x-nx-session"];
+        delete retryHeaders["x-runtime-session-guid"];
+
+        console.warn(`[Cloud API] Session rejected for ${method}. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
+        response = await fetch(cloudUrl, {
+          method,
+          headers: retryHeaders,
+          body: body ? JSON.stringify(body) : undefined,
+          redirect: "manual",
+        });
+        
+        // If still 401/403 after retry, then return the auth error
+        if (response.status === 401 || response.status === 403) {
+          return createAuthErrorResponse(systemId, systemName);
+        }
+      } else {
+        return createAuthErrorResponse(systemId, systemName);
+      }
+    } else if (response.status === 401 || response.status === 403) {
       const errorText = await response.clone().text();
       console.warn(`[Cloud API] Auth error (${response.status}) for ${cloudUrl}:`, errorText);
       return createAuthErrorResponse(systemId, systemName);

@@ -11,6 +11,8 @@ export interface Organization {
   id: number;
   name: string;
   system_id: string;
+  license_status?: string;
+  license_expires_at?: string | null;
 }
 
 export interface User {
@@ -42,6 +44,9 @@ export interface UserPublic {
   organizations?: Organization[]; // New: organizations the user belongs to
   organization?: Organization; // Single organization from /me
   privileges?: Privilege[]; // New: user's access privileges
+  license_status?: string;
+  license_expires_at?: string | null;
+  days_remaining?: number | null;
   // List of allowed camera IDs for this user's organization (if provided by external API)
   org_camera_ids?: string[] | number[];
   is_active: boolean;

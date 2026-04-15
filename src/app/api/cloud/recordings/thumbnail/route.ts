@@ -45,7 +45,8 @@ export async function GET(request: NextRequest) {
     }
 
     if (!response.ok) {
-        return NextResponse.json({ error: `Image fetch failed: ${response.status}` }, { status: response.status });
+        const status = response.status === 401 ? 403 : response.status;
+        return NextResponse.json({ error: `Image fetch failed: ${response.status}` }, { status });
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());

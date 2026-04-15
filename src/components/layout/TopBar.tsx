@@ -26,6 +26,8 @@ import {
 } from "@/lib/persistent-notifications";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
+import { useAuth } from "@/hooks/use-auth";
+import { isLicenseExpired, isLicenseExpiringSoon } from "@/lib/auth/utils";
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -33,6 +35,7 @@ interface TopBarProps {
 
 export default function TopBar({ onMenuClick }: TopBarProps) {
   const { connected, loading: isSystemLoading } = useSystemInfo();
+  const { user } = useAuth();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [notifications, setNotifications] = useState<PersistentNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -158,6 +161,34 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
 
         {/* Right Side Actions */}
         <div className="flex items-center gap-2 sm:gap-3 ml-auto no-drag">
+          {/* License Badge */}
+          {user && (
+            (() => {
+              const expiry = user.organization?.license_expires_at || user.license_expires_at;
+              return isLicenseExpired(expiry) || isLicenseExpiringSoon(expiry);
+            })()
+          ) && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" className="h-9 px-2 text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 gap-1.5 border border-red-200">
+                    <AlertCircle className="w-4 h-4" />
+                    <span className="text-xs font-bold uppercase tracking-wider hidden lg:inline">
+                      {isLicenseExpired(user.organization?.license_expires_at || user.license_expires_at) ? 'License Expired' : 'License Expiring Soon'}
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <div className="text-xs">
+                    <p className="font-bold">License Issue</p>
+                    <p>Your license {isLicenseExpired(user.organization?.license_expires_at || user.license_expires_at) ? 'expired on' : 'will expire on'}:</p>
+                    <p className="text-red-500 font-mono mt-0.5">{user.organization?.license_expires_at || user.license_expires_at}</p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+
           <TooltipProvider delayDuration={0}>
             {/* System Status - Hidden on mobile */}
             <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 px-2 group cursor-help">

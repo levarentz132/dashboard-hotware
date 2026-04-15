@@ -95,7 +95,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
           error: "Database temporarily unavailable",
         }));
       } else {
-        // Actual auth failure - logout
+        // Auth failure — if license is expired or session is invalid, force a full logout
+        // to clear cookies and redirect. Merely setting state is not enough because
+        // the session cookie (which drives middleware) would remain valid.
+        if (data.licenseExpired) {
+          console.warn("[Auth] License expired. Forcing logout.");
+          setState({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: data.message || "License expired",
+          });
+          // Force full logout to clear cookies and redirect to login
+          try {
+            await fetch(AUTH_ROUTES.API_LOGOUT, { method: "POST", credentials: "include" });
+          } catch (_) { /* best-effort */ }
+          if (typeof window !== "undefined") {
+            window.location.replace(AUTH_ROUTES.LOGIN);
+          }
+          return data;
+        }
         setState({
           user: null,
           isAuthenticated: false,
@@ -103,6 +122,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           error: null,
         });
       }
+      return data;
     } catch (error) {
       console.error("Session check error:", error);
       // Network error - keep current state, don't logout
@@ -111,33 +131,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
         isLoading: false,
         error: "Network error",
       }));
+      return { success: false, isAuthenticated: false };
     }
   }, []);
 
-  // Initial session check and Auto-Login for Electron
+  // Initial session check
   useEffect(() => {
+    let isInitialCheck = true;
+    
     const initAuth = async () => {
       // 1. First check if we already have a valid session cookie
-      await checkSession();
-
+      const sessionData = await checkSession();
+      
       // 2. If in Electron and not authenticated, attempt Auto-Login using local config
       const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
-      if (extConfig && !state.isAuthenticated && !state.isLoading) {
-        console.log("[Auth] Electron detected, attempting Auto-Login with local identity...");
-
-        // We use the cloud email as username and the plain password (which we don't have)
-        // BUT the backend has been updated to accept the hash as verification if username matches.
-        // Wait, for this to work we'll pass a special 'auto_login' flag.
-        login({
-          username: extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
-          password: 'AUTO_LOGIN_CONTEXT', // Backend will detect this and use headers
-          system_id: extConfig.NEXT_PUBLIC_NX_SYSTEM_ID
-        });
+      if (extConfig && isInitialCheck) {
+        // We only attempt auto-login if the session check explicitly failed
+        if (sessionData && !sessionData.isAuthenticated) {
+          console.log("[Auth] Electron detected and session invalid, attempting Auto-Login...");
+          login({
+            username: extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
+            password: 'AUTO_LOGIN_CONTEXT', 
+            system_id: extConfig.NEXT_PUBLIC_NX_SYSTEM_ID
+          });
+        }
       }
+      isInitialCheck = false;
     };
 
     initAuth();
-  }, [checkSession]);
+  }, [checkSession]); // login is omitted to avoid loop, it's stable anyway
 
   // Periodic session check
   useEffect(() => {
@@ -147,6 +170,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     return () => clearInterval(interval);
   }, [state.isAuthenticated, checkSession]);
+
+  // License expiry watcher — triggers as soon as the user object reflects an expired license.
+  // Uses date comparison (same as TopBar's isLicenseExpired) so it catches expiry even when
+  // license_status is still "ACTIVE" but license_expires_at is in the past.
+  useEffect(() => {
+    if (!state.user || !state.isAuthenticated) return;
+
+    const licenseStatus = (state.user.license_status || "").toLowerCase();
+    const daysRemaining = (state.user as any).days_remaining;
+
+    // Date-based expiry check (mirrors TopBar's isLicenseExpired logic)
+    const licenseExpiresAt =
+      (state.user as any).license_expires_at ||
+      (state.user as any).organization?.license_expires_at;
+    const isDateExpired = licenseExpiresAt
+      ? (() => {
+          try {
+            const d = new Date(licenseExpiresAt);
+            return !isNaN(d.getTime()) && d < new Date();
+          } catch { return false; }
+        })()
+      : false;
+
+    const isExpired =
+      licenseStatus === "expired" ||
+      isDateExpired ||
+      (typeof daysRemaining === "number" && daysRemaining <= 0);
+
+    if (isExpired && licenseStatus !== "active") {
+      console.warn("[Auth] License expiry detected in user state. Forcing logout.");
+      (async () => {
+        try {
+          await fetch(AUTH_ROUTES.API_LOGOUT, { method: "POST", credentials: "include" });
+        } catch (_) { /* best-effort */ }
+        if (typeof window !== "undefined") {
+          window.location.replace(AUTH_ROUTES.LOGIN);
+        }
+      })();
+    }
+  }, [state.user, state.isAuthenticated]);
 
   // Login handler
   const login = useCallback(

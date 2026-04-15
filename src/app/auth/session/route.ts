@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
           isAuthenticated: false,
           message: AUTH_MESSAGES.UNAUTHORIZED,
         },
-        { status: 401 }
+        { status: 403 }
       );
     }
 
@@ -52,6 +52,36 @@ export async function GET(request: NextRequest) {
             role: meResult.user.role as any,
           };
           console.log(`[Session API] Enriched user data from /me for ${session.user?.username}`);
+
+          // Check for license expiration AFTER enrichment — using the final merged user object
+          const licenseStatus = (session.user.license_status || "").toLowerCase();
+          const daysRemaining = (session.user as any).days_remaining;
+          const licenseExpiresAt = (session.user as any).license_expires_at ||
+                                   (session.user as any).organization?.license_expires_at;
+
+          // Date-based check (mirrors TopBar's isLicenseExpired logic)
+          const isDateExpired = licenseExpiresAt
+            ? (() => { try { const d = new Date(licenseExpiresAt); return !isNaN(d.getTime()) && d < new Date(); } catch { return false; } })()
+            : false;
+
+          const isActuallyActive =
+            (session.user as any).is_active !== false &&
+            licenseStatus !== "expired" &&
+            !isDateExpired &&
+            (daysRemaining === undefined || daysRemaining === null || daysRemaining > 0);
+
+          if (!isActuallyActive && licenseStatus !== "active") {
+            console.warn(`[Session API] License expired for ${session.user?.username}. Forcing logout.`);
+            return NextResponse.json(
+              {
+                success: false,
+                isAuthenticated: false,
+                message: `Lisensi Anda telah habis. Status: ${(session.user as any).license_status_display || "Expired"}`,
+                licenseExpired: true,
+              },
+              { status: 403 }
+            );
+          }
         }
       } catch (meError) {
         console.warn("[Session API] Failed to enrich user data from /me:", meError);
@@ -74,6 +104,26 @@ export async function GET(request: NextRequest) {
               const { getExternalMe } = await import("@/lib/auth/external-api");
               const meResult = await getExternalMe(refreshed.accessToken);
               if (meResult && meResult.user) {
+                // Check for license expiration
+                const licenseStatus = (meResult.user.license_status || "").toLowerCase();
+                const daysRemaining = meResult.user.days_remaining;
+                const isActuallyActive = meResult.user.is_active !== false && 
+                                        licenseStatus !== "expired" && 
+                                        (daysRemaining === undefined || daysRemaining === null || daysRemaining > 0);
+
+                if (!isActuallyActive && licenseStatus !== 'active') {
+                   console.warn(`[Session API][Refresh] License expired for ${meResult.user.username}`);
+                   return NextResponse.json(
+                     {
+                       success: false,
+                       isAuthenticated: false,
+                       message: `Lisensi Anda telah habis. Status: ${meResult.user.license_status_display || "Expired"}`,
+                       licenseExpired: true
+                     },
+                     { status: 403 }
+                   );
+                }
+
                 refreshedSession.user = {
                   ...refreshedSession.user,
                   ...meResult.user,
@@ -148,7 +198,7 @@ export async function GET(request: NextRequest) {
           isAuthenticated: false,
           message: AUTH_MESSAGES.SESSION_EXPIRED,
         },
-        { status: 401 }
+        { status: 403 }
       );
 
       // Clear invalid cookies

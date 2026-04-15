@@ -28,3 +28,41 @@ export function getDisplayRole(role: string | Role | null | undefined): string {
 
     return roleName;
 }
+
+/**
+ * Check if the license is expired.
+ * @param license_expires_at The expiration date string
+ */
+export function isLicenseExpired(license_expires_at: string | null | undefined): boolean {
+    if (!license_expires_at) return false;
+    try {
+        const expiry = new Date(license_expires_at);
+        // Invalid date check
+        if (isNaN(expiry.getTime())) return false;
+        return expiry < new Date();
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Check if the license is expiring within a certain number of days.
+ * @param license_expires_at The expiration date string
+ * @param days Threshold in days
+ */
+export function isLicenseExpiringSoon(license_expires_at: string | null | undefined, days: number = 7): boolean {
+    if (!license_expires_at) return false;
+    try {
+        const expiry = new Date(license_expires_at);
+        // Invalid date check
+        if (isNaN(expiry.getTime())) return false;
+        
+        const now = new Date();
+        const soon = new Date();
+        soon.setDate(now.getDate() + days);
+        
+        return expiry < soon && expiry > now;
+    } catch (e) {
+        return false;
+    }
+}

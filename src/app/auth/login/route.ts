@@ -163,13 +163,13 @@ export async function POST(request: NextRequest) {
           message: message,
           error_code: externalData.error_code,
         },
-        { status },
+        { status: 403 },
       );
     }
 
     // Check if user data exists
     if (!externalData.user) {
-      return NextResponse.json({ success: false, message: "Data pengguna tidak ditemukan" }, { status: 401 });
+      return NextResponse.json({ success: false, message: "Data pengguna tidak ditemukan" }, { status: 403 });
     }
 
     const userData = externalData.user;
@@ -205,6 +205,8 @@ export async function POST(request: NextRequest) {
       id: org.id,
       name: org.name,
       system_id: org.system_id,
+      license_status: org.license_status,
+      license_expires_at: org.license_expires_at,
     }));
 
     // Transform external user data to our UserPublic format
@@ -217,6 +219,9 @@ export async function POST(request: NextRequest) {
       system_id: userData.system_id || "",
       organizations, // Store organizations
       privileges, // Store privileges
+      license_status: userData.license_status,
+      license_expires_at: userData.license_expires_at,
+      days_remaining: userData.days_remaining,
       is_active: isActive,
       created_at: new Date(),
       last_login: userData.last_login ? new Date(userData.last_login) : new Date(),
