@@ -420,8 +420,8 @@ export default function CloudRecordings() {
       const timer = setTimeout(async () => {
         // IMPROVEMENT: Immediately patch the device to stop recording when the timer expires
         // This ensures the recording stops at the exact same time the notification is shown.
+        const cameraDeviceId = getOriginalDeviceId(rec.cameraId);
         try {
-          const cameraDeviceId = getOriginalDeviceId(rec.cameraId);
           const prevSystemId = nxAPI.getSystemId();
           nxAPI.setSystemId(rec.systemId);
           await nxAPI.updateDevice(cameraDeviceId, {
@@ -436,13 +436,42 @@ export default function CloudRecordings() {
         addPersistentNotification({ 
           type: 'success', 
           title: 'Recording Done', 
-          message: `Recording for ${rec.cameraName} is finished and available for playback.`,
+          message: `Recording for ${rec.cameraName} is finished. Auto-saving...`,
           systemId: rec.systemId,
           deviceId: rec.cameraId,
           startTimeMs: rec.startMs,
           endTimeMs: rec.endMs,
           durationMs: rec.endMs - rec.startMs
         });
+
+        // ── AUTO-SAVE: trigger server-side download+encode+save ──────────────
+        // Wait 8s for NX to flush and index the completed clip before fetching it.
+        setTimeout(async () => {
+          try {
+            const autoSaveParams = new URLSearchParams({
+              systemId: rec.systemId,
+              deviceId: cameraDeviceId,
+              startTime: String(rec.startMs),
+              endTime: String(rec.endMs),
+              cameraName: rec.cameraName,
+              autoSave: "true",
+            });
+            const res = await fetch(`/api/cloud/recordings/download?${autoSaveParams.toString()}`);
+            const result = await res.json();
+            if (result.success) {
+              console.log(`[CloudRecordings] Auto-saved recording: ${result.file}`);
+              addPersistentNotification({
+                type: 'info',
+                title: 'Recording Saved',
+                message: `${rec.cameraName} saved as ${result.file}`,
+              });
+            } else {
+              console.warn("[CloudRecordings] Auto-save failed:", result);
+            }
+          } catch (autoSaveErr) {
+            console.error("[CloudRecordings] Auto-save request error:", autoSaveErr);
+          }
+        }, 8000);
         
         if (rec.recurrence === "none") {
           setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
@@ -452,6 +481,7 @@ export default function CloudRecordings() {
           loadFromPersistence();
         }
       }, endMs - now);
+
       scheduleTimers.current.set(rec.id + "-end", timer);
     }
   };
@@ -751,7 +781,7 @@ export default function CloudRecordings() {
     window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
   };
 
-  const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string, isLegacy?: boolean, fileName?: string, dateFolder?: string) => {
+  const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string, isLegacy?: boolean, fileName?: string, dateFolder?: string, cameraName?: string) => {
     if (isLegacy && fileName && dateFolder) {
       window.open(`/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&download=true`, "_blank");
       return;
@@ -764,6 +794,8 @@ export default function CloudRecordings() {
       endTime: String(startTimeMs + (durationMs || 1000)),
       stream: "true",  // Always proxy through Next.js so VMS token is applied server-side
     });
+    // Pass camera name so the server can use it when auto-saving the video
+    if (cameraName) params.set("cameraName", cameraName);
     window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
   };
 
@@ -986,8 +1018,14 @@ export default function CloudRecordings() {
     });
 
     if (totalTasksScheduled > 0) {
-      setScheduledRecordings(prev => [...prev, ...newScheduledEntries]);
-      setScheduleSuccess(`Successfully scheduled ${totalTasksScheduled} task(s).`);
+      setScheduledRecordings(prev => {
+        // Edit mode: remove old entries for this batch before inserting the updated ones
+        const filtered = scheduleBatchId
+          ? prev.filter(r => r.batchId !== scheduleBatchId)
+          : prev;
+        return [...filtered, ...newScheduledEntries];
+      });
+      setScheduleSuccess(`Successfully ${scheduleBatchId ? "updated" : "scheduled"} ${totalTasksScheduled} task(s).`);
       setTimeout(() => setIsScheduleOpen(false), 1500);
     } else {
       setScheduleError("No valid times or date selections provided.");
@@ -1306,7 +1344,7 @@ export default function CloudRecordings() {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isScreenshot || rec.isLocal, rec.fileName, rec.dateFolder)} 
+                            onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isScreenshot || rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName)} 
                             className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary"
                           >
                             <Download className="h-3.5 w-3.5" /> {rec.isScreenshot ? "Save Image" : "Download"}
@@ -1378,7 +1416,9 @@ export default function CloudRecordings() {
 
                       const handleEdit = (e: React.MouseEvent) => {
                         e.stopPropagation();
-                        setScheduleCamera(first.cameraId);
+                        // Must use composite "systemId:deviceId" so SearchableCameraSelect
+                        // can match the value and handleScheduleRecording can filter correctly.
+                        setScheduleCamera(`${first.systemId}:${first.cameraId}`);
                         setScheduleSystem(first.systemId);
                         setScheduleType(first.type);
                         setScheduleBatchId(first.batchId || null);
