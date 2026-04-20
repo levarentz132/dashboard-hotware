@@ -1414,7 +1414,7 @@ export default function CloudRecordings() {
                       const dateList = sortedDates.map(d => format(d, "MMM d"));
                       const displayDates = dateList.length > 2 ? `${dateList.slice(0, 2).join(", ")}...` : dateList.join(", ");
 
-                      const handleEdit = (e: React.MouseEvent) => {
+                      const handleEdit = (e: React.MouseEvent<HTMLButtonElement>) => {
                         e.stopPropagation();
                         // Must use composite "systemId:deviceId" so SearchableCameraSelect
                         // can match the value and handleScheduleRecording can filter correctly.
