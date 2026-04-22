@@ -29,38 +29,42 @@ export async function GET(request: NextRequest) {
     const cloudUrl = buildCloudUrl(systemId, "/ec2/recordedTimePeriods", params, request, systemName || undefined);
     const headers = buildCloudHeaders(request, systemId);
 
-    let response = await fetch(cloudUrl, {
-      method: "GET",
-      headers,
-    });
+    let responseData: any = { reply: [] };
+    try {
+      let response = await fetch(cloudUrl, {
+        method: "GET",
+        headers,
+      });
 
-    if (response.status === 401 || response.status === 403) {
-      const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
-      if (basicAuthHeader) {
-        const retryHeaders: Record<string, string> = {
-          ...headers,
-          Authorization: basicAuthHeader,
-        };
-        delete retryHeaders["x-runtime-guid"];
+      if (response.status === 401 || response.status === 403) {
+        const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
+        if (basicAuthHeader) {
+          const retryHeaders: Record<string, string> = {
+            ...headers,
+            Authorization: basicAuthHeader,
+          };
+          delete retryHeaders["x-runtime-guid"];
 
-        console.warn("[recordings] Retrying recordedTimePeriods with Basic auth");
-        response = await fetch(cloudUrl, {
-          method: "GET",
-          headers: retryHeaders,
-        });
+          console.warn("[recordings] Retrying recordedTimePeriods with Basic auth");
+          response = await fetch(cloudUrl, {
+            method: "GET",
+            headers: retryHeaders,
+          });
+        }
       }
-    }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[recordings] Error:", response.status, errorText);
-      return NextResponse.json(
-        { error: `Failed to fetch recordings: ${response.status}`, details: errorText },
-        { status: response.status }
-      );
+      if (response.ok) {
+        responseData = await response.json();
+      } else {
+        const errorText = await response.text().catch(() => "Unknown error");
+        console.warn(`[recordings] Nx API returned ${response.status} (likely recording disabled on NVR). Proceeding with local scan.`, errorText);
+      }
+    } catch (err: any) {
+      console.warn("[recordings] Nx API fetch failed. Proceeding with local scan only.", err.message);
     }
-
-    const data = await response.json();
+    
+    // Use responseData instead of data
+    const data = responseData;
     
     // Log raw response for debugging
     console.log("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
@@ -190,9 +194,12 @@ export async function GET(request: NextRequest) {
           const cameraFolders = fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory());
           
           for (const cameraFolderName of cameraFolders) {
-            // Check if this folder matches our camera
+            // Check if this folder matches our camera name OR camera ID
             const safeSearchName = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-            if (safeSearchName && cameraFolderName !== safeSearchName) continue;
+            const isNameMatch = safeSearchName && cameraFolderName === safeSearchName;
+            const isIdMatch = cameraFolderName.toLowerCase() === deviceId.toLowerCase();
+            
+            if (!isNameMatch && !isIdMatch) continue;
 
             const cameraPath = path.join(folderPath, cameraFolderName);
             const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
