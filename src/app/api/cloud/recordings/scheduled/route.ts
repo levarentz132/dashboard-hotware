@@ -58,6 +58,7 @@ const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
 declare global {
   var _nxWatchdogInterval: NodeJS.Timeout | undefined;
   var _nxWatchdogActive: boolean | undefined;
+  var _nxAppPort: string | undefined;
 }
 
 const startWatchdog = () => {
@@ -96,10 +97,22 @@ const startWatchdog = () => {
       let changed = false;
 
       const now = Date.now();
-
+      
+      // ── DEDUPLICATION: Remove identical tasks before processing ──────────
+      const uniqueSchedules: any[] = [];
+      const seenKeys = new Set();
+      for (const s of (schedules || [])) {
+        const key = `${s.cameraId}-${s.startTime}-${s.type}-${new Date(s.date).toDateString()}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueSchedules.push(s);
+        } else {
+          changed = true; // Mark as changed to save the cleaned-up list
+        }
+      }
 
       const updatedSchedules = await Promise.all(
-        schedules.map(async (rec: any) => {
+        uniqueSchedules.map(async (rec: any) => {
           // Skip permanently finished tasks
           if (rec.status === "completed") return rec;
 
@@ -127,17 +140,21 @@ const startWatchdog = () => {
             if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress") && isWithinWindow) {
               console.log(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${new Date().toLocaleTimeString()})`);
               try {
-                const port = process.env.PORT || "3146";
+                const port = global._nxAppPort || process.env.PORT || "3000";
                 const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
 
                 const screenshotHeaders: Record<string, string> = {
                   "Content-Type": "application/json",
                 };
                 if (globalAuth) screenshotHeaders["x-watchdog-auth"] = globalAuth;
-                if (nxLocationIp) screenshotHeaders["x-nx-location-ip"] = nxLocationIp;
-                if (nxLocationPort) screenshotHeaders["x-nx-location-port"] = nxLocationPort;
+                if (nxLocationIp && nxLocationIp !== "localhost" && nxLocationIp !== "null") {
+                  screenshotHeaders["x-nx-location-ip"] = nxLocationIp;
+                }
+                if (nxLocationPort && nxLocationPort !== "7001" && nxLocationPort !== "null") {
+                  screenshotHeaders["x-nx-location-port"] = nxLocationPort;
+                }
 
-                console.log(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName}`);
+                console.log(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
                 logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`);
                 const screenshotRes = await fetch(internalUrl, {
                   method: "POST",
@@ -191,7 +208,7 @@ const startWatchdog = () => {
                     
                     // Trigger persistent notification for WATCHDOG completion (screenshots)
                     if (notificationUserKey) {
-                      const port = process.env.PORT || "3146";
+                      const port = global._nxAppPort || process.env.PORT || "3011";
                       await fetch(`http://127.0.0.1:${port}/api/notifications`, {
                         method: "POST",
                         body: JSON.stringify({
@@ -209,8 +226,9 @@ const startWatchdog = () => {
                   }
                 }
                 changed = true;
-              } catch (e) {
-                console.error(`[Watchdog] 🛑 Snapshot exception for ${rec.cameraName}:`, e);
+              } catch (e: any) {
+                console.error(`[Watchdog] 🛑 Snapshot exception for ${rec.cameraName}:`, e.message);
+                logRecordingEvent(`Scheduled snapshot FAILED for ${rec.cameraName}: ${e.message}`);
                 rec.status = "failed";
                 rec.record = false;
                 changed = true;
@@ -345,10 +363,10 @@ const startWatchdog = () => {
                 rec.record = false;
               }
               changed = true;
-            } catch (e) {
+            } catch (e: any) {
+              console.error(`[Watchdog] Stop failed (will retry in 10s):`, e.message);
+              logRecordingEvent(`Stop recording RETRY for ${rec.cameraName}: ${e.message}`);
               // Keep as "recording" so the next watchdog tick retries the stop.
-              // Do NOT set to "failed" — that would leave the camera recording indefinitely.
-              console.error(`[Watchdog] Stop failed (will retry in 10s):`, e);
               rec.status = "recording";
               changed = true;
             }
@@ -385,7 +403,8 @@ const startWatchdog = () => {
 // Ensure watchdog starts when this module is used
 startWatchdog();
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  if (request.nextUrl.port) global._nxAppPort = request.nextUrl.port;
   startWatchdog();
   try {
     const data = await fs.readFile(DATA_FILE, "utf-8");
@@ -396,6 +415,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (request.nextUrl.port) global._nxAppPort = request.nextUrl.port;
   startWatchdog();
   try {
     const body = await request.json();
@@ -418,9 +438,24 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Persist NX location ───────────────────────────────────────────────────
-    // Read from body (sent by frontend), fallback to cookies, or finally default to localhost:7001
-    const nxIp = body.nxLocationIp || request.cookies.get("nx_location_ip")?.value || "localhost";
-    const nxPort = body.nxLocationPort || request.cookies.get("nx_location_port")?.value || "7001";
+    // Read from body (sent by frontend), fallback to cookies, or finally settings.json
+    let nxIp = body.nxLocationIp || request.cookies.get("nx_location_ip")?.value;
+    let nxPort = body.nxLocationPort || request.cookies.get("nx_location_port")?.value;
+    
+    if (!nxIp || nxIp === "localhost") {
+      try {
+        const settingsFile = path.join(process.cwd(), "data", "settings.json");
+        if (fsSync.existsSync(settingsFile)) {
+          const settings = JSON.parse(fsSync.readFileSync(settingsFile, "utf-8"));
+          if (settings.nxServerHost) nxIp = settings.nxServerHost;
+          if (settings.nxServerPort) nxPort = settings.nxServerPort;
+        }
+      } catch (e) {}
+    }
+
+    nxIp = (nxIp && nxIp !== "localhost" && nxIp !== "null") ? nxIp : undefined;
+    nxPort = (nxPort && nxPort !== "7001" && nxPort !== "null") ? nxPort : undefined;
+    
     body.nxLocationIp = nxIp;
     body.nxLocationPort = nxPort;
 
