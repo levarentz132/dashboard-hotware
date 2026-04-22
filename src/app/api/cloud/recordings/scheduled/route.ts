@@ -465,24 +465,9 @@ export async function POST(request: NextRequest) {
       notificationUserKey: body.notificationUserKey || request.cookies.get("local_nx_user")?.value || request.cookies.get("nx_cloud_session")?.value
     }, null, 2), "utf-8");
 
-    // Log new schedules
+    // Log save success
     if (Array.isArray(body.schedules)) {
-      body.schedules.forEach((s: any) => {
-        // If it's a new or pending task, log it
-        if (s.status === "pending") {
-          // Calculate target execution time
-          let executionTime = s.startTime;
-          if (s.date) {
-            const dateObj = new Date(s.date);
-            const [h, m, sec] = s.startTime.split(":").map(Number);
-            dateObj.setHours(h, m, sec || 0, 0);
-            executionTime = formatAuditDate(dateObj);
-          }
-          
-          logRecordingEvent(`Recording schedule created: ${s.cameraName} → ${executionTime}`);
-          logRecordingEvent(`User added recording task for ${s.cameraName} (execution time: ${executionTime})`);
-        }
-      });
+      console.log(`[Watchdog] Persisted ${body.schedules.length} schedules to disk (VMS: ${nxIp || "Cloud Relay"})`);
     }
 
     return NextResponse.json({ success: true });

@@ -372,13 +372,22 @@ export default function CloudRecordings() {
             ...s,
             date: new Date(s.date)
           })).filter((s: any) => s.status !== "completed" && s.status !== "failed");
-          setScheduledRecordings(loadedScheds);
-          // Re-reconcile timers for anything pending/recording
-          loadedScheds.forEach((rec: ScheduledRecording) => {
-            if (rec.status === "pending" || rec.status === "recording") {
-              reconcileTimer(rec);
-            }
-          });
+
+          // BREAK INFINITE LOOP: Only update state if data actually changed
+          const currentIds = scheduledRecordings.map(s => s.id).sort().join(",");
+          const loadedIds = loadedScheds.map((s: any) => s.id).sort().join(",");
+          const currentStatuses = scheduledRecordings.map(s => s.status).sort().join(",");
+          const loadedStatuses = loadedScheds.map((s: any) => s.status).sort().join(",");
+
+          if (currentIds !== loadedIds || currentStatuses !== loadedStatuses) {
+            setScheduledRecordings(loadedScheds);
+            // Re-reconcile timers
+            loadedScheds.forEach((rec: ScheduledRecording) => {
+              if (rec.status === "pending" || rec.status === "recording") {
+                reconcileTimer(rec);
+              }
+            });
+          }
         }
       }
     } catch (e) { console.error("[Persistence] Load failed:", e); }
