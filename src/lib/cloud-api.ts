@@ -539,6 +539,13 @@ async function requestCloudApi<T>(
     }
 
     console.log(`[Cloud API] Requesting ${method} ${cloudUrl}`);
+    if (method === 'POST' && endpoint.toLowerCase().includes('/users')) {
+      try {
+        console.log('[Cloud API] POST /users request body:', JSON.stringify(body));
+      } catch (e) {
+        console.log('[Cloud API] Failed to stringify POST body for logging');
+      }
+    }
 
     let response = await fetch(cloudUrl, {
       method,
@@ -614,6 +621,16 @@ async function requestCloudApi<T>(
         console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
       } else {
         console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
+      }
+
+      // Extra debug for user creation failures
+      if (method === 'POST' && endpoint.toLowerCase().includes('/users')) {
+        try {
+          console.error('[Cloud API] POST /users failed. Request body:', JSON.stringify(body));
+          console.error('[Cloud API] POST /users response body:', errorText);
+        } catch (e) {
+          console.error('[Cloud API] Failed to log detailed POST /users debug info');
+        }
       }
 
       return createFetchErrorResponse(

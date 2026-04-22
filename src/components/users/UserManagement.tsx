@@ -1096,7 +1096,9 @@ export default function UserManagement() {
         <div className="space-y-2">
           <Label>Permissions (Groups)</Label>
           <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
-            {groups.length === 0 ? (
+            {!selectedSystemId ? (
+              <p className="text-sm text-muted-foreground">Select a system to load permission groups</p>
+            ) : groups.length === 0 ? (
               <p className="text-sm text-muted-foreground">No groups available</p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
@@ -1109,6 +1111,7 @@ export default function UserManagement() {
                         id={`group-${group.id}`}
                         checked={formData.groupIds.includes(group.id)}
                         onChange={() => handleGroupToggle(group.id)}
+                        disabled={!selectedSystemId}
                         className="h-4 w-4 rounded border-gray-300"
                       />
                       <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
@@ -1167,8 +1170,13 @@ export default function UserManagement() {
             </Select>
           )}
 
-          {cloudSystems.length > 0 && canEditUsers && (
-            <Button onClick={handleOpenCreate} className="gap-2 h-10 px-4" size="default">
+          {canEditUsers && (
+            <Button
+              onClick={handleOpenCreate}
+              className="gap-2 h-10 px-4"
+              size="default"
+              disabled={!selectedSystemId && localUsers.length === 0}
+            >
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">Add User</span>
             </Button>
