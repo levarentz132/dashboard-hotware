@@ -27,7 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/hooks/use-auth";
-import { isLicenseExpired, isLicenseExpiringSoon } from "@/lib/auth/utils";
+import { isLicenseExpired, isLicenseExpiringSoon, formatIndonesianDate } from "@/lib/auth/utils";
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -182,7 +182,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
                   <div className="text-xs">
                     <p className="font-bold">License Issue</p>
                     <p>Your license {isLicenseExpired(user.organization?.license_expires_at || user.license_expires_at) ? 'expired on' : 'will expire on'}:</p>
-                    <p className="text-red-500 font-mono mt-0.5">{user.organization?.license_expires_at || user.license_expires_at}</p>
+                    <p className="text-red-500 font-mono mt-0.5">{formatIndonesianDate(user.organization?.license_expires_at || user.license_expires_at)}</p>
                   </div>
                 </TooltipContent>
               </Tooltip>
