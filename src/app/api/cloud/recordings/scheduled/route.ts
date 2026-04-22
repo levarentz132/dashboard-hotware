@@ -173,12 +173,15 @@ const startWatchdog = () => {
                         let monthIdx = nextDate.getMonth() + 1;
                         let next = new Date(year, monthIdx, targetDay);
                         while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-                        next.setHours(sh, sm, ss, 0);
                         nextDate.setTime(next.getTime());
                       } else {
                         nextDate.setMonth(nextDate.getMonth() + 1);
                       }
                     }
+                    
+                    // Reset to original intended time for the next occurrence
+                    nextDate.setHours(sh, sm, ss, 0);
+                    
                     rec.status = "pending";
                     rec.date = nextDate.toISOString();
                     rec.startMs = nextDate.getTime();
@@ -312,27 +315,32 @@ const startWatchdog = () => {
 
               delete originalSchedules[rec.id];
 
-              if (rec.recurrence && rec.recurrence !== "none") {
-                const nextDate = new Date(rec.date);
-                if (rec.recurrence === "weekday") {
-                  nextDate.setDate(nextDate.getDate() + 7);
-                } else if (rec.recurrence === "monthday") {
-                  const targetDay = rec.recurrenceDay;
-                  if (targetDay) {
-                    let year = nextDate.getFullYear();
-                    let monthIdx = nextDate.getMonth() + 1;
-                    let next = new Date(year, monthIdx, targetDay);
-                    while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-                    next.setHours(sh, sm, ss, 0);
-                    nextDate.setTime(next.getTime());
-                  } else {
-                    nextDate.setMonth(nextDate.getMonth() + 1);
+                if (rec.recurrence && rec.recurrence !== "none") {
+                  const nextDate = new Date(rec.date);
+                  if (rec.recurrence === "weekday") {
+                    nextDate.setDate(nextDate.getDate() + 7);
+                  } else if (rec.recurrence === "monthday") {
+                    const targetDay = rec.recurrenceDay;
+                    if (targetDay) {
+                      let year = nextDate.getFullYear();
+                      let monthIdx = nextDate.getMonth() + 1;
+                      let next = new Date(year, monthIdx, targetDay);
+                      while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
+                      nextDate.setTime(next.getTime());
+                    } else {
+                      nextDate.setMonth(nextDate.getMonth() + 1);
+                    }
                   }
-                }
-                rec.status = "pending";
-                rec.record = false;
-                rec.date = nextDate.toISOString();
-              } else {
+
+                  // Reset to original intended time for the next occurrence
+                  nextDate.setHours(sh, sm, ss, 0);
+
+                  rec.status = "pending";
+                  rec.record = false;
+                  rec.date = nextDate.toISOString();
+                  rec.startMs = nextDate.getTime();
+                  rec.endMs = nextDate.getTime() + (endMs - startMs);
+                } else {
                 rec.status = "completed";
                 rec.record = false;
               }

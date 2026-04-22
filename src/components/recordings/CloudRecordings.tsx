@@ -856,19 +856,23 @@ export default function CloudRecordings() {
         const currentDay = now.getDay();
         
         scheduleDays.forEach(dayIndex => {
-          // If today matches the selected day, we included today as a target
-          // This allows users to set a time like '11:00' when it's '12:00' and have it fire immediately.
+          let targetDate: Date;
+          
           if (dayIndex === currentDay) {
-            scheduleTimeRanges.forEach(range => {
-              scheduleTargets.push({ date: new Date(now), start: range.start, end: range.end });
-            });
+            // Today is the selected day
+            targetDate = new Date(now);
+          } else {
+            // Future day
+            targetDate = nextDay(now, dayIndex as Day);
           }
 
-          // Also always schedule the *next* week's occurrence
-          let targetDate = nextDay(now, dayIndex as Day);
-          scheduleTimeRanges.forEach(range => {
-            scheduleTargets.push({ date: targetDate, start: range.start, end: range.end });
-          });
+          if (scheduleType === "screenshot") {
+            scheduleTargets.push({ date: targetDate, start: scheduleScreenshotTime, end: scheduleScreenshotTime });
+          } else {
+            scheduleTimeRanges.forEach(range => {
+              scheduleTargets.push({ date: targetDate, start: range.start, end: range.end });
+            });
+          }
         });
       } else if (scheduleMonthDay !== "" && scheduleMonthDay > 0 && scheduleMonthDay <= 31) {
         // Monthly recurrence
@@ -878,20 +882,19 @@ export default function CloudRecordings() {
         let monthIdx = now.getMonth();
         let targetDate = new Date(year, monthIdx, targetDayNum);
         
-        // If today is the target day, include it
-        if (targetDate.getDate() === targetDayNum && targetDate.getMonth() === now.getMonth()) {
-           scheduleTimeRanges.forEach(range => {
-            scheduleTargets.push({ date: new Date(targetDate), start: range.start, end: range.end });
-          });
-        }
-
-        // Also schedule the next occurrence if today is passed or already added
-        if (targetDate < now || targetDate.getDate() !== targetDayNum) {
+        // If today is the target day, include it. 
+        // Otherwise find the next occurrence in the future.
+        if (targetDate.getDate() !== targetDayNum || targetDate < now) {
           while (true) {
             monthIdx++;
             targetDate = new Date(year, monthIdx, targetDayNum);
             if (targetDate.getDate() === targetDayNum) break;
           }
+        }
+
+        if (scheduleType === "screenshot") {
+          scheduleTargets.push({ date: new Date(targetDate), start: scheduleScreenshotTime, end: scheduleScreenshotTime });
+        } else {
           scheduleTimeRanges.forEach(range => {
             scheduleTargets.push({ date: new Date(targetDate), start: range.start, end: range.end });
           });
@@ -921,17 +924,15 @@ export default function CloudRecordings() {
         const endMs = scheduleType === "screenshot" ? startMs : new Date(tDate).setHours(eh, em, 59, 999);
         const nowMs = Date.now();
         
-        // Skip if already finished
-        if (endMs < nowMs && scheduleType !== "screenshot") return;
+        // Skip if already finished (only for non-recurring specific dates)
+        const isRecurring = scheduleDays.length > 0 || (scheduleMonthDay !== "" && scheduleMonthDay > 0);
+        if (!isRecurring && endMs < nowMs && scheduleType !== "screenshot") return;
         if (endMs < startMs) return;
 
-        // ── ADJUSTMENT: If start is in the past, set to NOW ──────────────────
+        // ── ADJUSTMENT: If start is in the past, set startMs to NOW for the FIRST execution ──
         let effectiveStartMs = startMs;
-        let effectiveStartTime = tStart;
         if (startMs < nowMs) {
           effectiveStartMs = nowMs;
-          const dNow = new Date();
-          effectiveStartTime = `${String(dNow.getHours()).padStart(2, '0')}:${String(dNow.getMinutes()).padStart(2, '0')}:${String(dNow.getSeconds()).padStart(2, '0')}`;
         }
 
         const entryId = `sched-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -946,7 +947,7 @@ export default function CloudRecordings() {
             systemId: systemId,
             systemName: device?.systemName || "",
             date: tDate,
-            startTime: effectiveStartTime, 
+            startTime: tStart, // Always use the original intended time
             endTime: tEnd,
             startMs: effectiveStartMs,
             endMs: endMs,
@@ -967,10 +968,45 @@ export default function CloudRecordings() {
                   deviceId: cameraDeviceId,
                   cameraName: device?.name || "Camera",
                   timestampMs: Date.now(),
-                  scheduledStartTime: effectiveStartTime, // Pass the adjusted time
+                  scheduledStartTime: tStart, // Pass the original time
                 })
               });
-              setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
+              
+              // For recurring snapshots, we actually want them to persist and move to next occurrence
+              if (isRecurring) {
+                const nextOccurDate = new Date(tDate);
+                if (scheduleDays.length > 0) {
+                  nextOccurDate.setDate(nextOccurDate.getDate() + 7);
+                } else {
+                  // Monthly
+                  const dayNum = Number(scheduleMonthDay);
+                  let y = nextOccurDate.getFullYear();
+                  let mIdx = nextOccurDate.getMonth();
+                  while (true) {
+                    mIdx++;
+                    const next = new Date(y, mIdx, dayNum);
+                    if (next.getDate() === dayNum) { nextOccurDate.setTime(next.getTime()); break; }
+                  }
+                }
+
+                setScheduledRecordings(prev => {
+                  const filtered = prev.filter(r => r.id !== immediateEntryId);
+                  const recurringFollowup: ScheduledRecording = {
+                    ...snapshotEntry,
+                    id: entryId,
+                    date: nextOccurDate,
+                    status: "pending",
+                    startMs: nextOccurDate.setHours(sh, sm, 0, 0),
+                    endMs: nextOccurDate.setHours(sh, sm, 0, 0),
+                    recurrence: scheduleDays.length > 0 ? "weekday" : "monthday",
+                    recurrenceDay: scheduleDays.length > 0 ? undefined : Number(scheduleMonthDay),
+                  };
+                  return [recurringFollowup, ...filtered];
+                });
+              } else {
+                setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
+              }
+
               addPersistentNotification({ 
                 type: 'success', 
                 title: 'Snapshot Captured', 
@@ -978,7 +1014,7 @@ export default function CloudRecordings() {
                 systemId: systemId,
                 deviceId: cameraDeviceId,
                 startTimeMs: Date.now(),
-                durationMs: 0 // Indicates snapshot
+                durationMs: 0
               });
               setTimeout(() => handleSearchRecentRecordings(), 1500);
             } catch (err: any) {
@@ -998,7 +1034,8 @@ export default function CloudRecordings() {
           systemId: systemId,
           systemName: device?.systemName || "",
           date: tDate,
-          startTime: effectiveStartTime, // Use adjusted time if in the past
+          startTime: tStart, // Always use the original intended time string
+
           endTime: tEnd,
           startMs: effectiveStartMs,
           endMs: endMs,
@@ -1009,7 +1046,7 @@ export default function CloudRecordings() {
           batchId,
         };
         if (scheduleType === "screenshot") {
-          newEntry.screenshotTime = effectiveStartTime;
+          newEntry.screenshotTime = tStart;
         }
 
         newScheduledEntries.push(newEntry);
