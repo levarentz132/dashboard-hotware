@@ -33,7 +33,12 @@ export async function GET(request: NextRequest) {
       const settingsFile = path.join(process.cwd(), "data", "settings.json");
       if (fs.existsSync(settingsFile)) {
         const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-        if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
+        // If it's a video, prioritize videoStoragePath. Otherwise use storagePath.
+        if (fileName.toLowerCase().endsWith(".mp4") && settings.videoStoragePath) {
+          screenshotsBaseDir = settings.videoStoragePath;
+        } else if (settings.storagePath) {
+          screenshotsBaseDir = settings.storagePath;
+        }
       }
     } catch (e) { }
 
@@ -45,13 +50,15 @@ export async function GET(request: NextRequest) {
     }
 
     if (!fs.existsSync(filePath)) {
+      console.warn(`[screenshot/serve] File not found: ${filePath}`);
       return NextResponse.json(
-        { error: "Screenshot not found" },
+        { error: "Media not found" },
         { status: 404 }
       );
     }
 
     const buffer = fs.readFileSync(filePath);
+    const contentType = fileName.toLowerCase().endsWith(".mp4") ? "video/mp4" : "image/png";
     const disposition = download === "true"
       ? `attachment; filename="${safeFileName}"`
       : `inline; filename="${safeFileName}"`;
@@ -59,7 +66,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse(buffer, {
       status: 200,
       headers: {
-        "Content-Type": "image/png",
+        "Content-Type": contentType,
         "Content-Disposition": disposition,
         "Content-Length": String(buffer.length),
         "Cache-Control": "public, max-age=86400",

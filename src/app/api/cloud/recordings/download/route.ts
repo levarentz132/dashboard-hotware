@@ -112,7 +112,11 @@ export async function GET(request: NextRequest) {
         const settingsFile = path.join(process.cwd(), "data", "settings.json");
         if (fs.existsSync(settingsFile)) {
           const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-          if (settings.storagePath) videosBaseDir = settings.storagePath;
+          if (settings.videoStoragePath) {
+            videosBaseDir = settings.videoStoragePath;
+          } else if (settings.storagePath) {
+            videosBaseDir = settings.storagePath;
+          }
         }
       } catch (e) { /* ignore */ }
 

@@ -109,6 +109,7 @@ interface RecentRecording {
   isLocal?: boolean;
   fileName?: string;
   dateFolder?: string;
+  cameraFolderName?: string;
 }
 
 interface ScheduleTimeRange {
@@ -294,6 +295,7 @@ export default function CloudRecordings() {
   // ---- Settings state ----
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [storagePath, setStoragePath] = useState("");
+  const [videoStoragePath, setVideoStoragePath] = useState("");
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -476,6 +478,7 @@ export default function CloudRecordings() {
       if (res.ok) {
         const data = await res.json();
         if (data.storagePath) setStoragePath(data.storagePath);
+        if (data.videoStoragePath) setVideoStoragePath(data.videoStoragePath);
       }
     } catch { }
   };
@@ -485,11 +488,11 @@ export default function CloudRecordings() {
       const res = await fetch("/api/cloud/recordings/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storagePath }),
+        body: JSON.stringify({ storagePath, videoStoragePath }),
       });
       if (res.ok) {
         setIsSettingsOpen(false);
-        addPersistentNotification({ type: 'success', title: 'Settings Saved', message: 'Storage path updated successfully.' });
+        addPersistentNotification({ type: 'success', title: 'Settings Saved', message: 'Storage paths updated successfully.' });
       }
     } catch (err: any) {
       addPersistentNotification({ type: 'error', title: 'Error', message: 'Failed to save settings.' });
@@ -738,11 +741,12 @@ export default function CloudRecordings() {
     }
   };
 
-  const handlePreview = (time: number, duration: number, sysId: string, devId: string, isLegacy?: boolean, fileName?: string, dateFolder?: string) => {
+  const handlePreview = (time: number, duration: number, sysId: string, devId: string, isLegacy?: boolean, fileName?: string, dateFolder?: string, cameraFolderName?: string) => {
     if (duration <= 5000 || isLegacy) {
       let url = "";
       if (isLegacy && fileName && dateFolder) {
         url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}`;
+        if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
       } else {
         url = `/api/cloud/recordings/thumbnail?systemId=${sysId}&deviceId=${devId.replace(/[{}]/g, "")}&timestampMs=${time}`;
       }
@@ -765,9 +769,11 @@ export default function CloudRecordings() {
     window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
   };
 
-  const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string, isLegacy?: boolean, fileName?: string, dateFolder?: string, cameraName?: string) => {
+  const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string, isLegacy?: boolean, fileName?: string, dateFolder?: string, cameraName?: string, cameraFolderName?: string) => {
     if (isLegacy && fileName && dateFolder) {
-      window.open(`/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&download=true`, "_blank");
+      let url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&download=true`;
+      if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
+      window.open(url, "_blank");
       return;
     }
 
@@ -1196,6 +1202,7 @@ export default function CloudRecordings() {
             isLocal: p.isLocal,
             fileName: p.fileName,
             dateFolder: p.dateFolder,
+            cameraFolderName: p.cameraName,
           };
         });
         mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
@@ -1239,6 +1246,7 @@ export default function CloudRecordings() {
           isLocal: p.isLocal,
           fileName: p.fileName,
           dateFolder: p.dateFolder,
+          cameraFolderName: p.cameraName,
         };
       });
       setRecentRecordings(mapped);
@@ -1304,7 +1312,9 @@ export default function CloudRecordings() {
           </Button>
           <Button onClick={() => { 
             if (scheduleType === "screenshot" && !storagePath) {
-              addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a storage path in Settings before scheduling snapshots.' });
+              addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a snapshot storage path in Settings.' });
+            } else if (scheduleType === "video" && !videoStoragePath) {
+              addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a video storage path in Settings.' });
             }
             resetScheduleForm(); 
             setIsScheduleOpen(true); 
@@ -1391,7 +1401,7 @@ export default function CloudRecordings() {
                                 addPersistentNotification({ type: 'info', title: 'Preview Disabled', message: 'Video preview is currently disabled for optimization. Please use the Download button.' });
                                 return;
                               }
-                              handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder);
+                              handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
                             }}
                             className={cn("h-8 gap-1.5 hover:bg-primary/10 hover:text-primary", !rec.isScreenshot && "opacity-50")}
                           >
@@ -1400,7 +1410,7 @@ export default function CloudRecordings() {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isScreenshot || rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName)} 
+                            onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isScreenshot || rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName, rec.cameraFolderName)} 
                             className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary"
                           >
                             <Download className="h-3.5 w-3.5" /> {rec.isScreenshot ? "Save Image" : "Download"}
@@ -1752,14 +1762,35 @@ export default function CloudRecordings() {
               </div>
 
               {scheduleType === "screenshot" ? (
-                <Input type="time" value={scheduleScreenshotTime} onChange={e => setScheduleScreenshotTime(e.target.value)} lang="en-GB" className="h-10" />
+                <Input 
+                  type="time" 
+                  value={scheduleScreenshotTime} 
+                  onChange={e => setScheduleScreenshotTime(e.target.value)} 
+                  lang="en-GB" 
+                  step="60"
+                  className="h-10" 
+                />
               ) : (
                 <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2">
                   {scheduleTimeRanges.map((range, idx) => (
                     <div key={idx} className="flex items-center gap-2 group animate-in fade-in slide-in-from-top-1">
-                      <Input type="time" value={range.start} onChange={e => updateScheduleTimeRange(idx, "start", e.target.value)} lang="en-GB" className="h-9" />
+                      <Input 
+                        type="time" 
+                        value={range.start} 
+                        onChange={e => updateScheduleTimeRange(idx, "start", e.target.value)} 
+                        lang="en-GB" 
+                        step="60"
+                        className="h-9" 
+                      />
                       <span className="text-muted-foreground text-xs font-bold">TO</span>
-                      <Input type="time" value={range.end} onChange={e => updateScheduleTimeRange(idx, "end", e.target.value)} lang="en-GB" className="h-9" />
+                      <Input 
+                        type="time" 
+                        value={range.end} 
+                        onChange={e => updateScheduleTimeRange(idx, "end", e.target.value)} 
+                        lang="en-GB" 
+                        step="60"
+                        className="h-9" 
+                      />
                       <Button variant="ghost" size="icon" onClick={() => removeScheduleTimeRange(idx)} disabled={scheduleTimeRanges.length === 1} className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive">
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -1864,40 +1895,55 @@ export default function CloudRecordings() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Settings className="h-4 w-4 text-primary" /> Screenshot Settings
+              <Settings className="h-4 w-4 text-primary" /> General Settings
             </DialogTitle>
             <DialogDescription>
-              Configure where snapshots are archived locally on the server.
+              Configure where recordings and snapshots are archived on the server.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Local Storage Path</Label>
-              <div className="flex gap-2">
-                <Input 
-                  placeholder="E.g. D:\RecordedSnapshots or /mnt/data/vms_snaps" 
-                  value={storagePath}
-                  onChange={(e) => setStoragePath(e.target.value)}
-                  className="flex-1 bg-slate-50 border-slate-200"
-                />
-              </div>
-              <p className="text-[10px] text-muted-foreground italic leading-relaxed">
-                Enter an absolute path on the server. If empty, snapshots will use the internal "data" directory.
+          <div className="space-y-6 pt-4">
+            <div className="space-y-3">
+              <Label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Camera className="h-3 w-3" /> Snapshot Storage Path
+              </Label>
+              <Input 
+                placeholder="E.g. D:\Snapshots" 
+                value={storagePath}
+                onChange={(e) => setStoragePath(e.target.value)}
+                className="bg-slate-50 border-slate-200"
+              />
+              <p className="text-[9px] text-muted-foreground italic">
+                Absolute path for .png captures.
               </p>
             </div>
 
-            {!storagePath && (
+            <div className="space-y-3 pt-2 border-t">
+              <Label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Video className="h-3 w-3" /> Video Storage Path
+              </Label>
+              <Input 
+                placeholder="E.g. D:\Recordings" 
+                value={videoStoragePath}
+                onChange={(e) => setVideoStoragePath(e.target.value)}
+                className="bg-slate-50 border-slate-200"
+              />
+              <p className="text-[9px] text-muted-foreground italic">
+                Absolute path for .mp4 video files.
+              </p>
+            </div>
+
+            {(!storagePath || !videoStoragePath) && (
               <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 flex items-start gap-3">
                 <div className="mt-0.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /></div>
                 <p className="text-[10px] text-amber-700 leading-tight">
-                  <span className="font-bold">Recommendation:</span> Choose a folder outside the application directory to preserve images during updates.
+                  <span className="font-bold">Notice:</span> Empty paths will use the default "data" directory.
                 </p>
               </div>
             )}
           </div>
           <DialogFooter className="pt-4 mt-4 border-t">
             <Button variant="ghost" onClick={() => setIsSettingsOpen(false)} className="h-9">Cancel</Button>
-            <Button onClick={handleSaveSettings} className="h-9 px-6 bg-slate-900 border-slate-900">Save Path</Button>
+            <Button onClick={handleSaveSettings} className="h-9 px-6 bg-slate-900 border-slate-900">Save Settings</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

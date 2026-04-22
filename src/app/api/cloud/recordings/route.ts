@@ -101,16 +101,21 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    // 2. Fetch local screenshots from data folder (date-based folder structure)
+    // 2. Fetch local files from data folders (date-based folder structure)
     try {
-      let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+      const defaultDir = path.join(process.cwd(), "data", "recorded_screenshots");
+      const baseDirs = new Set<string>([defaultDir]);
+
       try {
         const settingsFile = path.join(process.cwd(), "data", "settings.json");
         if (fs.existsSync(settingsFile)) {
           const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-          if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
+          if (settings.storagePath) baseDirs.add(settings.storagePath);
+          if (settings.videoStoragePath) baseDirs.add(settings.videoStoragePath);
         }
       } catch (e) { }
+
+      for (const screenshotsBaseDir of baseDirs) {
 
       if (fs.existsSync(screenshotsBaseDir)) {
         const startLimit = startTime ? parseInt(startTime, 10) : 0;
@@ -233,55 +238,56 @@ export async function GET(request: NextRequest) {
             }
           }
         }
-
-        // 3. Final Deduplication and Post-Processing
-        // We group entries by a 5-second window to resolve duplicates between VMS pulses, 
-        // new ID-based snapshots, and legacy name-based snapshots.
-        const finalPeriods: any[] = [];
-        const sortedCandidateList = [...allPeriods].sort((a, b) => {
-           // Sort priority within the 5s window:
-           // 1. Local ID-based (has fileName and __)
-           // 2. Local legacy (has fileName, no __)
-           // 3. VMS recording (no fileName)
-           if (a.isLocal && b.isLocal) {
-              const aHasId = (a.fileName || "").includes("__") ? 0 : 1;
-              const bHasId = (b.fileName || "").includes("__") ? 0 : 1;
-              return aHasId - bHasId;
-           }
-           if (a.isLocal) return -1;
-           if (b.isLocal) return 1;
-           return 0;
-        });
-
-        for (const candidate of sortedCandidateList) {
-          const isDuplicate = finalPeriods.some(p => {
-             // 1. Explicit filename check (Same download link)
-             if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
-
-             // 2. Time-based deduplication
-             const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
-             // If they are within 10 seconds of each other
-             if (timeDiff < 10000) {
-                // If we already have a local snapshot for this window, skip this VMS record (pulse)
-                if (p.isLocal && !candidate.isLocal && candidate.durationMs <= 10000) return true;
-                // If both are local snapshots for the same window, prioritize the ID-split over legacy
-                if (p.isLocal && candidate.isLocal) return true;
-             }
-             return false;
-          });
-
-          if (!isDuplicate) {
-            finalPeriods.push(candidate);
-          }
-        }
-
-        // Final sort by start time descending (newest first)
-        finalPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
-        allPeriods = finalPeriods;
       }
-    } catch (err) {
-      console.warn("[recordings] Failed to scan local screenshots:", err);
+    } // End of baseDirs loop
+
+    // 3. Final Deduplication and Post-Processing
+    // We group entries by a 5-second window to resolve duplicates between VMS pulses, 
+    // new ID-based snapshots, and legacy name-based snapshots.
+    const finalPeriods: any[] = [];
+    const sortedCandidateList = [...allPeriods].sort((a, b) => {
+       // Sort priority within the 5s window:
+       // 1. Local ID-based (has fileName and __)
+       // 2. Local legacy (has fileName, no __)
+       // 3. VMS recording (no fileName)
+       if (a.isLocal && b.isLocal) {
+          const aHasId = (a.fileName || "").includes("__") ? 0 : 1;
+          const bHasId = (b.fileName || "").includes("__") ? 0 : 1;
+          return aHasId - bHasId;
+       }
+       if (a.isLocal) return -1;
+       if (b.isLocal) return 1;
+       return 0;
+    });
+
+    for (const candidate of sortedCandidateList) {
+      const isDuplicate = finalPeriods.some(p => {
+         // 1. Explicit filename check (Same download link)
+         if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
+
+         // 2. Time-based deduplication
+         const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
+         // If they are within 10 seconds of each other
+         if (timeDiff < 10000) {
+            // If we already have a local snapshot for this window, skip this VMS record (pulse)
+            if (p.isLocal && !candidate.isLocal && candidate.durationMs <= 10000) return true;
+            // If both are local snapshots for the same window, prioritize the ID-split over legacy
+            if (p.isLocal && candidate.isLocal) return true;
+         }
+         return false;
+      });
+
+      if (!isDuplicate) {
+        finalPeriods.push(candidate);
+      }
     }
+
+    // Final sort by start time descending (newest first)
+    finalPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
+    allPeriods = finalPeriods;
+  } catch (err) {
+    console.warn("[recordings] Failed to scan local storage folders:", err);
+  }
     
     return NextResponse.json(allPeriods);
   } catch (error) {

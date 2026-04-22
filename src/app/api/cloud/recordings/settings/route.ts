@@ -27,17 +27,17 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { storagePath } = body;
-
-    // Ensure data directory exists
-    const dataDir = path.join(process.cwd(), "data");
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ storagePath }, null, 2));
-
-    return NextResponse.json({ success: true, storagePath });
+    const { storagePath, videoStoragePath } = body;
+ 
+     // Ensure data directory exists
+     const dataDir = path.join(process.cwd(), "data");
+     if (!fs.existsSync(dataDir)) {
+       fs.mkdirSync(dataDir, { recursive: true });
+     }
+ 
+     fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ storagePath, videoStoragePath }, null, 2));
+ 
+     return NextResponse.json({ success: true, storagePath, videoStoragePath });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
