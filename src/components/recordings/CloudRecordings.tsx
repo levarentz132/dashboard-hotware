@@ -1371,7 +1371,7 @@ export default function CloudRecordings() {
                             </div>
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
                               <span className="font-medium text-foreground/80">
-                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })}
+                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: false })}
                               </span>
                               {!rec.isScreenshot && rec.durationMs > 5000 && (
                                 <>
@@ -1752,14 +1752,14 @@ export default function CloudRecordings() {
               </div>
 
               {scheduleType === "screenshot" ? (
-                <Input type="time" value={scheduleScreenshotTime} onChange={e => setScheduleScreenshotTime(e.target.value)} className="h-10" />
+                <Input type="time" value={scheduleScreenshotTime} onChange={e => setScheduleScreenshotTime(e.target.value)} lang="en-GB" className="h-10" />
               ) : (
                 <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2">
                   {scheduleTimeRanges.map((range, idx) => (
                     <div key={idx} className="flex items-center gap-2 group animate-in fade-in slide-in-from-top-1">
-                      <Input type="time" value={range.start} onChange={e => updateScheduleTimeRange(idx, "start", e.target.value)} className="h-9" />
+                      <Input type="time" value={range.start} onChange={e => updateScheduleTimeRange(idx, "start", e.target.value)} lang="en-GB" className="h-9" />
                       <span className="text-muted-foreground text-xs font-bold">TO</span>
-                      <Input type="time" value={range.end} onChange={e => updateScheduleTimeRange(idx, "end", e.target.value)} className="h-9" />
+                      <Input type="time" value={range.end} onChange={e => updateScheduleTimeRange(idx, "end", e.target.value)} lang="en-GB" className="h-9" />
                       <Button variant="ghost" size="icon" onClick={() => removeScheduleTimeRange(idx)} disabled={scheduleTimeRanges.length === 1} className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive">
                         <Trash2 className="h-4 w-4" />
                       </Button>

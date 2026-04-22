@@ -138,7 +138,8 @@ const startWatchdog = () => {
             const isWithinWindow = now >= startMs && now < startMs + catchUpWindowMs;
 
             if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress") && isWithinWindow) {
-              console.log(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${new Date().toLocaleTimeString()})`);
+              const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+              console.log(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${time})`);
               try {
                 const port = global._nxAppPort || process.env.PORT || "3000";
                 const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
