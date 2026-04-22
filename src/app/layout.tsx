@@ -1,14 +1,13 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { AuthProvider } from "@/contexts/auth-context";
-
 import { FullscreenHandler } from "@/components/utils/FullscreenHandler";
 import { GlobalDeviceMonitor } from "@/components/monitoring/GlobalDeviceMonitor";
 import DisableConsoleClient from "@/components/DisableConsoleClient";
 import NotificationSystem from "@/components/ui/NotificationSystem";
 
-const inter = Inter({ subsets: ["latin"] });
+// Use a system font stack instead of fetching from Google Fonts to support offline builds
+const inter = { className: "" };
 
 export const metadata: Metadata = {
   title: "Hotware Dashboard",
@@ -22,7 +21,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body>
         <DisableConsoleClient />
         <FullscreenHandler />
         <AuthProvider>

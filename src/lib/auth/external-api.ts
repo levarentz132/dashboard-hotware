@@ -2,7 +2,7 @@
 // Handles communication with external license API
 
 export const EXTERNAL_AUTH_API = {
-  URL: "http://43.218.99.193:3000", // Base URL: http://16.78.105.192:3000
+  URL: "http://43.218.99.193:3111", // Base URL: http://16.78.105.192:3000
   TIMEOUT: 10000, // 10 seconds
 };
 
@@ -54,8 +54,6 @@ export interface ExternalAuthResponse {
     last_login?: string | null;
     is_active?: boolean;
     created_at?: string;
-    org_camera_ids?: string[] | number[];
-    orgCameraIds?: string[] | number[];
   };
   organization?: ExternalOrganization; // Single organization from /me
 }

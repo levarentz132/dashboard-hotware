@@ -23,9 +23,6 @@
       }
     ],
     "paths": {
-      "class-variance-authority": [
-        "./node_modules/class-variance-authority/dist/index.d.ts"
-      ],
       "@/*": [
         "./src/*"
       ]

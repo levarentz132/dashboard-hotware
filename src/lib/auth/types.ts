@@ -47,8 +47,6 @@ export interface UserPublic {
   license_status?: string;
   license_expires_at?: string | null;
   days_remaining?: number | null;
-  // List of allowed camera IDs for this user's organization (if provided by external API)
-  org_camera_ids?: string[] | number[];
   is_active: boolean;
   created_at: Date | string;
   last_login?: Date | string | null;

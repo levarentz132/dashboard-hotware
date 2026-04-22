@@ -84,50 +84,6 @@ export async function GET(request: NextRequest) {
 
     console.log(`[recordings/devices] Cameras after filter: ${cameras.length}`);
 
-    // Apply org_camera_ids filter if provided by external auth
-    try {
-      const token = request.cookies.get(AUTH_CONFIG.COOKIE_NAME)?.value;
-      if (token) {
-        const me = await getExternalMe(token).catch(() => null);
-        const allowed = me?.user?.org_camera_ids ?? me?.user?.orgCameraIds ?? undefined;
-        if (Array.isArray(allowed) && allowed.length > 0) {
-          const allowedSet = new Set(allowed.map((id: any) => String(id).toLowerCase()));
-          const filtered = cameras.filter((d: any) => allowedSet.has(String(d.id).toLowerCase()));
-          console.log(`[recordings/devices] Cameras after org_camera_ids filter: ${filtered.length}`);
-          return NextResponse.json(filtered);
-        }
-      }
-    } catch (e) {
-      console.warn("[recordings/devices] Failed to apply org_camera_ids filter:", e);
-    }
-    
-      // Fallback: if external /me did not provide org_camera_ids, check for a client-visible
-      // `org_camera_ids` cookie (set by login) and apply that as the allowed list.
-      try {
-        const cookieVal = request.cookies.get('org_camera_ids')?.value;
-        if (cookieVal) {
-          let parsed: any = undefined;
-          try {
-            parsed = JSON.parse(cookieVal);
-          } catch (e1) {
-            try {
-              parsed = JSON.parse(decodeURIComponent(cookieVal));
-            } catch (e2) {
-              // attempt CSV fallback
-              parsed = cookieVal.split(/\s*,\s*/).map((s) => s.replace(/^"|"$/g, ''));
-            }
-          }
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const allowedSet = new Set(parsed.map((id: any) => String(id).toLowerCase()));
-            const filtered = cameras.filter((d: any) => allowedSet.has(String(d.id).toLowerCase()));
-            console.log(`[recordings/devices] Cameras after org_camera_ids cookie filter: ${filtered.length}`);
-            return NextResponse.json(filtered);
-          }
-        }
-      } catch (e) {
-        console.warn('[recordings/devices] Failed to parse org_camera_ids cookie fallback:', e);
-      }
-
     return NextResponse.json(cameras);
   } catch (error) {
     console.error("[recordings/devices] Exception:", error);

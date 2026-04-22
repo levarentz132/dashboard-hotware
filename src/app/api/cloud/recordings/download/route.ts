@@ -3,6 +3,7 @@ import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderF
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { logRecordingEvent } from "@/lib/recording-logger";
 import { promisify } from "util";
 import { spawn } from "child_process";
 import { Readable } from "stream";
@@ -122,13 +123,12 @@ export async function GET(request: NextRequest) {
       const HH   = recDate.getHours().toString().padStart(2, "0");
       const mmP  = recDate.getMinutes().toString().padStart(2, "0");
       const SS   = recDate.getSeconds().toString().padStart(2, "0");
-      const dateFolder = `${YYYY}${MM}${DD}`;
-
+      const dateFolder = `${YYYY}-${MM}-${DD}`;
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").trim();
-      const baseFileName = `${safeCameraName}_${dateFolder}_${HH}${mmP}${SS}`;
+      const baseFileName = `${HH}${mmP}${SS}`;
 
-      const saveDir = path.join(videosBaseDir, dateFolder);
+      const saveDir = path.join(videosBaseDir, dateFolder, safeCameraName);
       if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
 
       let finalFileName = `${baseFileName}.mp4`;
@@ -176,6 +176,7 @@ export async function GET(request: NextRequest) {
             resolve(NextResponse.json({ error: "FFmpeg failed during auto-save", code }, { status: 500 }));
           } else {
             console.log(`[recordings/download] AUTO-SAVE complete: ${savePath}`);
+            logRecordingEvent(`Recording finished successfully: ${safeCameraName}`);
             resolve(NextResponse.json({ success: true, path: savePath, file: finalFileName }));
           }
         });
@@ -366,13 +367,13 @@ export async function GET(request: NextRequest) {
               const HH  = recDate.getHours().toString().padStart(2, "0");
               const mm  = recDate.getMinutes().toString().padStart(2, "0");
               const SS  = recDate.getSeconds().toString().padStart(2, "0");
-              const dateFolder = `${YYYY}${MM}${DD}`;
+              const dateFolder = `${YYYY}-${MM}-${DD}`;
 
               const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
                 .replace(/[<>:"/\\|?*]/g, "_").trim();
-              const baseFileName = `${safeCameraName}_${dateFolder}_${HH}${mm}${SS}`;
+              const baseFileName = `${HH}${mm}${SS}`;
 
-              const saveDir = path.join(videosBaseDir, dateFolder);
+              const saveDir = path.join(videosBaseDir, dateFolder, safeCameraName);
               if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
 
               // Collision detection
@@ -391,6 +392,7 @@ export async function GET(request: NextRequest) {
                   console.error("[recordings/download] Auto-save video copy failed:", copyErr);
                 } else {
                   console.log(`[recordings/download] Auto-saved video to: ${savePath}`);
+                  logRecordingEvent(`Recording finished successfully: ${safeCameraName}`);
                 }
               });
             } catch (saveErr) {

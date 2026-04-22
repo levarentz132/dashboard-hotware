@@ -66,3 +66,28 @@ export function isLicenseExpiringSoon(license_expires_at: string | null | undefi
         return false;
     }
 }
+
+/**
+ * Format a date string to Indonesian locale (id-ID).
+ * @param dateString The date string to format
+ * @returns Formatted date string or the original if invalid
+ */
+export function formatIndonesianDate(dateString: string | null | undefined): string {
+    if (!dateString) return "-";
+    try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+        
+        return new Intl.DateTimeFormat('id-ID', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        }).format(date);
+    } catch (e) {
+        return dateString;
+    }
+}

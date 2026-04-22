@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
+import { logRecordingEvent, formatAuditDate } from "@/lib/recording-logger";
 
 
 // ── VMS Direct API helpers ────────────────────────────────────────────────────
@@ -137,6 +138,7 @@ const startWatchdog = () => {
                 if (nxLocationPort) screenshotHeaders["x-nx-location-port"] = nxLocationPort;
 
                 console.log(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName}`);
+                logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`);
                 const screenshotRes = await fetch(internalUrl, {
                   method: "POST",
                   headers: screenshotHeaders,
@@ -157,6 +159,7 @@ const startWatchdog = () => {
                 } else {
                   const result = await screenshotRes.json();
                   console.log(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
+                  logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`);
                   rec.record = false;
 
                   if (rec.recurrence && rec.recurrence !== "none") {
@@ -263,6 +266,7 @@ const startWatchdog = () => {
               }, globalAuth, ip, port);
 
               console.log(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
+              logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`);
               rec.status = "recording";
               rec.record = true; 
               changed = true;
@@ -294,6 +298,7 @@ const startWatchdog = () => {
                 schedule: { isEnabled: false }
               }, globalAuth, ip, port);
               console.log(`[Watchdog] Recording stopped for ${rec.cameraName}`);
+              logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`);
 
               // ── Step 2: Restore original schedule (with isEnabled: false) ───────────
               // Only restore if the original had tasks (don't re-enable a blank schedule)
@@ -416,6 +421,27 @@ export async function POST(request: NextRequest) {
       ...body,
       notificationUserKey: body.notificationUserKey || request.cookies.get("local_nx_user")?.value || request.cookies.get("nx_cloud_session")?.value
     }, null, 2), "utf-8");
+
+    // Log new schedules
+    if (Array.isArray(body.schedules)) {
+      body.schedules.forEach((s: any) => {
+        // If it's a new or pending task, log it
+        if (s.status === "pending") {
+          // Calculate target execution time
+          let executionTime = s.startTime;
+          if (s.date) {
+            const dateObj = new Date(s.date);
+            const [h, m, sec] = s.startTime.split(":").map(Number);
+            dateObj.setHours(h, m, sec || 0, 0);
+            executionTime = formatAuditDate(dateObj);
+          }
+          
+          logRecordingEvent(`Recording schedule created: ${s.cameraName} → ${executionTime}`);
+          logRecordingEvent(`User added recording task for ${s.cameraName} (execution time: ${executionTime})`);
+        }
+      });
+    }
+
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

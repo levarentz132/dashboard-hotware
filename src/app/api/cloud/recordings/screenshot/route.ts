@@ -253,8 +253,7 @@ export async function POST(request: NextRequest) {
     }
 
     const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
-    const fileDateStr = `${YYYY}${MM}${DD}`; // Compact format
-    const baseFileName = `${safeCameraName}_${fileDateStr}_${displayHH}${displaymm}${displaySS}`;
+    const baseFileName = `${displayHH}${displaymm}${displaySS}`;
 
     // ---- Get Custom Storage Path ----
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
@@ -266,7 +265,7 @@ export async function POST(request: NextRequest) {
       }
     } catch (e) { }
 
-    const screenshotsDir = path.join(screenshotsBaseDir, dateFolder);
+    const screenshotsDir = path.join(screenshotsBaseDir, dateFolder, safeCameraName);
     if (!fs.existsSync(screenshotsDir)) {
       fs.mkdirSync(screenshotsDir, { recursive: true });
     }
@@ -290,6 +289,7 @@ export async function POST(request: NextRequest) {
       filePath: filePath,
       fileName: finalFileName,
       dateFolder: dateFolder,
+      cameraName: safeCameraName,
       sizeBytes: buffer.length,
       timestamp: targetDate.toISOString(),
     });
@@ -336,13 +336,14 @@ export async function GET(request: NextRequest) {
       if (dateFilter && folder !== dateFilter) continue;
 
       const folderPath = path.join(baseDir, folder);
-      const files = fs.readdirSync(folderPath).filter(f => f.endsWith(".png"));
-
-      for (const file of files) {
+      
+      // List files directly in the date folder (Legacy)
+      const rootFiles = fs.readdirSync(folderPath).filter(f => f.endsWith(".png"));
+      for (const file of rootFiles) {
         const filePath = path.join(folderPath, file);
-        const stat = fs.statSync(filePath);
+        if (fs.statSync(filePath).isDirectory()) continue;
 
-        // Parse camera name and timestamp from filename: CameraName_YYYY-MM-DD_HHMMSS.png or CameraName_YYYYMMDD_HHMMSS.png
+        const stat = fs.statSync(filePath);
         const match = file.match(/^(.+)_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.png$/);
         const cameraName = match ? match[1] : file;
         const dateStr = match ? match[2] : folder;
@@ -358,6 +359,37 @@ export async function GET(request: NextRequest) {
           createdAt: stat.birthtime.toISOString(),
           url: `/api/cloud/recordings/screenshot/serve?date=${folder}&file=${encodeURIComponent(file)}`,
         });
+      }
+
+      // List files in camera subfolders (New)
+      const cameraFolders = fs.readdirSync(folderPath).filter(f => {
+        const fullPath = path.join(folderPath, f);
+        return fs.statSync(fullPath).isDirectory();
+      });
+
+      for (const cameraName of cameraFolders) {
+        const cameraPath = path.join(folderPath, cameraName);
+        const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png"));
+
+        for (const file of files) {
+          const filePath = path.join(cameraPath, file);
+          const stat = fs.statSync(filePath);
+
+          // Filename is HHMMSS.png or HHMMSS_N.png
+          const timeMatch = file.match(/^(\d{6})(?:_\d+)?\.png$/);
+          const timeStr = timeMatch ? timeMatch[1] : "000000";
+
+          screenshots.push({
+            fileName: file,
+            dateFolder: folder,
+            cameraName,
+            dateStr: folder,
+            timeStr,
+            sizeBytes: stat.size,
+            createdAt: stat.birthtime.toISOString(),
+            url: `/api/cloud/recordings/screenshot/serve?date=${folder}&camera=${encodeURIComponent(cameraName)}&file=${encodeURIComponent(file)}`,
+          });
+        }
       }
     }
 

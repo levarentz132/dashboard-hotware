@@ -90,7 +90,7 @@ interface ScheduledRecording {
   endMs: number;
   type: "video" | "screenshot";
   screenshotTime?: string;
-  status: "pending" | "recording" | "completed" | "failed" | "in progress";
+  status: "pending" | "recording" | "completed" | "failed" | "in progress" | "capturing";
   startedAt?: number;
   recurrence?: "none" | "weekday" | "monthday";
   recurrenceDay?: number;
@@ -951,7 +951,7 @@ export default function CloudRecordings() {
             startMs: effectiveStartMs,
             endMs: endMs,
             type: "screenshot",
-            status: "in progress",
+            status: "capturing",
             batchId,
           };
           setScheduledRecordings(prev => [snapshotEntry, ...prev]);
@@ -1223,6 +1223,7 @@ export default function CloudRecordings() {
     pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
     recording: "bg-green-100 text-green-800 border-green-200 animate-pulse",
     "in progress": "bg-indigo-100 text-indigo-800 border-indigo-200 animate-pulse",
+    capturing: "bg-indigo-100 text-indigo-800 border-indigo-200 animate-pulse",
     completed: "bg-blue-100 text-blue-800 border-blue-200",
     failed: "bg-red-100 text-red-800 border-red-200",
     active: "bg-sky-100 text-sky-800 border-sky-200 font-bold",
@@ -1406,10 +1407,10 @@ export default function CloudRecordings() {
                       const first = group[0];
                       const sortedDates = [...group].map(r => new Date(r.date)).sort((a, b) => a.getTime() - b.getTime());
                       const isRecurring = group.some(r => r.recurrence && r.recurrence !== "none");
-                      const anyRecording = group.some((r: ScheduledRecording) => r.status === "recording" || r.status === "in progress");
+                      const anyRecording = group.some((r: ScheduledRecording) => r.status === "recording" || r.status === "in progress" || r.status === "capturing");
                       const allCompleted = group.every(r => r.status === "completed" || r.status === "failed");
                       const mainStatus = anyRecording 
-                        ? (group.some(r => r.status === "recording") ? "recording" : "in progress") 
+                        ? (group.some(r => r.status === "recording") ? "recording" : (group.some(r => r.status === "capturing") ? "capturing" : "in progress")) 
                         : (isRecurring ? "active" : (allCompleted ? "completed" : "pending"));
                       const dateList = sortedDates.map(d => format(d, "MMM d"));
                       const displayDates = dateList.length > 2 ? `${dateList.slice(0, 2).join(", ")}...` : dateList.join(", ");
@@ -1438,7 +1439,7 @@ export default function CloudRecordings() {
                               {/* Glowing side indicator */}
                               <div className={cn("absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all group-hover:w-1.5", 
                                 mainStatus === "recording" ? "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]" : 
-                                mainStatus === "in progress" ? "bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]" :
+                                (mainStatus === "in progress" || mainStatus === "capturing") ? "bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]" :
                                 mainStatus === "active" ? "bg-sky-500 shadow-[0_0_10px_rgba(14,165,233,0.2)]" :
                                 mainStatus === "pending" ? "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.2)]" : "bg-slate-300")} />
 
@@ -1475,7 +1476,7 @@ export default function CloudRecordings() {
                                 </div>
                               </div>
 
-                              { (mainStatus === "recording" || mainStatus === "in progress") && (
+                              { (mainStatus === "recording" || mainStatus === "in progress" || mainStatus === "capturing") && (
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary/10">
                                   <div className={cn("h-full w-full animate-pulse", mainStatus === "recording" ? "bg-green-500" : "bg-indigo-500")} />
                                 </div>

@@ -131,33 +131,30 @@ export async function GET(request: NextRequest) {
 
         for (const dateFolder of dateFolders) {
           const folderPath = path.join(screenshotsBaseDir, dateFolder);
-          const files = fs.readdirSync(folderPath).filter(f => f.endsWith(".png"));
+          
+          // --- 1. Scan Legacy Flat Files (directly in dateFolder) ---
+          const legacyFiles = fs.readdirSync(folderPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
 
-          for (const file of files) {
+          for (const file of legacyFiles) {
+            const filePath = path.join(folderPath, file);
+            if (fs.statSync(filePath).isDirectory()) continue;
+
             // New format: {deviceId}__{cameraName}_{YYYYMMDD}_{HHMMSS}.png
             // Legacy format: {cameraName}_{YYYY-MM-DD}_{HHMMSS}.png
             const idSplit = file.split("__");
             let isMatch = false;
             
             if (idSplit.length > 1) {
-              // This is a new format file. Strict ID match.
               const fileDeviceId = idSplit[0].toLowerCase();
-              if (fileDeviceId === deviceId.toLowerCase()) {
-                isMatch = true;
-              }
+              if (fileDeviceId === deviceId.toLowerCase()) isMatch = true;
             } else if (searchCameraName) {
-              // Legacy format. Match by camera name.
-              // Note: Only match if the file does NOT have a dual-separator (__) indicating it belongs to a different ID-based record.
               const safeSearchName = searchCameraName.replace(/[<>:"/\\|?*]/g, "_").trim();
-              if (file.startsWith(safeSearchName + "_")) {
-                isMatch = true;
-              }
+              if (file.startsWith(safeSearchName + "_")) isMatch = true;
             }
 
             if (!isMatch) continue;
 
-            // Parse timestamp from filename
-            const match = file.match(/_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.(?:png|jpg)$/);
+            const match = file.match(/_(\d{8}|\d{4}-\d{2}-\d{2})_(\d{6})(?:_\d+)?\.(?:png|jpg|mp4)$/);
             if (!match) continue;
 
             const [, dateStr, timeStr] = match;
@@ -175,18 +172,57 @@ export async function GET(request: NextRequest) {
             const timestamp = new Date(y, m - 1, d, hour, minute, second).getTime();
 
             if (timestamp >= startLimit && timestamp <= endLimit) {
-              // Deduplicate: If an equivalent VMS period (short clip/pulse) already exists within ±5s, 
-              // we hide the VMS record and keep the Local record (labeled SNAPSHOT).
-              // We'll perform the filtering AFTER scanning both VMS and local to keep logic simple.
               allPeriods.push({
                 startTimeMs: timestamp,
-                durationMs: 0,
-                isScreenshot: true,
+                durationMs: file.endsWith(".mp4") ? 60000 : 0, // Assume 1m for videos if unknown
+                isScreenshot: file.endsWith(".png"),
+                isVideo: file.endsWith(".mp4"),
                 isLocal: true,
                 serverId: "local-storage",
                 fileName: file,
                 dateFolder: dateFolder,
+                url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(file)}`,
               });
+            }
+          }
+
+          // --- 2. Scan New Nested Structure (dateFolder > cameraName > timestamp) ---
+          const cameraFolders = fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory());
+          
+          for (const cameraFolderName of cameraFolders) {
+            // Check if this folder matches our camera
+            const safeSearchName = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+            if (safeSearchName && cameraFolderName !== safeSearchName) continue;
+
+            const cameraPath = path.join(folderPath, cameraFolderName);
+            const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
+
+            for (const file of files) {
+              const timeMatch = file.match(/^(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
+              if (!timeMatch) continue;
+
+              const timeStr = timeMatch[1];
+              const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
+              
+              const hour = parseInt(timeStr.substring(0, 2), 10);
+              const minute = parseInt(timeStr.substring(2, 4), 10);
+              const second = parseInt(timeStr.substring(4, 6), 10);
+              const timestamp = new Date(y, m - 1, d, hour, minute, second).getTime();
+
+              if (timestamp >= startLimit && timestamp <= endLimit) {
+                allPeriods.push({
+                  startTimeMs: timestamp,
+                  durationMs: file.endsWith(".mp4") ? 60000 : 0,
+                  isScreenshot: file.endsWith(".png"),
+                  isVideo: file.endsWith(".mp4"),
+                  isLocal: true,
+                  serverId: "local-storage",
+                  fileName: file,
+                  dateFolder: dateFolder,
+                  cameraName: cameraFolderName,
+                  url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&camera=${encodeURIComponent(cameraFolderName)}&file=${encodeURIComponent(file)}`,
+                });
+              }
             }
           }
         }

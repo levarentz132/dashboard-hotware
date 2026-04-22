@@ -11,6 +11,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const dateFolder = searchParams.get("date");
+    const cameraName = searchParams.get("camera");
     const fileName = searchParams.get("file");
     const download = searchParams.get("download");
 
@@ -23,6 +24,7 @@ export async function GET(request: NextRequest) {
 
     // Sanitize to prevent path traversal
     const safeDateFolder = dateFolder.replace(/[^0-9-]/g, "");
+    const safeCameraName = cameraName ? cameraName.replace(/[<>:"/\\|?*]/g, "_") : null;
     const safeFileName = path.basename(fileName);
 
     // Respect custom storage path if defined
@@ -35,7 +37,12 @@ export async function GET(request: NextRequest) {
       }
     } catch (e) { }
 
-    const filePath = path.join(screenshotsBaseDir, safeDateFolder, safeFileName);
+    let filePath;
+    if (safeCameraName) {
+      filePath = path.join(screenshotsBaseDir, safeDateFolder, safeCameraName, safeFileName);
+    } else {
+      filePath = path.join(screenshotsBaseDir, safeDateFolder, safeFileName);
+    }
 
     if (!fs.existsSync(filePath)) {
       return NextResponse.json(
