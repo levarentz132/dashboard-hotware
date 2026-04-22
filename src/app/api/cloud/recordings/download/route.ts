@@ -130,17 +130,17 @@ export async function GET(request: NextRequest) {
       const dateFolder = `${YYYY}-${MM}-${DD}`;
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").trim();
-      const baseFileName = `${HH}${mmP}${SS}`;
-
-      const saveDir = path.join(videosBaseDir, dateFolder, safeCameraName);
-      if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
-
-      let finalFileName = `${baseFileName}.mp4`;
-      let savePath = path.join(saveDir, finalFileName);
-      let counter = 1;
-      while (fs.existsSync(savePath)) {
-        finalFileName = `${baseFileName}_${counter}.mp4`;
-        savePath = path.join(saveDir, finalFileName);
+      const baseFileName = `${safeCameraName}_${HH}${mmP}${SS}`;
+ 
+       const saveDir = path.join(videosBaseDir, dateFolder);
+       if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
+ 
+       let finalFileName = `${baseFileName}.mp4`;
+       let savePath = path.join(saveDir, finalFileName);
+       let counter = 1;
+       while (fs.existsSync(savePath)) {
+         finalFileName = `${baseFileName}_${counter}.mp4`;
+         savePath = path.join(saveDir, finalFileName);
         counter++;
       }
 

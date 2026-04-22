@@ -256,7 +256,7 @@ export async function POST(request: NextRequest) {
     }
 
     const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
-    const baseFileName = `${displayHH}${displaymm}${displaySS}`;
+    const timestampStr = `${displayHH}${displaymm}${displaySS}`;
 
     // ---- Get Custom Storage Path ----
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
@@ -269,10 +269,13 @@ export async function POST(request: NextRequest) {
     } catch (e) { }
 
     console.log(`[screenshot] Using storage base: ${screenshotsBaseDir}`);
-    const screenshotsDir = path.join(screenshotsBaseDir, dateFolder, safeCameraName);
+    const screenshotsDir = path.join(screenshotsBaseDir, dateFolder); // Saved directly in date folder
     if (!fs.existsSync(screenshotsDir)) {
       fs.mkdirSync(screenshotsDir, { recursive: true });
     }
+
+    // New format: CameraName_HHmmss.png
+    const baseFileName = `${safeCameraName}_${timestampStr}`;
 
     // ---- 4. Collision detection: append _N if file already exists ----
     let finalFileName = `${baseFileName}.png`;

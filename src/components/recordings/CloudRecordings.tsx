@@ -1202,7 +1202,7 @@ export default function CloudRecordings() {
             isLocal: p.isLocal,
             fileName: p.fileName,
             dateFolder: p.dateFolder,
-            cameraFolderName: p.cameraName,
+            cameraFolderName: p.cameraFolderName !== undefined ? p.cameraFolderName : p.cameraName,
           };
         });
         mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
@@ -1246,7 +1246,7 @@ export default function CloudRecordings() {
           isLocal: p.isLocal,
           fileName: p.fileName,
           dateFolder: p.dateFolder,
-          cameraFolderName: p.cameraName,
+          cameraFolderName: p.cameraFolderName !== undefined ? p.cameraFolderName : p.cameraName,
         };
       });
       setRecentRecordings(mapped);

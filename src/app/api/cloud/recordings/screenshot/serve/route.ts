@@ -45,6 +45,13 @@ export async function GET(request: NextRequest) {
     let filePath;
     if (safeCameraName) {
       filePath = path.join(screenshotsBaseDir, safeDateFolder, safeCameraName, safeFileName);
+      // Fallback: If not found in subfolder, try the root date folder
+      if (!fs.existsSync(filePath)) {
+        const fallbackPath = path.join(screenshotsBaseDir, safeDateFolder, safeFileName);
+        if (fs.existsSync(fallbackPath)) {
+          filePath = fallbackPath;
+        }
+      }
     } else {
       filePath = path.join(screenshotsBaseDir, safeDateFolder, safeFileName);
     }
