@@ -339,8 +339,9 @@ export default function CloudRecordings() {
   // ---- Persistence Logic ----
   const saveToPersistence = async (scheds: ScheduledRecording[], originals: any) => {
     try {
-      const nxLocationIp = Cookies.get("nx_location_ip") || undefined;
-      const nxLocationPort = Cookies.get("nx_location_port") || undefined;
+      // Capture the VMS location to store it in the data file for the watchdog
+      const nxLocationIp = Cookies.get("nx_location_ip") || (typeof window !== 'undefined' ? (window as any).electronConfig?.NEXT_PUBLIC_NX_SERVER_HOST : undefined);
+      const nxLocationPort = Cookies.get("nx_location_port") || (typeof window !== 'undefined' ? (window as any).electronConfig?.NEXT_PUBLIC_NX_SERVER_PORT : undefined);
       
       await fetch("/api/cloud/recordings/scheduled", {
         method: "POST",
@@ -955,7 +956,16 @@ export default function CloudRecordings() {
             status: "capturing",
             batchId,
           };
-          setScheduledRecordings(prev => [snapshotEntry, ...prev]);
+          setScheduledRecordings(prev => {
+            // Remove any existing duplicate tasks for this camera/time/type to prevent double-firing
+            const filtered = prev.filter(r => !(
+              r.cameraId === snapshotEntry.cameraId && 
+              r.startTime === snapshotEntry.startTime && 
+              r.type === snapshotEntry.type &&
+              new Date(r.date).toDateString() === new Date(snapshotEntry.date).toDateString()
+            ));
+            return [snapshotEntry, ...filtered];
+          });
           totalTasksScheduled++;
 
           (async () => {
@@ -996,6 +1006,7 @@ export default function CloudRecordings() {
                     id: entryId,
                     date: nextOccurDate,
                     status: "pending",
+                    screenshotTime: tStart, // Preserve the time display
                     startMs: nextOccurDate.setHours(sh, sm, 0, 0),
                     endMs: nextOccurDate.setHours(sh, sm, 0, 0),
                     recurrence: scheduleDays.length > 0 ? "weekday" : "monthday",
@@ -1056,10 +1067,16 @@ export default function CloudRecordings() {
 
     if (totalTasksScheduled > 0) {
       setScheduledRecordings(prev => {
-        // Edit mode: remove old entries for this batch before inserting the updated ones
-        const filtered = scheduleBatchId
-          ? prev.filter(r => r.batchId !== scheduleBatchId)
-          : prev;
+        // Remove old entries for this batch OR remove duplicates if adding individual tasks
+        let filtered = prev;
+        if (scheduleBatchId) {
+          filtered = prev.filter(r => r.batchId !== scheduleBatchId);
+        } else {
+          // Individual task: remove existing matches for same camera/time/type
+          const newIds = new Set(newScheduledEntries.map(n => n.id));
+          const newKeys = new Set(newScheduledEntries.map(n => `${n.cameraId}-${n.startTime}-${n.type}-${new Date(n.date).toDateString()}`));
+          filtered = prev.filter(r => !newIds.has(r.id) && !newKeys.has(`${r.cameraId}-${r.startTime}-${r.type}-${new Date(r.date).toDateString()}`));
+        }
         return [...filtered, ...newScheduledEntries];
       });
       setScheduleSuccess(`Successfully ${scheduleBatchId ? "updated" : "scheduled"} ${totalTasksScheduled} task(s).`);
@@ -1099,7 +1116,19 @@ export default function CloudRecordings() {
         nextDate.setTime(next.getTime());
       }
       
-      setScheduledRecordings(prev => prev.map(r => r.id === id ? { ...r, date: nextDate, status: "pending" } : r));
+      // Recalculate startMs and endMs for the next occurrence
+      const [sh, sm] = rec.startTime.split(":").map(Number);
+      const [eh, em] = (rec.endTime || rec.startTime).split(":").map(Number);
+      const nextStartMs = new Date(nextDate).setHours(sh, sm, 0, 0);
+      const nextEndMs = rec.type === "screenshot" ? nextStartMs : new Date(nextDate).setHours(eh, em, 59, 999);
+
+      setScheduledRecordings(prev => prev.map(r => r.id === id ? { 
+        ...r, 
+        date: nextDate, 
+        status: "pending",
+        startMs: nextStartMs,
+        endMs: nextEndMs
+      } : r));
       addPersistentNotification({ type: 'info', title: 'Skipped', message: `Skipped to ${format(nextDate, "MMM d, yyyy")}` });
       return;
     }

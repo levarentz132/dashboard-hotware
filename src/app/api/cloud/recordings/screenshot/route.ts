@@ -3,6 +3,7 @@ import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderF
 import { API_CONFIG } from "@/lib/config";
 import fs from "fs";
 import path from "path";
+import { logRecordingEvent } from "@/lib/recording-logger";
 
 /**
  * POST /api/cloud/recordings/screenshot
@@ -14,8 +15,9 @@ import path from "path";
  * Returns: { success: true, filePath, fileName, dateFolder }
  */
 export async function POST(request: NextRequest) {
+  let body: any;
   try {
-    const body = await request.json();
+    body = await request.json();
     const { deviceId, cameraName } = body;
     
     // systemId comes from POST body; fall back to query params / headers
@@ -107,7 +109,7 @@ export async function POST(request: NextRequest) {
         // Wait 3s to ensure the camera is active and the VMS has started the recording task
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        console.log(`[screenshot] Disabling recording after 1s pulse...`);
+        console.log(`[screenshot] Disabling recording pulse on ${vmsUrl}...`);
         let stopPulseRes = await fetch(vmsUrl, {
           method: "PATCH",
           headers: { ...vmsHeaders, "Content-Type": "application/json" },
@@ -157,6 +159,7 @@ export async function POST(request: NextRequest) {
 
     let imageResponse;
     try {
+      console.log(`[screenshot] Capturing fresh frame from ${downloadUrl}`);
       imageResponse = await fetch(downloadUrl, {
         headers,
         signal: controller.signal,
@@ -265,6 +268,7 @@ export async function POST(request: NextRequest) {
       }
     } catch (e) { }
 
+    console.log(`[screenshot] Using storage base: ${screenshotsBaseDir}`);
     const screenshotsDir = path.join(screenshotsBaseDir, dateFolder, safeCameraName);
     if (!fs.existsSync(screenshotsDir)) {
       fs.mkdirSync(screenshotsDir, { recursive: true });
@@ -293,15 +297,18 @@ export async function POST(request: NextRequest) {
       sizeBytes: buffer.length,
       timestamp: targetDate.toISOString(),
     });
-  } catch (error) {
-    if ((error as any)?.name === "AbortError") {
+  } catch (error: any) {
+    const camName = body?.cameraName || "camera";
+    if (error?.name === "AbortError") {
       console.error("[screenshot] Capture timed out");
+      logRecordingEvent(`Snapshot capture TIMEOUT for ${camName}`);
       return NextResponse.json(
         { error: "Screenshot capture timed out" },
         { status: 504 }
       );
     }
     console.error("[screenshot] Exception:", error);
+    logRecordingEvent(`Snapshot capture EXCEPTION for ${camName}: ${error.message}`);
     return NextResponse.json(
       { error: "Internal server error during screenshot capture" },
       { status: 500 }

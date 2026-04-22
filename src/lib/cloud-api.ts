@@ -109,6 +109,11 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
     let host = (isDirectAddress && cleanId !== 'localhost' && cleanId !== '127.0.0.1') 
       ? cleanId 
       : (API_CONFIG.serverHost || 'localhost');
+    
+    if (host === 'localhost' && !isDirectAddress && cleanId !== 'localhost') {
+      console.warn(`[Cloud API] Falling back to localhost for system ${cleanId}. This may fail if VMS is remote.`);
+    }
+    
     let port = API_CONFIG.serverPort || '7001';
 
     // If redirected via cookie or watchdog header (no cookies in server-to-server calls)
