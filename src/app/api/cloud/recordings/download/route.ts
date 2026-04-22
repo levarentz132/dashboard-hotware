@@ -160,7 +160,7 @@ export async function GET(request: NextRequest) {
         "-f", "mp4",
         "-y",
         savePath,
-      ]);
+      ], { windowsHide: true });
 
       ffmpegAutoSave.stdin.on("error", (e) => {
         console.error("[recordings/download] AUTO-SAVE FFmpeg stdin error:", e);
@@ -326,7 +326,7 @@ export async function GET(request: NextRequest) {
           "-f", "mp4",
           "-y",                       // overwrite if exists
           tempPath
-        ]);
+        ], { windowsHide: true });
 
         // Avoid process crash on early stdin close
         ffmpeg.stdin.on("error", (e) => {

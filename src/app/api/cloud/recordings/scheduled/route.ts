@@ -321,6 +321,27 @@ const startWatchdog = () => {
               console.log(`[Watchdog] Recording stopped for ${rec.cameraName}`);
               logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`);
 
+              // ── Step 3: Trigger Auto-Download (Server-side) ────────────────
+              // We trigger the internal download API to pull the clip and save it to disk.
+              // We wait 5s to let the VMS index the new clip before trying to fetch it.
+              setTimeout(async () => {
+                try {
+                  const port = global._nxAppPort || process.env.PORT || "3011";
+                  const autoSaveUrl = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
+                  
+                  console.log(`[Watchdog] Triggering auto-save for ${rec.cameraName}...`);
+                  const downloadRes = await fetch(autoSaveUrl);
+                  const downloadResult = await downloadRes.json();
+                  if (downloadResult.success) {
+                    console.log(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
+                  } else {
+                    console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error);
+                  }
+                } catch (saveErr: any) {
+                  console.error(`[Watchdog] 🛑 Auto-save trigger exception for ${rec.cameraName}:`, saveErr.message);
+                }
+              }, 5000);
+
               // ── Step 2: Restore original schedule (with isEnabled: false) ───────────
               // Only restore if the original had tasks (don't re-enable a blank schedule)
               const original = originalSchedules[rec.id];

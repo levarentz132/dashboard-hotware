@@ -453,35 +453,9 @@ export default function CloudRecordings() {
           endTimeMs: rec.endMs,
           durationMs: rec.endMs - rec.startMs
         });
-
-        // ── AUTO-SAVE: trigger server-side download+encode+save ──────────────
-        // Wait 8s for NX to flush and index the completed clip before fetching it.
-        setTimeout(async () => {
-          try {
-            const autoSaveParams = new URLSearchParams({
-              systemId: rec.systemId,
-              deviceId: cameraDeviceId,
-              startTime: String(rec.startMs),
-              endTime: String(rec.endMs),
-              cameraName: rec.cameraName,
-              autoSave: "true",
-            });
-            const res = await fetch(`/api/cloud/recordings/download?${autoSaveParams.toString()}`);
-            const result = await res.json();
-            if (result.success) {
-              console.log(`[CloudRecordings] Auto-saved recording: ${result.file}`);
-              addPersistentNotification({
-                type: 'info',
-                title: 'Recording Saved',
-                message: `${rec.cameraName} saved as ${result.file}`,
-              });
-            } else {
-              console.warn("[CloudRecordings] Auto-save failed:", result);
-            }
-          } catch (autoSaveErr) {
-            console.error("[CloudRecordings] Auto-save request error:", autoSaveErr);
-          }
-        }, 8000);
+        
+        // Note: Auto-save has been moved to the server-side watchdog for reliability.
+        console.log(`[CloudRecordings] Recording ${rec.cameraName} finished. Server watchdog will handle auto-save.`);
         
         if (rec.recurrence === "none") {
           setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
@@ -1412,10 +1386,16 @@ export default function CloudRecordings() {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder)} 
-                            className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary"
+                            onClick={() => {
+                              if (!rec.isScreenshot) {
+                                addPersistentNotification({ type: 'info', title: 'Preview Disabled', message: 'Video preview is currently disabled for optimization. Please use the Download button.' });
+                                return;
+                              }
+                              handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder);
+                            }}
+                            className={cn("h-8 gap-1.5 hover:bg-primary/10 hover:text-primary", !rec.isScreenshot && "opacity-50")}
                           >
-                            <Eye className="h-3.5 w-3.5" /> {rec.isScreenshot ? "View Image" : "Preview"}
+                            <Eye className="h-3.5 w-3.5" /> {rec.isScreenshot ? "View Image" : "Preview (N/A)"}
                           </Button>
                           <Button 
                             variant="ghost" 
