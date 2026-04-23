@@ -244,9 +244,20 @@ export async function GET(request: NextRequest) {
         );
       }
 
+      const recDate = new Date(parseInt(startTime as string, 10));
+      const YYYY = recDate.getFullYear();
+      const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
+      const DD = recDate.getDate().toString().padStart(2, "0");
+      const HH = recDate.getHours().toString().padStart(2, "0");
+      const mm = recDate.getMinutes().toString().padStart(2, "0");
+      const ss = recDate.getSeconds().toString().padStart(2, "0");
+      const timestamp = `${YYYY}${MM}${DD}_${HH}${mm}${ss}`;
+      const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
+        .replace(/[<>:"/\\|?*]/g, "_").trim();
+
       const filename = effectiveIsImage
-        ? `screenshot_${deviceId.substring(0, 8)}_${startTime}.png`
-        : `recording_${deviceId.substring(0, 8)}_${startTime}.mp4`;
+        ? `${safeCameraName}_${timestamp}.png`
+        : `${safeCameraName}_${timestamp}.mp4`;
 
       // If it's a screenshot, save a local copy to the data folder using date-based structure
       if (effectiveIsImage) {

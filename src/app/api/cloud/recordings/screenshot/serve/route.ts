@@ -66,8 +66,25 @@ export async function GET(request: NextRequest) {
 
     const buffer = fs.readFileSync(filePath);
     const contentType = fileName.toLowerCase().endsWith(".mp4") ? "video/mp4" : "image/png";
+    // If it's a download, suggest a more descriptive filename: cameraName_YYYYMMDD_HHMMSS.ext
+    let suggestedFileName = safeFileName;
+    if (download === "true") {
+      const extension = safeFileName.split(".").pop();
+      const baseName = safeFileName.split(".")[0];
+      const dateStr = safeDateFolder.replace(/-/g, ""); // YYYY-MM-DD -> YYYYMMDD
+      
+      // If the filename already contains the camera name, don't duplicate it
+      const hasCameraName = safeCameraName && baseName.includes(safeCameraName);
+      
+      if (safeCameraName && !hasCameraName) {
+        suggestedFileName = `${safeCameraName}_${dateStr}_${baseName}.${extension}`;
+      } else if (!hasCameraName) {
+        suggestedFileName = `${dateStr}_${baseName}.${extension}`;
+      }
+    }
+
     const disposition = download === "true"
-      ? `attachment; filename="${safeFileName}"`
+      ? `attachment; filename="${suggestedFileName}"`
       : `inline; filename="${safeFileName}"`;
 
     return new NextResponse(buffer, {

@@ -1,4 +1,6 @@
+import logger from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
+import { API_CONFIG } from "@/lib/config";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
@@ -41,13 +43,13 @@ async function vmsRequest(
     });
     if (!res.ok) {
       const text = await res.text();
-      console.error(`[Watchdog] VMS ${method} ${url} failed with status ${res.status}: ${text}`);
+      logger.debug(`[Watchdog] VMS ${method} ${url} failed with status ${res.status}: ${text}`);
       throw new Error(`VMS ${res.status}: ${text}`);
     }
     const ct = res.headers.get("content-type") || "";
     return ct.includes("application/json") ? res.json() : res.text();
   } catch (err: any) {
-    console.error(`[Watchdog] Network error for VMS ${method} ${url}:`, err.message);
+    logger.debug(`[Watchdog] Network error for VMS ${method} ${url}:`, err.message);
     throw err;
   }
 }
@@ -68,7 +70,7 @@ const startWatchdog = () => {
     clearInterval(global._nxWatchdogInterval);
   }
 
-  console.log("[Watchdog] Initializing background monitor (V3)...");
+  logger.debug("[Watchdog] Initializing background monitor (V3)...");
   global._nxWatchdogInterval = setInterval(async () => {
     if (global._nxWatchdogActive) return;
     global._nxWatchdogActive = true;
@@ -91,9 +93,22 @@ const startWatchdog = () => {
         notificationUserKey = null
       } = parsed;
       
-      // Safety: Ensure we don't have literal "null" or empty strings
-      const ip = nxLocationIp && nxLocationIp !== "null" ? nxLocationIp : "localhost";
-      const port = nxLocationPort && nxLocationPort !== "null" ? nxLocationPort : "7001";
+      // ── Resolve VMS IP: Prioritize configured IP over defaults ────────────
+      let ip = nxLocationIp && nxLocationIp !== "null" ? nxLocationIp : "localhost";
+      let port = nxLocationPort && nxLocationPort !== "null" ? nxLocationPort : "7001";
+
+      // If the specific schedule doesn't have an IP, or it's localhost, use the global config
+      if (ip === "localhost" || !ip) {
+        const configHost = API_CONFIG.serverHost;
+        const configPort = API_CONFIG.serverPort;
+        if (configHost && configHost !== "localhost") {
+          ip = configHost;
+        }
+        if (configPort) {
+          port = configPort;
+        }
+      }
+
       let changed = false;
 
       const now = Date.now();
@@ -139,7 +154,7 @@ const startWatchdog = () => {
 
             if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress") && isWithinWindow) {
               const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-              console.log(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${time})`);
+              logger.debug(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${time})`);
               try {
                 const port = global._nxAppPort || process.env.PORT || "3000";
                 const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
@@ -155,7 +170,7 @@ const startWatchdog = () => {
                   screenshotHeaders["x-nx-location-port"] = nxLocationPort;
                 }
 
-                console.log(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
+                logger.debug(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
                 logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`, rec.scheduledBy);
                 const screenshotRes = await fetch(internalUrl, {
                   method: "POST",
@@ -171,12 +186,12 @@ const startWatchdog = () => {
 
                 if (!screenshotRes.ok) {
                   const errText = await screenshotRes.text();
-                  console.error(`[Watchdog] 📸 Snapshot API failed (${screenshotRes.status}): ${errText}`);
+                  logger.error(`[Watchdog] 📸 Snapshot API failed (${screenshotRes.status}): ${errText}`);
                   rec.status = "failed";
                   rec.record = false;
                 } else {
                   const result = await screenshotRes.json();
-                  console.log(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
+                  logger.debug(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
                   logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
                   rec.record = false;
 
@@ -228,7 +243,7 @@ const startWatchdog = () => {
                 }
                 changed = true;
               } catch (e: any) {
-                console.error(`[Watchdog] 🛑 Snapshot exception for ${rec.cameraName}:`, e.message);
+                logger.error(`[Watchdog] 🛑 Snapshot exception for ${rec.cameraName}:`, e.message);
                 logRecordingEvent(`Scheduled snapshot FAILED for ${rec.cameraName}: ${e.message}`, rec.scheduledBy);
                 rec.status = "failed";
                 rec.record = false;
@@ -248,9 +263,9 @@ const startWatchdog = () => {
               return rec;
             }
 
-            console.log(`[Watchdog] Starting/Retrying video recording for ${rec.cameraName}`);
-            if (!globalAuth) {
-              console.warn(`[Watchdog] No auth/location saved — cannot update VMS for ${rec.cameraName}.`);
+            logger.debug(`[Watchdog] Starting/Retrying video recording for ${rec.cameraName} (VMS: ${ip}:${port})`);
+            if (!globalAuth || !ip || ip === "localhost") {
+              logger.warn(`[Watchdog] Cannot patch camera ${rec.cameraName}: VMS IP is not configured or auth is missing. (Current IP: ${ip})`);
               return rec;
             }
             try {
@@ -276,9 +291,15 @@ const startWatchdog = () => {
 
               try {
                 const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, globalAuth, ip, port);
-                if (cam?.schedule) originalSchedules[rec.id] = cam.schedule;
+                if (cam?.schedule) {
+                  originalSchedules[rec.id] = cam.schedule;
+                } else {
+                  originalSchedules[rec.id] = { isEnabled: false };
+                }
               } catch (e) {
-                console.warn(`[Watchdog] Could not fetch original schedule for ${rec.cameraName}:`, e);
+                logger.debug(`[Watchdog] Could not fetch original schedule for ${rec.cameraName}:`, e);
+                // Set a placeholder to prevent re-fetching/patching every 2 seconds on failure
+                originalSchedules[rec.id] = originalSchedules[rec.id] || { isEnabled: false };
               }
 
               await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
@@ -287,13 +308,13 @@ const startWatchdog = () => {
                 },
               }, globalAuth, ip, port);
 
-              console.log(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
+              logger.debug(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
               logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`, rec.scheduledBy);
               rec.status = "recording";
               rec.record = true; 
               changed = true;
             } catch (e) {
-              console.error(`[Watchdog] Failed to start video recording:`, e);
+              logger.debug(`[Watchdog] Failed to start video recording:`, e);
               rec.status = "failed";
               rec.record = false;
               changed = true;
@@ -303,7 +324,7 @@ const startWatchdog = () => {
 
           // ── VIDEO RECORDING: CASE 2 — Stop & Complete ──────────────────────
           else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress")) {
-            console.log(`[Watchdog] Completing video recording for ${rec.cameraName}`);
+            logger.debug(`[Watchdog] Completing video recording for ${rec.cameraName}`);
             if (!globalAuth) {
               console.warn(`[Watchdog] No auth/location saved — cannot revert VMS schedule for ${rec.cameraName}.`);
               rec.status = "completed"; // Still mark complete so UI updates
@@ -319,7 +340,7 @@ const startWatchdog = () => {
               await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
                 schedule: { isEnabled: false }
               }, globalAuth, ip, port);
-              console.log(`[Watchdog] Recording stopped for ${rec.cameraName}`);
+              logger.debug(`[Watchdog] Recording stopped for ${rec.cameraName}`);
               logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
 
               // ── Step 3: Trigger Auto-Download (Server-side) ────────────────
@@ -330,11 +351,11 @@ const startWatchdog = () => {
                   const port = global._nxAppPort || process.env.PORT || "3011";
                   const autoSaveUrl = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
                   
-                  console.log(`[Watchdog] Triggering auto-save for ${rec.cameraName}...`);
+                  logger.debug(`[Watchdog] Triggering auto-save for ${rec.cameraName}...`);
                   const downloadRes = await fetch(autoSaveUrl);
                   const downloadResult = await downloadRes.json();
                   if (downloadResult.success) {
-                    console.log(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
+                    logger.debug(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
                   } else {
                     console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error);
                   }
@@ -514,7 +535,7 @@ export async function POST(request: NextRequest) {
 
     // Log save success
     if (Array.isArray(body.schedules)) {
-      console.log(`[Watchdog] Persisted ${body.schedules.length} schedules to disk (VMS: ${nxIp || "Cloud Relay"})`);
+      logger.debug(`[Watchdog] Persisted ${body.schedules.length} schedules to disk (VMS: ${nxIp || "Cloud Relay"})`);
     }
 
     return NextResponse.json({ success: true });

@@ -19,13 +19,27 @@ const CURRENT_LEVEL = (typeof process !== 'undefined' && process.env.NEXT_PUBLIC
   ? LOG_LEVELS.DEBUG 
   : LOG_LEVELS.WARN;
 
+const isCritical = (args: any[]) => {
+  const str = JSON.stringify(args).toLowerCase();
+  return str.includes('error') || str.includes('failed') || str.includes('exception') || str.includes('rejected');
+};
+
 const logger = {
   debug: (...args: any[]) => {
+    // If it's a "silent" debug log but contains an error keyword, elevate it to warn
+    if (isCritical(args)) {
+      console.warn(...args);
+      return;
+    }
     if (CURRENT_LEVEL <= LOG_LEVELS.DEBUG) {
       console.log(...args);
     }
   },
   info: (...args: any[]) => {
+    if (isCritical(args)) {
+      console.warn(...args);
+      return;
+    }
     if (CURRENT_LEVEL <= LOG_LEVELS.INFO) {
       console.log(...args);
     }

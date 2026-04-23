@@ -1,3 +1,4 @@
+import logger from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
 import fs from "fs";
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
           };
           delete retryHeaders["x-runtime-guid"];
 
-          console.warn("[recordings] Retrying recordedTimePeriods with Basic auth");
+          logger.warn("[recordings] Retrying recordedTimePeriods with Basic auth");
           response = await fetch(cloudUrl, {
             method: "GET",
             headers: retryHeaders,
@@ -57,17 +58,17 @@ export async function GET(request: NextRequest) {
         responseData = await response.json();
       } else {
         const errorText = await response.text().catch(() => "Unknown error");
-        console.warn(`[recordings] Nx API returned ${response.status} (likely recording disabled on NVR). Proceeding with local scan.`, errorText);
+        logger.warn(`[recordings] Nx API returned ${response.status} (likely recording disabled on NVR). Proceeding with local scan.`, errorText);
       }
     } catch (err: any) {
-      console.warn("[recordings] Nx API fetch failed. Proceeding with local scan only.", err.message);
+      logger.warn("[recordings] Nx API fetch failed. Proceeding with local scan only.", err.message);
     }
     
     // Use responseData instead of data
     const data = responseData;
     
     // Log raw response for debugging
-    console.log("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
+    logger.debug("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
     
     // NX API returns { reply: [{ guid: "serverId", periods: [{startTimeMs, durationMs}] }] }
     // We need to flatten all periods from all servers
@@ -303,12 +304,12 @@ export async function GET(request: NextRequest) {
     finalPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
     allPeriods = finalPeriods;
   } catch (err) {
-    console.warn("[recordings] Failed to scan local storage folders:", err);
+    logger.warn("[recordings] Failed to scan local storage folders:", err);
   }
     
     return NextResponse.json(allPeriods);
   } catch (error) {
-    console.error("[recordings] Exception:", error);
+    logger.error("[recordings] Exception:", error);
     return NextResponse.json(
       { error: "Failed to fetch recordings" },
       { status: 500 }

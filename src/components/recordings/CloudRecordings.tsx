@@ -1406,7 +1406,7 @@ export default function CloudRecordings() {
                             }}
                             className={cn("h-8 gap-1.5 hover:bg-primary/10 hover:text-primary", !rec.isScreenshot && "opacity-50")}
                           >
-                            <Eye className="h-3.5 w-3.5" /> {rec.isScreenshot ? "View Image" : "Preview (N/A)"}
+                            <Eye className="h-3.5 w-3.5" /> {rec.isScreenshot ? "View Image" : "Preview"}
                           </Button>
                           <Button 
                             variant="ghost" 
