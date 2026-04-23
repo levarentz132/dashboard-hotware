@@ -149,15 +149,7 @@ export async function GET(request: NextRequest) {
       const ffmpegAutoSave = spawn("ffmpeg", [
         "-fflags", "+genpts",
         "-i", "pipe:0",
-        "-start_at_zero",
-        "-avoid_negative_ts", "make_zero",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "18",
-        "-profile:v", "main",
-        "-level", "4.2",
-        "-pix_fmt", "yuv420p",
-        "-r", "30",
+        "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
@@ -321,19 +313,7 @@ export async function GET(request: NextRequest) {
           "-fflags", "+genpts",
           "-i", "pipe:0",
 
-          "-start_at_zero",
-          "-avoid_negative_ts", "make_zero",
-
-          "-c:v", "libx264",
-          "-preset", "fast",
-          "-crf", "18",
-          "-profile:v", "main",
-          "-level", "4.2",
-          "-pix_fmt", "yuv420p",
-
-          "-vf", "scale=in_range=pc:out_range=tv",
-          "-r", "30",                 // ✅ force stable FPS
-
+          "-c:v", "copy",
           "-c:a", "aac",
           "-b:a", "128k",
 
