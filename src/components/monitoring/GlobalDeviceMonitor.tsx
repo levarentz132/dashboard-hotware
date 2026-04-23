@@ -1,5 +1,6 @@
 "use client";
 
+import logger from "@/lib/logger";
 import { useEffect, useRef, useCallback } from "react";
 import { getElectronHeaders } from "@/lib/config";
 import { showNotification } from "@/lib/notifications";
@@ -55,7 +56,6 @@ export function GlobalDeviceMonitor() {
   const STORAGE_COOLDOWN = 60 * 60 * 1000; // 1 hour cooldown for same storage alert
 
 
-  console.log("[GlobalDeviceMonitor] ⚡ Component rendering");
 
   // Debug: Log component mount
   useEffect(() => {
@@ -92,7 +92,7 @@ export function GlobalDeviceMonitor() {
         const data = await response.json();
         const systems = Array.isArray(data) ? data : data?.systems || [];
 
-        console.log(`[GlobalDeviceMonitor] Found ${systems.length} cloud systems`);
+        logger.debug(`[GlobalDeviceMonitor] Found ${systems.length} cloud systems`);
 
         systems.forEach((s: any) => {
           const cleanId = s.id.replace(/[{}]/g, "");
@@ -108,7 +108,7 @@ export function GlobalDeviceMonitor() {
       console.error("[GlobalDeviceMonitor] Error fetching cloud systems:", error);
     }
 
-    console.log(`[GlobalDeviceMonitor] Total systems to monitor: ${allSystems.length}`);
+    logger.debug(`[GlobalDeviceMonitor] Total systems to monitor: ${allSystems.length}`);
     return allSystems;
   }, []);
 
@@ -132,7 +132,7 @@ export function GlobalDeviceMonitor() {
       if (response.ok) {
         const devices = await response.json();
         const deviceCount = Array.isArray(devices) ? devices.length : 0;
-        console.log(
+        logger.debug(
           `[GlobalDeviceMonitor] ✓ ${systemName}: ${deviceCount} devices (Status: ${response.status})`
         );
         return {
@@ -472,11 +472,11 @@ export function GlobalDeviceMonitor() {
     const systems = systemsRef.current;
 
     if (systems.length === 0) {
-      console.log("[GlobalDeviceMonitor] No online systems to monitor");
+      logger.debug("[GlobalDeviceMonitor] No online systems to monitor");
       return;
     }
 
-    console.log(`[GlobalDeviceMonitor] 🔄 Checking devices for ${systems.length} system(s)...`);
+    logger.debug(`[GlobalDeviceMonitor] 🔄 Checking devices for ${systems.length} system(s)...`);
 
     // Check all systems in parallel (Devices + Storage)
     const results = await Promise.all(
@@ -494,7 +494,7 @@ export function GlobalDeviceMonitor() {
     const totalDevices = results.reduce((sum, r) => sum + r.deviceCount, 0);
 
     // Log individual device statuses
-    console.log(`[GlobalDeviceMonitor] 📋 Monitoring results: ${totalDevices} total devices`);
+    logger.debug(`[GlobalDeviceMonitor] 📋 Monitoring results: ${totalDevices} total devices`);
     results.forEach(result => {
       if (result.success && result.devices) {
         let onlineCount = 0;
@@ -504,7 +504,7 @@ export function GlobalDeviceMonitor() {
           if (status === 'online' || status === 'recording') onlineCount++;
           else if (status === 'offline') offlineCount++;
         });
-        console.log(`  System: ${result.systemName} -> ${onlineCount} online, ${offlineCount} offline`);
+        logger.debug(`  System: ${result.systemName} -> ${onlineCount} online, ${offlineCount} offline`);
       }
     });
 
@@ -533,10 +533,10 @@ export function GlobalDeviceMonitor() {
       await saveSnapshot(currentSnapshot);
       previousSnapshotRef.current = currentSnapshot;
     } else {
-      console.log(`[GlobalDeviceMonitor] ℹ️ No changes detected, skipping save`);
+      logger.debug(`[GlobalDeviceMonitor] ℹ️ No changes detected, skipping save`);
     }
 
-    console.log(
+    logger.debug(
       `[GlobalDeviceMonitor] ✓ Monitoring complete: ${successCount}/${systems.length} systems, ${totalDevices} total devices`
     );
   }, [checkDevicesForSystem, hasChanges, saveSnapshot]);

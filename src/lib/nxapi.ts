@@ -1,3 +1,4 @@
+import logger from "./logger";
 import { ICamera, IDeviceType } from "@/types/Device";
 import { API_CONFIG, API_ENDPOINTS } from "./config";
 import { IServer } from "@/types/Server";
@@ -466,7 +467,7 @@ class NxWitnessAPI {
         return servers.servers;
       } else {
         console.warn("[getServers] Unexpected servers response format:", servers);
-        console.log("[getServers] Available keys:", servers ? Object.keys(servers) : "null/undefined");
+        logger.debug("[getServers] Available keys:", servers ? Object.keys(servers) : "null/undefined");
         return [];
       }
     } catch (error) {
@@ -761,7 +762,7 @@ class NxWitnessAPI {
       const storages = await this.getStorages("this");
       return storages;
     } catch (error) {
-      console.log("[getStorageInfo] Storage endpoint not available:", error);
+      logger.debug("[getStorageInfo] Storage endpoint not available:", error);
       return null;
     }
   }
@@ -935,14 +936,14 @@ if (typeof window !== "undefined" && API_CONFIG.username && API_CONFIG.password)
   setTimeout(async () => {
     try {
       const success = await nxAPI.login(API_CONFIG.username!, API_CONFIG.password!);
-      console.log("[nxAPI] Auto-login result:", success);
+      logger.debug("[nxAPI] Auto-login result:", success);
 
       if (success) {
         // Prefetch critical data to prime the cache
-        console.log("[nxAPI] Prefetching critical data...");
+        logger.debug("[nxAPI] Prefetching critical data...");
         // Use Promise.allSetled to not block if one fails
         await Promise.allSettled([nxAPI.getCameras(), nxAPI.getSystemInfo(), nxAPI.getServers()]);
-        console.log("[nxAPI] Prefetched cameras, system info, and servers.");
+        logger.debug("[nxAPI] Prefetched cameras, system info, and servers.");
       }
     } catch (error) {
       console.error("[nxAPI] Auto-login failed:", error);

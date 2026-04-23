@@ -1,3 +1,4 @@
+import logger from "./logger";
 import fs from "fs";
 import path from "path";
 
@@ -35,8 +36,8 @@ export function logRecordingEvent(message: string, username?: string, timestamp?
     }
     
     fs.appendFileSync(LOG_FILE, logLine);
-    // Also log to console for visibility in main logs
-    console.log(`[AuditLog] ${message}`);
+    // Also log to console for visibility in main logs (but hidden in terminal)
+    logger.debug(`[AuditLog] ${message}`);
   } catch (err) {
     console.error("Failed to write recording audit log:", err);
   }

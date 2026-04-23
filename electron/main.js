@@ -512,9 +512,48 @@ function launchServer(command, args, cwd, customEnv) {
 
     nextProcess = spawn(command, args, {
         cwd,
-        stdio: 'inherit',
+        stdio: ['inherit', 'pipe', 'pipe'],
         env: customEnv
     });
+
+    const filterAndLog = (data, isError = false) => {
+        const str = data.toString().trim();
+        if (!str) return;
+
+        // Log everything to file for debugging
+        logtoFile(`[Next.js ${isError ? 'stderr' : 'stdout'}] ${str}`);
+
+        // Define patterns that should be hidden from the terminal
+        const noisePatterns = [
+            '\\[Digest Auth\\]',
+            '\\[Cloud API\\]',
+            '\\[Cloud Auth\\]',
+            '\\[nxAPI\\]',
+            '\\[External API\\]',
+            '\\[AuditLog\\]',
+            '\\[InventorySync\\]',
+            '\\[RoleManagement\\]',
+            '\\[recordings-service\\]',
+            '\\[UserManagement\\]',
+            '\\[SystemHealth\\]',
+            '\\[GlobalDeviceMonitor\\]'
+        ];
+        
+        const isNoise = noisePatterns.some(p => new RegExp(p).test(str));
+        const isCritical = str.includes('ERROR') || str.includes('WARN') || str.includes('Failed') || str.includes('ready on');
+
+        // Only print to terminal if it's not noise, or if it's critical/error
+        if (!isNoise || isCritical || isError) {
+            if (isError) {
+                process.stderr.write(data);
+            } else {
+                process.stdout.write(data);
+            }
+        }
+    };
+
+    nextProcess.stdout.on('data', filterAndLog);
+    nextProcess.stderr.on('data', d => filterAndLog(d, true));
 
     nextProcess.on('error', (err) => {
         logtoFile(`[Electron] Failed to start server process: ${err.message}`);

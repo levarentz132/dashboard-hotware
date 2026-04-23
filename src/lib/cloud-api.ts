@@ -1,3 +1,4 @@
+import logger from "./logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getDynamicConfig, getCloudAuthHeader, API_CONFIG } from "./config";
 
@@ -191,7 +192,7 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
         const user = JSON.parse(decodeURIComponent(localUserCookie));
         if (user.token) {
           localToken = user.token;
-          console.log(`[Cloud Auth] Found session token from local_nx_user for ${isGlobal ? 'global request' : systemId}`);
+          logger.debug(`[Cloud Auth] Found session token from local_nx_user for ${isGlobal ? 'global request' : systemId}`);
         }
       } catch (e) { }
     }
@@ -203,7 +204,7 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     const watchdogAuth = request.headers.get("x-watchdog-auth");
     if (watchdogAuth) {
       localToken = watchdogAuth;
-      console.log(`[Cloud Auth] Using x-watchdog-auth header for ${isGlobal ? 'global' : systemId}`);
+      logger.debug(`[Cloud Auth] Using x-watchdog-auth header for ${isGlobal ? 'global' : systemId}`);
     }
   }
 
@@ -256,7 +257,7 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     const basicAuth = getBasicAuthHeaderFromRequest(request);
     if (basicAuth) {
       headers["Authorization"] = basicAuth;
-      console.log(`[Cloud Auth] Falling back to shared server credentials for ${systemId}`);
+      logger.debug(`[Cloud Auth] Falling back to shared server credentials for ${systemId}`);
     } else {
       console.warn(`[Cloud Auth] No session or shared credentials found for ${systemId}`);
       const cookies = request.headers.get("cookie") || "";
@@ -373,7 +374,7 @@ export async function fetchFromCloudApi<T>(
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    console.log(`[Cloud API] Fetching GET ${cloudUrl}`);
+    logger.debug(`[Cloud API] Fetching GET ${cloudUrl}`);
 
     let response = await fetch(cloudUrl, {
       method: "GET",
@@ -385,7 +386,7 @@ export async function fetchFromCloudApi<T>(
     if ([301, 302, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (location) {
-        console.log(`[Cloud API] Redirecting to ${location}`);
+        logger.debug(`[Cloud API] Redirecting to ${location}`);
         response = await fetch(location, {
           method: "GET",
           headers,
@@ -543,7 +544,7 @@ async function requestCloudApi<T>(
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    console.log(`[Cloud API] Requesting ${method} ${cloudUrl}`);
+    logger.debug(`[Cloud API] Requesting ${method} ${cloudUrl}`);
 
     let response = await fetch(cloudUrl, {
       method,
@@ -555,7 +556,7 @@ async function requestCloudApi<T>(
     if ([301, 302, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (location) {
-        console.log(`[Cloud API] Redirecting to ${location}`);
+        logger.debug(`[Cloud API] Redirecting to ${location}`);
         response = await fetch(location, {
           method,
           headers,

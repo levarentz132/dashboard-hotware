@@ -1,3 +1,4 @@
+import logger from './logger';
 import { createHash } from 'crypto';
 
 /**
@@ -68,11 +69,11 @@ function calculateDigestResponse(
 
   // HA1 = MD5(username:realm:password)
   const ha1 = md5(`${username}:${realm}:${password}`);
-  console.log(`[Digest Auth] HA1 components: username=${username}, realm=${realm}`);
+  logger.debug(`[Digest Auth] HA1 components: username=${username}, realm=${realm}`);
 
   // HA2 = MD5(method:uri)
   const ha2 = md5(`${method}:${uri}`);
-  console.log(`[Digest Auth] HA2 components: method=${method}, uri=${uri}`);
+  logger.debug(`[Digest Auth] HA2 components: method=${method}, uri=${uri}`);
 
   // Calculate response
   let response: string;
@@ -82,11 +83,11 @@ function calculateDigestResponse(
     }
     // response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
     response = md5(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`);
-    console.log(`[Digest Auth] Response calculated with qop=${qop}`);
+    logger.debug(`[Digest Auth] Response calculated with qop=${qop}`);
   } else {
     // response = MD5(HA1:nonce:HA2)
     response = md5(`${ha1}:${nonce}:${ha2}`);
-    console.log(`[Digest Auth] Response calculated without qop, nonce length=${nonce.length}`);
+    logger.debug(`[Digest Auth] Response calculated without qop, nonce length=${nonce.length}`);
   }
 
   return response;
@@ -143,8 +144,8 @@ export async function fetchWithDigestAuth(
   const urlObj = new URL(url);
   const uri = urlObj.pathname + urlObj.search;
 
-  console.log(`[Digest Auth] Attempting digest authentication for ${url}`);
-  console.log(`[Digest Auth] Username: ${username}, URI: ${uri}`);
+  logger.debug(`[Digest Auth] Attempting digest authentication for ${url}`);
+  logger.debug(`[Digest Auth] Username: ${username}, URI: ${uri}`);
 
   // First request to get the challenge
   const initialResponse = await fetch(url, {
@@ -156,7 +157,7 @@ export async function fetchWithDigestAuth(
 
   // If not 401, return the response (might be already authenticated or no auth required)
   if (initialResponse.status !== 401) {
-    console.log(`[Digest Auth] No challenge needed, status: ${initialResponse.status}`);
+    logger.debug(`[Digest Auth] No challenge needed, status: ${initialResponse.status}`);
     return initialResponse;
   }
 
@@ -167,7 +168,7 @@ export async function fetchWithDigestAuth(
     return initialResponse;
   }
 
-  console.log(`[Digest Auth] Received challenge: ${authHeader}`);
+  logger.debug(`[Digest Auth] Received challenge: ${authHeader}`);
 
   // Parse the challenge
   const challenge = parseDigestChallenge(authHeader);
@@ -176,11 +177,11 @@ export async function fetchWithDigestAuth(
     return initialResponse;
   }
 
-  console.log(`[Digest Auth] Parsed challenge - Realm: ${challenge.realm}, Nonce: ${challenge.nonce} (length: ${challenge.nonce.length}), QoP: ${challenge.qop || 'none'}, Algorithm: ${challenge.algorithm || 'MD5'}`);
+  logger.debug(`[Digest Auth] Parsed challenge - Realm: ${challenge.realm}, Nonce: ${challenge.nonce} (length: ${challenge.nonce.length}), QoP: ${challenge.qop || 'none'}, Algorithm: ${challenge.algorithm || 'MD5'}`);
 
   // Build digest auth header
   const digestAuthHeader = buildDigestAuthHeader(username, password, method, uri, challenge);
-  console.log(`[Digest Auth] Built authorization header`);
+  logger.debug(`[Digest Auth] Built authorization header`);
 
   // Retry with authentication
   const authenticatedResponse = await fetch(url, {
@@ -191,7 +192,7 @@ export async function fetchWithDigestAuth(
     },
   });
 
-  console.log(`[Digest Auth] Authenticated request status: ${authenticatedResponse.status}`);
+  logger.debug(`[Digest Auth] Authenticated request status: ${authenticatedResponse.status}`);
 
   return authenticatedResponse;
 }
