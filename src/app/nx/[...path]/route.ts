@@ -42,7 +42,6 @@ async function handleRequest(request: NextRequest, method: string) {
     const targetUrl = `https://${nxLocationIp}:${nxLocationPort}${path}${url.search}`;
 
     try {
-        console.log(`[NX Proxy] Proxying ${method} ${path} to ${targetUrl}`);
         // Build headers for the request
         const headers: Record<string, string> = {
             'Accept': 'application/json',
@@ -96,7 +95,6 @@ async function handleRequest(request: NextRequest, method: string) {
             if (username && password) {
                 const basicAuth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
                 if (headers['Authorization'] !== basicAuth) {
-                    console.warn(`[NX Proxy] Session rejected for ${path}. Retrying with Basic Auth.`);
                     const retryHeaders: Record<string, string> = { ...headers, 'Authorization': basicAuth };
                     delete retryHeaders['x-runtime-guid'];
                     delete retryHeaders['x-nx-session'];

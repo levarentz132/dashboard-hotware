@@ -197,7 +197,6 @@ export default function SystemHealth() {
     async (targetSystemId: string, systemName: string): Promise<boolean> => {
       if (autoLoginAttempted.has(targetSystemId)) return false;
 
-      console.log(`[SystemHealth] Attempting Admin login to ${systemName}...`);
       const success = await performAdminLogin(targetSystemId);
 
       if (success) {

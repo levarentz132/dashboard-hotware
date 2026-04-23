@@ -68,11 +68,9 @@ function calculateDigestResponse(
 
   // HA1 = MD5(username:realm:password)
   const ha1 = md5(`${username}:${realm}:${password}`);
-  console.log(`[Digest Auth] HA1 components: username=${username}, realm=${realm}`);
 
   // HA2 = MD5(method:uri)
   const ha2 = md5(`${method}:${uri}`);
-  console.log(`[Digest Auth] HA2 components: method=${method}, uri=${uri}`);
 
   // Calculate response
   let response: string;
@@ -82,11 +80,9 @@ function calculateDigestResponse(
     }
     // response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
     response = md5(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`);
-    console.log(`[Digest Auth] Response calculated with qop=${qop}`);
   } else {
     // response = MD5(HA1:nonce:HA2)
     response = md5(`${ha1}:${nonce}:${ha2}`);
-    console.log(`[Digest Auth] Response calculated without qop, nonce length=${nonce.length}`);
   }
 
   return response;
@@ -143,9 +139,6 @@ export async function fetchWithDigestAuth(
   const urlObj = new URL(url);
   const uri = urlObj.pathname + urlObj.search;
 
-  console.log(`[Digest Auth] Attempting digest authentication for ${url}`);
-  console.log(`[Digest Auth] Username: ${username}, URI: ${uri}`);
-
   // First request to get the challenge
   const initialResponse = await fetch(url, {
     ...options,
@@ -167,8 +160,6 @@ export async function fetchWithDigestAuth(
     return initialResponse;
   }
 
-  console.log(`[Digest Auth] Received challenge: ${authHeader}`);
-
   // Parse the challenge
   const challenge = parseDigestChallenge(authHeader);
   if (!challenge) {
@@ -176,11 +167,8 @@ export async function fetchWithDigestAuth(
     return initialResponse;
   }
 
-  console.log(`[Digest Auth] Parsed challenge - Realm: ${challenge.realm}, Nonce: ${challenge.nonce} (length: ${challenge.nonce.length}), QoP: ${challenge.qop || 'none'}, Algorithm: ${challenge.algorithm || 'MD5'}`);
-
   // Build digest auth header
   const digestAuthHeader = buildDigestAuthHeader(username, password, method, uri, challenge);
-  console.log(`[Digest Auth] Built authorization header`);
 
   // Retry with authentication
   const authenticatedResponse = await fetch(url, {

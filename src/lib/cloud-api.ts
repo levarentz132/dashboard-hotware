@@ -186,7 +186,6 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
         const user = JSON.parse(decodeURIComponent(localUserCookie));
         if (user.token) {
           localToken = user.token;
-          console.log(`[Cloud Auth] Found session token from local_nx_user for ${isGlobal ? 'global request' : systemId}`);
         }
       } catch (e) { }
     }
@@ -198,7 +197,6 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     const watchdogAuth = request.headers.get("x-watchdog-auth");
     if (watchdogAuth) {
       localToken = watchdogAuth;
-      console.log(`[Cloud Auth] Using x-watchdog-auth header for ${isGlobal ? 'global' : systemId}`);
     }
   }
 
@@ -251,7 +249,6 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     const basicAuth = getBasicAuthHeaderFromRequest(request);
     if (basicAuth) {
       headers["Authorization"] = basicAuth;
-      console.log(`[Cloud Auth] Falling back to shared server credentials for ${systemId}`);
     } else {
       console.warn(`[Cloud Auth] No session or shared credentials found for ${systemId}`);
       const cookies = request.headers.get("cookie") || "";
@@ -368,7 +365,6 @@ export async function fetchFromCloudApi<T>(
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    console.log(`[Cloud API] Fetching GET ${cloudUrl}`);
 
     let response = await fetch(cloudUrl, {
       method: "GET",
@@ -380,7 +376,6 @@ export async function fetchFromCloudApi<T>(
     if ([301, 302, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (location) {
-        console.log(`[Cloud API] Redirecting to ${location}`);
         response = await fetch(location, {
           method: "GET",
           headers,
@@ -534,18 +529,9 @@ async function requestCloudApi<T>(
     // Stop calling if there's no auth material for a cloud request
     const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"]);
     if (!hasAuth && (cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com"))) {
-      console.warn(`[Cloud API] Blocking request to ${cloudUrl} due to missing auth token`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    console.log(`[Cloud API] Requesting ${method} ${cloudUrl}`);
-    if (method === 'POST' && endpoint.toLowerCase().includes('/users')) {
-      try {
-        console.log('[Cloud API] POST /users request body:', JSON.stringify(body));
-      } catch (e) {
-        console.log('[Cloud API] Failed to stringify POST body for logging');
-      }
-    }
 
     let response = await fetch(cloudUrl, {
       method,
@@ -557,7 +543,6 @@ async function requestCloudApi<T>(
     if ([301, 302, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (location) {
-        console.log(`[Cloud API] Redirecting to ${location}`);
         response = await fetch(location, {
           method,
           headers,
@@ -592,7 +577,6 @@ async function requestCloudApi<T>(
         delete retryHeaders["x-nx-session"];
         delete retryHeaders["x-runtime-session-guid"];
 
-        console.warn(`[Cloud API] Session rejected for ${method}. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
         response = await fetch(cloudUrl, {
           method,
           headers: retryHeaders,
@@ -623,16 +607,6 @@ async function requestCloudApi<T>(
         console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
       }
 
-      // Extra debug for user creation failures
-      if (method === 'POST' && endpoint.toLowerCase().includes('/users')) {
-        try {
-          console.error('[Cloud API] POST /users failed. Request body:', JSON.stringify(body));
-          console.error('[Cloud API] POST /users response body:', errorText);
-        } catch (e) {
-          console.error('[Cloud API] Failed to log detailed POST /users debug info');
-        }
-      }
-
       return createFetchErrorResponse(
         `Failed to ${method} to ${systemName || systemId}`,
         systemId,
@@ -652,7 +626,6 @@ async function requestCloudApi<T>(
         const data = await response.json();
         return NextResponse.json(data);
       } catch (e) {
-        console.error(`[Cloud API] JSON Parse Error for ${cloudUrl}:`, e);
         const text = await response.clone().text();
         console.warn(`[Cloud API] Raw response body:`, text.substring(0, 500));
         return createFetchErrorResponse("Invalid JSON response from cloud", systemId, systemName, 502);
@@ -660,7 +633,6 @@ async function requestCloudApi<T>(
     }
 
     const text = await response.text();
-    console.warn(`[Cloud API] Non-JSON response from ${cloudUrl}:`, text.substring(0, 200));
     return NextResponse.json({ success: true, message: "Request successful (non-JSON)" } as unknown as T);
   } catch (error) {
     console.error(`[Cloud API] Error ${method} ${endpoint} to ${systemName || systemId}:`, error);
