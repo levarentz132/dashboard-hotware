@@ -443,6 +443,23 @@ export default function UserManagement() {
 
   // Token copy state
   const [copiedToken, setCopiedToken] = useState(false);
+  // Copy permissions from existing user (use non-empty sentinel for 'none')
+  const [copyFromUserId, setCopyFromUserId] = useState<string>("none");
+
+  const handleCopyFromUser = (userId: string) => {
+    setCopyFromUserId(userId);
+    if (userId === "none") {
+      setFormData((prev) => ({ ...prev, groupIds: [] }));
+      showNotification({ title: "Permissions cleared", message: "Cleared copied groups" });
+      return;
+    }
+
+    const src = effectiveUsers.find((u) => u.id === userId);
+    if (src) {
+      setFormData((prev) => ({ ...prev, groupIds: src.groupIds || [] }));
+      showNotification({ title: "Permissions copied", message: `Copied ${src.groupIds?.length || 0} groups from ${src.name}` });
+    }
+  };
 
   // Combined loading and error states
   const loading = usersLoading || groupsLoading || (loadingLocal && localUsers.length === 0);
@@ -1096,6 +1113,26 @@ export default function UserManagement() {
         <div className="space-y-2">
           <Label>Permissions (Groups)</Label>
           <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
+            {effectiveUsers.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-sm">Copy permissions from existing user</Label>
+                <Select value={copyFromUserId} onValueChange={(v: string) => handleCopyFromUser(v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select user to copy from..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {effectiveUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        <div className="flex items-center gap-2">
+                          <span className="truncate">{u.name}{u.email ? ` • ${u.email}` : ""}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {!selectedSystemId ? (
               <p className="text-sm text-muted-foreground">Select a system to load permission groups</p>
             ) : groups.length === 0 ? (

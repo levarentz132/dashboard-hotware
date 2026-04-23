@@ -51,7 +51,6 @@ export async function GET(request: NextRequest) {
             id: Number(meResult.user.id),
             role: meResult.user.role as any,
           };
-          console.log(`[Session API] Enriched user data from /me for ${session.user?.username}`);
 
           // Check for license expiration AFTER enrichment — using the final merged user object
           const licenseStatus = (session.user.license_status || "").toLowerCase();
@@ -71,7 +70,6 @@ export async function GET(request: NextRequest) {
             (daysRemaining === undefined || daysRemaining === null || daysRemaining > 0);
 
           if (!isActuallyActive && licenseStatus !== "active") {
-            console.warn(`[Session API] License expired for ${session.user?.username}. Forcing logout.`);
             return NextResponse.json(
               {
                 success: false,
@@ -92,11 +90,9 @@ export async function GET(request: NextRequest) {
     if (!session.valid) {
       // Access token invalid/expired - try refresh once
       if (refreshToken) {
-        console.log("[Session API] Access token invalid/expired. Attempting refresh...");
         const refreshed = await refreshAccessToken(refreshToken);
 
         if (refreshed.success && refreshed.accessToken) {
-          console.log("[Session API] Refresh successful. Rotating tokens.");
           const refreshedSession = await validateSession(refreshed.accessToken);
           if (refreshedSession.valid && refreshedSession.user) {
             // Also enrich the refreshed session user
@@ -112,7 +108,6 @@ export async function GET(request: NextRequest) {
                                         (daysRemaining === undefined || daysRemaining === null || daysRemaining > 0);
 
                 if (!isActuallyActive && licenseStatus !== 'active') {
-                   console.warn(`[Session API][Refresh] License expired for ${meResult.user.username}`);
                    return NextResponse.json(
                      {
                        success: false,
@@ -144,12 +139,6 @@ export async function GET(request: NextRequest) {
             try {
               const ids = refreshedSession.user && (refreshedSession.user.org_camera_ids ?? (refreshedSession.user as any).orgCameraIds);
               if (Array.isArray(ids) && ids.length > 0) {
-                // Debug: log cookie details to help diagnose client acceptance on refresh
-                try {
-                  console.log(`[Session][Refresh] org_camera_ids cookie set attempt. secure=${isSecureContext()}, value=${JSON.stringify(ids).slice(0,200)}`);
-                } catch (e) {
-                  console.log('[Session][Refresh] org_camera_ids cookie set attempt (failed to stringify)');
-                }
                 response.cookies.set('org_camera_ids', JSON.stringify(ids), {
                   httpOnly: false,
                   secure: isSecureContext(),
@@ -230,12 +219,6 @@ export async function GET(request: NextRequest) {
     try {
       const ids = session.user && (session.user.org_camera_ids ?? (session.user as any).orgCameraIds);
       if (Array.isArray(ids) && ids.length > 0) {
-          // Debug: log cookie details to help diagnose client acceptance
-          try {
-            console.log(`[Session] org_camera_ids cookie set attempt. secure=${isSecureContext()}, value=${JSON.stringify(ids).slice(0,200)}`);
-          } catch (e) {
-            console.log('[Session] org_camera_ids cookie set attempt (failed to stringify)');
-          }
         response.cookies.set('org_camera_ids', JSON.stringify(ids), {
           httpOnly: false,
           secure: isSecureContext(),
