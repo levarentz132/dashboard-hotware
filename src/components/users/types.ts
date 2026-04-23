@@ -41,6 +41,7 @@ export interface UserFormData {
   type: "local" | "temporaryLocal" | "cloud";
   groupIds: string[];
   isEnabled: boolean;
+  resourceAccessRights?: Record<string, string>;
   // Temporary user specific
   startS?: number;
   endS?: number;

@@ -121,6 +121,7 @@ interface UserFormData {
   type: "local" | "temporaryLocal" | "cloud";
   groupIds: string[];
   isEnabled: boolean;
+  resourceAccessRights?: Record<string, string>;
   // Temporary user specific
   startS?: number;
   endS?: number;
@@ -139,6 +140,7 @@ const initialFormData: UserFormData = {
   confirmPassword: "",
   type: "local",
   groupIds: [],
+  resourceAccessRights: {},
   isEnabled: true,
   startS: undefined,
   endS: undefined,
@@ -147,6 +149,91 @@ const initialFormData: UserFormData = {
   expiresAfterLoginValue: 1,
   expiresAfterLoginUnit: "days",
 };
+
+// Hook to fetch devices for a system
+function useDevices(systemId?: string) {
+  const [devices, setDevices] = useState<Array<{ id: string; name: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchDevices = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      if (!systemId) {
+        setDevices([]);
+        setLoading(false);
+        return;
+      }
+
+      const url = `/api/nx/devices?systemId=${encodeURIComponent(systemId)}`;
+      const response = await fetch(url, { method: "GET", credentials: "include", headers: { Accept: "application/json", ...getElectronHeaders() } });
+      if (!response.ok) {
+        setDevices([]);
+        setError(`Failed to fetch devices: ${response.status}`);
+        return;
+      }
+      const data = await response.json();
+      const mapped = Array.isArray(data) ? data.map((d: any) => ({ id: d.id || d.deviceId || "", name: d.name || d.displayName || d.deviceName || "Unnamed" })) : [];
+      setDevices(mapped);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDevices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [systemId]);
+
+  useEffect(() => {
+    fetchDevices();
+  }, [fetchDevices]);
+
+  return { devices, loading, error, refetch: fetchDevices };
+}
+
+// Default permission groups to use for selection (override/fallback)
+const DEFAULT_PERMISSION_GROUPS: NxUserGroup[] = [
+  {
+    id: "{00000000-0000-0000-0000-100000000000}",
+    name: "Administrators",
+    description:
+      "Members of this group have unlimited System privileges. Administrators can create and modify Power Users, merge Systems and connect or disconnect System to Nx Cloud.",
+    permissions: ("powerUser|viewLogs|viewMetrics|generateEvents|administrator".split("|") || []),
+  },
+  {
+    id: "{00000000-0000-0000-0000-100000000001}",
+    name: "Power Users",
+    description:
+      "Members of this group can, in addition to the permissions granted by the Advanced Viewers group, control most of the System configuration, but are not allowed to change any Administrator related settings, like delete or change their own groups and permissions, and cannot create or edit other Power Users.",
+    permissions: ("powerUser|viewLogs|viewMetrics|generateEvents".split("|") || []),
+  },
+  {
+    id: "{00000000-0000-0000-0000-100000000002}",
+    name: "Advanced Viewers",
+    description:
+      "Members of this group can, in addition to the permissions granted by the Viewers group, see and activate PTZ positions and PTZ tours, use 2-way audio, operate I/O module buttons, create and edit bookmarks, and view the Event Log.",
+    permissions: ("viewLogs|generateEvents".split("|") || []),
+  },
+  {
+    id: "{00000000-0000-0000-0000-100000000003}",
+    name: "Viewers",
+    description:
+      "Members of this group can, in addition to the permissions granted by the Live Viewers group, view and export archive and Bookmarks.",
+    permissions: ("none".split("|") || []),
+  },
+  {
+    id: "{00000000-0000-0000-0000-100000000004}",
+    name: "Live Viewers",
+    description: "Members of this group can view live videos, I/O modules and web pages.",
+    permissions: ("none".split("|") || []),
+  },
+  {
+    id: "{00000000-0000-0000-0000-100000000005}",
+    name: "System Health Viewers",
+    description: "Members of this group can view System Health Monitoring information and server processor load in real-time (Server Monitoring).",
+    permissions: ("viewMetrics".split("|") || []),
+  },
+];
 
 // Helper functions for time conversion (moved to service)
 
@@ -251,6 +338,7 @@ export default function UserManagement() {
 
   const { users, loading: usersLoading, error: usersError, requiresAuth, refetch: refetchUsers } = useUsers(systemId);
   const { groups, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useUserGroups(systemId);
+  const { devices, loading: devicesLoading, error: devicesError, refetch: refetchDevices } = useDevices(systemId);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
@@ -446,6 +534,14 @@ export default function UserManagement() {
   // Copy permissions from existing user (use non-empty sentinel for 'none')
   const [copyFromUserId, setCopyFromUserId] = useState<string>("none");
 
+  // Rights options for devices
+  const DEVICE_RIGHTS_OPTIONS: { label: string; value: string }[] = [
+    { label: "View", value: "view" },
+    { label: "View + Archive", value: "view|viewArchive" },
+    { label: "View + Archive + Export", value: "view|viewArchive|exportArchive" },
+    { label: "Full (includes edit)", value: "view|viewArchive|exportArchive|edit" },
+  ];
+
   const handleCopyFromUser = (userId: string) => {
     setCopyFromUserId(userId);
     if (userId === "none") {
@@ -456,7 +552,7 @@ export default function UserManagement() {
 
     const src = effectiveUsers.find((u) => u.id === userId);
     if (src) {
-      setFormData((prev) => ({ ...prev, groupIds: src.groupIds || [] }));
+      setFormData((prev) => ({ ...prev, groupIds: src.groupIds || [], resourceAccessRights: (src as any).resourceAccessRights || {} }));
       showNotification({ title: "Permissions copied", message: `Copied ${src.groupIds?.length || 0} groups from ${src.name}` });
     }
   };
@@ -480,7 +576,7 @@ export default function UserManagement() {
 
   // Get group name by ID (from effective groups)
   const getGroupName = (groupId: string): string => {
-    const group = effectiveGroups.find((g) => g.id === groupId);
+    const group = DEFAULT_PERMISSION_GROUPS.find((g) => g.id === groupId) || effectiveGroups.find((g) => g.id === groupId);
     return group ? group.name : groupId.substring(0, 8) + "...";
   };
 
@@ -576,6 +672,7 @@ export default function UserManagement() {
       confirmPassword: "",
       type: user.type === "ldap" ? "local" : user.type,
       groupIds: user.groupIds || [],
+      resourceAccessRights: (user as any).resourceAccessRights || {},
       isEnabled: user.isEnabled !== false,
       startS: user.temporaryToken?.startS,
       endS: user.temporaryToken?.endS,
@@ -592,7 +689,7 @@ export default function UserManagement() {
   const handleOpenDelete = (user: NxUser) => {
     // Check if user is an administrator
     const isAdmin = user.groupIds?.some((groupId) => {
-      const group = groups.find((g) => g.id === groupId);
+      const group = DEFAULT_PERMISSION_GROUPS.find((g) => g.id === groupId) || groups.find((g) => g.id === groupId);
       return group?.name.toLowerCase().includes("administrator");
     });
 
@@ -662,6 +759,10 @@ export default function UserManagement() {
         isEnabled: formData.isEnabled,
         groupIds: formData.groupIds,
       };
+
+      if (formData.resourceAccessRights && Object.keys(formData.resourceAccessRights).length) {
+        body.resourceAccessRights = formData.resourceAccessRights;
+      }
 
       if (formData.type === "cloud") {
         body.name = formData.email;
@@ -744,6 +845,24 @@ export default function UserManagement() {
         }
       }
 
+      // Include resourceAccessRights if changed
+      const currentRAR = (selectedUser as any).resourceAccessRights || {};
+      const newRAR = formData.resourceAccessRights || {};
+      const keysEqual = (a: Record<string,string>, b: Record<string,string>) => {
+        const ak = Object.keys(a).map(normalizeId).sort().join(",");
+        const bk = Object.keys(b).map(normalizeId).sort().join(",");
+        if (ak !== bk) return false;
+        // compare values for matching keys
+        for (const k of Object.keys(a)) {
+          const nk = normalizeId(k);
+          if ((a as any)[k] !== (b as any)[nk] && (a as any)[k] !== (b as any)[k]) return false;
+        }
+        return true;
+      };
+      if (!keysEqual(currentRAR, newRAR)) {
+        body.resourceAccessRights = newRAR;
+      }
+
       // If nothing actually changed, just close and return
       if (Object.keys(body).length === 0) {
         setShowEditDialog(false);
@@ -799,6 +918,24 @@ export default function UserManagement() {
         ? prev.groupIds.filter((id) => id !== groupId)
         : [...prev.groupIds, groupId],
     }));
+  };
+
+  // Handle device access toggle
+  const handleToggleDevice = (deviceId: string) => {
+    setFormData((prev) => {
+      const rar = { ...(prev.resourceAccessRights || {}) };
+      if (rar[deviceId]) {
+        delete rar[deviceId];
+      } else {
+        rar[deviceId] = "view"; // default right when enabling
+      }
+      return { ...prev, resourceAccessRights: rar };
+    });
+  };
+
+  // Set device rights string
+  const handleSetDeviceRights = (deviceId: string, rights: string) => {
+    setFormData((prev) => ({ ...prev, resourceAccessRights: { ...(prev.resourceAccessRights || {}), [deviceId]: rights } }));
   };
 
   // Copy token to clipboard
@@ -1133,33 +1270,29 @@ export default function UserManagement() {
                 </Select>
               </div>
             )}
-            {!selectedSystemId ? (
-              <p className="text-sm text-muted-foreground">Select a system to load permission groups</p>
-            ) : groups.length === 0 ? (
+            {DEFAULT_PERMISSION_GROUPS.length === 0 ? (
               <p className="text-sm text-muted-foreground">No groups available</p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
-                {groups
-                  .filter((g) => !g.name.toLowerCase().includes("administrator"))
-                  .map((group) => (
-                    <div key={group.id} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id={`group-${group.id}`}
-                        checked={formData.groupIds.includes(group.id)}
-                        onChange={() => handleGroupToggle(group.id)}
-                        disabled={!selectedSystemId}
-                        className="h-4 w-4 rounded border-gray-300"
-                      />
-                      <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
-                        <div className="flex items-center gap-2">
-                          <Shield className="h-3 w-3 text-muted-foreground" />
-                          {group.name}
-                        </div>
-                        {group.description && <p className="text-xs text-muted-foreground">{group.description}</p>}
-                      </Label>
-                    </div>
-                  ))}
+                {DEFAULT_PERMISSION_GROUPS.filter((g) => !g.name.toLowerCase().includes("administrator")).map((group) => (
+                  <div key={group.id} className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id={`group-${group.id}`}
+                      checked={formData.groupIds.includes(group.id)}
+                      onChange={() => handleGroupToggle(group.id)}
+                      disabled={false}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
+                      <div className="flex items-center gap-2">
+                        <Shield className="h-3 w-3 text-muted-foreground" />
+                        {group.name}
+                      </div>
+                      {group.description && <p className="text-xs text-muted-foreground">{group.description}</p>}
+                    </Label>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1183,6 +1316,59 @@ export default function UserManagement() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Management</h1>
+        </div>
+
+        {/* Resource Access (per-user device rights) */}
+        <div className="space-y-2">
+          <Label>Resource Access (per-user)</Label>
+          <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
+            {!selectedSystemId ? (
+              <p className="text-sm text-muted-foreground">Select a system to load devices for resource access</p>
+            ) : devicesLoading ? (
+              <p className="text-sm text-muted-foreground">Loading devices...</p>
+            ) : devices.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No devices available</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {devices.map((device) => {
+                  const has = !!(formData.resourceAccessRights && formData.resourceAccessRights[device.id]);
+                  const currentRights = (formData.resourceAccessRights && formData.resourceAccessRights[device.id]) || "";
+                  return (
+                    <div key={device.id} className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id={`device-${device.id}`}
+                        checked={has}
+                        onChange={() => handleToggleDevice(device.id)}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      <Label htmlFor={`device-${device.id}`} className="text-sm font-normal cursor-pointer flex-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate">{device.name}</span>
+                          </div>
+                          {has && (
+                            <div className="w-56">
+                              <Select value={currentRights} onValueChange={(v: string) => handleSetDeviceRights(device.id, v)}>
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Select rights" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {DEVICE_RIGHTS_OPTIONS.map((opt) => (
+                                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+                        </div>
+                      </Label>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -1520,12 +1706,12 @@ export default function UserManagement() {
         )}
 
         {/* User Groups Section */}
-        {!loading && !error && groups.length > 0 && (
+        {!loading && !error && DEFAULT_PERMISSION_GROUPS.length > 0 && (
           <Card>
             <CardHeader className="p-3 sm:p-6">
               <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
                 <Shield className="h-4 w-4 sm:h-5 sm:w-5" />
-                User Groups ({groups.length})
+                User Groups ({DEFAULT_PERMISSION_GROUPS.length})
               </CardTitle>
               <CardDescription className="text-xs sm:text-sm">
                 Available user groups for permission management
@@ -1533,7 +1719,7 @@ export default function UserManagement() {
             </CardHeader>
             <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                {groups.map((group) => (
+                {DEFAULT_PERMISSION_GROUPS.map((group) => (
                   <div
                     key={group.id}
                     className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"

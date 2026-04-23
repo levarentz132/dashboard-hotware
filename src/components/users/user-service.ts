@@ -89,6 +89,15 @@ export async function createUser(formData: any, systemId?: string): Promise<{ su
     if (Array.isArray(normalizedData.groupIds)) {
       normalizedData.groupIds = normalizedData.groupIds.map((id: string) => id.replace(/[{}]|%7B|%7D/gi, ""));
     }
+    // Normalize resourceAccessRights keys if present
+    if (normalizedData.resourceAccessRights && typeof normalizedData.resourceAccessRights === "object") {
+      const mapped: Record<string, string> = {};
+      Object.entries(normalizedData.resourceAccessRights).forEach(([k, v]) => {
+        const nk = k.replace(/[{}]|%7B|%7D/gi, "");
+        mapped[nk] = v as string;
+      });
+      normalizedData.resourceAccessRights = mapped;
+    }
 
     // If no systemId provided from the UI, try sensible fallbacks so server proxy can route the request
     const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
@@ -135,6 +144,15 @@ export async function updateUser(
     const normalizedData = { ...formData };
     if (Array.isArray(normalizedData.groupIds)) {
       normalizedData.groupIds = normalizedData.groupIds.map((id: string) => id.replace(/[{}]|%7B|%7D/gi, ""));
+    }
+    // Normalize resourceAccessRights keys if present
+    if (normalizedData.resourceAccessRights && typeof normalizedData.resourceAccessRights === "object") {
+      const mapped: Record<string, string> = {};
+      Object.entries(normalizedData.resourceAccessRights).forEach(([k, v]) => {
+        const nk = k.replace(/[{}]|%7B|%7D/gi, "");
+        mapped[nk] = v as string;
+      });
+      normalizedData.resourceAccessRights = mapped;
     }
 
     const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
