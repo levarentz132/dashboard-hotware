@@ -1298,27 +1298,7 @@ export default function UserManagement() {
           </div>
         </div>
 
-        {/* Submit Error */}
-        {formErrors.submit && (
-          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-            <p className="text-sm text-red-600 dark:text-red-400">{formErrors.submit}</p>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const showNoCloudAlert = false; // Cloud failures are non-blocking
-
-  return (
-    <div className="space-y-4 md:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Management</h1>
-        </div>
-
-        {/* Resource Access (per-user device rights) */}
+        {/* Resource Access (per-user) */}
         <div className="space-y-2">
           <Label>Resource Access (per-user)</Label>
           <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
@@ -1370,6 +1350,28 @@ export default function UserManagement() {
             )}
           </div>
         </div>
+
+        {/* Submit Error */}
+        {formErrors.submit && (
+          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-sm text-red-600 dark:text-red-400">{formErrors.submit}</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const showNoCloudAlert = false; // Cloud failures are non-blocking
+
+  return (
+    <div className="space-y-4 md:space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Management</h1>
+        </div>
+
+      
 
         <div className="flex items-center gap-2">
           {/* Cloud System Selector - only if systems exist */}
