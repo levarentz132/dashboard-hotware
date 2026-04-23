@@ -156,7 +156,7 @@ const startWatchdog = () => {
                 }
 
                 console.log(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
-                logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`);
+                logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`, rec.scheduledBy);
                 const screenshotRes = await fetch(internalUrl, {
                   method: "POST",
                   headers: screenshotHeaders,
@@ -171,13 +171,13 @@ const startWatchdog = () => {
 
                 if (!screenshotRes.ok) {
                   const errText = await screenshotRes.text();
-                  console.error(`[Watchdog] ❌ Snapshot API failed (${screenshotRes.status}): ${errText}`);
+                  console.error(`[Watchdog] 📸 Snapshot API failed (${screenshotRes.status}): ${errText}`);
                   rec.status = "failed";
                   rec.record = false;
                 } else {
                   const result = await screenshotRes.json();
                   console.log(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
-                  logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`);
+                  logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
                   rec.record = false;
 
                   if (rec.recurrence && rec.recurrence !== "none") {
@@ -229,7 +229,7 @@ const startWatchdog = () => {
                 changed = true;
               } catch (e: any) {
                 console.error(`[Watchdog] 🛑 Snapshot exception for ${rec.cameraName}:`, e.message);
-                logRecordingEvent(`Scheduled snapshot FAILED for ${rec.cameraName}: ${e.message}`);
+                logRecordingEvent(`Scheduled snapshot FAILED for ${rec.cameraName}: ${e.message}`, rec.scheduledBy);
                 rec.status = "failed";
                 rec.record = false;
                 changed = true;
@@ -288,7 +288,7 @@ const startWatchdog = () => {
               }, globalAuth, ip, port);
 
               console.log(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
-              logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`);
+              logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`, rec.scheduledBy);
               rec.status = "recording";
               rec.record = true; 
               changed = true;
@@ -320,7 +320,7 @@ const startWatchdog = () => {
                 schedule: { isEnabled: false }
               }, globalAuth, ip, port);
               console.log(`[Watchdog] Recording stopped for ${rec.cameraName}`);
-              logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`);
+              logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
 
               // ── Step 3: Trigger Auto-Download (Server-side) ────────────────
               // We trigger the internal download API to pull the clip and save it to disk.
@@ -386,10 +386,25 @@ const startWatchdog = () => {
               }
               changed = true;
             } catch (e: any) {
-              console.error(`[Watchdog] Stop failed (will retry in 10s):`, e.message);
-              logRecordingEvent(`Stop recording RETRY for ${rec.cameraName}: ${e.message}`);
-              // Keep as "recording" so the next watchdog tick retries the stop.
-              rec.status = "recording";
+              const retryCount = (rec.stopRetryCount || 0) + 1;
+              const lastRetry = rec.lastStopRetryMs || 0;
+              const waitMs = 30000; // 30 seconds backoff
+              
+              if (now - lastRetry > waitMs) {
+                if (retryCount <= 5) {
+                  console.error(`[Watchdog] Stop failed (Retry ${retryCount}/5 in 30s):`, e.message);
+                  logRecordingEvent(`Stop recording RETRY (${retryCount}/5) for ${rec.cameraName}: ${e.message}`, rec.scheduledBy);
+                  rec.stopRetryCount = retryCount;
+                  rec.lastStopRetryMs = now;
+                } else {
+                  console.error(`[Watchdog] Stop FAILED after 5 retries for ${rec.cameraName}:`, e.message);
+                  logRecordingEvent(`Stop recording PERMANENTLY FAILED after 5 retries for ${rec.cameraName}`, rec.scheduledBy);
+                  rec.status = "failed";
+                  rec.stopRetryCount = 0;
+                }
+              }
+              // Keep as "recording" so we stay in this loop until max retries
+              if (rec.status !== "failed") rec.status = "recording";
               changed = true;
             }
           }
@@ -450,13 +465,23 @@ export async function POST(request: NextRequest) {
     if (!token) token = request.cookies.get("nx_cloud_session")?.value;
 
     if (token) {
+      let username = "System";
       try {
         if (token.startsWith("{")) {
           const parsed = JSON.parse(token);
           token = parsed.token || parsed.accessToken || token;
+          username = parsed.username || parsed.full_name || username;
         }
       } catch (e) {}
       body.globalAuth = token;
+      
+      // Assign 'scheduledBy' to each new or updated schedule item
+      if (Array.isArray(body.schedules)) {
+        body.schedules = body.schedules.map((s: any) => ({
+          ...s,
+          scheduledBy: s.scheduledBy || username
+        }));
+      }
     }
 
     // ── Persist NX location ───────────────────────────────────────────────────

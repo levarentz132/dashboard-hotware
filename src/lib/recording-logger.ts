@@ -23,10 +23,11 @@ export function formatAuditDate(date: Date | string | number = new Date()): stri
 /**
  * Appends a detailed audit log entry to data/recordings.log
  */
-export function logRecordingEvent(message: string, timestamp?: Date) {
+export function logRecordingEvent(message: string, username?: string, timestamp?: Date) {
   try {
     const formattedTime = formatAuditDate(timestamp);
-    const logLine = `(${formattedTime}) ${message}\n`;
+    const userPrefix = username ? `[${username}] ` : "";
+    const logLine = `(${formattedTime}) ${userPrefix}${message}\n`;
     
     const logDir = path.dirname(LOG_FILE);
     if (!fs.existsSync(logDir)) {

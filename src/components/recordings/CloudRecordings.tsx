@@ -16,7 +16,7 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X, Plus, Trash2, CalendarDays, Pencil, AlertCircle, Settings } from "lucide-react";
+import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X, Plus, Trash2, CalendarDays, Pencil, AlertCircle, Settings, User } from "lucide-react";
 import { format, addDays, nextDay, Day } from "date-fns";
 import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
@@ -95,6 +95,7 @@ interface ScheduledRecording {
   recurrence?: "none" | "weekday" | "monthday";
   recurrenceDay?: number;
   batchId?: string;
+  scheduledBy?: string;
 }
 
 interface RecentRecording {
@@ -1529,6 +1530,12 @@ export default function CloudRecordings() {
                                     <div className={cn("text-[8px] px-1.5 py-0.5 rounded-full border uppercase tracking-widest bg-slate-100 text-slate-600 border-slate-200", statusColor[mainStatus])}>
                                       {mainStatus}
                                     </div>
+                                    {first.scheduledBy && (
+                                      <div className="flex items-center gap-1 text-[8px] text-slate-400 font-medium px-1.5 py-0.5 rounded-full border border-slate-100 bg-slate-50/50">
+                                        <User className="h-2.5 w-2.5 opacity-60" />
+                                        {first.scheduledBy}
+                                      </div>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100 text-slate-400 hover:text-primary" onClick={handleEdit}>
