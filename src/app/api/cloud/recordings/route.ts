@@ -195,7 +195,11 @@ export async function GET(request: NextRequest) {
              const hour = parseInt(timeStr.substring(0, 2), 10);
              const minute = parseInt(timeStr.substring(2, 4), 10);
              const second = parseInt(timeStr.substring(4, 6), 10);
-             const timestamp = new Date(y, m - 1, d, hour, minute, second).getTime();
+             // For scheduled PNG snapshots, round down seconds to :00 so the display time
+             // matches the user-set schedule time (e.g. 10:07:03 -> 10:07:00)
+             const isScheduledPng = file.endsWith(".png");
+             const displaySecond = isScheduledPng ? 0 : second;
+             const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
  
              if (timestamp >= startLimit && timestamp <= endLimit) {
                allPeriods.push({
@@ -237,7 +241,10 @@ export async function GET(request: NextRequest) {
                const hour = parseInt(timeStr.substring(0, 2), 10);
                const minute = parseInt(timeStr.substring(2, 4), 10);
                const second = parseInt(timeStr.substring(4, 6), 10);
-               const timestamp = new Date(y, m - 1, d, hour, minute, second).getTime();
+               // For scheduled PNG snapshots, round down seconds to :00
+               const isScheduledPng = file.endsWith(".png");
+               const displaySecond = isScheduledPng ? 0 : second;
+               const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
  
                if (timestamp >= startLimit && timestamp <= endLimit) {
                  allPeriods.push({
@@ -264,19 +271,22 @@ export async function GET(request: NextRequest) {
     // new ID-based snapshots, and legacy name-based snapshots.
     const finalPeriods: any[] = [];
     const sortedCandidateList = [...allPeriods].sort((a, b) => {
-       // Sort priority within the 5s window:
-       // 1. Local ID-based (has fileName and __)
-       // 2. Local legacy (has fileName, no __)
-       // 3. VMS recording (no fileName)
+       // 1. Prioritize VMS (non-local) records first to ensure they are the 'p' in comparison
+       if (a.isLocal !== b.isLocal) return a.isLocal ? 1 : -1;
+       
        if (a.isLocal && b.isLocal) {
           const aHasId = (a.fileName || "").includes("__") ? 0 : 1;
           const bHasId = (b.fileName || "").includes("__") ? 0 : 1;
-          return aHasId - bHasId;
+          if (aHasId !== bHasId) return aHasId - bHasId;
        }
-       // Prioritize VMS (non-local) over local to ensure we show segments that are guaranteed to work
-       if (a.isLocal) return 1;
-       if (b.isLocal) return -1;
-       return 0;
+       
+       // 2. Prioritize rounded times (e.g., :00 seconds) to favor scheduled times over real-time offsets
+       const aRounded = a.startTimeMs % 10000 === 0; // Prefer multiples of 10s (usually :00)
+       const bRounded = b.startTimeMs % 10000 === 0;
+       if (aRounded !== bRounded) return aRounded ? -1 : 1;
+       
+       // 3. Sort by start time descending
+       return b.startTimeMs - a.startTimeMs;
     });
 
     for (const candidate of sortedCandidateList) {
@@ -287,18 +297,18 @@ export async function GET(request: NextRequest) {
          // 2. Time-based deduplication (If within 10 seconds of each other)
          const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
          if (timeDiff < 10000) {
-            // If we already have a VMS record for this window, skip the local recording (MP4).
-            // We keep local snapshots (PNG) as they are distinct events.
-            if (!p.isLocal && candidate.isLocal && candidate.isVideo) return true;
+            // If we have a VMS record and a local one (Snapshot or Video), merge them.
+            // We prefer keeping the VMS record for videos, but for snapshots, we want the "View Image" button.
+            // However, to satisfy the user's request for "no duplicates" and "keep 07:00",
+            // we will skip the local one if we already have a record for this time.
+            if (!p.isLocal && candidate.isLocal) return true;
 
-            // If we already have a local record and the candidate is VMS (shouldn't happen with new sort)
-            if (p.isLocal && !candidate.isLocal) return true;
-
-            // If both are from VMS, skip the duplicate if they are extremely close in time.
-            if (!p.isLocal && !candidate.isLocal && timeDiff < 2000) return true;
-
-            // If both are local, keep only the first one (prioritized by ID-split in sort).
+            // If both are local (e.g. 10:07:03 and 10:07:00), skip the second one.
+            // Since we sort descending, we'll keep the newest one unless we snap.
             if (p.isLocal && candidate.isLocal) return true;
+
+            // If both are from VMS, skip the duplicate.
+            if (!p.isLocal && !candidate.isLocal && timeDiff < 2000) return true;
          }
          return false;
       });

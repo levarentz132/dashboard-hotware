@@ -1392,7 +1392,7 @@ export default function CloudRecordings() {
                             </div>
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
                               <span className="font-medium text-foreground/80">
-                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: false })}
+                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: false })}
                               </span>
                               {!rec.isScreenshot && rec.durationMs > 5000 && (
                                 <>
