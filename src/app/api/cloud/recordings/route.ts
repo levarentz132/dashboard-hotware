@@ -67,8 +67,7 @@ export async function GET(request: NextRequest) {
     // Use responseData instead of data
     const data = responseData;
     
-    // Log raw response for debugging
-    logger.debug("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
+    // logger.debug("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
     
     // NX API returns { reply: [{ guid: "serverId", periods: [{startTimeMs, durationMs}] }] }
     // We need to flatten all periods from all servers

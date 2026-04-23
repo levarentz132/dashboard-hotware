@@ -93,7 +93,7 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<an
     const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
     const url = `${EXTERNAL_AUTH_API.URL}${path}`;
 
-    console.log(`[External API] Calling: ${url}`);
+    // console.log(`[External API] Calling: ${url}`);
 
     const method = options.method || "GET";
     const headers: Record<string, string> = {};
@@ -418,12 +418,7 @@ export async function saveExternalDashboardLayout(
     payload.layout_id = layoutData.layout_id;
   }
 
-  console.log(`[External API] Request: POST /dashboard/layout`, JSON.stringify({
-    device_type: payload.device_type,
-    layout_name: payload.layout_name,
-    has_layout_data: !!payload.layout_data,
-    json_length: Array.isArray(payload.layout_data) ? payload.layout_data.length : 0,
-  }));
+  // console.log(`[External API] Request: POST /dashboard/layout`, JSON.stringify({ device_type: payload.device_type, layout_name: payload.layout_name, has_layout_data: !!payload.layout_data, json_length: Array.isArray(payload.layout_data) ? payload.layout_data.length : 0 }));
 
   return await apiFetch(`/dashboard/layout`, {
     method: "POST",

@@ -99,7 +99,7 @@ function getServerSideConfig(): Record<string, string> {
     const fallbackPath = path.join(home, 'hotware-dashboard', '.env.local');
     if (fs.existsSync(fallbackPath)) {
       configPath = fallbackPath;
-      console.log(`[Config] Using fallback config path: ${configPath}`);
+      // console.log(`[Config] Using fallback config path: ${configPath}`);
     } else {
       console.warn(`[Config] Fallback config path NOT found: ${fallbackPath}`);
     }
@@ -135,7 +135,7 @@ function getServerSideConfig(): Record<string, string> {
         config[key.trim()] = valueParts.join('=').trim();
       }
     });
-    console.log(`[Config] Loaded config from disk: ${config.NEXT_PUBLIC_NX_SERVER_HOST}`);
+    // console.log(`[Config] Loaded config from disk: ${config.NEXT_PUBLIC_NX_SERVER_HOST}`);
     cachedConfig = config;
     lastReadTime = now;
     return config;

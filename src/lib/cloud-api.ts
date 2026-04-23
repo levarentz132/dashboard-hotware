@@ -366,11 +366,19 @@ export async function fetchFromCloudApi<T>(
 
     // Stop calling if there's no auth material for a cloud request
     const isGlobal = (systemId || '').trim().toLowerCase() === 'all';
+    const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
     const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"] || basicAuthHeader);
 
+    // For cloud-bound URLs, we need a real NX Cloud OAuth token — a local VMS session
+    // token will always be rejected with 403. Skip the call entirely if we only have local creds.
+    const cloudAuthToken = getCloudAuthHeader(request);
+    if (isCloudBound && !cloudAuthToken) {
+      logger.debug(`[Cloud API] Skipping cloud call to ${endpoint} — no NX Cloud token available (local NVR mode).`);
+      return createAuthErrorResponse(systemId, systemName);
+    }
+
     // Only block if it looks like a cloud-bound request (nxvms.com or vmsproxy.com)
-    if (!hasAuth && (cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com"))) {
-      console.warn(`[Cloud API] Blocking request to ${cloudUrl} due to missing auth token`);
+    if (!hasAuth && isCloudBound) {
       return createAuthErrorResponse(systemId, systemName);
     }
 
@@ -404,7 +412,7 @@ export async function fetchFromCloudApi<T>(
 
     // Check if this is an NX server endpoint (REST v3/v4 or legacy /api)
     const isNxEndpoint = endpoint.startsWith("/rest/v3") || endpoint.startsWith("/rest/v4") || endpoint.startsWith("/api/");
-    const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
+    // isCloudBound already declared above
     const isRelay = cloudUrl.includes(".relay.vmsproxy.com");
     
     // We retry for relay connections or local direct connections (non-cloud bound)
@@ -422,7 +430,7 @@ export async function fetchFromCloudApi<T>(
         delete retryHeaders["x-nx-session"];
         delete retryHeaders["x-runtime-session-guid"];
 
-        console.warn(`[Cloud API] Session rejected. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
+        logger.debug(`[Cloud API] Session rejected. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
         response = await fetch(cloudUrl, {
           method: "GET",
           headers: retryHeaders,
@@ -434,7 +442,7 @@ export async function fetchFromCloudApi<T>(
           return createAuthErrorResponse(systemId, systemName);
         }
       } else {
-        console.warn(`[Cloud API] Auth failed for ${systemId} and no Basic credentials available for retry.`);
+        logger.debug(`[Cloud API] Auth failed for ${systemId} (no Basic credentials). Expected if not using NX Cloud.`);
         return createAuthErrorResponse(systemId, systemName);
       }
     } else if (response.status === 401 || response.status === 403) {
@@ -538,9 +546,17 @@ async function requestCloudApi<T>(
     const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
 
     // Stop calling if there's no auth material for a cloud request
+    const isCloudBound2 = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
     const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"]);
-    if (!hasAuth && (cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com"))) {
-      console.warn(`[Cloud API] Blocking request to ${cloudUrl} due to missing auth token`);
+
+    // For cloud-bound URLs, require a real NX Cloud OAuth token
+    const cloudAuthToken2 = getCloudAuthHeader(request);
+    if (isCloudBound2 && !cloudAuthToken2) {
+      logger.debug(`[Cloud API] Skipping cloud ${method} to ${endpoint} — no NX Cloud token available.`);
+      return createAuthErrorResponse(systemId, systemName);
+    }
+
+    if (!hasAuth && isCloudBound2) {
       return createAuthErrorResponse(systemId, systemName);
     }
 
@@ -591,7 +607,7 @@ async function requestCloudApi<T>(
         delete retryHeaders["x-nx-session"];
         delete retryHeaders["x-runtime-session-guid"];
 
-        console.warn(`[Cloud API] Session rejected for ${method}. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
+        logger.debug(`[Cloud API] Session rejected for ${method}. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
         response = await fetch(cloudUrl, {
           method,
           headers: retryHeaders,
