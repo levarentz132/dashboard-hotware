@@ -122,25 +122,25 @@ export async function GET(request: NextRequest) {
 
       const recDate = new Date(parseInt(startTime as string, 10));
       const YYYY = recDate.getFullYear().toString();
-      const MM   = (recDate.getMonth() + 1).toString().padStart(2, "0");
-      const DD   = recDate.getDate().toString().padStart(2, "0");
-      const HH   = recDate.getHours().toString().padStart(2, "0");
-      const mmP  = recDate.getMinutes().toString().padStart(2, "0");
-      const SS   = recDate.getSeconds().toString().padStart(2, "0");
+      const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
+      const DD = recDate.getDate().toString().padStart(2, "0");
+      const HH = recDate.getHours().toString().padStart(2, "0");
+      const mmP = recDate.getMinutes().toString().padStart(2, "0");
+      const SS = recDate.getSeconds().toString().padStart(2, "0");
       const dateFolder = `${YYYY}-${MM}-${DD}`;
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").trim();
       const baseFileName = `${safeCameraName}_${HH}${mmP}${SS}`;
- 
-       const saveDir = path.join(videosBaseDir, dateFolder);
-       if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
- 
-       let finalFileName = `${baseFileName}.mp4`;
-       let savePath = path.join(saveDir, finalFileName);
-       let counter = 1;
-       while (fs.existsSync(savePath)) {
-         finalFileName = `${baseFileName}_${counter}.mp4`;
-         savePath = path.join(saveDir, finalFileName);
+
+      const saveDir = path.join(videosBaseDir, dateFolder);
+      if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
+
+      let finalFileName = `${baseFileName}.mp4`;
+      let savePath = path.join(saveDir, finalFileName);
+      let counter = 1;
+      while (fs.existsSync(savePath)) {
+        finalFileName = `${baseFileName}_${counter}.mp4`;
+        savePath = path.join(saveDir, finalFileName);
         counter++;
       }
 
@@ -355,7 +355,7 @@ export async function GET(request: NextRequest) {
         return await new Promise<NextResponse>((resolve) => {
           ffmpeg.on('close', (code) => {
             console.log(`[recordings/download] FFmpeg finished with code ${code}`);
-            
+
             if (code !== 0) {
               console.error(`[recordings/download] FFmpeg failed with code ${code}`);
               resolve(NextResponse.json({ error: "FFmpeg process failed during conversion", code }, { status: 500 }));
@@ -377,11 +377,11 @@ export async function GET(request: NextRequest) {
               // Build filename: cameraName_YYYYMMDD_HHMMSS.mp4  (use recording startTime, not wall clock)
               const recDate = startTime ? new Date(parseInt(startTime, 10)) : new Date();
               const YYYY = recDate.getFullYear().toString();
-              const MM  = (recDate.getMonth() + 1).toString().padStart(2, "0");
-              const DD  = recDate.getDate().toString().padStart(2, "0");
-              const HH  = recDate.getHours().toString().padStart(2, "0");
-              const mm  = recDate.getMinutes().toString().padStart(2, "0");
-              const SS  = recDate.getSeconds().toString().padStart(2, "0");
+              const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
+              const DD = recDate.getDate().toString().padStart(2, "0");
+              const HH = recDate.getHours().toString().padStart(2, "0");
+              const mm = recDate.getMinutes().toString().padStart(2, "0");
+              const SS = recDate.getSeconds().toString().padStart(2, "0");
               const dateFolder = `${YYYY}-${MM}-${DD}`;
 
               const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
@@ -416,7 +416,7 @@ export async function GET(request: NextRequest) {
 
             // Stream the fixed file back to the client
             const fileStream = fs.createReadStream(tempPath);
-            
+
             // Clean up the temp file after it's been sent
             fileStream.on('close', () => {
               fs.unlink(tempPath, (err) => {
@@ -438,9 +438,9 @@ export async function GET(request: NextRequest) {
           ffmpeg.on('error', (err) => {
             console.error("[recordings/download] FFmpeg spawn error:", err);
             // This usually means FFmpeg is not found in the path
-            resolve(NextResponse.json({ 
+            resolve(NextResponse.json({
               error: "FFmpeg process error - verify FFmpeg is installed and in system PATH",
-              details: err.message 
+              details: err.message
             }, { status: 500 }));
           });
         });

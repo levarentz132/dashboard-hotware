@@ -273,8 +273,9 @@ export async function GET(request: NextRequest) {
           const bHasId = (b.fileName || "").includes("__") ? 0 : 1;
           return aHasId - bHasId;
        }
-       if (a.isLocal) return -1;
-       if (b.isLocal) return 1;
+       // Prioritize VMS (non-local) over local to ensure we show segments that are guaranteed to work
+       if (a.isLocal) return 1;
+       if (b.isLocal) return -1;
        return 0;
     });
 
@@ -283,13 +284,20 @@ export async function GET(request: NextRequest) {
          // 1. Explicit filename check (Same download link)
          if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
 
-         // 2. Time-based deduplication
+         // 2. Time-based deduplication (If within 10 seconds of each other)
          const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
-         // If they are within 10 seconds of each other
          if (timeDiff < 10000) {
-            // If we already have a local snapshot for this window, skip this VMS record (pulse)
-            if (p.isLocal && !candidate.isLocal && candidate.durationMs <= 10000) return true;
-            // If both are local snapshots for the same window, prioritize the ID-split over legacy
+            // If we already have a VMS record for this window, skip the local recording (MP4).
+            // We keep local snapshots (PNG) as they are distinct events.
+            if (!p.isLocal && candidate.isLocal && candidate.isVideo) return true;
+
+            // If we already have a local record and the candidate is VMS (shouldn't happen with new sort)
+            if (p.isLocal && !candidate.isLocal) return true;
+
+            // If both are from VMS, skip the duplicate if they are extremely close in time.
+            if (!p.isLocal && !candidate.isLocal && timeDiff < 2000) return true;
+
+            // If both are local, keep only the first one (prioritized by ID-split in sort).
             if (p.isLocal && candidate.isLocal) return true;
          }
          return false;

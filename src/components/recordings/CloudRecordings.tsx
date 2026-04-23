@@ -743,7 +743,9 @@ export default function CloudRecordings() {
   };
 
   const handlePreview = (time: number, duration: number, sysId: string, devId: string, isLegacy?: boolean, fileName?: string, dateFolder?: string, cameraFolderName?: string) => {
-    if (duration <= 5000 || isLegacy) {
+    const isVideo = fileName?.toLowerCase().endsWith(".mp4");
+
+    if ((duration <= 5000 || isLegacy) && !isVideo) {
       let url = "";
       if (isLegacy && fileName && dateFolder) {
         url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}`;
@@ -754,6 +756,14 @@ export default function CloudRecordings() {
       
       const cam = devices.find(d => normalizeId(d.id) === devId);
       setPreviewSnapshot({ url, title: cam?.name || "Snapshot" });
+      return;
+    }
+
+    // If it's a local video (legacy), open it in a new tab via screenshot/serve
+    if (isLegacy && isVideo && fileName && dateFolder) {
+      let url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}`;
+      if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
+      window.open(url, "_blank");
       return;
     }
 
