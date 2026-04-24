@@ -55,6 +55,7 @@ async function vmsRequest(
 }
 
 const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
+const MAX_AUTOSAVE_AGE_MS = 60 * 60 * 1000; // 1 hour grace period for auto-download
 
 // Background Watchdog (In-memory for the server session)
 declare global {
@@ -346,23 +347,30 @@ const startWatchdog = () => {
               // ── Step 3: Trigger Auto-Download (Server-side) ────────────────
               // We trigger the internal download API to pull the clip and save it to disk.
               // We wait 5s to let the VMS index the new clip before trying to fetch it.
-              setTimeout(async () => {
-                try {
-                  const port = global._nxAppPort || process.env.PORT || "3011";
-                  const autoSaveUrl = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
-                  
-                  logger.debug(`[Watchdog] Triggering auto-save for ${rec.cameraName}...`);
-                  const downloadRes = await fetch(autoSaveUrl);
-                  const downloadResult = await downloadRes.json();
-                  if (downloadResult.success) {
-                    logger.debug(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
-                  } else {
-                    console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error);
+              const isTooOld = (now - endMs) > MAX_AUTOSAVE_AGE_MS;
+              
+              if (!isTooOld) {
+                // Trigger auto-save immediately in the background
+                (async () => {
+                  try {
+                    const port = global._nxAppPort || process.env.PORT || "3011";
+                    const autoSaveUrl = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
+                    
+                    logger.debug(`[Watchdog] Triggering auto-save for ${rec.cameraName}...`);
+                    const downloadRes = await fetch(autoSaveUrl);
+                    const downloadResult = await downloadRes.json();
+                    if (downloadResult.success) {
+                      logger.debug(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
+                    } else {
+                      console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error);
+                    }
+                  } catch (saveErr: any) {
+                    console.error(`[Watchdog] 🛑 Auto-save trigger exception for ${rec.cameraName}:`, saveErr.message);
                   }
-                } catch (saveErr: any) {
-                  console.error(`[Watchdog] 🛑 Auto-save trigger exception for ${rec.cameraName}:`, saveErr.message);
-                }
-              }, 5000);
+                })();
+              } else {
+                logger.debug(`[Watchdog] ⏩ Skipping auto-save for ${rec.cameraName} (Recording is too old: ${Math.round((now - endMs) / 60000)}m ago)`);
+              }
 
               // ── Step 2: Restore original schedule (with isEnabled: false) ───────────
               // Only restore if the original had tasks (don't re-enable a blank schedule)
@@ -431,6 +439,36 @@ const startWatchdog = () => {
           }
 
 
+          // ── CASE 3: Missed/Expired Tasks ──────────────────────────────────
+          else if (now >= endMs && rec.status === "pending") {
+            logger.debug(`[Watchdog] Marking missed task as completed/expired: ${rec.cameraName} (End was ${new Date(endMs).toLocaleString()})`);
+            
+            if (rec.recurrence && rec.recurrence !== "none") {
+              const nextDate = new Date(rec.date);
+              if (rec.recurrence === "weekday") {
+                nextDate.setDate(nextDate.getDate() + 7);
+              } else if (rec.recurrence === "monthday") {
+                const targetDay = rec.recurrenceDay;
+                if (targetDay) {
+                  let year = nextDate.getFullYear();
+                  let monthIdx = nextDate.getMonth() + 1;
+                  let next = new Date(year, monthIdx, targetDay);
+                  while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
+                  nextDate.setTime(next.getTime());
+                } else {
+                  nextDate.setMonth(nextDate.getMonth() + 1);
+                }
+              }
+              nextDate.setHours(sh, sm, ss, 0);
+              rec.status = "pending";
+              rec.date = nextDate.toISOString();
+              rec.startMs = nextDate.getTime();
+              rec.endMs = nextDate.getTime() + (endMs - startMs);
+            } else {
+              rec.status = "completed";
+            }
+            changed = true;
+          }
 
           return rec;
         })

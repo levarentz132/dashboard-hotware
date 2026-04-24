@@ -47,6 +47,64 @@ export async function POST(request: NextRequest) {
       .replace(/\s+/g, " ")             // Normalize whitespace
       .trim();
 
+    // ---- Storage Path & Filename Construction ----
+    const now = new Date();
+    const targetDate = body.timestampMs ? new Date(Number(body.timestampMs)) : now;
+    
+    const YYYY = targetDate.getFullYear().toString();
+    const MM = (targetDate.getMonth() + 1).toString().padStart(2, "0");
+    const DD = targetDate.getDate().toString().padStart(2, "0");
+    const HH = targetDate.getHours().toString().padStart(2, "0");
+    const mm = targetDate.getMinutes().toString().padStart(2, "0");
+    const SS = targetDate.getSeconds().toString().padStart(2, "0");
+
+    let displayHH = HH, displaymm = mm, displaySS = SS;
+    if (body.scheduledStartTime) {
+      const parts = body.scheduledStartTime.split(":");
+      if (parts.length >= 3) {
+        displayHH = parts[0].padStart(2, "0");
+        displaymm = parts[1].padStart(2, "0");
+        displaySS = parts[2].padStart(2, "0");
+      } else if (parts.length >= 2) {
+        displayHH = parts[0].padStart(2, "0");
+        displaymm = parts[1].padStart(2, "0");
+        displaySS = "00"; 
+      }
+    }
+
+    const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
+    const timestampStr = `${displayHH}${displaymm}${displaySS}`;
+
+    let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+    try {
+      const settingsFile = path.join(process.cwd(), "data", "settings.json");
+      if (fs.existsSync(settingsFile)) {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+        if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
+      }
+    } catch (e) { }
+
+    const screenshotsDir = path.join(screenshotsBaseDir, dateFolder);
+    if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir, { recursive: true });
+
+    const finalFileName = `${safeCameraName}_${timestampStr}.png`;
+    const filePath = path.join(screenshotsDir, finalFileName);
+
+    // DEDUPLICATION: Skip if file already exists
+    if (fs.existsSync(filePath)) {
+      console.log(`[screenshot] File already exists, skipping capture: ${filePath}`);
+      return NextResponse.json({
+        success: true,
+        filePath: filePath,
+        fileName: finalFileName,
+        dateFolder: dateFolder,
+        cameraName: safeCameraName,
+        sizeBytes: fs.statSync(filePath).size,
+        timestamp: targetDate.toISOString(),
+        skipped: true
+      });
+    }
+
     console.log(`[screenshot] Capturing PNG for ${safeCameraName} (${cleanDeviceId}) on system ${systemId}`);
 
     // ---- 1. (Optional) Wake up camera with a brief recording trigger ----
@@ -224,67 +282,6 @@ export async function POST(request: NextRequest) {
         { error: "Captured image is too small / invalid" },
         { status: 502 }
       );
-    }
-
-    // ---- 3. Build file path using device clock (server-side time) ----
-    const now = new Date();
-    // If timestampMs provided, use it for the filename date/time
-    const targetDate = body.timestampMs ? new Date(Number(body.timestampMs)) : now;
-    
-    const YYYY = targetDate.getFullYear().toString();
-    const MM = (targetDate.getMonth() + 1).toString().padStart(2, "0");
-    const DD = targetDate.getDate().toString().padStart(2, "0");
-    const HH = targetDate.getHours().toString().padStart(2, "0");
-    const mm = targetDate.getMinutes().toString().padStart(2, "0");
-    const SS = targetDate.getSeconds().toString().padStart(2, "0");
-
-    // Overwrite with scheduled time if provided (to match exact user-set time in UI)
-    let displayHH = HH;
-    let displaymm = mm;
-    let displaySS = SS;
-    if (body.scheduledStartTime) {
-      const parts = body.scheduledStartTime.split(":");
-      if (parts.length >= 3) {
-        displayHH = parts[0].padStart(2, "0");
-        displaymm = parts[1].padStart(2, "0");
-        displaySS = parts[2].padStart(2, "0");
-      } else if (parts.length >= 2) {
-        displayHH = parts[0].padStart(2, "0");
-        displaymm = parts[1].padStart(2, "0");
-        displaySS = "00"; 
-      }
-    }
-
-    const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
-    const timestampStr = `${displayHH}${displaymm}${displaySS}`;
-
-    // ---- Get Custom Storage Path ----
-    let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
-    try {
-      const settingsFile = path.join(process.cwd(), "data", "settings.json");
-      if (fs.existsSync(settingsFile)) {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-        if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
-      }
-    } catch (e) { }
-
-    console.log(`[screenshot] Using storage base: ${screenshotsBaseDir}`);
-    const screenshotsDir = path.join(screenshotsBaseDir, dateFolder); // Saved directly in date folder
-    if (!fs.existsSync(screenshotsDir)) {
-      fs.mkdirSync(screenshotsDir, { recursive: true });
-    }
-
-    // New format: CameraName_HHmmss.png
-    const baseFileName = `${safeCameraName}_${timestampStr}`;
-
-    // ---- 4. Collision detection: append _N if file already exists ----
-    let finalFileName = `${baseFileName}.png`;
-    let filePath = path.join(screenshotsDir, finalFileName);
-    let counter = 1;
-    while (fs.existsSync(filePath)) {
-      finalFileName = `${baseFileName}_${counter}.png`;
-      filePath = path.join(screenshotsDir, finalFileName);
-      counter++;
     }
 
     // ---- 5. Write the PNG file ----

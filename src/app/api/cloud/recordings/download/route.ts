@@ -83,10 +83,46 @@ export async function GET(request: NextRequest) {
       delete headers["Content-Type"];
     }
 
+    // Build storage base directory
+    let videosBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+    try {
+      const settingsFile = path.join(process.cwd(), "data", "settings.json");
+      if (fs.existsSync(settingsFile)) {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+        if (settings.videoStoragePath) {
+          videosBaseDir = settings.videoStoragePath;
+        } else if (settings.storagePath) {
+          videosBaseDir = settings.storagePath;
+        }
+      }
+    } catch (e) { /* ignore */ }
+
     // ── AUTO-SAVE ONLY (no streaming) ───────────────────────────────────────
     // Called automatically when a scheduled recording finishes. Encodes and saves
     // the clip to the storage folder, returns JSON. No body is streamed to the client.
     if (autoSave && !effectiveIsImage) {
+      const recDate = new Date(parseInt(startTime as string, 10));
+      const YYYY = recDate.getFullYear().toString();
+      const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
+      const DD = recDate.getDate().toString().padStart(2, "0");
+      const HH = recDate.getHours().toString().padStart(2, "0");
+      const mmP = recDate.getMinutes().toString().padStart(2, "0");
+      const SS = recDate.getSeconds().toString().padStart(2, "0");
+      const dateFolder = `${YYYY}-${MM}-${DD}`;
+      const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
+        .replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim();
+      
+      const finalFileName = `${safeCameraName}_${HH}${mmP}${SS}.mp4`;
+      const saveDir = path.join(videosBaseDir, dateFolder);
+      if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
+      const savePath = path.join(saveDir, finalFileName);
+
+      // DEDUPLICATION: Check if file already exists before fetching from VMS
+      if (fs.existsSync(savePath)) {
+        console.log(`[recordings/download] AUTO-SAVE: File already exists, skipping: ${savePath}`);
+        return NextResponse.json({ success: true, path: savePath, file: finalFileName, skipped: true });
+      }
+
       console.log(`[recordings/download] AUTO-SAVE triggered for ${deviceId} startTime=${startTime}`);
 
       let videoResponse: Response;
@@ -104,44 +140,6 @@ export async function GET(request: NextRequest) {
       } catch (fetchErr: any) {
         console.error("[recordings/download] AUTO-SAVE fetch error:", fetchErr);
         return NextResponse.json({ error: "Auto-save fetch error", details: fetchErr.message }, { status: 500 });
-      }
-
-      // Build output path: storagePath/YYYYMMDD/cameraName_YYYYMMDD_HHMMSS.mp4
-      let videosBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
-      try {
-        const settingsFile = path.join(process.cwd(), "data", "settings.json");
-        if (fs.existsSync(settingsFile)) {
-          const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-          if (settings.videoStoragePath) {
-            videosBaseDir = settings.videoStoragePath;
-          } else if (settings.storagePath) {
-            videosBaseDir = settings.storagePath;
-          }
-        }
-      } catch (e) { /* ignore */ }
-
-      const recDate = new Date(parseInt(startTime as string, 10));
-      const YYYY = recDate.getFullYear().toString();
-      const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
-      const DD = recDate.getDate().toString().padStart(2, "0");
-      const HH = recDate.getHours().toString().padStart(2, "0");
-      const mmP = recDate.getMinutes().toString().padStart(2, "0");
-      const SS = recDate.getSeconds().toString().padStart(2, "0");
-      const dateFolder = `${YYYY}-${MM}-${DD}`;
-      const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
-        .replace(/[<>:"/\\|?*]/g, "_").trim();
-      const baseFileName = `${safeCameraName}_${HH}${mmP}${SS}`;
-
-      const saveDir = path.join(videosBaseDir, dateFolder);
-      if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
-
-      let finalFileName = `${baseFileName}.mp4`;
-      let savePath = path.join(saveDir, finalFileName);
-      let counter = 1;
-      while (fs.existsSync(savePath)) {
-        finalFileName = `${baseFileName}_${counter}.mp4`;
-        savePath = path.join(saveDir, finalFileName);
-        counter++;
       }
 
       console.log(`[recordings/download] AUTO-SAVE encoding to: ${savePath}`);
@@ -365,31 +363,28 @@ export async function GET(request: NextRequest) {
               const dateFolder = `${YYYY}-${MM}-${DD}`;
 
               const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
-                .replace(/[<>:"/\\|?*]/g, "_").trim();
-              const baseFileName = `${HH}${mm}${SS}`;
+                .replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim();
+              const finalFileName = `${safeCameraName}_${HH}${mm}${SS}.mp4`;
 
-              const saveDir = path.join(videosBaseDir, dateFolder, safeCameraName);
+              const saveDir = path.join(videosBaseDir, dateFolder);
               if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
 
-              // Collision detection
-              let finalFileName = `${baseFileName}.mp4`;
-              let savePath = path.join(saveDir, finalFileName);
-              let counter = 1;
-              while (fs.existsSync(savePath)) {
-                finalFileName = `${baseFileName}_${counter}.mp4`;
-                savePath = path.join(saveDir, finalFileName);
-                counter++;
-              }
+              const savePath = path.join(saveDir, finalFileName);
 
-              // Fire-and-forget copy — don't block the browser response
-              fs.copyFile(tempPath, savePath, (copyErr) => {
-                if (copyErr) {
-                  console.error("[recordings/download] Auto-save video copy failed:", copyErr);
-                } else {
-                  console.log(`[recordings/download] Auto-saved video to: ${savePath}`);
-                  logRecordingEvent(`Recording finished successfully: ${safeCameraName}`);
-                }
-              });
+              // Deduplication check
+              if (fs.existsSync(savePath)) {
+                console.log(`[recordings/download] Auto-save skip: file exists ${savePath}`);
+              } else {
+                // Fire-and-forget copy — don't block the browser response
+                fs.copyFile(tempPath, savePath, (copyErr) => {
+                  if (copyErr) {
+                    console.error("[recordings/download] Auto-save video copy failed:", copyErr);
+                  } else {
+                    console.log(`[recordings/download] Auto-saved video to: ${savePath}`);
+                    logRecordingEvent(`Recording finished successfully: ${safeCameraName}`);
+                  }
+                });
+              }
             } catch (saveErr) {
               console.error("[recordings/download] Auto-save video error:", saveErr);
             }
