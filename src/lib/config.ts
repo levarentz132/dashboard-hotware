@@ -197,7 +197,6 @@ export function getDynamicConfig(request?: Request | NextRequest) {
         if (!netIfaces) continue;
         for (const iface of netIfaces) {
           if (iface.family === 'IPv4' && !iface.internal) {
-            console.log(`[Config] Auto-detected local network IP: ${iface.address}`);
             diskConfig.NEXT_PUBLIC_NX_SERVER_HOST = iface.address;
             break;
           }

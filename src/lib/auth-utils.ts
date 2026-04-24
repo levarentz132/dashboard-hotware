@@ -17,7 +17,6 @@ export async function performAdminLogin(systemId: string): Promise<boolean> {
         const testResponse = await fetch(`/api/cloud/audit-log?systemId=${encodeURIComponent(systemId)}&from=${new Date().toISOString()}`);
 
         if (testResponse.ok) {
-            console.log(`[Admin Authentication] Silent login successful for ${systemId} using secure token/fallback`);
             return true;
         }
 

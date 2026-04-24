@@ -89,13 +89,26 @@ export async function createUser(formData: any, systemId?: string): Promise<{ su
     if (Array.isArray(normalizedData.groupIds)) {
       normalizedData.groupIds = normalizedData.groupIds.map((id: string) => id.replace(/[{}]|%7B|%7D/gi, ""));
     }
+    // Normalize resourceAccessRights keys if present
+    if (normalizedData.resourceAccessRights && typeof normalizedData.resourceAccessRights === "object") {
+      const mapped: Record<string, string> = {};
+      Object.entries(normalizedData.resourceAccessRights).forEach(([k, v]) => {
+        const nk = k.replace(/[{}]|%7B|%7D/gi, "");
+        mapped[nk] = v as string;
+      });
+      normalizedData.resourceAccessRights = mapped;
+    }
 
-    const url = systemId ? `/api/nx/users?systemId=${encodeURIComponent(systemId)}` : "/api/nx/users";
+    // If no systemId provided from the UI, try sensible fallbacks so server proxy can route the request
+    const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
+    const url = effectiveSystemId ? `/api/nx/users?systemId=${encodeURIComponent(effectiveSystemId)}` : "/api/nx/users";
     const response = await fetch(url, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        ...getElectronHeaders()
+        Accept: "application/json",
+        ...getElectronHeaders(),
       },
       body: JSON.stringify(normalizedData),
     });
@@ -132,16 +145,28 @@ export async function updateUser(
     if (Array.isArray(normalizedData.groupIds)) {
       normalizedData.groupIds = normalizedData.groupIds.map((id: string) => id.replace(/[{}]|%7B|%7D/gi, ""));
     }
+    // Normalize resourceAccessRights keys if present
+    if (normalizedData.resourceAccessRights && typeof normalizedData.resourceAccessRights === "object") {
+      const mapped: Record<string, string> = {};
+      Object.entries(normalizedData.resourceAccessRights).forEach(([k, v]) => {
+        const nk = k.replace(/[{}]|%7B|%7D/gi, "");
+        mapped[nk] = v as string;
+      });
+      normalizedData.resourceAccessRights = mapped;
+    }
 
-    const url = systemId
-      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(systemId)}`
+    const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
+    const url = effectiveSystemId
+      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(effectiveSystemId)}`
       : `/api/nx/users/${normalizedUserId}`;
 
     const response = await fetch(url, {
       method: "PATCH",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        ...getElectronHeaders()
+        Accept: "application/json",
+        ...getElectronHeaders(),
       },
       body: JSON.stringify(normalizedData),
     });
@@ -168,14 +193,17 @@ export async function deleteUser(userId: string, systemId?: string): Promise<{ s
     // Normalize ID to strip curly braces
     const normalizedUserId = userId.replace(/[{}]|%7B|%7D/gi, "");
 
-    const url = systemId
-      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(systemId)}`
+    const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
+    const url = effectiveSystemId
+      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(effectiveSystemId)}`
       : `/api/nx/users/${normalizedUserId}`;
     const response = await fetch(url, {
       method: "DELETE",
+      credentials: "include",
       headers: {
-        ...getElectronHeaders()
-      }
+        Accept: "application/json",
+        ...getElectronHeaders(),
+      },
     });
 
     if (!response.ok) {

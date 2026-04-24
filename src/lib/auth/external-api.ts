@@ -191,12 +191,6 @@ export async function callExternalAuthAPI(request: ExternalAuthRequest): Promise
     data.success = true;
   }
 
-  console.log("[External API] Login Response:", {
-    success: data.success,
-    message: data.message,
-    has_token: !!data?.access_token,
-  });
-
   return data;
 }
 

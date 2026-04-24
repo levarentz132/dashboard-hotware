@@ -60,8 +60,7 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
     return payload as unknown as JWTPayload;
   } catch (error: any) {
     if (error?.code === 'ERR_JWT_EXPIRED') {
-      // This is expected behavior when token expires
-      // console.log("[Auth Service] Token expired, client should refresh");
+
       return null;
     }
     console.error("[Auth Service] Token verification failed:", error);

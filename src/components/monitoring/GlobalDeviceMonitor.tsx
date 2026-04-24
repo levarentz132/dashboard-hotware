@@ -59,7 +59,6 @@ export function GlobalDeviceMonitor() {
 
   // Debug: Log component mount
   useEffect(() => {
-    console.log("[GlobalDeviceMonitor] ✅ Component mounted - monitoring will start");
     return () => console.log("[GlobalDeviceMonitor] ❌ Component unmounted");
   }, []);
 
@@ -165,7 +164,6 @@ export function GlobalDeviceMonitor() {
         ? `Camera '${cameraName}' has been reconnected and is back online.`
         : `Camera '${cameraName}' has lost connection to the server. Please verify the camera's network connection.`;
 
-      console.log(`[GlobalDeviceMonitor] 📡 Triggering ${caption} for ${cameraName} on ${systemName}`);
 
       // Temporarily set systemId to target system for the API call
       const originalSystemId = nxAPI.getSystemId();
@@ -183,7 +181,6 @@ export function GlobalDeviceMonitor() {
       // Restore original systemId
       if (originalSystemId) nxAPI.setSystemId(originalSystemId);
 
-      console.log(`[GlobalDeviceMonitor] ✅ ${caption} event created successfully for ${cameraName}`);
     } catch (error) {
       console.error(`[GlobalDeviceMonitor] ❌ Error triggering status event:`, error);
     }
@@ -194,7 +191,6 @@ export function GlobalDeviceMonitor() {
    */
   const triggerStorageEvent = useCallback(async (storageName: string, storagePath: string, systemId: string, systemName: string, message: string) => {
     try {
-      console.log(`[GlobalDeviceMonitor] 💾 Triggering Low Disk Space event for ${storageName} on ${systemName}`);
 
       // Temporarily set systemId to target system for the API call
       const originalSystemId = nxAPI.getSystemId();
@@ -211,7 +207,6 @@ export function GlobalDeviceMonitor() {
       // Restore original systemId
       if (originalSystemId) nxAPI.setSystemId(originalSystemId);
 
-      console.log(`[GlobalDeviceMonitor] ✅ Low Disk Space event created successfully for ${storageName}`);
     } catch (error) {
       // Silently ignore 404/501 errors - server doesn't support generic events API
       const errorMsg = String(error);
@@ -310,7 +305,6 @@ export function GlobalDeviceMonitor() {
       if (response.ok) {
         const snapshot = await response.json();
         previousSnapshotRef.current = snapshot;
-        console.log(`[GlobalDeviceMonitor] 📂 Loaded previous snapshot: ${snapshot.summary?.totalDevices || 0} devices`);
         return snapshot;
       }
     } catch (error) {
@@ -365,16 +359,13 @@ export function GlobalDeviceMonitor() {
           const isNowOffline = isStatusOffline(currentStatus);
           const wasOffline = isStatusOffline(previousStatus);
 
-          if (previousStatus !== currentStatus) {
-            console.log(`[GlobalDeviceMonitor] 📊 Device ${currentDevice.name} status transition: "${previousStatus}" → "${currentStatus}"`);
-          }
+         
 
           const deviceKey = `${currentSystem.systemId}:${currentDevice.id}`;
           const lastNotified = lastNotifiedStatusRef.current[deviceKey];
 
           if (!isFirstRun && !wasOnline && isNowOnline && lastNotified !== 'online') {
             // Device came online
-            console.log(`[GlobalDeviceMonitor] 🟢 ALERT: ${currentDevice.name} (${currentSystem.systemName}) came ONLINE`);
 
             await triggerCameraEvent(
               currentDevice.name || currentDevice.id,
@@ -395,7 +386,6 @@ export function GlobalDeviceMonitor() {
             lastNotifiedStatusRef.current[deviceKey] = 'online';
           } else if (!isFirstRun && !wasOffline && isNowOffline && lastNotified !== 'offline') {
             // Device went offline
-            console.log(`[GlobalDeviceMonitor] 🔴 ALERT: ${currentDevice.name} (${currentSystem.systemName}) went OFFLINE`);
             
             addPersistentNotification({
               type: 'error',
@@ -529,7 +519,6 @@ export function GlobalDeviceMonitor() {
     const changed = await hasChanges(currentSnapshot, previousSnapshotRef.current);
 
     if (changed) {
-      console.log(`[GlobalDeviceMonitor] 🔔 Changes detected! Saving to JSON...`);
       await saveSnapshot(currentSnapshot);
       previousSnapshotRef.current = currentSnapshot;
     } else {

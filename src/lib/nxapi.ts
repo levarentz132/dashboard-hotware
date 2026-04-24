@@ -936,14 +936,9 @@ if (typeof window !== "undefined" && API_CONFIG.username && API_CONFIG.password)
   setTimeout(async () => {
     try {
       const success = await nxAPI.login(API_CONFIG.username!, API_CONFIG.password!);
-      logger.debug("[nxAPI] Auto-login result:", success);
 
       if (success) {
-        // Prefetch critical data to prime the cache
-        logger.debug("[nxAPI] Prefetching critical data...");
-        // Use Promise.allSetled to not block if one fails
         await Promise.allSettled([nxAPI.getCameras(), nxAPI.getSystemInfo(), nxAPI.getServers()]);
-        logger.debug("[nxAPI] Prefetched cameras, system info, and servers.");
       }
     } catch (error) {
       console.error("[nxAPI] Auto-login failed:", error);

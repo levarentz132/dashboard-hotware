@@ -23,6 +23,8 @@ export async function DELETE(request: NextRequest) {
 
 async function handleRequest(request: NextRequest, method: string) {
   const { systemId, systemName } = validateSystemId(request);
+  // Allow requests without a systemId for endpoints that don't require it
+  const effectiveSystemId = systemId || "";
   const url = new URL(request.url);
   const path = url.pathname.replace("/api/nx", "");
 
@@ -32,13 +34,7 @@ async function handleRequest(request: NextRequest, method: string) {
   }
   endpoint = endpoint.replace(/[{}]/g, "");
 
-  // If no systemId, return error (local check has been removed)
-  if (!systemId) {
-    return NextResponse.json(
-      { error: "System ID is required. Local system support has been disabled." },
-      { status: 400 }
-    );
-  }
+  // No blocking error here — allow empty systemId to be proxied where appropriate
 
   // Clone query params but remove systemId and systemName to avoid cluttering the target URL
   const queryParams = new URLSearchParams(url.searchParams);
@@ -54,7 +50,7 @@ async function handleRequest(request: NextRequest, method: string) {
     }
 
     const options = {
-      systemId,
+      systemId: effectiveSystemId,
       systemName: systemName || undefined,
       endpoint,
       body,
@@ -71,7 +67,7 @@ async function handleRequest(request: NextRequest, method: string) {
 
   if (method === "DELETE") {
     return deleteFromCloudApi(request, {
-      systemId,
+      systemId: effectiveSystemId,
       systemName: systemName || undefined,
       endpoint,
       queryParams: queryParams.size > 0 ? queryParams : undefined,
@@ -79,7 +75,7 @@ async function handleRequest(request: NextRequest, method: string) {
   }
 
   return fetchFromCloudApi(request, {
-    systemId,
+    systemId: effectiveSystemId,
     systemName: systemName || undefined,
     endpoint,
     queryParams: queryParams.size > 0 ? queryParams : undefined,

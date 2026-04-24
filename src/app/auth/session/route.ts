@@ -51,7 +51,6 @@ export async function GET(request: NextRequest) {
             id: Number(meResult.user.id),
             role: meResult.user.role as any,
           };
-          console.log(`[Session API] Enriched user data from /me for ${session.user?.username}`);
 
           // Check for license expiration AFTER enrichment — using the final merged user object
           const licenseStatus = (session.user.license_status || "").toLowerCase();
@@ -71,7 +70,6 @@ export async function GET(request: NextRequest) {
             (daysRemaining === undefined || daysRemaining === null || daysRemaining > 0);
 
           if (!isActuallyActive && licenseStatus !== "active") {
-            console.warn(`[Session API] License expired for ${session.user?.username}. Forcing logout.`);
             return NextResponse.json(
               {
                 success: false,
@@ -92,11 +90,9 @@ export async function GET(request: NextRequest) {
     if (!session.valid) {
       // Access token invalid/expired - try refresh once
       if (refreshToken) {
-        console.log("[Session API] Access token invalid/expired. Attempting refresh...");
         const refreshed = await refreshAccessToken(refreshToken);
 
         if (refreshed.success && refreshed.accessToken) {
-          console.log("[Session API] Refresh successful. Rotating tokens.");
           const refreshedSession = await validateSession(refreshed.accessToken);
           if (refreshedSession.valid && refreshedSession.user) {
             // Also enrich the refreshed session user
@@ -112,7 +108,6 @@ export async function GET(request: NextRequest) {
                                         (daysRemaining === undefined || daysRemaining === null || daysRemaining > 0);
 
                 if (!isActuallyActive && licenseStatus !== 'active') {
-                   console.warn(`[Session API][Refresh] License expired for ${meResult.user.username}`);
                    return NextResponse.json(
                      {
                        success: false,
@@ -140,6 +135,28 @@ export async function GET(request: NextRequest) {
               user: refreshedSession.user,
             });
 
+            // Persist org_camera_ids for client access when refresh returns a user
+            try {
+              const ids = refreshedSession.user && (refreshedSession.user.org_camera_ids ?? (refreshedSession.user as any).orgCameraIds);
+              if (Array.isArray(ids) && ids.length > 0) {
+                response.cookies.set('org_camera_ids', JSON.stringify(ids), {
+                  httpOnly: false,
+                  secure: isSecureContext(),
+                  sameSite: 'lax',
+                  maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+                  path: '/',
+                });
+              }
+              else {
+                try {
+                  console.log(`[Session][Refresh] no org_camera_ids on refreshedSession.user. keys=${refreshedSession.user ? Object.keys(refreshedSession.user).join(',') : 'no-user'}`);
+                } catch (e) {
+                  console.log('[Session][Refresh] no org_camera_ids present on refreshedSession.user (failed to list keys)');
+                }
+              }
+            } catch (e) {
+              console.warn('[Session] Failed to set org_camera_ids cookie on refresh:', e);
+            }
 
             response.cookies.set(AUTH_CONFIG.COOKIE_NAME, refreshed.accessToken, {
               httpOnly: true,
@@ -198,6 +215,28 @@ export async function GET(request: NextRequest) {
       user: session.user,
     });
 
+    // Persist org_camera_ids for client access
+    try {
+      const ids = session.user && (session.user.org_camera_ids ?? (session.user as any).orgCameraIds);
+      if (Array.isArray(ids) && ids.length > 0) {
+        response.cookies.set('org_camera_ids', JSON.stringify(ids), {
+          httpOnly: false,
+          secure: isSecureContext(),
+          sameSite: 'lax',
+          maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+          path: '/',
+        });
+      }
+      else {
+        try {
+          console.log(`[Session] no org_camera_ids on session.user. keys=${session.user ? Object.keys(session.user).join(',') : 'no-user'}`);
+        } catch (e) {
+          console.log('[Session] no org_camera_ids present on session.user (failed to list keys)');
+        }
+      }
+    } catch (e) {
+      console.warn('[Session] Failed to set org_camera_ids cookie:', e);
+    }
 
     // If we rotated tokens earlier in this request, persist them now
     if (rotatedAccessToken) {

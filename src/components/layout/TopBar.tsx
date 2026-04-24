@@ -27,7 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/hooks/use-auth";
-import { isLicenseExpired, isLicenseExpiringSoon, formatIndonesianDate } from "@/lib/auth/utils";
+import * as AuthUtils from "@/lib/auth/utils";
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -165,7 +165,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
           {user && (
             (() => {
               const expiry = user.organization?.license_expires_at || user.license_expires_at;
-              return isLicenseExpired(expiry) || isLicenseExpiringSoon(expiry);
+              return AuthUtils.isLicenseExpired(expiry) || AuthUtils.isLicenseExpiringSoon(expiry);
             })()
           ) && (
             <TooltipProvider>
@@ -174,15 +174,15 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
                   <Button variant="ghost" className="h-9 px-2 text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 gap-1.5 border border-red-200">
                     <AlertCircle className="w-4 h-4" />
                     <span className="text-xs font-bold uppercase tracking-wider hidden lg:inline">
-                      {isLicenseExpired(user.organization?.license_expires_at || user.license_expires_at) ? 'License Expired' : 'License Expiring Soon'}
+                      {AuthUtils.isLicenseExpired(user.organization?.license_expires_at || user.license_expires_at) ? 'License Expired' : 'License Expiring Soon'}
                     </span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
                   <div className="text-xs">
                     <p className="font-bold">License Issue</p>
-                    <p>Your license {isLicenseExpired(user.organization?.license_expires_at || user.license_expires_at) ? 'expired on' : 'will expire on'}:</p>
-                    <p className="text-red-500 font-mono mt-0.5">{formatIndonesianDate(user.organization?.license_expires_at || user.license_expires_at)}</p>
+                    <p>Your license {AuthUtils.isLicenseExpired(user.organization?.license_expires_at || user.license_expires_at) ? 'expired on' : 'will expire on'}:</p>
+                    <p className="text-red-500 font-mono mt-0.5">{user.organization?.license_expires_at || user.license_expires_at}</p>
                   </div>
                 </TooltipContent>
               </Tooltip>
