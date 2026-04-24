@@ -187,26 +187,27 @@ export function getDynamicConfig(request?: Request | NextRequest) {
   // Fallback to disk configuration (Remote Network users or missing headers)
   const diskConfig = getServerSideConfig();
 
-  // Auto-detect local IP if host is missing or localhost
-  if (diskConfig && (!diskConfig.NEXT_PUBLIC_NX_SERVER_HOST || diskConfig.NEXT_PUBLIC_NX_SERVER_HOST === 'localhost')) {
-    try {
-      const os = require('os');
-      const interfaces = os.networkInterfaces();
-      for (const name of Object.keys(interfaces)) {
-        const netIfaces = interfaces[name];
-        if (!netIfaces) continue;
-        for (const iface of netIfaces) {
-          if (iface.family === 'IPv4' && !iface.internal) {
-            diskConfig.NEXT_PUBLIC_NX_SERVER_HOST = iface.address;
-            break;
-          }
-        }
-        if (diskConfig.NEXT_PUBLIC_NX_SERVER_HOST && diskConfig.NEXT_PUBLIC_NX_SERVER_HOST !== 'localhost') break;
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
+  // Auto-detect local IP if host is missing (but NOT if explicitly set to localhost)
+  // DISABLED: Keep localhost as-is if explicitly configured
+  // if (diskConfig && !diskConfig.NEXT_PUBLIC_NX_SERVER_HOST) {
+  //   try {
+  //     const os = require('os');
+  //     const interfaces = os.networkInterfaces();
+  //     for (const name of Object.keys(interfaces)) {
+  //       const netIfaces = interfaces[name];
+  //       if (!netIfaces) continue;
+  //       for (const iface of netIfaces) {
+  //         if (iface.family === 'IPv4' && !iface.internal) {
+  //           diskConfig.NEXT_PUBLIC_NX_SERVER_HOST = iface.address;
+  //           break;
+  //         }
+  //       }
+  //       if (diskConfig.NEXT_PUBLIC_NX_SERVER_HOST && diskConfig.NEXT_PUBLIC_NX_SERVER_HOST !== 'localhost') break;
+  //     }
+  //   } catch (e) {
+  //     // ignore
+  //   }
+  // }
 
   return headersConfig || diskConfig;
 }

@@ -541,6 +541,18 @@ async function requestCloudApi<T>(
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
     const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
 
+    // DEBUG: Log request details
+    console.log(`[Cloud API DEBUG] ${method} Request:`, {
+      systemId,
+      systemName,
+      endpoint,
+      cloudUrl,
+      hasBasicAuth: !!basicAuthHeader,
+      hasAuthHeader: !!headers["Authorization"],
+      hasRuntimeGuid: !!headers["x-runtime-guid"],
+      authHeaderType: headers["Authorization"]?.substring(0, 20) + "...",
+    });
+
     // Stop calling if there's no auth material for a cloud request
     const isCloudBound2 = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
     const hasAuth = !!(headers["Authorization"] || headers["x-runtime-guid"]);
@@ -548,13 +560,16 @@ async function requestCloudApi<T>(
     // For cloud-bound URLs, require a real NX Cloud OAuth token
     const cloudAuthToken2 = getCloudAuthHeader(request);
     if (isCloudBound2 && !cloudAuthToken2) {
-      // logger.debug(`[Cloud API] Skipping cloud ${method} to ${endpoint} — no NX Cloud token available.`);
+      console.log(`[Cloud API DEBUG] Returning 403 - cloud-bound but no cloud token`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
     if (!hasAuth && isCloudBound2) {
+      console.log(`[Cloud API DEBUG] Returning 403 - no auth and cloud-bound`);
       return createAuthErrorResponse(systemId, systemName);
     }
+
+    console.log(`[Cloud API DEBUG] Auth checks passed, making ${method} request to ${cloudUrl}`);
 
     // logger.debug(`[Cloud API] Requesting ${method} ${cloudUrl}`);
 
@@ -564,6 +579,8 @@ async function requestCloudApi<T>(
       body: body ? JSON.stringify(body) : undefined,
       redirect: "manual",
     });
+
+    console.log(`[Cloud API DEBUG] Initial response status: ${response.status}`);
 
     if ([301, 302, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
@@ -594,6 +611,7 @@ async function requestCloudApi<T>(
     // Retry once with Basic auth when session token is rejected
     if ((response.status === 401 || response.status === 403) && (isNxEndpoint || isLocalOrRelay)) {
       if (basicAuthHeader) {
+        console.log(`[Cloud API DEBUG] Got ${response.status}, retrying with Basic auth`);
         const retryHeaders: Record<string, string> = {
           ...headers,
           Authorization: basicAuthHeader,
@@ -610,12 +628,17 @@ async function requestCloudApi<T>(
           body: body ? JSON.stringify(body) : undefined,
           redirect: "manual",
         });
+
+        console.log(`[Cloud API DEBUG] Retry response status: ${response.status}`);
         
         // If still 401/403 after retry, then return the auth error
         if (response.status === 401 || response.status === 403) {
+          const errorText = await response.clone().text();
+          console.log(`[Cloud API DEBUG] Still ${response.status} after retry, response:`, errorText.substring(0, 500));
           return createAuthErrorResponse(systemId, systemName);
         }
       } else {
+        console.log(`[Cloud API DEBUG] Got ${response.status} but no Basic auth available`);
         return createAuthErrorResponse(systemId, systemName);
       }
     } else if (response.status === 401 || response.status === 403) {

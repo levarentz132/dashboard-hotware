@@ -100,8 +100,9 @@ export async function createUser(formData: any, systemId?: string): Promise<{ su
     }
 
     // If no systemId provided from the UI, try sensible fallbacks so server proxy can route the request
-    const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
-    const url = effectiveSystemId ? `/api/nx/users?systemId=${encodeURIComponent(effectiveSystemId)}` : "/api/nx/users";
+    // Treat empty string as falsy
+    const effectiveSystemId = (systemId && systemId.trim()) || API_CONFIG.serverHost || API_CONFIG.systemId || "localhost";
+    const url = `/api/nx/users?systemId=${encodeURIComponent(effectiveSystemId)}`;
     const response = await fetch(url, {
       method: "POST",
       credentials: "include",
@@ -155,10 +156,21 @@ export async function updateUser(
       normalizedData.resourceAccessRights = mapped;
     }
 
-    const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
-    const url = effectiveSystemId
-      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(effectiveSystemId)}`
-      : `/api/nx/users/${normalizedUserId}`;
+    // NX Witness requires password when changing username (security requirement)
+    // If password is not provided but name is being changed, remove name from the update
+    if (!normalizedData.password && normalizedData.name) {
+      console.warn('[User Service] Cannot change username without providing password - removing name from update');
+      delete normalizedData.name;
+    }
+
+    // Remove empty/undefined password to avoid auth errors
+    if (!normalizedData.password || normalizedData.password === "") {
+      delete normalizedData.password;
+    }
+
+    // Treat empty string as falsy
+    const effectiveSystemId = (systemId && systemId.trim()) || API_CONFIG.serverHost || API_CONFIG.systemId || "localhost";
+    const url = `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(effectiveSystemId)}`;
 
     const response = await fetch(url, {
       method: "PATCH",
@@ -193,10 +205,9 @@ export async function deleteUser(userId: string, systemId?: string): Promise<{ s
     // Normalize ID to strip curly braces
     const normalizedUserId = userId.replace(/[{}]|%7B|%7D/gi, "");
 
-    const effectiveSystemId = systemId || API_CONFIG.serverHost || API_CONFIG.systemId || undefined;
-    const url = effectiveSystemId
-      ? `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(effectiveSystemId)}`
-      : `/api/nx/users/${normalizedUserId}`;
+    // Treat empty string as falsy
+    const effectiveSystemId = (systemId && systemId.trim()) || API_CONFIG.serverHost || API_CONFIG.systemId || "localhost";
+    const url = `/api/nx/users/${normalizedUserId}?systemId=${encodeURIComponent(effectiveSystemId)}`;
     const response = await fetch(url, {
       method: "DELETE",
       credentials: "include",

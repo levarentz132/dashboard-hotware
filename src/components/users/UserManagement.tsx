@@ -826,11 +826,23 @@ export default function UserManagement() {
           body.email = formData.email;
         }
       } else {
-        if (formData.name !== selectedUser.name) body.name = formData.name;
+        const isNameChanging = formData.name !== selectedUser.name;
+        const hasPassword = formData.password && formData.password.trim() !== "";
+
+        // NX Witness requires password when changing username (security requirement)
+        if (isNameChanging && !hasPassword) {
+          setFormErrors({
+            password: "Password is required when changing username",
+          });
+          setIsSubmitting(false);
+          return;
+        }
+
+        if (isNameChanging) body.name = formData.name;
         if (formData.fullName !== (selectedUser.fullName || "")) body.fullName = formData.fullName;
         if (formData.email !== (selectedUser.email || "")) body.email = formData.email;
 
-        if (formData.password) {
+        if (hasPassword) {
           body.password = formData.password;
         }
 
