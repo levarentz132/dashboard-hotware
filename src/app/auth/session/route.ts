@@ -136,27 +136,27 @@ export async function GET(request: NextRequest) {
             });
 
             // Persist org_camera_ids for client access when refresh returns a user
-            try {
-              const ids = refreshedSession.user && (refreshedSession.user.org_camera_ids ?? (refreshedSession.user as any).orgCameraIds);
-              if (Array.isArray(ids) && ids.length > 0) {
-                response.cookies.set('org_camera_ids', JSON.stringify(ids), {
-                  httpOnly: false,
-                  secure: isSecureContext(),
-                  sameSite: 'lax',
-                  maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
-                  path: '/',
-                });
-              }
-              else {
-                try {
-                  console.log(`[Session][Refresh] no org_camera_ids on refreshedSession.user. keys=${refreshedSession.user ? Object.keys(refreshedSession.user).join(',') : 'no-user'}`);
-                } catch (e) {
-                  console.log('[Session][Refresh] no org_camera_ids present on refreshedSession.user (failed to list keys)');
-                }
-              }
-            } catch (e) {
-              console.warn('[Session] Failed to set org_camera_ids cookie on refresh:', e);
-            }
+            // try {
+            //   const ids = refreshedSession.user && (refreshedSession.user.org_camera_ids ?? (refreshedSession.user as any).orgCameraIds);
+            //   if (Array.isArray(ids) && ids.length > 0) {
+            //     response.cookies.set('org_camera_ids', JSON.stringify(ids), {
+            //       httpOnly: false,
+            //       secure: isSecureContext(),
+            //       sameSite: 'lax',
+            //       maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+            //       path: '/',
+            //     });
+            //   }
+            //   else {
+            //     try {
+            //       console.log(`[Session][Refresh] no org_camera_ids on refreshedSession.user. keys=${refreshedSession.user ? Object.keys(refreshedSession.user).join(',') : 'no-user'}`);
+            //     } catch (e) {
+            //       console.log('[Session][Refresh] no org_camera_ids present on refreshedSession.user (failed to list keys)');
+            //     }
+            //   }
+            // } catch (e) {
+            //   console.warn('[Session] Failed to set org_camera_ids cookie on refresh:', e);
+            // }
 
             response.cookies.set(AUTH_CONFIG.COOKIE_NAME, refreshed.accessToken, {
               httpOnly: true,
@@ -216,27 +216,27 @@ export async function GET(request: NextRequest) {
     });
 
     // Persist org_camera_ids for client access
-    try {
-      const ids = session.user && (session.user.org_camera_ids ?? (session.user as any).orgCameraIds);
-      if (Array.isArray(ids) && ids.length > 0) {
-        response.cookies.set('org_camera_ids', JSON.stringify(ids), {
-          httpOnly: false,
-          secure: isSecureContext(),
-          sameSite: 'lax',
-          maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
-          path: '/',
-        });
-      }
-      else {
-        try {
-          console.log(`[Session] no org_camera_ids on session.user. keys=${session.user ? Object.keys(session.user).join(',') : 'no-user'}`);
-        } catch (e) {
-          console.log('[Session] no org_camera_ids present on session.user (failed to list keys)');
-        }
-      }
-    } catch (e) {
-      console.warn('[Session] Failed to set org_camera_ids cookie:', e);
-    }
+    // try {
+    //   const ids = session.user && (session.user.org_camera_ids ?? (session.user as any).orgCameraIds);
+    //   if (Array.isArray(ids) && ids.length > 0) {
+    //     response.cookies.set('org_camera_ids', JSON.stringify(ids), {
+    //       httpOnly: false,
+    //       secure: isSecureContext(),
+    //       sameSite: 'lax',
+    //       maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+    //       path: '/',
+    //     });
+    //   }
+    //   else {
+    //     try {
+    //       console.log(`[Session] no org_camera_ids on session.user. keys=${session.user ? Object.keys(session.user).join(',') : 'no-user'}`);
+    //     } catch (e) {
+    //       console.log('[Session] no org_camera_ids present on session.user (failed to list keys)');
+    //     }
+    //   }
+    // } catch (e) {
+    //   console.warn('[Session] Failed to set org_camera_ids cookie:', e);
+    // }
 
     // If we rotated tokens earlier in this request, persist them now
     if (rotatedAccessToken) {
