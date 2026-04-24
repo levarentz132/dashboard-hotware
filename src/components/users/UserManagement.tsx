@@ -81,6 +81,7 @@ export interface NxUser {
   type: "local" | "temporaryLocal" | "ldap" | "cloud";
   groupIds?: string[];
   isEnabled?: boolean;
+  resourceAccessRights?: Record<string, string>;
   temporaryToken?: {
     startS?: number;
     endS?: number;
@@ -157,26 +158,32 @@ function useDevices(systemId?: string) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchDevices = useCallback(async () => {
+    console.log(`[useDevices] Fetching devices for systemId: ${systemId}`);
     try {
       setLoading(true);
       setError(null);
       if (!systemId) {
+        console.log(`[useDevices] No systemId provided, skipping fetch`);
         setDevices([]);
         setLoading(false);
         return;
       }
 
       const url = `/api/nx/devices?systemId=${encodeURIComponent(systemId)}`;
+      console.log(`[useDevices] Fetching from: ${url}`);
       const response = await fetch(url, { method: "GET", credentials: "include", headers: { Accept: "application/json", ...getElectronHeaders() } });
       if (!response.ok) {
+        console.error(`[useDevices] Failed to fetch devices: ${response.status}`);
         setDevices([]);
         setError(`Failed to fetch devices: ${response.status}`);
         return;
       }
       const data = await response.json();
       const mapped = Array.isArray(data) ? data.map((d: any) => ({ id: d.id || d.deviceId || "", name: d.name || d.displayName || d.deviceName || "Unnamed" })) : [];
+      console.log(`[useDevices] Fetched ${mapped.length} devices:`, mapped);
       setDevices(mapped);
     } catch (err) {
+      console.error(`[useDevices] Error:`, err);
       setError(err instanceof Error ? err.message : String(err));
       setDevices([]);
     } finally {
@@ -338,7 +345,11 @@ export default function UserManagement() {
 
   const { users, loading: usersLoading, error: usersError, requiresAuth, refetch: refetchUsers } = useUsers(systemId);
   const { groups, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useUserGroups(systemId);
-  const { devices, loading: devicesLoading, error: devicesError, refetch: refetchDevices } = useDevices(systemId);
+  
+  // For devices, use selectedSystemId if available, otherwise use localhost for local server after cloud systems are loaded
+  const deviceSystemId = selectedSystemId || (!loadingCloud && cloudSystems.length === 0 ? "localhost:7001" : selectedSystemId);
+  console.log(`[UserManagement] Device loading - selectedSystemId: ${selectedSystemId}, loadingCloud: ${loadingCloud}, cloudSystems: ${cloudSystems.length}, deviceSystemId: ${deviceSystemId}`);
+  const { devices, loading: devicesLoading, error: devicesError, refetch: refetchDevices } = useDevices(deviceSystemId);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
@@ -389,7 +400,14 @@ export default function UserManagement() {
           groupIds: u.groupIds || u.roleIds || [],
           isEnabled: u.isEnabled !== false,
           temporaryToken: u.temporaryToken,
+          resourceAccessRights: u.resourceAccessRights || undefined,
         }));
+        console.log(`[UserManagement] Fetched ${mapped.length} local users`);
+        mapped.forEach(u => {
+          if (u.resourceAccessRights && Object.keys(u.resourceAccessRights).length > 0) {
+            console.log(`[UserManagement] User ${u.name} has ${Object.keys(u.resourceAccessRights).length} camera permissions`);
+          }
+        });
         setLocalUsers(mapped);
       }
 
@@ -545,15 +563,30 @@ export default function UserManagement() {
   const handleCopyFromUser = (userId: string) => {
     setCopyFromUserId(userId);
     if (userId === "none") {
-      setFormData((prev) => ({ ...prev, groupIds: [] }));
-      showNotification({ title: "Permissions cleared", message: "Cleared copied groups" });
+      setFormData((prev) => ({ ...prev, groupIds: [], resourceAccessRights: {} }));
+      showNotification({ type: "info", title: "Permissions cleared", message: "Cleared copied groups" });
       return;
     }
 
     const src = effectiveUsers.find((u) => u.id === userId);
     if (src) {
-      setFormData((prev) => ({ ...prev, groupIds: src.groupIds || [], resourceAccessRights: (src as any).resourceAccessRights || {} }));
-      showNotification({ title: "Permissions copied", message: `Copied ${src.groupIds?.length || 0} groups from ${src.name}` });
+      // Normalize resource access rights IDs when copying
+      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+      const rawRAR = src.resourceAccessRights || {};
+      const normalizedRAR = Object.fromEntries(
+        Object.entries(rawRAR).map(([deviceId, rights]) => [normalizeId(deviceId), rights as string])
+      ) as Record<string, string>;
+      
+      setFormData((prev) => ({ 
+        ...prev, 
+        groupIds: src.groupIds || [], 
+        resourceAccessRights: normalizedRAR 
+      }));
+      showNotification({ 
+        type: "success", 
+        title: "Permissions copied", 
+        message: `Copied ${src.groupIds?.length || 0} groups and ${Object.keys(normalizedRAR).length} camera permissions from ${src.name}` 
+      });
     }
   };
 
@@ -664,6 +697,17 @@ export default function UserManagement() {
     const expiresS = user.temporaryToken?.expiresAfterLoginS;
     const timeConversion = expiresS ? secondsToTimeUnit(expiresS) : { value: 1, unit: "days" as TimeUnit };
 
+    // Normalize resource access rights IDs when loading user
+    const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+    const rawRAR = user.resourceAccessRights || {};
+    const normalizedRAR = Object.fromEntries(
+      Object.entries(rawRAR).map(([deviceId, rights]) => [normalizeId(deviceId), rights as string])
+    ) as Record<string, string>;
+
+    console.log(`[UserManagement] Opening edit for user: ${user.name}`);
+    console.log(`[UserManagement] Raw RAR:`, rawRAR);
+    console.log(`[UserManagement] Normalized RAR:`, normalizedRAR);
+
     setFormData({
       name: user.name,
       fullName: user.fullName || "",
@@ -672,7 +716,7 @@ export default function UserManagement() {
       confirmPassword: "",
       type: user.type === "ldap" ? "local" : user.type,
       groupIds: user.groupIds || [],
-      resourceAccessRights: (user as any).resourceAccessRights || {},
+      resourceAccessRights: normalizedRAR,
       isEnabled: user.isEnabled !== false,
       startS: user.temporaryToken?.startS,
       endS: user.temporaryToken?.endS,
@@ -754,14 +798,23 @@ export default function UserManagement() {
 
     setIsSubmitting(true);
     try {
+      // Helper to normalize IDs (remove curly braces)
+      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+
       const body: any = {
         type: formData.type,
         isEnabled: formData.isEnabled,
-        groupIds: formData.groupIds,
+        groupIds: formData.groupIds.map(normalizeId),
       };
 
+      // Include camera/device resource access rights if defined
       if (formData.resourceAccessRights && Object.keys(formData.resourceAccessRights).length) {
-        body.resourceAccessRights = formData.resourceAccessRights;
+        body.resourceAccessRights = Object.fromEntries(
+          Object.entries(formData.resourceAccessRights).map(([deviceId, rights]) => [
+            normalizeId(deviceId),
+            rights
+          ])
+        );
       }
 
       if (formData.type === "cloud") {
@@ -857,22 +910,19 @@ export default function UserManagement() {
         }
       }
 
-      // Include resourceAccessRights if changed
-      const currentRAR = (selectedUser as any).resourceAccessRights || {};
+      // Include resourceAccessRights - always send if defined to ensure camera access is updated
       const newRAR = formData.resourceAccessRights || {};
-      const keysEqual = (a: Record<string,string>, b: Record<string,string>) => {
-        const ak = Object.keys(a).map(normalizeId).sort().join(",");
-        const bk = Object.keys(b).map(normalizeId).sort().join(",");
-        if (ak !== bk) return false;
-        // compare values for matching keys
-        for (const k of Object.keys(a)) {
-          const nk = normalizeId(k);
-          if ((a as any)[k] !== (b as any)[nk] && (a as any)[k] !== (b as any)[k]) return false;
-        }
-        return true;
-      };
-      if (!keysEqual(currentRAR, newRAR)) {
-        body.resourceAccessRights = newRAR;
+      if (Object.keys(newRAR).length > 0) {
+        // Normalize device IDs and ensure proper format
+        body.resourceAccessRights = Object.fromEntries(
+          Object.entries(newRAR).map(([deviceId, rights]) => [
+            normalizeId(deviceId),
+            rights
+          ])
+        );
+      } else {
+        // Send empty object to clear all resource access if user removed all devices
+        body.resourceAccessRights = {};
       }
 
       // If nothing actually changed, just close and return
@@ -935,19 +985,43 @@ export default function UserManagement() {
   // Handle device access toggle
   const handleToggleDevice = (deviceId: string) => {
     setFormData((prev) => {
+      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+      const normalizedId = normalizeId(deviceId);
+      
+      // Create a copy of resource access rights
       const rar = { ...(prev.resourceAccessRights || {}) };
-      if (rar[deviceId]) {
+      
+      // Check both normalized and original ID formats
+      const hasNormalizedKey = rar[normalizedId] !== undefined;
+      const hasOriginalKey = rar[deviceId] !== undefined;
+      
+      if (hasNormalizedKey || hasOriginalKey) {
+        // Remove both possible formats to avoid duplicates
+        delete rar[normalizedId];
         delete rar[deviceId];
       } else {
-        rar[deviceId] = "view"; // default right when enabling
+        // Add using normalized ID (consistent format)
+        rar[normalizedId] = "view"; // default right when enabling
       }
+      
       return { ...prev, resourceAccessRights: rar };
     });
   };
 
   // Set device rights string
   const handleSetDeviceRights = (deviceId: string, rights: string) => {
-    setFormData((prev) => ({ ...prev, resourceAccessRights: { ...(prev.resourceAccessRights || {}), [deviceId]: rights } }));
+    setFormData((prev) => {
+      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+      const normalizedId = normalizeId(deviceId);
+      
+      const rar = { ...(prev.resourceAccessRights || {}) };
+      
+      // Remove old format if exists, use normalized format
+      delete rar[deviceId];
+      rar[normalizedId] = rights;
+      
+      return { ...prev, resourceAccessRights: rar };
+    });
   };
 
   // Copy token to clipboard
@@ -1314,23 +1388,63 @@ export default function UserManagement() {
         <div className="space-y-2">
           <Label>Resource Access (per-user)</Label>
           <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
-            {!selectedSystemId ? (
-              <p className="text-sm text-muted-foreground">Select a system to load devices for resource access</p>
-            ) : devicesLoading ? (
-              <p className="text-sm text-muted-foreground">Loading devices...</p>
-            ) : devices.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No devices available</p>
-            ) : (
+            {(() => {
+              console.log(`[Resource Access] selectedSystemId: ${selectedSystemId}, devicesLoading: ${devicesLoading}, devices.length: ${devices.length}`);
+              console.log(`[Resource Access] formData.resourceAccessRights:`, formData.resourceAccessRights);
+              
+              // For local servers, use a fallback systemId
+              const effectiveSystemId = selectedSystemId || "localhost:7001";
+              
+              if (!selectedSystemId && cloudSystems.length === 0) {
+                // No cloud systems, use local server
+                console.log(`[Resource Access] Using local server, fetching devices for: ${effectiveSystemId}`);
+              }
+              
+              if (devicesLoading) {
+                return <p className="text-sm text-muted-foreground">Loading devices...</p>;
+              }
+              
+              if (devices.length === 0) {
+                return (
+                  <div className="text-sm text-muted-foreground">
+                    <p>No devices available</p>
+                    <p className="text-xs mt-1">System ID: {effectiveSystemId}</p>
+                  </div>
+                );
+              }
+              
+              return (
               <div className="grid grid-cols-1 gap-2">
                 {devices.map((device) => {
-                  const has = !!(formData.resourceAccessRights && formData.resourceAccessRights[device.id]);
-                  const currentRights = (formData.resourceAccessRights && formData.resourceAccessRights[device.id]) || "";
+                  // Normalize ID for comparison (remove curly braces)
+                  const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+                  const normalizedDeviceId = normalizeId(device.id);
+                  
+                  // Check if this device has access by finding matching normalized ID
+                  let hasAccess = false;
+                  let currentRights = "";
+                  
+                  if (formData.resourceAccessRights) {
+                    // Check all keys in resourceAccessRights with normalized comparison
+                    for (const [key, value] of Object.entries(formData.resourceAccessRights)) {
+                      const normalizedKey = normalizeId(key);
+                      if (normalizedKey === normalizedDeviceId) {
+                        hasAccess = true;
+                        currentRights = value;
+                        break;
+                      }
+                    }
+                  }
+                  
+                  // Debug logging
+                  console.log(`[Device] ${device.name} | ID: ${device.id} | Normalized: ${normalizedDeviceId} | Has Access: ${hasAccess} | Rights: ${currentRights}`);
+                  
                   return (
                     <div key={device.id} className="flex items-center space-x-2">
                       <input
                         type="checkbox"
                         id={`device-${device.id}`}
-                        checked={has}
+                        checked={hasAccess}
                         onChange={() => handleToggleDevice(device.id)}
                         className="h-4 w-4 rounded border-gray-300"
                       />
@@ -1339,7 +1453,7 @@ export default function UserManagement() {
                           <div className="flex items-center gap-2">
                             <span className="truncate">{device.name}</span>
                           </div>
-                          {has && (
+                          {hasAccess && (
                             <div className="w-56">
                               <Select value={currentRights} onValueChange={(v: string) => handleSetDeviceRights(device.id, v)}>
                                 <SelectTrigger className="w-full">
@@ -1359,7 +1473,8 @@ export default function UserManagement() {
                   );
                 })}
               </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 

@@ -11,6 +11,7 @@ export interface NxUser {
   type: "local" | "temporaryLocal" | "ldap" | "cloud";
   groupIds?: string[];
   isEnabled?: boolean;
+  resourceAccessRights?: Record<string, string>;
   temporaryToken?: {
     startS?: number;
     endS?: number;
