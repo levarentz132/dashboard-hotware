@@ -14,6 +14,35 @@ const mkdir = promisify(fs.mkdir);
 // VMS uses self-signed certificates — disable strict TLS validation for server-side fetches
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+/**
+ * Get the path to ffmpeg executable.
+ * In packaged Electron apps, use the bundled ffmpeg.exe from resources.
+ * In development, use system PATH.
+ */
+function getFfmpegPath(): string {
+  // Check if running in packaged Electron app
+  if (process.env.ELECTRON_RUN_AS_NODE || process.env.IS_ELECTRON) {
+    try {
+      // Try to find bundled ffmpeg in resources
+      // @ts-ignore - resourcesPath is added by Electron at runtime
+      const resourcesPath = process.resourcesPath || path.join(process.cwd(), "..");
+      const bundledFfmpeg = path.join(resourcesPath, "node-bin", "ffmpeg.exe");
+      
+      if (fs.existsSync(bundledFfmpeg)) {
+        console.log(`[recordings/download] Using bundled FFmpeg: ${bundledFfmpeg}`);
+        return bundledFfmpeg;
+      } else {
+        console.warn(`[recordings/download] Bundled FFmpeg not found at: ${bundledFfmpeg}`);
+      }
+    } catch (e) {
+      console.error("[recordings/download] Error locating bundled FFmpeg:", e);
+    }
+  }
+  
+  // Fall back to system PATH
+  return "ffmpeg";
+}
+
 export async function GET(request: NextRequest) {
   // Handle HEAD requests (browser pre-flight for video range support)
   const isHead = request.method === "HEAD";
@@ -144,7 +173,8 @@ export async function GET(request: NextRequest) {
 
       console.log(`[recordings/download] AUTO-SAVE encoding to: ${savePath}`);
 
-      const ffmpegAutoSave = spawn("ffmpeg", [
+      const ffmpegPath = getFfmpegPath();
+      const ffmpegAutoSave = spawn(ffmpegPath, [
         "-fflags", "+genpts",
         "-i", "pipe:0",
         "-c:v", "copy",
@@ -307,7 +337,8 @@ export async function GET(request: NextRequest) {
         const tempId = Math.random().toString(36).substring(7);
         const tempPath = path.join(os.tmpdir(), `fixed_recording_${tempId}.mp4`);
 
-        const ffmpeg = spawn("ffmpeg", [
+        const ffmpegPath = getFfmpegPath();
+        const ffmpeg = spawn(ffmpegPath, [
           "-fflags", "+genpts",
           "-i", "pipe:0",
 
@@ -428,7 +459,8 @@ export async function GET(request: NextRequest) {
       if (!effectiveIsImage && isPreview && videoResponse.body) {
         console.log(`[recordings/download] Transcoding preview to fragmented MP4 via FFmpeg (pipe)`);
 
-        const ffmpegPreview = spawn("ffmpeg", [
+        const ffmpegPath = getFfmpegPath();
+        const ffmpegPreview = spawn(ffmpegPath, [
           "-fflags", "+genpts",
           "-i", "pipe:0",
 

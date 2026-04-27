@@ -719,7 +719,8 @@ function startNextProd() {
             NODE_ENV: 'production',
             HOSTNAME: '0.0.0.0',
             EXT_CONFIG_PATH: serverPath.includes('app.asar') ? path.join(app.getPath('userData'), '.env.local') : CONFIG_PATH,
-            NODE_PATH: nodeModulesPath
+            NODE_PATH: nodeModulesPath,
+            IS_ELECTRON: 'true'
         };
 
         logtoFile(`[Electron] Setting NODE_PATH to: ${nodeModulesPath}`);
@@ -739,7 +740,8 @@ function startNextProd() {
             ...process.env,
             NODE_ENV: 'production',
             PORT: currentPort,
-            NODE_OPTIONS: '--max-old-space-size=512'
+            NODE_OPTIONS: '--max-old-space-size=512',
+            IS_ELECTRON: 'true'
         };
 
         launchServer('npm', ['run', 'start'], cwd, env);
