@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
             resolve(NextResponse.json({ error: "FFmpeg failed during auto-save", code }, { status: 500 }));
           } else {
             console.log(`[recordings/download] AUTO-SAVE complete: ${savePath}`);
-            logRecordingEvent(`Recording finished successfully: ${safeCameraName}`);
+            logRecordingEvent(`Auto-saved video to disk: ${safeCameraName}`);
             resolve(NextResponse.json({ success: true, path: savePath, file: finalFileName }));
           }
         });
@@ -381,7 +381,7 @@ export async function GET(request: NextRequest) {
                     console.error("[recordings/download] Auto-save video copy failed:", copyErr);
                   } else {
                     console.log(`[recordings/download] Auto-saved video to: ${savePath}`);
-                    logRecordingEvent(`Recording finished successfully: ${safeCameraName}`);
+                    logRecordingEvent(`Auto-saved video to disk: ${safeCameraName}`);
                   }
                 });
               }
