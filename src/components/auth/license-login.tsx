@@ -140,6 +140,12 @@ export function LicenseLogin() {
                                         placeholder="Enter license username"
                                         className="pl-10 h-11 bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 rounded-xl transition-all"
                                         {...register("username")}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                document.getElementById("license-password")?.focus();
+                                            }
+                                        }}
                                         disabled={isLoading}
                                     />
                                 </div>

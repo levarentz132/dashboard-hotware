@@ -34,10 +34,6 @@ export default function LoginPage() {
       {/* Main Centered Card */}
       <div className="w-full max-w-md relative z-10">
         <NxVmsLogin />
-        
-        <p className="text-center text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em] mt-12 opacity-50">
-          © 2026 Hotware Technology • Advanced Dashboard
-        </p>
       </div>
     </div>
   );

@@ -359,10 +359,7 @@ export function NxVmsLogin() {
         <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden transition-all duration-500 animate-in fade-in slide-in-from-bottom-8">
             {/* Header */}
             <div className="p-8 bg-gradient-to-br from-slate-900 to-blue-900 text-white relative flex flex-col items-center gap-3">
-                <div className="p-3 bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20">
-                    <Server className="w-6 h-6 text-blue-200" />
-                </div>
-                <h2 className="text-xl font-black tracking-tight uppercase">Hotware Dashboard</h2>
+                {/* <h2 className="text-xl font-black tracking-tight uppercase">Hotware Dashboard</h2> */}
             </div>
 
             {/* Content */}
@@ -475,20 +472,23 @@ export function NxVmsLogin() {
 
                 {/* Final Dashboard Button */}
                 {isConnected && (
-                    <Button 
-                        onClick={handleDashboardLogin}
-                        disabled={isLicenseLoading}
-                        className="w-full h-16 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black rounded-2xl shadow-2xl shadow-blue-500/40 transition-all hover:scale-[1.02] active:scale-[0.98] group mt-4"
-                    >
-                        {isLicenseLoading ? (
-                            <RefreshCw className="w-5 h-5 animate-spin" />
-                        ) : (
-                            <>
-                                <LogIn className="w-5 h-5 mr-3 group-hover:translate-x-1 transition-transform" />
-                                <span className="tracking-widest">ENTER DASHBOARD</span>
-                            </>
-                        )}
-                    </Button>
+                    <div className="pt-2 space-y-6">
+                        <div className="h-px bg-slate-100" />
+                        <Button 
+                            onClick={handleDashboardLogin}
+                            disabled={isLicenseLoading}
+                            className="w-full h-16 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black rounded-2xl shadow-2xl shadow-blue-500/40 transition-all hover:scale-[1.02] active:scale-[0.98] group"
+                        >
+                            {isLicenseLoading ? (
+                                <RefreshCw className="w-5 h-5 animate-spin" />
+                            ) : (
+                                <>
+                                    <LogIn className="w-5 h-5 mr-3 group-hover:translate-x-1 transition-transform" />
+                                    <span className="tracking-widest">ENTER DASHBOARD</span>
+                                </>
+                            )}
+                        </Button>
+                    </div>
                 )}
             </div>
             
