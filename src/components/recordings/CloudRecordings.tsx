@@ -1313,8 +1313,8 @@ export default function CloudRecordings() {
       <Tabs defaultValue="results" className="w-full space-y-6">
         {/* Header with Integrated Search/Filter and Tabs */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-muted/30 p-4 rounded-xl border shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-8">
-            <h1 className="text-xl font-bold leading-none">Recordings</h1>
+          <div className="flex flex-col md:flex-row md:items-center">
+
             
             <TabsList className="bg-background/50 p-1 rounded-xl border shadow-inner">
               <TabsTrigger value="results" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
