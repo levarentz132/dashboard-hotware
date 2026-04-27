@@ -401,11 +401,18 @@ export function NxVmsLogin() {
                                     className="h-11 pl-10 bg-white border-slate-200 rounded-xl focus:border-blue-500 transition-all font-bold text-slate-700 text-sm"
                                     value={credentials.username}
                                     onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            document.getElementById("nx-local-password")?.focus();
+                                        }
+                                    }}
                                 />
                                 <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                             </div>
                             <div className="relative">
                                 <Input
+                                    id="nx-local-password"
                                     type={showPassword ? "text" : "password"}
                                     placeholder="Password"
                                     className="h-11 pl-10 pr-10 bg-white border-slate-200 rounded-xl focus:border-blue-500 transition-all font-bold text-slate-700 text-sm"
@@ -463,9 +470,18 @@ export function NxVmsLogin() {
                         <Button
                             onClick={handleCloudLogin}
                             disabled={isLoading}
-                            className="w-full h-14 bg-slate-900 hover:bg-black text-white font-black rounded-2xl shadow-xl shadow-slate-900/10 transition-all"
+                            className="w-full h-16 bg-cyan-50/50 hover:bg-cyan-100/80 border-2 border-cyan-100/50 text-cyan-800 font-black rounded-2xl transition-all flex items-center justify-between px-6 group active:scale-95"
                         >
-                            {isLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : "AUTHENTICATE WITH CLOUD"}
+                            <div className="flex items-center gap-4">
+                                <div className="h-10 w-10 rounded-xl bg-white shadow-sm border border-cyan-100 flex items-center justify-center text-cyan-600 group-hover:scale-110 transition-transform">
+                                    <Cloud className="w-5 h-5" />
+                                </div>
+                                <div className="text-left">
+                                    <p className="text-sm font-black tracking-tight">Connect NX Cloud</p>
+                                    <p className="text-[10px] font-bold text-cyan-600/60 uppercase tracking-widest">Access Systems Globally</p>
+                                </div>
+                            </div>
+                            <ArrowRight className="w-5 h-5 text-cyan-400 group-hover:translate-x-1 transition-transform" />
                         </Button>
                     )}
                 </div>
