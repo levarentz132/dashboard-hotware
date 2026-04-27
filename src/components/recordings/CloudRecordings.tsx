@@ -338,6 +338,7 @@ export default function CloudRecordings() {
 
   const scheduleTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const originalSchedules = useRef<Map<string, any>>(new Map());
+  const hasLoadedFromDisk = useRef(false);
 
   // ---- Persistence Logic ----
   const saveToPersistence = async (scheds: ScheduledRecording[], originals: any) => {
@@ -392,6 +393,8 @@ export default function CloudRecordings() {
             });
           }
         }
+        // Mark as loaded so saveToPersistence knows it's safe to write
+        hasLoadedFromDisk.current = true;
       }
     } catch (e) { console.error("[Persistence] Load failed:", e); }
   };
@@ -509,6 +512,10 @@ export default function CloudRecordings() {
   }, []);
 
   useEffect(() => {
+    // Guard: Do NOT save until we have loaded from disk at least once.
+    // This prevents the initial empty state [] from overwriting saved data
+    // on page load or after re-login.
+    if (!hasLoadedFromDisk.current) return;
     saveToPersistence(scheduledRecordings, originalSchedules.current);
   }, [scheduledRecordings]);
 
@@ -1292,6 +1299,7 @@ export default function CloudRecordings() {
     recording: "bg-green-100 text-green-800 border-green-200 animate-pulse",
     "in progress": "bg-indigo-100 text-indigo-800 border-indigo-200 animate-pulse",
     capturing: "bg-indigo-100 text-indigo-800 border-indigo-200 animate-pulse",
+    completing: "bg-green-100 text-green-800 border-green-200 animate-pulse",
     completed: "bg-blue-100 text-blue-800 border-blue-200",
     failed: "bg-red-100 text-red-800 border-red-200",
     active: "bg-sky-100 text-sky-800 border-sky-200 font-bold",
@@ -1302,179 +1310,201 @@ export default function CloudRecordings() {
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      {/* Header with Integrated Search/Filter */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-muted/30 p-4 rounded-xl border">
-        <div className="flex items-center gap-3">
-          <div>
-            <h1 className="text-xl font-bold leading-none">Recordings</h1>
+      <Tabs defaultValue="results" className="w-full space-y-6">
+        {/* Header with Integrated Search/Filter and Tabs */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-muted/30 p-4 rounded-xl border shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center">
+
+            
+            <TabsList className="bg-background/50 p-1 rounded-xl border shadow-inner">
+              <TabsTrigger value="results" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <List className="h-4 w-4 mr-2" />
+                Results
+              </TabsTrigger>
+              <TabsTrigger value="scheduled" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <Clock className="h-4 w-4 mr-2" />
+                Scheduled
+              </TabsTrigger>
+            </TabsList>
+          </div>
+
+          {/* Global Action Bar */}
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsSettingsOpen(true)} 
+              className="h-9 gap-2 shadow-sm border-slate-200 hover:bg-slate-50"
+              title="Snapshot Settings"
+            >
+              <Settings className="h-4 w-4 text-slate-500" />
+              Settings
+            </Button>
+            <Button onClick={() => { 
+              if (scheduleType === "screenshot" && !storagePath) {
+                addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a snapshot storage path in Settings.' });
+              } else if (scheduleType === "video" && !videoStoragePath) {
+                addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a video storage path in Settings.' });
+              }
+              resetScheduleForm(); 
+              setIsScheduleOpen(true); 
+            }} className="h-9 gap-2 shadow-sm font-bold">
+              <Plus className="h-4 w-4" /> New Schedule
+            </Button>
           </div>
         </div>
 
-        {/* Global Action Bar */}
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            onClick={() => setIsSettingsOpen(true)} 
-            className="h-9 gap-2 shadow-sm border-slate-200 hover:bg-slate-50"
-            title="Snapshot Settings"
-          >
-            <Settings className="h-4 w-4 text-slate-500" />
-            Settings
-          </Button>
-          <Button onClick={() => { 
-            if (scheduleType === "screenshot" && !storagePath) {
-              addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a snapshot storage path in Settings.' });
-            } else if (scheduleType === "video" && !videoStoragePath) {
-              addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a video storage path in Settings.' });
-            }
-            resetScheduleForm(); 
-            setIsScheduleOpen(true); 
-          }} className="h-9 gap-2 shadow-sm">
-            <Plus className="h-4 w-4" /> New Schedule
-          </Button>
-        </div>
-      </div>
-
-      {!requiresCloudAuth ? (
-        <div className="grid gap-6 grid-cols-3">
-          {/* LEFT: Recording Results (Major) */}
-          <div className="space-y-4 col-span-2">
-            <Card className="min-h-[600px] border-none shadow-none bg-transparent">
-              <div className="flex items-center gap-3 mb-6 pb-6 border-b">
-                <div className="w-48">
-                  <SearchableCameraSelect 
-                    value={selectedDevice} 
-                    onValueChange={handleSelectDevice}
-                    devices={devices}
-                    loadingDevices={loadingDevices}
-                    normalizeId={normalizeId}
-                    showAllOption={true}
-                    placeholder="All Cameras"
-                  />
-                </div>
-
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className={cn("justify-start font-normal h-9", !date && "text-muted-foreground")}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {date ? format(date, "MMM d, yyyy") : "Date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar mode="single" selected={date} onSelect={(d) => { setDate(d); if (selectedDevice && d) handleSearchRecentRecordings(selectedDevice, d); }} initialFocus />
-                  </PopoverContent>
-                </Popover>
-
-                {recentLoading && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground animate-pulse ml-auto">
-                    <Loader2 className="h-3 w-3 animate-spin" /> Synchronizing...
+        {!requiresCloudAuth ? (
+          <>
+            <TabsContent value="results" className="space-y-4 focus-visible:outline-none mt-0">
+              <Card className="min-h-[600px] border-none shadow-none bg-transparent">
+                <div className="flex flex-wrap items-center gap-3 mb-6 pb-6 border-b">
+                  <div className="w-64">
+                    <SearchableCameraSelect 
+                      value={selectedDevice} 
+                      onValueChange={handleSelectDevice}
+                      devices={devices}
+                      loadingDevices={loadingDevices}
+                      normalizeId={normalizeId}
+                      showAllOption={true}
+                      placeholder="All Cameras"
+                    />
                   </div>
-                )}
-              </div>
-              <CardContent className="px-0 pt-0">
-                {recentLoading ? (
-                  <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                    <p className="text-sm">Fetching recorded segments...</p>
-                  </div>
-                ) : filteredRecentRecordings.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-2">
-                    {filteredRecentRecordings.map(rec => (
-                      <div key={rec.id} className="group flex items-center justify-between p-3 border rounded-xl hover:bg-muted/40 transition-all">
-                        <div className="flex items-center gap-4">
-                          <div className={cn("p-2 rounded-lg", rec.isScreenshot ? "bg-blue-500/10" : "bg-primary/10")}>
-                            {rec.isScreenshot ? <Camera className="h-5 w-5 text-blue-500" /> : <Video className="h-5 w-5 text-primary" />}
-                          </div>
-                          <div>
-                            <div className="font-semibold text-sm flex items-center gap-2">
-                              {rec.cameraName}
 
-                            </div>
-                            <div className="text-xs text-muted-foreground flex items-center gap-2">
-                              <span className="font-medium text-foreground/80">
-                                {new Date(rec.startTimeMs).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: false })}
-                              </span>
-                              {!rec.isScreenshot && rec.durationMs > 5000 && (
-                                <>
-                                  <span className="opacity-40">|</span>
-                                  <span>{formatDuration(rec.durationMs)}</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={() => {
-                              if (!rec.isScreenshot) {
-                                addPersistentNotification({ type: 'info', title: 'Preview Disabled', message: 'Video preview is currently disabled for optimization. Please use the Download button.' });
-                                return;
-                              }
-                              handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
-                            }}
-                            className={cn("h-8 gap-1.5 hover:bg-primary/10 hover:text-primary", !rec.isScreenshot && "opacity-50")}
-                          >
-                            <Eye className="h-3.5 w-3.5" /> {rec.isScreenshot ? "View Image" : "Preview"}
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isScreenshot || rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName, rec.cameraFolderName)} 
-                            className="h-8 gap-1.5 hover:bg-primary/10 hover:text-primary"
-                          >
-                            <Download className="h-3.5 w-3.5" /> {rec.isScreenshot ? "Save Image" : "Download"}
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground gap-4 border-2 border-dashed rounded-2xl">
-                    <div className="bg-muted p-4 rounded-full">
-                      <Search className="h-8 w-8 opacity-40" />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className={cn("justify-start font-normal h-10 px-4 rounded-xl border-slate-200/60 bg-white/50", !date && "text-muted-foreground")}>
+                        <CalendarIcon className="mr-2 h-4 w-4 text-primary" />
+                        {date ? format(date, "MMMM d, yyyy") : "Select Date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar mode="single" selected={date} onSelect={(d) => { setDate(d); if (selectedDevice && d) handleSearchRecentRecordings(selectedDevice, d); }} initialFocus />
+                    </PopoverContent>
+                  </Popover>
+
+                  {recentLoading && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground animate-pulse ml-auto bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10">
+                      <Loader2 className="h-3 w-3 animate-spin text-primary" /> Synchronizing...
                     </div>
-                    <div>
-                      <p className="font-medium">No recordings found</p>
-                      <p className="text-sm">Try selecting a different camera or date above.</p>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* RIGHT: Scheduled Queue */}
-          <div className="space-y-4 col-span-1">
-            <Card className="h-fit sticky top-6">
-              <CardHeader className="pb-3 border-b">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-orange-500" />
-                    Scheduled Queue
-                  </CardTitle>
-                  {scheduledRecordings.length > 0 && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => requestCancel(scheduledRecordings.map(r => r.id), true)}
-                      className="h-7 text-[10px] uppercase font-bold tracking-widest text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    >
-                      Clear All
-                    </Button>
                   )}
                 </div>
-              </CardHeader>
-              <CardContent className="pt-4 px-3">
+                <CardContent className="px-0 pt-0">
+                  {recentLoading ? (
+                    <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground">
+                      <Loader2 className="h-8 w-8 animate-spin" />
+                      <p className="text-sm">Fetching recorded segments...</p>
+                    </div>
+                  ) : filteredRecentRecordings.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {filteredRecentRecordings.map(rec => (
+                        <div key={rec.id} className="group relative flex flex-col p-4 border rounded-2xl hover:border-primary/50 hover:shadow-xl transition-all bg-white overflow-hidden">
+                          <div className="flex items-start justify-between mb-4">
+                            <div className={cn("p-2.5 rounded-xl shadow-sm border", rec.isScreenshot ? "bg-blue-50 border-blue-100 text-blue-600" : "bg-primary/5 border-primary/10 text-primary")}>
+                              {rec.isScreenshot ? <Camera className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                            </div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => {
+                                  if (!rec.isScreenshot) {
+                                    addPersistentNotification({ type: 'info', title: 'Preview Disabled', message: 'Video preview is currently disabled for optimization. Please use the Download button.' });
+                                    return;
+                                  }
+                                  handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
+                                }}
+                                className={cn("h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary", !rec.isScreenshot && "opacity-50")}
+                                title={rec.isScreenshot ? "View Image" : "Preview"}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isScreenshot || rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName, rec.cameraFolderName)} 
+                                className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary"
+                                title={rec.isScreenshot ? "Save Image" : "Download"}
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <h3 className="font-bold text-[13px] truncate text-slate-800 uppercase tracking-tight">{rec.cameraName}</h3>
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[11px] font-semibold text-slate-500">
+                                {new Date(rec.startTimeMs).toLocaleString([], { hour: 'numeric', minute: '2-digit', hour12: false })}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {new Date(rec.startTimeMs).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                                {!rec.isScreenshot && rec.durationMs > 5000 && (
+                                  <>
+                                    <span className="h-1 w-1 rounded-full bg-slate-300" />
+                                    <span className="text-[10px] font-bold text-primary">{formatDuration(rec.durationMs)}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground gap-4 border-2 border-dashed rounded-3xl bg-muted/20">
+                      <div className="bg-muted p-6 rounded-full shadow-inner">
+                        <Search className="h-10 w-10 opacity-40" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-lg text-slate-700">No recordings found</p>
+                        <p className="text-sm text-slate-500">Try selecting a different camera or date above.</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="scheduled" className="focus-visible:outline-none mt-0">
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
                 {scheduledRecordings.length === 0 ? (
-                  <div className="text-xs text-muted-foreground py-8 text-center italic">
-                    No active schedules
+                  <div className="col-span-full flex flex-col items-center justify-center py-24 text-center text-muted-foreground gap-4 border-2 border-dashed rounded-3xl bg-muted/20">
+                    <div className="bg-muted p-6 rounded-full shadow-inner">
+                      <Clock className="h-10 w-10 opacity-40" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-lg text-slate-700">No active schedules</p>
+                      <p className="text-sm text-slate-500">You haven't created any recording schedules yet.</p>
+                      <Button 
+                        onClick={() => setIsScheduleOpen(true)}
+                        className="mt-4 px-8 h-11 rounded-2xl font-bold shadow-lg hover:shadow-primary/20 transition-all gap-2"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Create your first schedule
+                      </Button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <>
+                    <div className="col-span-full flex items-center justify-between mb-2">
+                       <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                         <Clock className="h-4 w-4" />
+                         Active Tasks ({scheduledRecordings.length})
+                       </h2>
+                       <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => requestCancel(scheduledRecordings.map(r => r.id), true)}
+                        className="h-8 text-[10px] uppercase font-black tracking-widest text-destructive hover:bg-destructive/10 rounded-lg"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-2" />
+                        Cancel All Tasks
+                      </Button>
+                    </div>
+                    
                     {Object.values(scheduledRecordings.reduce((acc: Record<string, ScheduledRecording[]>, r) => {
-                      // Group by batchId if available, otherwise by fallback key
                       const key = r.batchId || `${r.cameraId}-${r.startTime}-${r.endTime}-${r.type}`;
                       if (!acc[key]) acc[key] = [];
                       acc[key].push(r);
@@ -1493,8 +1523,6 @@ export default function CloudRecordings() {
 
                       const handleEdit = (e: React.MouseEvent<HTMLButtonElement>) => {
                         e.stopPropagation();
-                        // Must use composite "systemId:deviceId" so SearchableCameraSelect
-                        // can match the value and handleScheduleRecording can filter correctly.
                         setScheduleCamera(`${first.systemId}:${first.cameraId}`);
                         setScheduleSystem(first.systemId);
                         setScheduleType(first.type);
@@ -1509,83 +1537,86 @@ export default function CloudRecordings() {
                       };
 
                       return (
-                        <Collapsible key={gIdx} className="group overflow-hidden rounded-2xl border bg-white border-slate-200 transition-all hover:border-primary/50 hover:shadow-xl shadow-sm">
+                        <Collapsible key={gIdx} className="group overflow-hidden rounded-3xl border bg-white border-slate-200 transition-all hover:border-primary/50 hover:shadow-2xl shadow-sm">
                           <CollapsibleTrigger asChild>
-                            <div className="relative cursor-pointer p-5 select-none">
-                              {/* Glowing side indicator */}
-                              <div className={cn("absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all group-hover:w-1.5", 
-                                mainStatus === "recording" ? "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]" : 
-                                (mainStatus === "in progress" || mainStatus === "capturing") ? "bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]" :
-                                mainStatus === "active" ? "bg-sky-500 shadow-[0_0_10px_rgba(14,165,233,0.2)]" :
-                                mainStatus === "pending" ? "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.2)]" : "bg-slate-300")} />
+                            <div className="relative cursor-pointer p-6 select-none">
+                              {/* Status Background Glow */}
+                              <div className={cn(
+                                "absolute inset-0 opacity-[0.03] transition-opacity group-hover:opacity-[0.06]",
+                                mainStatus === "recording" ? "bg-green-500" : 
+                                (mainStatus === "in progress" || mainStatus === "capturing") ? "bg-indigo-500" :
+                                mainStatus === "active" ? "bg-sky-500" : "bg-slate-500"
+                              )} />
 
-                              <div className="flex items-start justify-between gap-4 pl-3">
-                                <div className="space-y-1.5 min-w-0 flex-1">
-                                  <div className="flex items-center gap-3">
-                                    <h4 className="text-sm font-bold uppercase tracking-tight truncate text-slate-800 group-hover:text-primary transition-colors">{first.cameraName}</h4>
-                                    <div className="px-2 py-0.5 rounded text-[9px] uppercase tracking-widest border bg-slate-900 text-white border-slate-900">
-                                      {first.type}
+                              <div className="relative flex items-start justify-between gap-4">
+                                <div className="space-y-3 min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className={cn(
+                                      "p-2 rounded-xl border",
+                                      first.type === "screenshot" ? "bg-blue-50 border-blue-100 text-blue-600" : "bg-primary/5 border-primary/10 text-primary"
+                                    )}>
+                                      {first.type === "screenshot" ? <Camera className="h-4 w-4" /> : <Video className="h-4 w-4" />}
                                     </div>
+                                    <h4 className="text-[13px] font-black uppercase tracking-tight truncate text-slate-800 group-hover:text-primary transition-colors">{first.cameraName}</h4>
                                   </div>
                                   
-                                  <div className="flex items-center gap-4 text-xs text-slate-500">
-                                    <span className="flex items-center gap-1.5"><CalendarIcon className="h-3.5 w-3.5 opacity-60" /> {displayDates}</span>
-                                    <span className="opacity-20 px-1">|</span>
-                                    <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 opacity-60" /> {first.type === "screenshot" ? first.screenshotTime : `${first.startTime} - ${first.endTime}`}</span>
+                                  <div className="flex flex-col gap-1.5 text-[11px] text-slate-500 font-bold">
+                                    <span className="flex items-center gap-2 bg-slate-50 w-fit px-2 py-1 rounded-lg border border-slate-100 shadow-sm">
+                                      <CalendarIcon className="h-3 w-3 opacity-60 text-primary" /> 
+                                      {displayDates}
+                                    </span>
+                                    <span className="flex items-center gap-2 bg-slate-50 w-fit px-2 py-1 rounded-lg border border-slate-100 shadow-sm">
+                                      <Clock className="h-3 w-3 opacity-60 text-primary" /> 
+                                      {first.type === "screenshot" ? first.screenshotTime : `${first.startTime} - ${first.endTime}`}
+                                    </span>
                                   </div>
                                 </div>
 
-                                <div className="flex flex-col items-end gap-3 shrink-0">
+                                <div className="flex flex-col items-end gap-4 shrink-0">
                                   <div className="flex items-center gap-2">
-                                    <div className={cn("text-[8px] px-1.5 py-0.5 rounded-full border uppercase tracking-widest bg-slate-100 text-slate-600 border-slate-200", statusColor[mainStatus])}>
+                                    <div className={cn("text-[9px] px-2.5 py-1 rounded-full border font-black uppercase tracking-widest shadow-sm", statusColor[mainStatus])}>
                                       {mainStatus}
                                     </div>
-                                    {first.scheduledBy && (
-                                      <div className="flex items-center gap-1 text-[8px] text-slate-400 font-medium px-1.5 py-0.5 rounded-full border border-slate-100 bg-slate-50/50">
-                                        <User className="h-2.5 w-2.5 opacity-60" />
-                                        {first.scheduledBy}
-                                      </div>
-                                    )}
                                   </div>
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100 text-slate-400 hover:text-primary" onClick={handleEdit}>
-                                      <Pencil className="h-3.5 w-3.5" />
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all translate-y-1 group-hover:translate-y-0">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-primary" onClick={handleEdit}>
+                                      <Pencil className="h-4 w-4" />
                                     </Button>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-destructive/10 text-slate-400 hover:text-destructive" onClick={(e) => { e.stopPropagation(); requestCancel(group.map(r => r.id), true); }}>
-                                      <Trash2 className="h-3.5 w-3.5" />
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-destructive/10 text-slate-400 hover:text-destructive" onClick={(e) => { e.stopPropagation(); requestCancel(group.map(r => r.id), true); }}>
+                                      <Trash2 className="h-4 w-4" />
                                     </Button>
                                   </div>
                                 </div>
                               </div>
 
-                              { (mainStatus === "recording" || mainStatus === "in progress" || mainStatus === "capturing") && (
-                                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary/10">
-                                  <div className={cn("h-full w-full animate-pulse", mainStatus === "recording" ? "bg-green-500" : "bg-indigo-500")} />
+                              {(mainStatus === "recording" || mainStatus === "in progress" || mainStatus === "capturing") && (
+                                <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-100">
+                                  <div className={cn("h-full animate-progress-glow", mainStatus === "recording" ? "bg-green-500" : "bg-indigo-500")} style={{ width: '100%' }} />
                                 </div>
                               )}
                             </div>
                           </CollapsibleTrigger>
 
-                          <CollapsibleContent className="bg-slate-50/80 border-t border-slate-100 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-300">
+                          <CollapsibleContent className="bg-slate-50/50 border-t border-slate-100 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-300">
                              <div className="p-4 space-y-2">
                                {sortedDates.map((d, dIdx) => (
-                                 <div key={dIdx} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-white border border-slate-200 shadow-sm hover:border-primary/30 transition-all group/item">
+                                 <div key={dIdx} className="flex items-center justify-between gap-4 p-3 rounded-2xl bg-white border border-slate-200/60 shadow-sm hover:border-primary/30 transition-all">
                                    <div className="flex items-center gap-3">
-                                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] text-slate-500 border border-slate-200 shadow-inner font-bold">#{dIdx + 1}</div>
+                                      <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-[10px] text-slate-500 border border-slate-200 shadow-inner font-black">#{dIdx + 1}</div>
                                       <div className="flex flex-col">
-                                        <span className="text-xs font-semibold text-slate-800">{format(d, "EEEE")}</span>
-                                        <span className="text-[10px] text-slate-500 font-medium">{format(d, "MMMM d, yyyy")}</span>
+                                        <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{format(d, "EEEE")}</span>
+                                        <span className="text-[10px] text-slate-500 font-bold">{format(d, "MMMM d, yyyy")}</span>
                                       </div>
                                    </div>
                                    <div className="flex items-center gap-2">
-                                      <div className={cn("text-[8px] px-1.5 py-0.5 rounded-md border uppercase tracking-widest font-bold", statusColor[group[dIdx].status])}>
+                                      <div className={cn("text-[8px] px-2 py-0.5 rounded-lg border font-black uppercase tracking-widest", statusColor[group[dIdx].status])}>
                                         {group[dIdx].status}
                                       </div>
                                       <Button 
                                         variant="ghost" 
                                         size="icon" 
                                         className={cn(
-                                          "h-6 w-6 rounded-md transition-all",
+                                          "h-7 w-7 rounded-lg transition-all",
                                           isRecurring 
                                             ? "text-sky-500/60 hover:text-sky-600 hover:bg-sky-50" 
                                             : "text-destructive/60 hover:text-destructive hover:bg-destructive/10"
@@ -1593,7 +1624,7 @@ export default function CloudRecordings() {
                                         onClick={() => requestCancel([group[dIdx].id], false)}
                                         title={isRecurring ? "Skip this occurrence" : "Remove this recording"}
                                       >
-                                        <X className={isRecurring ? "h-3 w-3" : "h-3.5 w-3.5"} />
+                                        <X className={isRecurring ? "h-3.5 w-3.5" : "h-4 w-4"} />
                                       </Button>
                                    </div>
                                  </div>
@@ -1603,27 +1634,31 @@ export default function CloudRecordings() {
                         </Collapsible>
                       );
                     })}
-                  </div>
+                  </>
                 )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      ) : (
-        <Card className="border-primary/50 bg-primary/5">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 font-bold">
-              <Cloud className="h-5 w-5" /> Cloud Access Required
-            </CardTitle>
-            <CardDescription>You need to be authenticated with NX Cloud to manage remote recordings.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={handleCloudLogin} className="gap-2 font-bold px-8">
-              <LogIn className="h-4 w-4" /> Sign in to NX Cloud
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+              </div>
+            </TabsContent>
+          </>
+        ) : (
+          <Card className="border-primary/50 bg-primary/5 rounded-3xl overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-3 font-black text-xl text-primary uppercase tracking-tight">
+                <div className="p-2 bg-primary/10 rounded-xl">
+                  <Cloud className="h-6 w-6" />
+                </div>
+                Cloud Access Required
+              </CardTitle>
+              <CardDescription className="text-slate-600 font-medium ml-12">You need to be authenticated with NX Cloud to manage remote recordings.</CardDescription>
+            </CardHeader>
+            <CardContent className="ml-12 pb-8">
+              <Button onClick={handleCloudLogin} className="gap-2 font-black px-8 py-6 rounded-2xl shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30">
+                <LogIn className="h-5 w-5" /> Sign in to NX Cloud
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      </Tabs>
+
 
       {/* NEW SCHEDULE DIALOG */}
       <Dialog open={isScheduleOpen} onOpenChange={handleOpenChange}>

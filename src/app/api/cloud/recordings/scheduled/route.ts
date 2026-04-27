@@ -154,6 +154,10 @@ const startWatchdog = () => {
             const isWithinWindow = now >= startMs && now < startMs + catchUpWindowMs;
 
             if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress") && isWithinWindow) {
+              // ── IMMEDIATELY mark as "capturing" to prevent re-entry on next tick ──
+              rec.status = "capturing" as any;
+              changed = true;
+
               const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
               logger.debug(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${time})`);
               try {
@@ -172,7 +176,6 @@ const startWatchdog = () => {
                 }
 
                 logger.debug(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
-                logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`, rec.scheduledBy);
                 const screenshotRes = await fetch(internalUrl, {
                   method: "POST",
                   headers: screenshotHeaders,
@@ -193,7 +196,7 @@ const startWatchdog = () => {
                 } else {
                   const result = await screenshotRes.json();
                   logger.debug(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
-                  logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
+                  logRecordingEvent(`Snapshot captured successfully: ${rec.cameraName}`, rec.scheduledBy);
                   rec.record = false;
 
                   if (rec.recurrence && rec.recurrence !== "none") {
@@ -326,10 +329,18 @@ const startWatchdog = () => {
           // ── VIDEO RECORDING: CASE 2 — Stop & Complete ──────────────────────
           else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress")) {
             logger.debug(`[Watchdog] Completing video recording for ${rec.cameraName}`);
+            
+            // ── IMMEDIATELY mark as "completing" to prevent re-entry on next tick ──
+            // The watchdog runs every 2s. Without this guard, the async VMS PATCH
+            // below would still be running when the next tick fires, causing
+            // duplicate log entries and duplicate auto-save triggers.
+            rec.status = "completing" as any;
+            changed = true;
+
             if (!globalAuth) {
               console.warn(`[Watchdog] No auth/location saved — cannot revert VMS schedule for ${rec.cameraName}.`);
               rec.status = "completed"; // Still mark complete so UI updates
-              changed = true;
+              logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
               return rec;
             }
             try {
@@ -342,7 +353,6 @@ const startWatchdog = () => {
                 schedule: { isEnabled: false }
               }, globalAuth, ip, port);
               logger.debug(`[Watchdog] Recording stopped for ${rec.cameraName}`);
-              logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
 
               // ── Step 3: Trigger Auto-Download (Server-side) ────────────────
               // We trigger the internal download API to pull the clip and save it to disk.
@@ -413,6 +423,8 @@ const startWatchdog = () => {
                 rec.status = "completed";
                 rec.record = false;
               }
+              // Log exactly once after final status is set
+              logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
               changed = true;
             } catch (e: any) {
               const retryCount = (rec.stopRetryCount || 0) + 1;
