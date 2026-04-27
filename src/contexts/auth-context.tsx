@@ -231,7 +231,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             isLoading: false,
             error: null,
           });
-          router.push(AUTH_ROUTES.DASHBOARD);
+          router.replace(AUTH_ROUTES.DASHBOARD);
         } else {
           setState((prev) => ({
             ...prev,
