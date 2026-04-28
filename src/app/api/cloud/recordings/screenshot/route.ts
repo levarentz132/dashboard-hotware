@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
-    const timestampStr = `${displayHH}${displaymm}${displaySS}`;
+    const timestampStr = `${displayHH}${displaymm}00`; // Always use :00 per user request
 
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
     try {
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
 
     // DEDUPLICATION: Skip if file already exists
     if (fs.existsSync(filePath)) {
-      console.log(`[screenshot] File already exists, skipping capture: ${filePath}`);
+      // console.log(`[screenshot] File already exists, skipping capture: ${filePath}`);
       return NextResponse.json({
         success: true,
         filePath: filePath,
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       const vmsUrl = buildCloudUrl(systemId, `/rest/v3/devices/${cleanDeviceId}`, undefined, request);
       const vmsHeaders = buildCloudHeaders(request, systemId);
       
-      console.log(`[screenshot] Waking up camera via brief recording trigger on ${vmsUrl}`);
+      // console.log(`[screenshot] Waking up camera via brief recording trigger on ${vmsUrl}`);
       
       // Get current schedule to restore it later
       let camRes = await fetch(vmsUrl, { headers: vmsHeaders });
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
         const endSec = startSec + 5; // 5s pulse covering the current moment for reliable Live capture
         const dayOfWeek = now.getDay();
         
-        console.log(`[screenshot] Enabling recording for 5s pulse...`);
+        // console.log(`[screenshot] Enabling recording for 5s pulse...`);
         let startPulseRes = await fetch(vmsUrl, {
           method: "PATCH",
           headers: { ...vmsHeaders, "Content-Type": "application/json" },
@@ -166,8 +166,8 @@ export async function POST(request: NextRequest) {
         
         // Wait 3s to ensure the camera is active and the VMS has started the recording task
         await new Promise(resolve => setTimeout(resolve, 3000));
-
-        console.log(`[screenshot] Disabling recording pulse on ${vmsUrl}...`);
+        
+        // console.log(`[screenshot] Disabling recording pulse on ${vmsUrl}...`);
         let stopPulseRes = await fetch(vmsUrl, {
           method: "PATCH",
           headers: { ...vmsHeaders, "Content-Type": "application/json" },
@@ -190,7 +190,7 @@ export async function POST(request: NextRequest) {
         }
       }
     } catch (e) {
-      console.warn("[screenshot] Wake-up pulse failed (continuing with best-effort capture):", e);
+      // console.warn("[screenshot] Wake-up pulse failed (continuing with best-effort capture):", e);
     }
 
     // ---- 2. Fetch the live frame from VMS as PNG ----
@@ -204,7 +204,7 @@ export async function POST(request: NextRequest) {
     params.set("_", String(Date.now()));
     params.set("roundMethod", "precise");
     if (body.scheduledStartTime) {
-      console.log(`[screenshot] Capturing fresh frame following ${body.scheduledStartTime}:00 pulse.`);
+      // console.log(`[screenshot] Capturing fresh frame following ${body.scheduledStartTime}:00 pulse.`);
     }
 
     const downloadUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
@@ -217,7 +217,7 @@ export async function POST(request: NextRequest) {
 
     let imageResponse;
     try {
-      console.log(`[screenshot] Capturing fresh frame from ${downloadUrl}`);
+      // console.log(`[screenshot] Capturing fresh frame from ${downloadUrl}`);
       imageResponse = await fetch(downloadUrl, {
         headers,
         signal: controller.signal,
@@ -233,7 +233,7 @@ export async function POST(request: NextRequest) {
             Authorization: basicAuthHeader,
           };
           delete retryHeaders["x-runtime-guid"];
-          console.warn("[screenshot] Retrying with Basic auth");
+          // console.warn("[screenshot] Retrying with Basic auth");
           imageResponse = await fetch(downloadUrl, {
             headers: retryHeaders,
             signal: controller.signal,
@@ -251,7 +251,7 @@ export async function POST(request: NextRequest) {
           const vmsUrl = `https://${nxIp}:${nxPort}/rest/v3/devices/${cleanDeviceId}`;
           const vmsHeaders = buildCloudHeaders(request, systemId);
           
-          console.log(`[screenshot] Restoring original schedule (with isEnabled: false) for ${cleanDeviceId}`);
+          // console.log(`[screenshot] Restoring original schedule (with isEnabled: false) for ${cleanDeviceId}`);
           await fetch(vmsUrl, {
             method: "PATCH",
             headers: { ...vmsHeaders, "Content-Type": "application/json" },
@@ -260,14 +260,14 @@ export async function POST(request: NextRequest) {
             })
           });
         } catch (e) {
-          console.warn("[screenshot] Schedule restoration failed:", e);
+          // console.warn("[screenshot] Schedule restoration failed:", e);
         }
       }
     }
 
     if (!imageResponse.ok) {
       const errorText = await imageResponse.text();
-      console.error(`[screenshot] Image fetch failed: ${imageResponse.status} - ${errorText}`);
+      // console.error(`[screenshot] Image fetch failed: ${imageResponse.status} - ${errorText}`);
       return NextResponse.json(
         { error: `Failed to capture screenshot: ${imageResponse.status}` },
         { status: imageResponse.status }
@@ -277,7 +277,7 @@ export async function POST(request: NextRequest) {
     // ---- 2. Get the image buffer ----
     const buffer = Buffer.from(await imageResponse.arrayBuffer());
     if (buffer.length < 100) {
-      console.error(`[screenshot] Image too small (${buffer.length} bytes), likely invalid`);
+      // console.error(`[screenshot] Image too small (${buffer.length} bytes), likely invalid`);
       return NextResponse.json(
         { error: "Captured image is too small / invalid" },
         { status: 502 }
@@ -300,14 +300,14 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     const camName = body?.cameraName || "camera";
     if (error?.name === "AbortError") {
-      console.error("[screenshot] Capture timed out");
+      // console.error("[screenshot] Capture timed out");
       logRecordingEvent(`Snapshot capture TIMEOUT for ${camName}`);
       return NextResponse.json(
         { error: "Screenshot capture timed out" },
         { status: 504 }
       );
     }
-    console.error("[screenshot] Exception:", error);
+    // console.error("[screenshot] Exception:", error);
     logRecordingEvent(`Snapshot capture EXCEPTION for ${camName}: ${error.message}`);
     return NextResponse.json(
       { error: "Internal server error during screenshot capture" },
@@ -327,7 +327,15 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const dateFilter = searchParams.get("date");
 
-    const baseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+    let baseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+    try {
+      const settingsFile = path.join(process.cwd(), "data", "settings.json");
+      if (fs.existsSync(settingsFile)) {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+        if (settings.storagePath) baseDir = settings.storagePath;
+      }
+    } catch (e) { }
+
     if (!fs.existsSync(baseDir)) {
       return NextResponse.json({ screenshots: [] });
     }
@@ -406,10 +414,9 @@ export async function GET(request: NextRequest) {
       const bKey = `${b.dateStr}${b.timeStr}`;
       return bKey.localeCompare(aKey);
     });
-
     return NextResponse.json({ screenshots });
   } catch (error) {
-    console.error("[screenshot] List error:", error);
+    // console.error("[screenshot] List error:", error);
     return NextResponse.json({ error: "Failed to list screenshots" }, { status: 500 });
   }
 }

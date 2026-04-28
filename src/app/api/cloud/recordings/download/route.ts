@@ -29,13 +29,13 @@ function getFfmpegPath(): string {
       const bundledFfmpeg = path.join(resourcesPath, "node-bin", "ffmpeg.exe");
       
       if (fs.existsSync(bundledFfmpeg)) {
-        console.log(`[recordings/download] Using bundled FFmpeg: ${bundledFfmpeg}`);
+        // console.log(`[recordings/download] Using bundled FFmpeg: ${bundledFfmpeg}`);
         return bundledFfmpeg;
       } else {
-        console.warn(`[recordings/download] Bundled FFmpeg not found at: ${bundledFfmpeg}`);
+        // console.warn(`[recordings/download] Bundled FFmpeg not found at: ${bundledFfmpeg}`);
       }
     } catch (e) {
-      console.error("[recordings/download] Error locating bundled FFmpeg:", e);
+      // console.error("[recordings/download] Error locating bundled FFmpeg:", e);
     }
   }
   
@@ -56,6 +56,9 @@ export async function GET(request: NextRequest) {
     const stream = searchParams.get("stream");
     const preview = searchParams.get("preview"); // If 'true', serve inline for browser playback
     const autoSave = searchParams.get("autoSave") === "true"; // If 'true', save to disk only — no streaming
+    const isSnapshotParam = searchParams.get("isSnapshot") === "true";
+
+    console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, autoSave=${autoSave}`);
 
     if (!systemId || !deviceId || !startTime) {
       return NextResponse.json(
@@ -64,10 +67,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    console.log(`[recordings/download] Params: systemId=${systemId}, deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}, stream=${stream}`);
+    // console.log(`[recordings/download] Params: systemId=${systemId}, deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}, stream=${stream}`);
 
-    // Standardize screenshot detection: if endTime is missing OR equal to startTime OR duration is 0
-    const isImage = !endTime || parseInt(endTime) === parseInt(startTime as string) || (parseInt(endTime) - parseInt(startTime as string)) === 0;
+    // Standardize screenshot detection: if endTime is missing OR equal to startTime OR duration is 0 OR isSnapshot flag is set
+    const isImage = isSnapshotParam || !endTime || parseInt(endTime) === parseInt(startTime as string) || (parseInt(endTime) - parseInt(startTime as string)) <= 1000;
 
     // Build download URL params
     const params = new URLSearchParams();
@@ -77,10 +80,10 @@ export async function GET(request: NextRequest) {
     // we get fresh camera data and an updated thumbnail capability.
     if (isImage) {
       params.set("pos", startTime as string);
-      params.set("duration", "1");
-      params.set("stream", "0"); // Force High Quality (Primary)
-      endpoint = `/media/${deviceId}.mp4`;
-      // We will now treat this as a short video (1s) instead of a static image
+      params.set("time", startTime as string);
+      params.set("method", "fast");
+      endpoint = `/ec2/camera/thumbnail`; 
+      // We will treat this as a static image
     } else {
       params.set("pos", startTime as string);
       params.set("stream", "0"); // Force High Quality (Primary)
@@ -90,20 +93,20 @@ export async function GET(request: NextRequest) {
         const durationSec = Math.ceil(durationMs / 1000);
         params.set("duration", String(durationSec));
         params.set("end", endTime as string);
-        console.log(`[recordings/download] Timeframe: ${startTime} to ${endTime} (duration: ${durationSec}s)`);
+        // console.log(`[recordings/download] Timeframe: ${startTime} to ${endTime} (duration: ${durationSec}s)`);
       }
       endpoint = `/media/${deviceId}.mp4`;
     }
 
-    // Force isImage to false if we are now serving the 1s record as requested
-    const effectiveIsImage = isImage && endpoint.includes("/image");
+    // Force isImage to true if we are using the thumbnail/image endpoint
+    const effectiveIsImage = isImage && (endpoint.includes("/image") || endpoint.includes("/thumbnail"));
 
 
     const username = searchParams.get("username");
     const password = searchParams.get("password");
 
     const downloadUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
-    console.log(`[recordings/download] Generated URL: ${downloadUrl}`);
+    // console.log(`[recordings/download] Generated URL: ${downloadUrl}`);
 
     // Explicitly define generic headers type
     const headers: Record<string, string> = buildCloudHeaders(request, systemId);
@@ -141,7 +144,7 @@ export async function GET(request: NextRequest) {
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim();
       
-      const finalFileName = `${safeCameraName}_${HH}${mmP}${SS}.mp4`;
+      const finalFileName = `${safeCameraName}_${HH}${mmP}00.mp4`;
       const saveDir = path.join(videosBaseDir, dateFolder);
       if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
       const savePath = path.join(saveDir, finalFileName);
@@ -158,6 +161,15 @@ export async function GET(request: NextRequest) {
       try {
         const controller = new AbortController();
         const autoSaveTimeout = setTimeout(() => controller.abort(), 120000); // 2-min timeout for long clips
+        
+        // Pulse Filtering: Skip auto-save if duration is under 10 seconds
+        const durationMs = (endTime && startTime) ? parseInt(endTime) - parseInt(startTime) : 0;
+        if (durationMs > 0 && durationMs < 10000) {
+          console.log(`[recordings/download] AUTO-SAVE skipped: Clip is a pulse (${Math.round(durationMs/1000)}s)`);
+          clearTimeout(autoSaveTimeout);
+          return NextResponse.json({ success: true, skipped: true, reason: "pulse_filter" });
+        }
+
         videoResponse = await fetch(downloadUrl, { headers, signal: controller.signal });
         clearTimeout(autoSaveTimeout);
 
@@ -215,13 +227,13 @@ export async function GET(request: NextRequest) {
     if (stream === "true" || preview === "true") {
 
       const isPreview = preview === "true";
-      console.log(`[recordings/download] ${isPreview ? "Previewing" : "Streaming"} media with auth headers`);
+      // console.log(`[recordings/download] ${isPreview ? "Previewing" : "Streaming"} media with auth headers`);
 
       // Forward Range header from browser — REQUIRED for inline video playback
       const rangeHeader = request.headers.get("range");
       if (rangeHeader) {
         headers["Range"] = rangeHeader;
-        console.log(`[recordings/download] Forwarding Range header: ${rangeHeader}`);
+        // console.log(`[recordings/download] Forwarding Range header: ${rangeHeader}`);
       }
 
       const controller = new AbortController();
@@ -241,7 +253,7 @@ export async function GET(request: NextRequest) {
           };
           delete retryHeaders["x-runtime-guid"];
 
-          console.warn("[recordings/download] Retrying media fetch with Basic auth");
+          // console.warn("[recordings/download] Retrying media fetch with Basic auth");
           videoResponse = await fetch(downloadUrl, {
             headers: retryHeaders,
             signal: controller.signal,
@@ -255,9 +267,98 @@ export async function GET(request: NextRequest) {
       }
 
       if (!videoResponse.ok) {
+        // FALLBACK: If VMS returns 404, check if we have a local copy of this file
+        if (videoResponse.status === 404) {
+          // console.log(`[recordings/download] Upstream 404. Checking local storage fallback for deviceId=${deviceId} startTime=${startTime}`);
+          const recDate = new Date(parseInt(startTime as string, 10));
+          const YYYY = recDate.getFullYear().toString();
+          const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
+          const DD = recDate.getDate().toString().padStart(2, "0");
+          const dateFolder = `${YYYY}-${MM}-${DD}`;
+          const dateFolderLegacy = `${YYYY}${MM}${DD}`;
+          
+          const HH = recDate.getHours().toString().padStart(2, "0");
+          const mm = recDate.getMinutes().toString().padStart(2, "0");
+          const ss = recDate.getSeconds().toString().padStart(2, "0");
+          const timeStr = `${HH}${mm}${ss}`;
+          
+          const localBaseDirs = [path.join(process.cwd(), "data", "recorded_screenshots")];
+          // Add custom storage path if exists
+          try {
+            const settingsFile = path.join(process.cwd(), "data", "settings.json");
+            if (fs.existsSync(settingsFile)) {
+              const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+              if (settings.storagePath) localBaseDirs.push(settings.storagePath);
+              if (settings.videoStoragePath) localBaseDirs.push(settings.videoStoragePath);
+            }
+          } catch {}
+
+          for (const baseDir of localBaseDirs) {
+            if (!fs.existsSync(baseDir)) continue;
+            for (const df of [dateFolder, dateFolderLegacy]) {
+              const folderPath = path.join(baseDir, df);
+              if (!fs.existsSync(folderPath)) continue;
+              
+              // Scan for matching file
+              const files = fs.readdirSync(folderPath);
+              for (const file of files) {
+                // Match by time and deviceId/cameraName
+                // simplified check: does it contain deviceId and timeStr?
+                const isMatch = (file.includes(deviceId) || (searchParams.get("cameraName") && file.includes(searchParams.get("cameraName")!))) && file.includes(timeStr);
+                if (isMatch) {
+                  const localPath = path.join(folderPath, file);
+                  // console.log(`[recordings/download] Fallback found local file: ${localPath}`);
+                  
+                  const isVideoFile = file.toLowerCase().endsWith(".mp4");
+                  
+                  // If it's a snapshot but we found an MP4, extract the frame
+                  if (isVideoFile && isImage) {
+                    // console.log(`[recordings/download] Local fallback: Extracting frame from MP4 for snapshot`);
+                    const pngBuffer = await new Promise<Buffer | null>((resolve) => {
+                      const ffmpeg = spawn(getFfmpegPath(), [
+                        "-i", localPath,
+                        "-vframes", "1",
+                        "-f", "image2",
+                        "-c:v", "png",
+                        "pipe:1"
+                      ], { windowsHide: true });
+                      const chunks: Buffer[] = [];
+                      ffmpeg.stdout.on("data", (c) => chunks.push(c));
+                      ffmpeg.on("close", (code) => code === 0 ? resolve(Buffer.concat(chunks)) : resolve(null));
+                      ffmpeg.on("error", () => resolve(null));
+                    });
+
+                    if (pngBuffer) {
+                      return new NextResponse(new Uint8Array(pngBuffer), {
+                        status: 200,
+                        headers: {
+                          "Content-Type": "image/png",
+                          "Content-Disposition": `attachment; filename="${file.replace(".mp4", ".png")}"`,
+                          "Content-Length": String(pngBuffer.length),
+                        },
+                      });
+                    }
+                  }
+
+                  const fileBuffer = fs.readFileSync(localPath);
+                  const contentType = isVideoFile ? "video/mp4" : "image/png";
+                  return new NextResponse(new Uint8Array(fileBuffer), {
+                    status: 200,
+                    headers: {
+                      "Content-Type": contentType,
+                      "Content-Disposition": `attachment; filename="${file}"`,
+                      "Content-Length": String(fileBuffer.length),
+                    },
+                  });
+                }
+              }
+            }
+          }
+        }
+
         let errorText = "";
         try { errorText = await videoResponse.text(); } catch (e) { errorText = "Could not read error body"; }
-        console.error(`[recordings/download] Video fetch failed: ${videoResponse.status}`, errorText);
+        // console.error(`[recordings/download] Video fetch failed: ${videoResponse.status}`, errorText);
         return NextResponse.json(
           { error: `Video fetch failed: ${videoResponse.status}`, details: errorText },
           { status: videoResponse.status }
@@ -270,7 +371,7 @@ export async function GET(request: NextRequest) {
       const DD = recDate.getDate().toString().padStart(2, "0");
       const HH = recDate.getHours().toString().padStart(2, "0");
       const mm = recDate.getMinutes().toString().padStart(2, "0");
-      const ss = recDate.getSeconds().toString().padStart(2, "0");
+      const ss = "00"; // Round down to :00 per user request
       const timestamp = `${YYYY}${MM}${DD}_${HH}${mm}${ss}`;
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").trim();
@@ -282,20 +383,30 @@ export async function GET(request: NextRequest) {
       // If it's a screenshot, save a local copy to the data folder using date-based structure
       if (effectiveIsImage) {
         try {
-          const buffer = await videoResponse.clone().arrayBuffer();
           const now = new Date();
           const YYYY = now.getFullYear().toString();
           const MM = (now.getMonth() + 1).toString().padStart(2, "0");
           const DD = now.getDate().toString().padStart(2, "0");
           const HH = now.getHours().toString().padStart(2, "0");
           const mm = now.getMinutes().toString().padStart(2, "0");
-          const SS = now.getSeconds().toString().padStart(2, "0");
+          const SS = "00"; // Round down to :00 per user request
           const dateFolder = `${YYYY}${MM}${DD}`;
+          
+          // Respect custom storage path for snapshots
+          let snapshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+          try {
+            const settingsFile = path.join(process.cwd(), "data", "settings.json");
+            if (fs.existsSync(settingsFile)) {
+              const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+              if (settings.storagePath) snapshotsBaseDir = settings.storagePath;
+            }
+          } catch (e) { }
+
           const cameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
             .replace(/[<>:"/\\|?*]/g, "_").trim();
           const baseFileName = `${cameraName}_${dateFolder}_${HH}${mm}${SS}`;
 
-          const screenshotsDir = path.join(process.cwd(), "data", "recorded_screenshots", dateFolder);
+          const screenshotsDir = path.join(snapshotsBaseDir, dateFolder);
           if (!fs.existsSync(screenshotsDir)) {
             fs.mkdirSync(screenshotsDir, { recursive: true });
           }
@@ -310,10 +421,11 @@ export async function GET(request: NextRequest) {
             counter++;
           }
 
-          await writeFile(localPath, Buffer.from(buffer));
-          console.log(`[recordings/download] Saved screenshot to: ${localPath}`);
+          const buffer = await videoResponse.clone().arrayBuffer();
+          fs.writeFileSync(localPath, Buffer.from(buffer));
+          // console.log(`[recordings/download] Saved screenshot to: ${localPath}`);
         } catch (saveErr) {
-          console.error("[recordings/download] Failed to save local screenshot copy:", saveErr);
+          // console.error("[recordings/download] Failed to save local screenshot copy:", saveErr);
         }
       }
 
@@ -328,9 +440,13 @@ export async function GET(request: NextRequest) {
         : (responseContentType || "video/mp4");
 
       // FFmpeg REMUXING: For video downloads, use FFmpeg to fix the container metadata.
+      // EXCEPTION: Don't auto-save very short clips (likely snapshot pulses)
+      const durationMs = parseInt(endTime as string, 10) - parseInt(startTime as string, 10);
+      const isPulse = durationMs > 0 && durationMs < 10000; // Under 10 seconds
+
       // We skip this for previews to ensure instant playback without server-side processing.
       if (!effectiveIsImage && !isPreview && videoResponse.body) {
-        console.log(`[recordings/download] Remuxing video via FFmpeg to fix metadata (download)`);
+        // console.log(`[recordings/download] Remuxing video via FFmpeg to fix metadata (download)`);
 
         // Use a temporary file for the output to support -movflags +faststart, 
         // which requires a seekable output (not a pipe).
@@ -363,10 +479,10 @@ export async function GET(request: NextRequest) {
         // Wait for FFmpeg to finish processing the file
         return await new Promise<NextResponse>((resolve) => {
           ffmpeg.on('close', (code) => {
-            console.log(`[recordings/download] FFmpeg finished with code ${code}`);
+            // console.log(`[recordings/download] FFmpeg finished with code ${code}`);
 
             if (code !== 0) {
-              console.error(`[recordings/download] FFmpeg failed with code ${code}`);
+              // console.error(`[recordings/download] FFmpeg failed with code ${code}`);
               resolve(NextResponse.json({ error: "FFmpeg process failed during conversion", code }, { status: 500 }));
               return;
             }
@@ -379,7 +495,11 @@ export async function GET(request: NextRequest) {
                 const settingsFile = path.join(process.cwd(), "data", "settings.json");
                 if (fs.existsSync(settingsFile)) {
                   const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-                  if (settings.storagePath) videosBaseDir = settings.storagePath;
+                  if (settings.videoStoragePath) {
+                    videosBaseDir = settings.videoStoragePath;
+                  } else if (settings.storagePath) {
+                    videosBaseDir = settings.storagePath;
+                  }
                 }
               } catch (e) { /* ignore settings read errors */ }
 
@@ -390,7 +510,7 @@ export async function GET(request: NextRequest) {
               const DD = recDate.getDate().toString().padStart(2, "0");
               const HH = recDate.getHours().toString().padStart(2, "0");
               const mm = recDate.getMinutes().toString().padStart(2, "0");
-              const SS = recDate.getSeconds().toString().padStart(2, "0");
+              const SS = "00"; // Round down to :00 per user request
               const dateFolder = `${YYYY}-${MM}-${DD}`;
 
               const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
@@ -402,20 +522,8 @@ export async function GET(request: NextRequest) {
 
               const savePath = path.join(saveDir, finalFileName);
 
-              // Deduplication check
-              if (fs.existsSync(savePath)) {
-                console.log(`[recordings/download] Auto-save skip: file exists ${savePath}`);
-              } else {
-                // Fire-and-forget copy — don't block the browser response
-                fs.copyFile(tempPath, savePath, (copyErr) => {
-                  if (copyErr) {
-                    console.error("[recordings/download] Auto-save video copy failed:", copyErr);
-                  } else {
-                    console.log(`[recordings/download] Auto-saved video to: ${savePath}`);
-                    logRecordingEvent(`Auto-saved video to disk: ${safeCameraName}`);
-                  }
-                });
-              }
+              // Manual downloads do not save to local disk per user request.
+              // This block is only for streaming/downloading to the client.
             } catch (saveErr) {
               console.error("[recordings/download] Auto-save video error:", saveErr);
             }
@@ -426,7 +534,7 @@ export async function GET(request: NextRequest) {
             // Clean up the temp file after it's been sent
             fileStream.on('close', () => {
               fs.unlink(tempPath, (err) => {
-                if (err) console.error("[recordings/download] Temp file cleanup error:", err);
+                // if (err) console.error("[recordings/download] Temp file cleanup error:", err);
               });
             });
 
@@ -442,7 +550,7 @@ export async function GET(request: NextRequest) {
 
 
           ffmpeg.on('error', (err) => {
-            console.error("[recordings/download] FFmpeg spawn error:", err);
+            // console.error("[recordings/download] FFmpeg spawn error:", err);
             // This usually means FFmpeg is not found in the path
             resolve(NextResponse.json({
               error: "FFmpeg process error - verify FFmpeg is installed and in system PATH",
@@ -457,7 +565,7 @@ export async function GET(request: NextRequest) {
       // Fragmented MP4 uses empty_moov+frag_keyframe which doesn't need +faststart (no seekable output needed).
       // We also re-encode to H.264/AAC to guarantee Electron codec compatibility.
       if (!effectiveIsImage && isPreview && videoResponse.body) {
-        console.log(`[recordings/download] Transcoding preview to fragmented MP4 via FFmpeg (pipe)`);
+        // console.log(`[recordings/download] Transcoding preview to fragmented MP4 via FFmpeg (pipe)`);
 
         const ffmpegPath = getFfmpegPath();
         const ffmpegPreview = spawn(ffmpegPath, [
@@ -488,7 +596,7 @@ export async function GET(request: NextRequest) {
         });
         ffmpegPreview.stderr.on("data", (chunk) => {
           // Only log first stderr chunk to avoid log spam
-          console.log("[recordings/download] FFmpeg preview:", chunk.toString().substring(0, 200));
+          // console.log("[recordings/download] FFmpeg preview:", chunk.toString().substring(0, 200));
         });
 
         const previewInput = Readable.fromWeb(videoResponse.body as any);
@@ -546,14 +654,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   } catch (error) {
     if ((error as any)?.name === "AbortError") {
-      console.error("[recordings/download] Upstream timeout");
+      // console.error("[recordings/download] Upstream timeout");
       return NextResponse.json(
         { error: "Download request timed out", details: "Upstream server did not respond in time" },
         { status: 504 }
       );
     }
 
-    console.error("[recordings/download] Exception:", error);
+    // console.error("[recordings/download] Exception:", error);
     return NextResponse.json(
       { error: "Failed to generate download URL" },
       { status: 500 }

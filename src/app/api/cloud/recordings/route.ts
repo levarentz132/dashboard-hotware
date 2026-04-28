@@ -58,10 +58,10 @@ export async function GET(request: NextRequest) {
         responseData = await response.json();
       } else {
         const errorText = await response.text().catch(() => "Unknown error");
-        logger.warn(`[recordings] Nx API returned ${response.status} (likely recording disabled on NVR). Proceeding with local scan.`, errorText);
+        // logger.warn(`[recordings] Nx API returned ${response.status} (likely recording disabled on NVR). Proceeding with local scan.`, errorText);
       }
     } catch (err: any) {
-      logger.warn("[recordings] Nx API fetch failed. Proceeding with local scan only.", err.message);
+      // logger.warn("[recordings] Nx API fetch failed. Proceeding with local scan only.", err.message);
     }
     
     // Use responseData instead of data
@@ -201,14 +201,19 @@ export async function GET(request: NextRequest) {
              const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
  
              if (timestamp >= startLimit && timestamp <= endLimit) {
-               allPeriods.push({
-                 startTimeMs: timestamp,
-                 durationMs: file.endsWith(".mp4") ? 60000 : 0,
-                 isScreenshot: file.endsWith(".png"),
-                 isVideo: file.endsWith(".mp4"),
-                 isLocal: true,
-                 serverId: "local-storage",
-                 fileName: file,
+              const isVideo = file.endsWith(".mp4");
+              const stats = fs.statSync(filePath);
+              // Simple heuristic: if file is very small (< 150KB), it's probably a 1s snapshot fallback
+              const isShortVideo = isVideo && stats.size < 150000; 
+
+              allPeriods.push({
+                startTimeMs: timestamp,
+                durationMs: isVideo ? (isShortVideo ? 1000 : 60000) : 0,
+                isScreenshot: file.endsWith(".png") || isShortVideo,
+                isVideo: isVideo && !isShortVideo,
+                isLocal: true,
+                serverId: "local-storage",
+                fileName: file,
                  dateFolder: dateFolder,
                  cameraName: foundCameraName || searchCameraName || "Unknown",
                  cameraFolderName: null, // No subfolder for flat files
@@ -271,7 +276,11 @@ export async function GET(request: NextRequest) {
     const finalPeriods: any[] = [];
     const sortedCandidateList = [...allPeriods].sort((a, b) => {
        // 1. Prioritize VMS (non-local) records first to ensure they are the 'p' in comparison
-       if (a.isLocal !== b.isLocal) return a.isLocal ? 1 : -1;
+       // EXCEPTION: For screenshots, prioritize LOCAL records so we can serve them even if VMS 404s
+       if (a.isLocal !== b.isLocal) {
+          if (a.isScreenshot || b.isScreenshot) return a.isLocal ? -1 : 1;
+          return a.isLocal ? 1 : -1;
+       }
        
        if (a.isLocal && b.isLocal) {
           const aHasId = (a.fileName || "").includes("__") ? 0 : 1;
@@ -284,7 +293,10 @@ export async function GET(request: NextRequest) {
        const bRounded = b.startTimeMs % 10000 === 0;
        if (aRounded !== bRounded) return aRounded ? -1 : 1;
        
-       // 3. Sort by start time descending
+       // 3. Prioritize Screenshots over Videos for the same time window
+       if (a.isScreenshot !== b.isScreenshot) return a.isScreenshot ? -1 : 1;
+       
+       // 4. Sort by start time descending
        return b.startTimeMs - a.startTimeMs;
     });
 
@@ -297,14 +309,22 @@ export async function GET(request: NextRequest) {
          const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
          if (timeDiff < 10000) {
             // If we have a VMS record and a local one (Snapshot or Video), merge them.
-            // We prefer keeping the VMS record for videos, but for snapshots, we want the "View Image" button.
-            // However, to satisfy the user's request for "no duplicates" and "keep 07:00",
-            // we will skip the local one if we already have a record for this time.
-            if (!p.isLocal && candidate.isLocal) return true;
+            // We prefer keeping the LOCAL record for snapshots to avoid VMS 404s.
+            if (!p.isLocal && candidate.isLocal) {
+               if (p.isScreenshot || candidate.isScreenshot) return false; // Keep searching/Don't skip candidate yet (it will become 'p' later because it's sorted)
+               return true; // Skip local video if VMS video exists
+            }
+            if (p.isLocal && !candidate.isLocal) {
+               if (p.isScreenshot || candidate.isScreenshot) return true; // Skip VMS screenshot if local exists
+            }
 
-            // If both are local (e.g. 10:07:03 and 10:07:00), skip the second one.
-            // Since we sort descending, we'll keep the newest one unless we snap.
-            if (p.isLocal && candidate.isLocal) return true;
+            // If both are local, keep the first one (Screenshot) and skip the second (Video)
+            if (p.isLocal && candidate.isLocal) {
+               // If one is a screenshot and they are in the same minute, skip the video
+               const sameMinute = Math.floor(p.startTimeMs / 60000) === Math.floor(candidate.startTimeMs / 60000);
+               if (sameMinute && (p.isScreenshot || candidate.isScreenshot)) return true;
+               return true; 
+            }
 
             // If both are from VMS, skip the duplicate.
             if (!p.isLocal && !candidate.isLocal && timeDiff < 2000) return true;

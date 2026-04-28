@@ -63,6 +63,24 @@ declare global {
   var _nxWatchdogActive: boolean | undefined;
   var _nxAppPort: string | undefined;
 }
+ 
+/**
+ * Try to detect the current application port from environment or process arguments.
+ * Useful in dev where ports can change (e.g. 3010, 3011).
+ */
+function detectCurrentPort(fallback: string): string {
+  if (global._nxAppPort) return global._nxAppPort;
+  if (process.env.PORT) return process.env.PORT;
+  
+  // Check process arguments (e.g. next dev -p 3010)
+  const pIndex = process.argv.indexOf("-p");
+  if (pIndex !== -1 && process.argv[pIndex + 1]) {
+    return process.argv[pIndex + 1];
+  }
+  
+  return fallback;
+}
+
 
 const startWatchdog = () => {
   if (global._nxWatchdogActive) return;
@@ -71,7 +89,7 @@ const startWatchdog = () => {
     clearInterval(global._nxWatchdogInterval);
   }
 
-  logger.debug("[Watchdog] Initializing background monitor (V3)...");
+  // logger.debug("[Watchdog] Initializing background monitor (V3)...");
   global._nxWatchdogInterval = setInterval(async () => {
     if (global._nxWatchdogActive) return;
     global._nxWatchdogActive = true;
@@ -91,8 +109,14 @@ const startWatchdog = () => {
         globalAuth = null, 
         nxLocationIp = "localhost", 
         nxLocationPort = "7001",
-        notificationUserKey = null
+        notificationUserKey = null,
+        appPort = process.env.NODE_ENV === "production" ? "3030" : "3010" // Production: 3030, Dev: 3010
       } = parsed;
+      
+      // Use the persisted appPort if the global is not set yet
+      if (!global._nxAppPort) {
+        global._nxAppPort = appPort;
+      }
       
       // ── Resolve VMS IP: Prioritize configured IP over defaults ────────────
       let ip = nxLocationIp && nxLocationIp !== "null" ? nxLocationIp : "localhost";
@@ -159,9 +183,9 @@ const startWatchdog = () => {
               changed = true;
 
               const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-              logger.debug(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${time})`);
+              // logger.debug(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${time})`);
               try {
-                const port = global._nxAppPort || process.env.PORT || "3000";
+                const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
                 const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
 
                 const screenshotHeaders: Record<string, string> = {
@@ -175,7 +199,7 @@ const startWatchdog = () => {
                   screenshotHeaders["x-nx-location-port"] = nxLocationPort;
                 }
 
-                logger.debug(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
+                // logger.debug(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
                 const screenshotRes = await fetch(internalUrl, {
                   method: "POST",
                   headers: screenshotHeaders,
@@ -195,7 +219,7 @@ const startWatchdog = () => {
                   rec.record = false;
                 } else {
                   const result = await screenshotRes.json();
-                  logger.debug(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
+                  console.log(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
                   logRecordingEvent(`Snapshot captured successfully: ${rec.cameraName}`, rec.scheduledBy);
                   rec.record = false;
 
@@ -228,7 +252,7 @@ const startWatchdog = () => {
                     
                     // Trigger persistent notification for WATCHDOG completion (screenshots)
                     if (notificationUserKey) {
-                      const port = global._nxAppPort || process.env.PORT || "3011";
+                      const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
                       await fetch(`http://127.0.0.1:${port}/api/notifications`, {
                         method: "POST",
                         body: JSON.stringify({
@@ -267,14 +291,16 @@ const startWatchdog = () => {
               return rec;
             }
 
-            logger.debug(`[Watchdog] Starting/Retrying video recording for ${rec.cameraName} (VMS: ${ip}:${port})`);
+            console.log(`[Watchdog] Starting/Retrying video recording for ${rec.cameraName} (VMS: ${ip}:${port})`);
             if (!globalAuth || !ip || ip === "localhost") {
               logger.warn(`[Watchdog] Cannot patch camera ${rec.cameraName}: VMS IP is not configured or auth is missing. (Current IP: ${ip})`);
               return rec;
             }
             try {
               const cleanId = rec.cameraId.replace(/[{}]/g, "");
-              const dayOfWeek = new Date(rec.date).getDay();
+              const dDate = new Date(rec.date);
+              let dayOfWeek = dDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+              if (dayOfWeek === 0) dayOfWeek = 7; // Convert to 1-7 (Mon-Sun)
               
               // Calculate seconds from start of day for 'in progress' tasks
               const dNow = new Date();
@@ -282,6 +308,12 @@ const startWatchdog = () => {
               
               let startSec = sh * 3600 + sm * 60;
               let endSec = eh * 3600 + em * 60 + 59;
+
+              // Apply Sunday offset (-3600s) to match CameraInventory logic
+              if (dayOfWeek === 7) {
+                startSec -= 3600;
+                endSec -= 3600;
+              }
 
               if (rec.status === "in progress") {
                 // If in-progress, start NOW and limit to at most 1 minute, 
@@ -309,10 +341,22 @@ const startWatchdog = () => {
               await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
                 schedule: {
                   isEnabled: true,
+                  tasks: [
+                    {
+                      startTime: startSec,
+                      endTime: endSec,
+                      dayOfWeek: dayOfWeek,
+                      recordingType: "always",
+                      streamQuality: "lowest",
+                      fps: 0,
+                      bitrateKbps: 0,
+                      metadataTypes: "none"
+                    }
+                  ]
                 },
               }, globalAuth, ip, port);
 
-              logger.debug(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
+              // logger.debug(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
               logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`, rec.scheduledBy);
               rec.status = "recording";
               rec.record = true; 
@@ -352,7 +396,7 @@ const startWatchdog = () => {
               await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
                 schedule: { isEnabled: false }
               }, globalAuth, ip, port);
-              logger.debug(`[Watchdog] Recording stopped for ${rec.cameraName}`);
+              // logger.debug(`[Watchdog] Recording stopped for ${rec.cameraName}`);
 
               // ── Step 3: Trigger Auto-Download (Server-side) ────────────────
               // We trigger the internal download API to pull the clip and save it to disk.
@@ -363,23 +407,41 @@ const startWatchdog = () => {
                 // Trigger auto-save immediately in the background
                 (async () => {
                   try {
-                    const port = global._nxAppPort || process.env.PORT || "3011";
+                    const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
                     const autoSaveUrl = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
                     
-                    logger.debug(`[Watchdog] Triggering auto-save for ${rec.cameraName}...`);
+                    // logger.debug(`[Watchdog] Triggering auto-save for ${rec.cameraName} via ${autoSaveUrl}`);
                     const downloadRes = await fetch(autoSaveUrl);
                     const downloadResult = await downloadRes.json();
                     if (downloadResult.success) {
-                      logger.debug(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
+                      console.log(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
+                      
+                      // Trigger persistent notification for WATCHDOG completion (videos)
+                      if (notificationUserKey) {
+                        const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
+                        await fetch(`http://127.0.0.1:${port}/api/notifications`, {
+                          method: "POST",
+                          body: JSON.stringify({
+                            username: notificationUserKey,
+                            type: "success",
+                            title: "Auto-Save Done",
+                            message: `Scheduled recording for ${rec.cameraName} is saved to disk.`,
+                            systemId: rec.systemId,
+                            deviceId: cleanId,
+                            startTimeMs: rec.startMs,
+                            durationMs: rec.endMs - rec.startMs
+                          })
+                        }).catch(e => console.error("[Watchdog] Notification failed:", e.message));
+                      }
                     } else {
-                      console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error);
+                      console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error || JSON.stringify(downloadResult));
                     }
                   } catch (saveErr: any) {
                     console.error(`[Watchdog] 🛑 Auto-save trigger exception for ${rec.cameraName}:`, saveErr.message);
                   }
                 })();
               } else {
-                logger.debug(`[Watchdog] ⏩ Skipping auto-save for ${rec.cameraName} (Recording is too old: ${Math.round((now - endMs) / 60000)}m ago)`);
+                // logger.debug(`[Watchdog] ⏩ Skipping auto-save for ${rec.cameraName} (Recording is too old: ${Math.round((now - endMs) / 60000)}m ago)`);
               }
 
               // ── Step 2: Restore original schedule (with isEnabled: false) ───────────
@@ -389,7 +451,13 @@ const startWatchdog = () => {
                 // Force isEnabled: false at the end of our scheduled task
                 const updatedSchedule = { ...original, isEnabled: false };
                 await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: updatedSchedule }, globalAuth, ip, port);
-                console.log(`[Watchdog] Restored original schedule (Disabled) for ${rec.cameraName}`);
+                // console.log(`[Watchdog] Restored original schedule (Disabled) for ${rec.cameraName}`);
+              } else {
+                // If no original schedule was saved, ensure tasks are cleared
+                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { 
+                  schedule: { isEnabled: false, tasks: [] } 
+                }, globalAuth, ip, port);
+                // console.log(`[Watchdog] Cleared temporary tasks for ${rec.cameraName}`);
               }
 
               delete originalSchedules[rec.id];
@@ -453,7 +521,7 @@ const startWatchdog = () => {
 
           // ── CASE 3: Missed/Expired Tasks ──────────────────────────────────
           else if (now >= endMs && rec.status === "pending") {
-            logger.debug(`[Watchdog] Marking missed task as completed/expired: ${rec.cameraName} (End was ${new Date(endMs).toLocaleString()})`);
+            // logger.debug(`[Watchdog] Marking missed task as completed/expired: ${rec.cameraName} (End was ${new Date(endMs).toLocaleString()})`);
             
             if (rec.recurrence && rec.recurrence !== "none") {
               const nextDate = new Date(rec.date);
@@ -495,7 +563,8 @@ const startWatchdog = () => {
             globalAuth, 
             nxLocationIp, 
             nxLocationPort,
-            notificationUserKey 
+            notificationUserKey,
+            appPort: detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010")
           }, null, 2)
         );
       }
@@ -512,7 +581,27 @@ const startWatchdog = () => {
 startWatchdog();
 
 export async function GET(request: NextRequest) {
-  if (request.nextUrl.port) global._nxAppPort = request.nextUrl.port;
+  // Capture the port from the request to help the watchdog make internal calls
+  const urlPort = request.nextUrl.port;
+  const hostHeader = request.headers.get("host");
+  const hostPort = hostHeader?.split(":")[1];
+  const detectedPort = urlPort || hostPort;
+  
+  if (detectedPort && detectedPort !== global._nxAppPort) {
+    // logger.debug(`[Watchdog] Captured and persisting app port: ${detectedPort}`);
+    global._nxAppPort = detectedPort;
+    
+    // Immediately persist the port to the data file
+    (async () => {
+      try {
+        const dataStr = await fs.readFile(DATA_FILE, "utf-8").catch(() => "{}");
+        const data = JSON.parse(dataStr);
+        data.appPort = detectedPort;
+        await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
+      } catch (e) {}
+    })();
+  }
+  
   startWatchdog();
   try {
     const data = await fs.readFile(DATA_FILE, "utf-8");
@@ -523,7 +612,17 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (request.nextUrl.port) global._nxAppPort = request.nextUrl.port;
+  // Capture the port from the request to help the watchdog make internal calls
+  const urlPort = request.nextUrl.port;
+  const hostHeader = request.headers.get("host");
+  const hostPort = hostHeader?.split(":")[1];
+  const detectedPort = urlPort || hostPort;
+  
+  if (detectedPort && detectedPort !== global._nxAppPort) {
+    // logger.debug(`[Watchdog] Captured app port: ${detectedPort}`);
+    global._nxAppPort = detectedPort;
+  }
+
   startWatchdog();
   try {
     const body = await request.json();
@@ -585,7 +684,7 @@ export async function POST(request: NextRequest) {
 
     // Log save success
     if (Array.isArray(body.schedules)) {
-      logger.debug(`[Watchdog] Persisted ${body.schedules.length} schedules to disk (VMS: ${nxIp || "Cloud Relay"})`);
+      // logger.debug(`[Watchdog] Persisted ${body.schedules.length} schedules to disk (VMS: ${nxIp || "Cloud Relay"})`);
     }
 
     return NextResponse.json({ success: true });

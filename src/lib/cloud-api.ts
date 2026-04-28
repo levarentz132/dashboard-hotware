@@ -112,7 +112,7 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
       : (API_CONFIG.serverHost || 'localhost');
     
     if (host === 'localhost' && !isDirectAddress && cleanId !== 'localhost') {
-      console.warn(`[Cloud API] Falling back to localhost for system ${cleanId}. This may fail if VMS is remote.`);
+      // console.warn(`[Cloud API] Falling back to localhost for system ${cleanId}. This may fail if VMS is remote.`);
     }
     
     let port = API_CONFIG.serverPort || '7001';
@@ -256,7 +256,7 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     if (basicAuth) {
       headers["Authorization"] = basicAuth;
     } else {
-      console.warn(`[Cloud Auth] No session or shared credentials found for ${systemId}`);
+      // console.warn(`[Cloud Auth] No session or shared credentials found for ${systemId}`);
       const cookies = request.headers.get("cookie") || "";
       if (cookies) {
         headers.Cookie = cookies;
@@ -370,7 +370,7 @@ export async function fetchFromCloudApi<T>(
     // token will always be rejected with 403. Skip the call entirely if we only have local creds.
     const cloudAuthToken = getCloudAuthHeader(request);
     if (isCloudBound && !cloudAuthToken) {
-      logger.debug(`[Cloud API] Skipping cloud call to ${endpoint} — no NX Cloud token available (local NVR mode).`);
+      // logger.debug(`[Cloud API] Skipping cloud call to ${endpoint} — no NX Cloud token available (local NVR mode).`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
@@ -379,7 +379,7 @@ export async function fetchFromCloudApi<T>(
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    logger.debug(`[Cloud API] Fetching GET ${cloudUrl}`);
+    // logger.debug(`[Cloud API] Fetching GET ${cloudUrl}`);
 
     let response = await fetch(cloudUrl, {
       method: "GET",
@@ -438,7 +438,7 @@ export async function fetchFromCloudApi<T>(
           return createAuthErrorResponse(systemId, systemName);
         }
       } else {
-        logger.debug(`[Cloud API] Auth failed for ${systemId} (no Basic credentials). Expected if not using NX Cloud.`);
+        // logger.debug(`[Cloud API] Auth failed for ${systemId} (no Basic credentials). Expected if not using NX Cloud.`);
         return createAuthErrorResponse(systemId, systemName);
       }
     } else if (response.status === 401 || response.status === 403) {
@@ -452,9 +452,9 @@ export async function fetchFromCloudApi<T>(
       const status = response.status;
 
       if ([502, 503, 504].includes(status)) {
-        console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
+        // console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
       } else {
-        console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
+        // console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
       }
 
       return createFetchErrorResponse(
@@ -479,7 +479,7 @@ export async function fetchFromCloudApi<T>(
     }
 
     const text = await response.text();
-    console.warn(`[Cloud API] Non-JSON response from ${cloudUrl}:`, text.substring(0, 200));
+    // console.warn(`[Cloud API] Non-JSON response from ${cloudUrl}:`, text.substring(0, 200));
     return NextResponse.json({ success: true, message: "Request successful (non-JSON)" } as unknown as T);
   } catch (error) {
     console.error(`[Cloud API] Error fetching ${endpoint} from ${systemName || systemId}:`, error);
@@ -542,6 +542,7 @@ async function requestCloudApi<T>(
     const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
 
     // DEBUG: Log request details
+    /*
     console.log(`[Cloud API DEBUG] ${method} Request:`, {
       systemId,
       systemName,
@@ -552,6 +553,7 @@ async function requestCloudApi<T>(
       hasRuntimeGuid: !!headers["x-runtime-guid"],
       authHeaderType: headers["Authorization"]?.substring(0, 20) + "...",
     });
+    */
 
     // Stop calling if there's no auth material for a cloud request
     const isCloudBound2 = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
@@ -560,16 +562,16 @@ async function requestCloudApi<T>(
     // For cloud-bound URLs, require a real NX Cloud OAuth token
     const cloudAuthToken2 = getCloudAuthHeader(request);
     if (isCloudBound2 && !cloudAuthToken2) {
-      console.log(`[Cloud API DEBUG] Returning 403 - cloud-bound but no cloud token`);
+      // console.log(`[Cloud API DEBUG] Returning 403 - cloud-bound but no cloud token`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
     if (!hasAuth && isCloudBound2) {
-      console.log(`[Cloud API DEBUG] Returning 403 - no auth and cloud-bound`);
+      // console.log(`[Cloud API DEBUG] Returning 403 - no auth and cloud-bound`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    console.log(`[Cloud API DEBUG] Auth checks passed, making ${method} request to ${cloudUrl}`);
+    // console.log(`[Cloud API DEBUG] Auth checks passed, making ${method} request to ${cloudUrl}`);
 
     // logger.debug(`[Cloud API] Requesting ${method} ${cloudUrl}`);
 
@@ -580,7 +582,7 @@ async function requestCloudApi<T>(
       redirect: "manual",
     });
 
-    console.log(`[Cloud API DEBUG] Initial response status: ${response.status}`);
+    // console.log(`[Cloud API DEBUG] Initial response status: ${response.status}`);
 
     if ([301, 302, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
@@ -611,7 +613,7 @@ async function requestCloudApi<T>(
     // Retry once with Basic auth when session token is rejected
     if ((response.status === 401 || response.status === 403) && (isNxEndpoint || isLocalOrRelay)) {
       if (basicAuthHeader) {
-        console.log(`[Cloud API DEBUG] Got ${response.status}, retrying with Basic auth`);
+        // console.log(`[Cloud API DEBUG] Got ${response.status}, retrying with Basic auth`);
         const retryHeaders: Record<string, string> = {
           ...headers,
           Authorization: basicAuthHeader,
@@ -629,16 +631,16 @@ async function requestCloudApi<T>(
           redirect: "manual",
         });
 
-        console.log(`[Cloud API DEBUG] Retry response status: ${response.status}`);
+        // console.log(`[Cloud API DEBUG] Retry response status: ${response.status}`);
         
         // If still 401/403 after retry, then return the auth error
         if (response.status === 401 || response.status === 403) {
-          const errorText = await response.clone().text();
-          console.log(`[Cloud API DEBUG] Still ${response.status} after retry, response:`, errorText.substring(0, 500));
+          // const errorText = await response.clone().text();
+          // console.log(`[Cloud API DEBUG] Still ${response.status} after retry, response:`, errorText.substring(0, 500));
           return createAuthErrorResponse(systemId, systemName);
         }
       } else {
-        console.log(`[Cloud API DEBUG] Got ${response.status} but no Basic auth available`);
+        // console.log(`[Cloud API DEBUG] Got ${response.status} but no Basic auth available`);
         return createAuthErrorResponse(systemId, systemName);
       }
     } else if (response.status === 401 || response.status === 403) {
@@ -652,9 +654,9 @@ async function requestCloudApi<T>(
       const status = response.status;
 
       if ([502, 503, 504].includes(status)) {
-        console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
+        // console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
       } else {
-        console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
+        // console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
       }
 
       return createFetchErrorResponse(
