@@ -1334,58 +1334,6 @@ export default function UserManagement() {
           </div>
         )}
 
-        {/* Permissions / Group Selection */}
-        <div className="space-y-2">
-          <Label>Permissions (Groups)</Label>
-          <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
-            {effectiveUsers.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-sm">Copy permissions from existing user</Label>
-                <Select value={copyFromUserId} onValueChange={(v: string) => handleCopyFromUser(v)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select user to copy from..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {effectiveUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        <div className="flex items-center gap-2">
-                          <span className="truncate">{u.name}{u.email ? ` • ${u.email}` : ""}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {DEFAULT_PERMISSION_GROUPS.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No groups available</p>
-            ) : (
-              <div className="grid grid-cols-1 gap-2">
-                {DEFAULT_PERMISSION_GROUPS.filter((g) => !g.name.toLowerCase().includes("administrator")).map((group) => (
-                  <div key={group.id} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`group-${group.id}`}
-                      checked={formData.groupIds.includes(group.id)}
-                      onChange={() => handleGroupToggle(group.id)}
-                      disabled={false}
-                      className="h-4 w-4 rounded border-gray-300"
-                    />
-                    <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
-                      <div className="flex items-center gap-2">
-                        <Shield className="h-3 w-3 text-muted-foreground" />
-                        {group.name}
-                      </div>
-                      {group.description && <p className="text-xs text-muted-foreground">{group.description}</p>}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Resource Access (per-user) */}
         <div className="space-y-2">
           <Label>Resource Access (per-user)</Label>
@@ -1475,6 +1423,59 @@ export default function UserManagement() {
                 );
               })()}
             </ScrollArea>
+          </div>
+        </div>
+
+        {/* Permissions / Group Selection */}
+        <div className="space-y-2">
+          <Label>Permissions (Groups)</Label>
+          <div className="border rounded-lg p-3 space-y-4 bg-muted/20">
+            {effectiveUsers.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-sm">Copy permissions from existing user</Label>
+                <Select value={copyFromUserId} onValueChange={(v: string) => handleCopyFromUser(v)}>
+                  <SelectTrigger className="w-full bg-white">
+                    <SelectValue placeholder="Select user to copy from..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {effectiveUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        <div className="flex items-center gap-2">
+                          <span className="truncate">{u.name}{u.email ? ` • ${u.email}` : ""}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            
+            <div className="grid grid-cols-1 gap-2">
+              {DEFAULT_PERMISSION_GROUPS
+                .filter((g) => {
+                  const name = g.name.toLowerCase();
+                  return name.includes("power user");
+                })
+                .map((group) => (
+                  <div key={group.id} className="flex items-center space-x-2 p-1 rounded-md hover:bg-white/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      id={`group-${group.id}`}
+                      checked={formData.groupIds.includes(group.id)}
+                      onChange={() => handleGroupToggle(group.id)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Shield className="h-3.5 w-3.5 text-blue-600" />
+                        {group.name}
+                      </div>
+                      {group.description && <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{group.description}</p>}
+                    </Label>
+                  </div>
+                ))}
+            </div>
           </div>
         </div>
 
