@@ -352,6 +352,7 @@ export default function UserManagement() {
   const { devices, loading: devicesLoading, error: devicesError, refetch: refetchDevices } = useDevices(deviceSystemId);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [resourceSearchTerm, setResourceSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
@@ -683,6 +684,7 @@ export default function UserManagement() {
     setFormErrors({});
     setShowPassword(false);
     setShowConfirmPassword(false);
+    setResourceSearchTerm("");
   };
 
   // Open create dialog
@@ -1001,7 +1003,7 @@ export default function UserManagement() {
         delete rar[deviceId];
       } else {
         // Add using normalized ID (consistent format)
-        rar[normalizedId] = "view"; // default right when enabling
+        rar[normalizedId] = "view|viewArchive|exportArchive|edit"; // default right when enabling (Full)
       }
       
       return { ...prev, resourceAccessRights: rar };
@@ -1387,94 +1389,92 @@ export default function UserManagement() {
         {/* Resource Access (per-user) */}
         <div className="space-y-2">
           <Label>Resource Access (per-user)</Label>
-          <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
-            {(() => {
-              console.log(`[Resource Access] selectedSystemId: ${selectedSystemId}, devicesLoading: ${devicesLoading}, devices.length: ${devices.length}`);
-              console.log(`[Resource Access] formData.resourceAccessRights:`, formData.resourceAccessRights);
-              
-              // For local servers, use a fallback systemId
-              const effectiveSystemId = selectedSystemId || "localhost:7001";
-              
-              if (!selectedSystemId && cloudSystems.length === 0) {
-                // No cloud systems, use local server
-                console.log(`[Resource Access] Using local server, fetching devices for: ${effectiveSystemId}`);
-              }
-              
-              if (devicesLoading) {
-                return <p className="text-sm text-muted-foreground">Loading devices...</p>;
-              }
-              
-              if (devices.length === 0) {
-                return (
-                  <div className="text-sm text-muted-foreground">
-                    <p>No devices available</p>
-                    <p className="text-xs mt-1">System ID: {effectiveSystemId}</p>
-                  </div>
+          <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Search cameras..."
+                className="pl-8 h-9 text-sm bg-white"
+                value={resourceSearchTerm}
+                onChange={(e) => setResourceSearchTerm(e.target.value)}
+              />
+              {resourceSearchTerm && (
+                <button 
+                  onClick={() => setResourceSearchTerm("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            <ScrollArea className="h-[300px] pr-2 -mr-2">
+              {(() => {
+                const effectiveSystemId = selectedSystemId || "localhost:7001";
+                
+                if (devicesLoading) {
+                  return <p className="text-sm text-muted-foreground py-4 text-center">Loading devices...</p>;
+                }
+                
+                const filteredDevices = devices.filter(d => 
+                  (d.name || "").toLowerCase().includes(resourceSearchTerm.toLowerCase()) ||
+                  (d.id || "").toLowerCase().includes(resourceSearchTerm.toLowerCase())
                 );
-              }
-              
-              return (
-              <div className="grid grid-cols-1 gap-2">
-                {devices.map((device) => {
-                  // Normalize ID for comparison (remove curly braces)
-                  const normalizeId = (id: string) => id.replace(/[{}]/g, "");
-                  const normalizedDeviceId = normalizeId(device.id);
-                  
-                  // Check if this device has access by finding matching normalized ID
-                  let hasAccess = false;
-                  let currentRights = "";
-                  
-                  if (formData.resourceAccessRights) {
-                    // Check all keys in resourceAccessRights with normalized comparison
-                    for (const [key, value] of Object.entries(formData.resourceAccessRights)) {
-                      const normalizedKey = normalizeId(key);
-                      if (normalizedKey === normalizedDeviceId) {
-                        hasAccess = true;
-                        currentRights = value;
-                        break;
-                      }
-                    }
-                  }
-                  
-                  // Debug logging
-                  console.log(`[Device] ${device.name} | ID: ${device.id} | Normalized: ${normalizedDeviceId} | Has Access: ${hasAccess} | Rights: ${currentRights}`);
-                  
+
+                if (filteredDevices.length === 0) {
                   return (
-                    <div key={device.id} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id={`device-${device.id}`}
-                        checked={hasAccess}
-                        onChange={() => handleToggleDevice(device.id)}
-                        className="h-4 w-4 rounded border-gray-300"
-                      />
-                      <Label htmlFor={`device-${device.id}`} className="text-sm font-normal cursor-pointer flex-1">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate">{device.name}</span>
-                          </div>
-                          {hasAccess && (
-                            <div className="w-56">
-                              <Select value={currentRights} onValueChange={(v: string) => handleSetDeviceRights(device.id, v)}>
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Select rights" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {DEVICE_RIGHTS_OPTIONS.map((opt) => (
-                                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
-                        </div>
-                      </Label>
+                    <div className="text-sm text-muted-foreground py-8 text-center">
+                      <p>{devices.length === 0 ? "No devices available" : "No matching cameras"}</p>
                     </div>
                   );
-                })}
-              </div>
-              );
-            })()}
+                }
+                
+                return (
+                  <div className="grid grid-cols-1 gap-1">
+                    {filteredDevices.map((device) => {
+                      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+                      const normalizedDeviceId = normalizeId(device.id);
+                      
+                      let hasAccess = false;
+                      if (formData.resourceAccessRights) {
+                        for (const key of Object.keys(formData.resourceAccessRights)) {
+                          if (normalizeId(key) === normalizedDeviceId) {
+                            hasAccess = true;
+                            break;
+                          }
+                        }
+                      }
+                      
+                      return (
+                        <div key={device.id} className={cn(
+                          "flex items-center space-x-2 p-2 rounded-md transition-colors",
+                          hasAccess ? "bg-blue-50/50 dark:bg-blue-900/10" : "hover:bg-muted"
+                        )}>
+                          <input
+                            type="checkbox"
+                            id={`device-${device.id}`}
+                            checked={hasAccess}
+                            onChange={() => handleToggleDevice(device.id)}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <Label 
+                            htmlFor={`device-${device.id}`} 
+                            className="text-sm font-medium cursor-pointer flex-1 flex items-center justify-between"
+                          >
+                            <span className="truncate">{device.name}</span>
+                            {hasAccess && (
+                              <Badge variant="secondary" className="text-[10px] font-bold uppercase tracking-tight bg-blue-100 text-blue-700 hover:bg-blue-100 border-none">
+                                Full Access
+                              </Badge>
+                            )}
+                          </Label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </ScrollArea>
           </div>
         </div>
 
