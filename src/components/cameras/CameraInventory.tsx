@@ -32,7 +32,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { isAdmin } from "@/lib/auth";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
-import RecordingScheduleDialog from "./RecordingScheduleDialog";
+// import RecordingScheduleDialog from "./RecordingScheduleDialog";
 
 
 interface CloudSystem {
@@ -287,10 +287,12 @@ export default function CameraInventory() {
     );
   };
 
+  /* 
   const handleCameraClick = (camera: CameraDevice) => {
     setSelectedCameraForSchedule(camera);
     setIsScheduleDialogOpen(true);
   };
+  */
 
   const displayCameras = useMemo(() => {
     return (camerasBySystem || []).flatMap((sys: any) => (sys.cameras || []).map((c: any) => ({ ...c, systemId: sys.systemId })));
@@ -689,8 +691,8 @@ export default function CameraInventory() {
                                   {filteredSystemCameras.map((camera) => (
                                     <div
                                       key={`${systemData.systemId}-${camera.id}`}
-                                      onClick={() => handleCameraClick(camera)}
-                                      className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px] cursor-pointer"
+                                      // onClick={() => handleCameraClick(camera)}
+                                      className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px] cursor-default"
                                     >
                                       {/* Header */}
                                       <div className="flex items-start justify-between mb-2">
@@ -772,8 +774,8 @@ export default function CameraInventory() {
                 {filteredCameras.map((camera) => (
                   <div
                     key={camera.id}
-                    onClick={() => handleCameraClick(camera)}
-                    className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer"
+                    // onClick={() => handleCameraClick(camera)}
+                    className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white cursor-default"
                   >
                     <div className="flex items-start justify-between mb-2 md:mb-3">
                       <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -826,8 +828,8 @@ export default function CameraInventory() {
                       {filteredCameras.map((camera) => (
                         <tr
                           key={camera.id}
-                          onClick={() => handleCameraClick(camera)}
-                          className="hover:bg-gray-50 cursor-pointer"
+                          // onClick={() => handleCameraClick(camera)}
+                          className="hover:bg-gray-50 cursor-default"
                         >
                           <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center">
@@ -865,8 +867,8 @@ export default function CameraInventory() {
                   {filteredCameras.map((camera) => (
                     <div
                       key={camera.id}
-                      onClick={() => handleCameraClick(camera)}
-                      className="bg-white border rounded-lg p-3 cursor-pointer"
+                      // onClick={() => handleCameraClick(camera)}
+                      className="bg-white border rounded-lg p-3 cursor-default"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -905,6 +907,7 @@ export default function CameraInventory() {
         </>
       )}
 
+      {/* 
       <RecordingScheduleDialog
         open={isScheduleDialogOpen}
         onOpenChange={setIsScheduleDialogOpen}
@@ -914,6 +917,7 @@ export default function CameraInventory() {
           else refetchSingle();
         }}
       />
+      */}
     </div>
   );
 }
