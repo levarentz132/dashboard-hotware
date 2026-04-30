@@ -253,8 +253,12 @@ const startWatchdog = () => {
                     // Trigger persistent notification for WATCHDOG completion (screenshots)
                     if (notificationUserKey) {
                       const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
+                      const notifHeaders: Record<string, string> = { "Content-Type": "application/json" };
+                      if (globalAuth) notifHeaders["x-watchdog-auth"] = globalAuth;
+                      
                       await fetch(`http://127.0.0.1:${port}/api/notifications`, {
                         method: "POST",
+                        headers: notifHeaders,
                         body: JSON.stringify({
                           username: notificationUserKey,
                           type: "success",
@@ -411,28 +415,44 @@ const startWatchdog = () => {
                     const autoSaveUrl = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
                     
                     // logger.debug(`[Watchdog] Triggering auto-save for ${rec.cameraName} via ${autoSaveUrl}`);
-                    const downloadRes = await fetch(autoSaveUrl);
+                    
+                    const downloadHeaders: Record<string, string> = {};
+                    if (globalAuth) downloadHeaders["x-watchdog-auth"] = globalAuth;
+                    if (nxLocationIp && nxLocationIp !== "localhost" && nxLocationIp !== "null") {
+                      downloadHeaders["x-nx-location-ip"] = nxLocationIp;
+                    }
+                    if (nxLocationPort && nxLocationPort !== "7001" && nxLocationPort !== "null") {
+                      downloadHeaders["x-nx-location-port"] = nxLocationPort;
+                    }
+
+                    const downloadRes = await fetch(autoSaveUrl, {
+                      headers: downloadHeaders
+                    });
                     const downloadResult = await downloadRes.json();
                     if (downloadResult.success) {
                       console.log(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
                       
                       // Trigger persistent notification for WATCHDOG completion (videos)
-                      if (notificationUserKey) {
-                        const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
-                        await fetch(`http://127.0.0.1:${port}/api/notifications`, {
-                          method: "POST",
-                          body: JSON.stringify({
-                            username: notificationUserKey,
-                            type: "success",
-                            title: "Auto-Save Done",
-                            message: `Scheduled recording for ${rec.cameraName} is saved to disk.`,
-                            systemId: rec.systemId,
-                            deviceId: cleanId,
-                            startTimeMs: rec.startMs,
-                            durationMs: rec.endMs - rec.startMs
-                          })
-                        }).catch(e => console.error("[Watchdog] Notification failed:", e.message));
-                      }
+                        if (notificationUserKey) {
+                          const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
+                          const notifHeaders: Record<string, string> = { "Content-Type": "application/json" };
+                          if (globalAuth) notifHeaders["x-watchdog-auth"] = globalAuth;
+
+                          await fetch(`http://127.0.0.1:${port}/api/notifications`, {
+                            method: "POST",
+                            headers: notifHeaders,
+                            body: JSON.stringify({
+                              username: notificationUserKey,
+                              type: "success",
+                              title: "Auto-Save Done",
+                              message: `Scheduled recording for ${rec.cameraName} is saved to disk.`,
+                              systemId: rec.systemId,
+                              deviceId: cleanId,
+                              startTimeMs: rec.startMs,
+                              durationMs: rec.endMs - rec.startMs
+                            })
+                          }).catch(e => console.error("[Watchdog] Notification failed:", e.message));
+                        }
                     } else {
                       console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error || JSON.stringify(downloadResult));
                     }
