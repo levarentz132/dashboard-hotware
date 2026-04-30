@@ -50,6 +50,7 @@ export interface UserPublic {
   is_active: boolean;
   created_at: Date | string;
   last_login?: Date | string | null;
+  resourceAccessRights?: Record<string, string>; // Mapping of camera ID to rights
 }
 
 // Payload for creating JWT tokens (exp can be string like "24h")

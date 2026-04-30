@@ -91,3 +91,34 @@ export function formatIndonesianDate(dateString: string | null | undefined): str
         return dateString;
     }
 }
+
+/**
+ * Check if a user has view permission for a specific camera.
+ */
+export function hasCameraViewPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
+    if (!user) return false;
+    if (isAdmin(user)) return true;
+    
+    const rights = user.resourceAccessRights || {};
+    const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+    const nid = normalizeId(cameraId);
+    
+    // Check for both original and normalized IDs in the rights map
+    const userRights = rights[nid] || rights[cameraId] || "";
+    return userRights !== "" && userRights !== "none";
+}
+
+/**
+ * Check if a user has edit permission for a specific camera.
+ */
+export function hasCameraEditPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
+    if (!user) return false;
+    if (isAdmin(user)) return true;
+    
+    const rights = user.resourceAccessRights || {};
+    const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+    const nid = normalizeId(cameraId);
+    
+    const userRights = rights[nid] || rights[cameraId] || "";
+    return userRights.includes("edit");
+}

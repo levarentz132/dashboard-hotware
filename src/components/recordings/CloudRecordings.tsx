@@ -21,6 +21,8 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@
 import { format, addDays, nextDay, Day } from "date-fns";
 import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
+import { useAuth } from "@/contexts/auth-context";
+import { isAdmin, hasCameraViewPermission, hasCameraEditPermission } from "@/lib/auth";
 import {
   Dialog,
   DialogContent,
@@ -126,7 +128,8 @@ const SearchableCameraSelect = ({
   loadingDevices, 
   normalizeId,
   placeholder = "Select Camera",
-  showAllOption = false
+  showAllOption = false,
+  canEdit
 }: { 
   value: string; 
   onValueChange: (v: string) => void;
@@ -135,6 +138,7 @@ const SearchableCameraSelect = ({
   normalizeId: (id: any) => string;
   placeholder?: string;
   showAllOption?: boolean;
+  canEdit?: (deviceId: string) => boolean;
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   
@@ -203,15 +207,16 @@ const SearchableCameraSelect = ({
                 const status = (device.status || "Offline").toLowerCase();
                 const isOnline = status === "online" || status === "recording" || status === "connected";
                 const isOffline = !isOnline;
+                const isDisabled = canEdit ? !canEdit(device.id) : false;
                 
                 return (
                   <SelectItem 
                     key={`${device.systemId}-${device.id}`} 
                     value={`${device.systemId}:${normalizeId(device.id)}`}
-                    disabled={isOffline}
+                    disabled={isOffline || isDisabled}
                     className={cn(
                       "rounded-lg transition-colors py-2.5",
-                      isOffline ? "opacity-40 grayscale-[0.5] cursor-not-allowed bg-slate-50/50" : "focus:bg-blue-50 focus:text-blue-700 cursor-pointer"
+                      (isOffline || isDisabled) ? "opacity-40 grayscale-[0.5] cursor-not-allowed bg-slate-50/50" : "focus:bg-blue-50 focus:text-blue-700 cursor-pointer"
                     )}
                   >
                     <div className="flex items-center justify-between w-full gap-3 pr-2">
@@ -222,6 +227,9 @@ const SearchableCameraSelect = ({
                           )}
                        </div>
                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isDisabled && (
+                            <Badge variant="outline" className="text-[8px] py-0 h-3.5 border-yellow-500/20 text-yellow-500 bg-yellow-500/5">Read Only</Badge>
+                          )}
                           <div className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-slate-300"}`} />
                           <span className={cn(
                             "text-[9px] font-black uppercase tracking-widest",
@@ -251,6 +259,8 @@ const SearchableCameraSelect = ({
 export default function CloudRecordings() {
   // ---- Shared state ----
   const [systems, setSystems] = useState<CloudSystem[]>([]);
+  const { user: localUser } = useAuth();
+  const isUserAdmin = isAdmin(localUser);
   const [devices, setDevices] = useState<(CloudDevice & { systemId: string; systemName: string })[]>([]);
   const [selectedSystem, setSelectedSystem] = useState<string>("127.0.0.1");
   const [selectedDevice, setSelectedDevice] = useState<string>("all");
@@ -388,9 +398,11 @@ export default function CloudRecordings() {
           const loadedStatuses = loadedScheds.map((s: any) => s.status).sort().join(",");
 
           if (currentIds !== loadedIds || currentStatuses !== loadedStatuses) {
-            setScheduledRecordings(loadedScheds);
+            // Filter schedules based on permissions
+            const allowedScheds = loadedScheds.filter((s: ScheduledRecording) => hasCameraViewPermission(localUser, s.cameraId));
+            setScheduledRecordings(allowedScheds);
             // Re-reconcile timers
-            loadedScheds.forEach((rec: ScheduledRecording) => {
+            allowedScheds.forEach((rec: ScheduledRecording) => {
               if (rec.status === "pending" || rec.status === "recording") {
                 reconcileTimer(rec);
               }
@@ -649,7 +661,9 @@ export default function CloudRecordings() {
         id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
         systemId: localSystemId, systemName: "", // Hiding local system name text as requested
       }));
-      setDevices(mappedLocal);
+      // Filter local cameras
+      const allowedLocal = mappedLocal.filter(d => hasCameraViewPermission(localUser, d.id));
+      setDevices(allowedLocal);
       setDevicesReady(true);
       // Removed auto-selection of first camera to allow user to explicitly "Choose Camera" first. 
     } catch (e) {
@@ -670,9 +684,11 @@ export default function CloudRecordings() {
             id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
             systemId: system.id, systemName: system.name,
           }));
+          // Filter cloud cameras
+          const allowedCloud = cloudMapped.filter(d => hasCameraViewPermission(localUser, d.id));
           setDevices(prev => {
             const existingIds = new Set(prev.map(d => normalizeId(d.id)));
-            const newOnes = cloudMapped.filter(d => !existingIds.has(normalizeId(d.id)));
+            const newOnes = allowedCloud.filter(d => !existingIds.has(normalizeId(d.id)));
             return [...prev, ...newOnes];
           });
         }
@@ -1610,6 +1626,7 @@ export default function CloudRecordings() {
                                       <Button 
                                         variant="ghost" 
                                         size="icon" 
+                                        disabled={!hasCameraEditPermission(localUser, first.cameraId)}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setScheduleCamera(`${first.systemId}:${first.cameraId}`);
@@ -1624,15 +1641,16 @@ export default function CloudRecordings() {
                                           }
                                           setIsScheduleOpen(true);
                                         }}
-                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all disabled:opacity-30"
                                       >
                                         <Pencil className="h-3.5 w-3.5" />
                                       </Button>
                                       <Button 
                                         variant="ghost" 
                                         size="icon" 
+                                        disabled={!hasCameraEditPermission(localUser, first.cameraId)}
                                         onClick={(e) => { e.stopPropagation(); requestCancel(group.map(r => r.id), true); }}
-                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-red-50 text-black hover:text-red-600 transition-all"
+                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-red-50 text-black hover:text-red-600 transition-all disabled:opacity-30"
                                       >
                                         <Trash2 className="h-3.5 w-3.5" />
                                       </Button>
@@ -1685,6 +1703,7 @@ export default function CloudRecordings() {
               loadingDevices={loadingDevices}
               normalizeId={normalizeId}
               placeholder="Choose Camera"
+              canEdit={(id) => hasCameraEditPermission(localUser, id)}
             />
 
             <div className="space-y-2">
@@ -1864,7 +1883,11 @@ export default function CloudRecordings() {
 
             <div className="flex gap-3 pt-4">
               <Button variant="outline" onClick={() => setIsScheduleOpen(false)} className="flex-1 font-bold">Cancel</Button>
-              <Button onClick={handleScheduleRecording} className="flex-1 font-bold gap-2">
+              <Button 
+                onClick={handleScheduleRecording} 
+                className="flex-1 font-bold gap-2"
+                disabled={!scheduleCamera || !hasCameraEditPermission(localUser, scheduleCamera)}
+              >
                 <PlayCircle className="h-4 w-4" /> Save Schedule
               </Button>
             </div>

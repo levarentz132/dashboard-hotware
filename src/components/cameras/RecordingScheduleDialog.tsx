@@ -16,14 +16,16 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Loader2, AlertCircle, Clock, Video, Activity, Zap } from "lucide-react";
+import { Loader2, AlertCircle, Clock, Video, Activity, Zap, Lock as LockIcon } from "lucide-react";
 import nxAPI from "@/lib/nxapi";
+import { Badge } from "@/components/ui/badge";
 
 interface RecordingScheduleDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     camera: any;
     onSuccess: () => void;
+    readOnly?: boolean;
 }
 
 type RecordingType = "always" | "motion" | "motionLow";
@@ -49,6 +51,7 @@ export default function RecordingScheduleDialog({
     onOpenChange,
     camera,
     onSuccess,
+    readOnly = false,
 }: RecordingScheduleDialogProps) {
     const [isEnabled, setIsEnabled] = useState(false);
     const [schedule, setSchedule] = useState<(ScheduleCell | null)[][]>(
@@ -117,7 +120,7 @@ export default function RecordingScheduleDialog({
             setDragCurrent(null);
         };
 
-        if (dragStart) {
+        if (dragStart && !readOnly) {
             window.addEventListener("mouseup", handleMouseUp);
             return () => window.removeEventListener("mouseup", handleMouseUp);
         }
@@ -214,6 +217,7 @@ export default function RecordingScheduleDialog({
     };
 
     const onMouseDown = (day: number, hour: number) => {
+        if (readOnly) return;
         const clickingCurrent = schedule[day][hour]?.type === activeType;
         setIsRemoving(clickingCurrent);
         setDragStart({ d: day, h: hour });
@@ -221,7 +225,7 @@ export default function RecordingScheduleDialog({
     };
 
     const onMouseEnter = (day: number, hour: number) => {
-        if (dragStart) setDragCurrent({ d: day, h: hour });
+        if (dragStart && !readOnly) setDragCurrent({ d: day, h: hour });
     };
 
     const isInDragRange = (day: number, hour: number) => {
@@ -319,6 +323,11 @@ export default function RecordingScheduleDialog({
                         <div className="flex items-center gap-3">
                             <Clock className="w-5 h-5 text-blue-400" />
                             <span>{camera?.name || "Recording Schedule"}</span>
+                            {readOnly && (
+                                <Badge variant="outline" className="ml-2 border-yellow-500/50 text-yellow-500 bg-yellow-500/10 py-0 h-5">
+                                    Read Only
+                                </Badge>
+                            )}
                         </div>
                     </DialogTitle>
                     <div className="text-xs text-gray-400 mt-2 flex gap-4">
@@ -328,6 +337,18 @@ export default function RecordingScheduleDialog({
                 </DialogHeader>
 
                 <div className="p-6 overflow-y-auto dark-scrollbar flex-grow space-y-8">
+                    {readOnly && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 flex items-start gap-4 animate-in fade-in slide-in-from-top-2">
+                            <AlertCircle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                                <h4 className="text-sm font-bold text-yellow-500 uppercase tracking-tight">Read Only Mode</h4>
+                                <p className="text-xs text-yellow-500/70 leading-relaxed font-medium">
+                                    You do not have permission to modify the recording schedule for this camera. 
+                                    Please contact your administrator if you believe this is an error.
+                                </p>
+                            </div>
+                        </div>
+                    )}
                     {loading ? (
                         <div className="py-20 flex flex-col items-center gap-3">
                             <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -342,6 +363,13 @@ export default function RecordingScheduleDialog({
                                 </div>
                             )}
 
+                            {readOnly && (
+                                <div className="mb-6 bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 p-3 rounded text-sm flex items-center gap-2">
+                                    <LockIcon className="h-4 w-4" />
+                                    <span>You do not have permission to edit this camera's recording schedule.</span>
+                                </div>
+                            )}
+
                             {/* Status & Toggle */}
                             <div className="flex items-center justify-between mb-4 px-1">
                                 <div className="flex items-center gap-2">
@@ -351,6 +379,7 @@ export default function RecordingScheduleDialog({
                                 <div className="flex items-center gap-3">
                                     <span className="text-xs font-semibold text-gray-400 tracking-tighter uppercase">Recording Enable</span>
                                     <button
+                                        disabled={readOnly}
                                         onClick={() => setIsEnabled(!isEnabled)}
                                         className={`w-14 h-7 rounded-full relative transition-colors duration-300 border-2 ${isEnabled ? "bg-green-500 border-green-400/50" : "bg-[#2d333b] border-[#484f58]"}`}
                                     >
@@ -366,14 +395,14 @@ export default function RecordingScheduleDialog({
                             <div className="bg-[#161b22] border border-[#30363d] rounded overflow-hidden">
                                 <div className="overflow-x-auto dark-scrollbar">
                                     <div className="grid grid-cols-[80px_repeat(24,minmax(40px,1fr))] bg-[#30363d] gap-px min-w-[1000px]">
-                                        <button onClick={toggleAll} className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold border-b border-[#30363d] z-10 sticky top-0">ALL</button>
+                                        <button disabled={readOnly} onClick={toggleAll} className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold border-b border-[#30363d] z-10 sticky top-0 disabled:cursor-not-allowed">ALL</button>
                                         {HOURS.map(h => (
-                                            <button key={`h-${h}`} onClick={() => toggleHour(h)} className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold border-b border-[#30363d] sticky top-0 z-10">{h}</button>
+                                            <button key={`h-${h}`} disabled={readOnly} onClick={() => toggleHour(h)} className="bg-[#0d1117] p-2 text-[10px] text-gray-500 font-bold border-b border-[#30363d] sticky top-0 z-10 disabled:cursor-not-allowed">{h}</button>
                                         ))}
 
                                         {DAYS.map((day, dIdx) => (
                                             <>
-                                                <button key={`day-${day}`} onClick={() => toggleDay(dIdx)} className={`bg-[#0d1117] p-2 text-xs font-bold text-left border-r border-[#30363d] border-b border-b-[#30363d] hover:bg-gray-800 transition-colors sticky left-0 z-10 ${day === "Sun" || day === "Sat" ? "text-red-400" : "text-gray-400"}`}>{day}</button>
+                                                <button key={`day-${day}`} disabled={readOnly} onClick={() => toggleDay(dIdx)} className={`bg-[#0d1117] p-2 text-xs font-bold text-left border-r border-[#30363d] border-b border-b-[#30363d] hover:bg-gray-800 transition-colors sticky left-0 z-10 disabled:cursor-not-allowed ${day === "Sun" || day === "Sat" ? "text-red-400" : "text-gray-400"}`}>{day}</button>
                                                 {HOURS.map(h => {
                                                     const isHighlighted = isInDragRange(dIdx, h);
                                                     const cell = schedule[dIdx][h];
@@ -399,7 +428,7 @@ export default function RecordingScheduleDialog({
                                                             key={`${dIdx}-${h}`}
                                                             onMouseDown={() => onMouseDown(dIdx, h)}
                                                             onMouseEnter={() => onMouseEnter(dIdx, h)}
-                                                            className={`aspect-[1/1] cursor-pointer transition-all duration-75 relative z-0 border-r border-[#30363d]/10 border-b border-b-[#30363d]/10 flex flex-col items-center justify-center gap-0.5 ${bgClass}`}
+                                                            className={`aspect-[1/1] transition-all duration-75 relative z-0 border-r border-[#30363d]/10 border-b border-b-[#30363d]/10 flex flex-col items-center justify-center gap-0.5 ${bgClass} ${readOnly ? "cursor-default" : "cursor-pointer"}`}
                                                         >
                                                             {cell && (
                                                                 <>
@@ -428,8 +457,9 @@ export default function RecordingScheduleDialog({
                                             {RECORDING_TYPES.map((type) => (
                                                 <button
                                                     key={type.id}
+                                                    disabled={readOnly}
                                                     onClick={() => setActiveType(type.id as RecordingType)}
-                                                    className={`flex items-center justify-between px-4 py-1.5 rounded-lg border-2 transition-all gap-4 ${activeType === type.id ? `border-blue-400 bg-[#161b22] text-white shadow-lg` : "border-[#30363d] bg-[#0d1117] text-gray-400 hover:bg-gray-800"}`}
+                                                    className={`flex items-center justify-between px-4 py-1.5 rounded-lg border-2 transition-all gap-4 disabled:opacity-50 disabled:cursor-not-allowed ${activeType === type.id ? `border-blue-400 bg-[#161b22] text-white shadow-lg` : "border-[#30363d] bg-[#0d1117] text-gray-400 hover:bg-gray-800"}`}
                                                 >
                                                     <span className="text-sm font-medium">{type.label}</span>
                                                     <div className={`w-2.5 h-2.5 rounded-full ${type.color}`} />
@@ -589,9 +619,11 @@ export default function RecordingScheduleDialog({
 
                 <DialogFooter className="p-6 pt-4 border-t border-[#30363d] bg-[#0d1117] shrink-0">
                     <Button variant="ghost" onClick={() => onOpenChange(false)} className="text-gray-400 hover:text-white">Cancel</Button>
-                    <Button onClick={handleSave} disabled={isSaving || loading} className="bg-blue-600 hover:bg-blue-500 text-white min-w-[140px]">
-                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : "Save Changes"}
-                    </Button>
+                    {!readOnly && (
+                        <Button onClick={handleSave} disabled={isSaving || loading} className="bg-blue-600 hover:bg-blue-500 text-white min-w-[140px]">
+                            {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : "Save Changes"}
+                        </Button>
+                    )}
                 </DialogFooter>
             </DialogContent>
         </Dialog>
