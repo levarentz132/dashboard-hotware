@@ -288,8 +288,8 @@ export default function CameraInventory() {
   };
 
   const handleCameraClick = (camera: CameraDevice) => {
-    setSelectedCameraForSchedule(camera);
-    setIsScheduleDialogOpen(true);
+    // setSelectedCameraForSchedule(camera);
+    // setIsScheduleDialogOpen(true);
   };
 
   const displayCameras = useMemo(() => {
@@ -691,12 +691,12 @@ export default function CameraInventory() {
                                 </div>
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                                  {filteredSystemCameras.map((camera) => (
-                                    <div
-                                      key={`${systemData.systemId}-${camera.id}`}
-                                      onClick={() => handleCameraClick(camera)}
-                                      className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px] cursor-pointer"
-                                    >
+                                    {filteredSystemCameras.map((camera) => (
+                                      <div
+                                        key={`${systemData.systemId}-${camera.id}`}
+                                        // onClick={() => handleCameraClick(camera)}
+                                        className="border rounded-lg p-3 hover:shadow-md transition-shadow bg-white flex flex-col h-full min-h-[200px]"
+                                      >
                                       {/* Header */}
                                       <div className="flex items-start justify-between mb-2">
                                         <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -777,8 +777,8 @@ export default function CameraInventory() {
                 {filteredCameras.map((camera) => (
                   <div
                     key={camera.id}
-                    onClick={() => handleCameraClick(camera)}
-                    className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white cursor-pointer"
+                    // onClick={() => handleCameraClick(camera)}
+                    className="border rounded-lg p-3 md:p-4 hover:shadow-md transition-shadow bg-white"
                   >
                     <div className="flex items-start justify-between mb-2 md:mb-3">
                       <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -831,8 +831,8 @@ export default function CameraInventory() {
                       {filteredCameras.map((camera) => (
                         <tr
                           key={camera.id}
-                          onClick={() => handleCameraClick(camera)}
-                          className="hover:bg-gray-50 cursor-pointer"
+                          // onClick={() => handleCameraClick(camera)}
+                          className="hover:bg-gray-50"
                         >
                           <td className="px-4 lg:px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center">
@@ -870,8 +870,8 @@ export default function CameraInventory() {
                   {filteredCameras.map((camera) => (
                     <div
                       key={camera.id}
-                      onClick={() => handleCameraClick(camera)}
-                      className="bg-white border rounded-lg p-3 cursor-pointer"
+                      // onClick={() => handleCameraClick(camera)}
+                      className="bg-white border rounded-lg p-3"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -910,7 +910,7 @@ export default function CameraInventory() {
         </>
       )}
 
-      <RecordingScheduleDialog
+      {/* <RecordingScheduleDialog
         open={isScheduleDialogOpen}
         onOpenChange={setIsScheduleDialogOpen}
         camera={selectedCameraForSchedule}
@@ -919,7 +919,7 @@ export default function CameraInventory() {
           if (viewMode === "cloud") refetchSync();
           else refetchSingle();
         }}
-      />
+      /> */}
     </div>
   );
 }
