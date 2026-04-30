@@ -97,15 +97,28 @@ export function formatIndonesianDate(dateString: string | null | undefined): str
  */
 export function hasCameraViewPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
-    if (isAdmin(user)) return true;
     
     const rights = user.resourceAccessRights || {};
+    const hasSpecificRights = Object.keys(rights).length > 0;
+    
+    // If the user is an admin AND they don't have any specific resource restrictions, they see everything.
+    // If they HAVE specific restrictions, we must check them even if they are an admin.
+    if (isAdmin(user) && !hasSpecificRights) {
+        return true;
+    }
+    
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
     
     // Check for both original and normalized IDs in the rights map
     const userRights = rights[nid] || rights[cameraId] || "";
-    return userRights !== "" && userRights !== "none";
+    const hasRight = userRights !== "" && userRights !== "none";
+    
+    if (!hasRight) {
+        console.warn(`[Permission] User ${user.username} denied view for camera ${cameraId}. Rights:`, rights);
+    }
+    
+    return hasRight;
 }
 
 /**
@@ -113,9 +126,13 @@ export function hasCameraViewPermission(user: UserPublic | null | undefined, cam
  */
 export function hasCameraEditPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
-    if (isAdmin(user)) return true;
     
     const rights = user.resourceAccessRights || {};
+    const hasSpecificRights = Object.keys(rights).length > 0;
+
+    // Admin bypass only if no specific resource restrictions are defined
+    if (isAdmin(user) && !hasSpecificRights) return true;
+    
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
     
