@@ -4,6 +4,10 @@ import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderF
 import fs from "fs";
 import path from "path";
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -35,6 +39,7 @@ export async function GET(request: NextRequest) {
       let response = await fetch(cloudUrl, {
         method: "GET",
         headers,
+        cache: 'no-store'
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -50,6 +55,7 @@ export async function GET(request: NextRequest) {
           response = await fetch(cloudUrl, {
             method: "GET",
             headers: retryHeaders,
+            cache: 'no-store'
           });
         }
       }
@@ -125,7 +131,7 @@ export async function GET(request: NextRequest) {
         let searchCameraName = "";
         try {
           const deviceUrl = buildCloudUrl(systemId, `/rest/v3/devices/${deviceId}`, new URLSearchParams(), request, systemName || undefined);
-          const devRes = await fetch(deviceUrl, { headers });
+          const devRes = await fetch(deviceUrl, { headers, cache: 'no-store' });
           if (devRes.ok) {
             const devData = await devRes.json();
             searchCameraName = (devData.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
@@ -153,20 +159,41 @@ export async function GET(request: NextRequest) {
              let timeStr = "";
              let foundCameraName = "";
  
-             // Pattern A: New simplified format {CameraName}_{HHmmss}.png
-             const simpleMatch = file.match(/^(.+)_(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
-             if (simpleMatch) {
-                foundCameraName = simpleMatch[1];
-                timeStr = simpleMatch[2];
-                // Check if this camera name matches our target
-                const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-                if (foundCameraName.toLowerCase() === safeTarget.toLowerCase() || 
-                    foundCameraName.toLowerCase() === deviceId.toLowerCase()) {
-                  isMatch = true;
-                }
+             // Pattern A: New format {CameraName}_{YYYY-MM-DD}_{HHmmss}_{ID}.png
+             const newFormatMatch = file.match(/^(.+)_(\d{4}-\d{2}-\d{2})_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
+             if (newFormatMatch) {
+               foundCameraName = newFormatMatch[1];
+               const fileDateStr = newFormatMatch[2];
+               timeStr = newFormatMatch[3];
+               const fileIdHash = newFormatMatch[4];
+
+               const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+               const isNameMatch = foundCameraName.toLowerCase() === safeTarget.toLowerCase();
+               
+               // If we have an ID hash in the filename, use it for exact matching
+               const idHash = deviceId.slice(-4).toLowerCase();
+               const isIdMatch = fileIdHash && fileIdHash === idHash;
+
+               if (isIdMatch || (isNameMatch && !fileIdHash)) {
+                 isMatch = true;
+               }
+             }
+
+             // Pattern B: Legacy simplified format {CameraName}_{HHmmss}.png
+             if (!isMatch) {
+               const simpleMatch = file.match(/^(.+)_(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
+               if (simpleMatch) {
+                  foundCameraName = simpleMatch[1];
+                  timeStr = simpleMatch[2];
+                  const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+                  if (foundCameraName.toLowerCase() === safeTarget.toLowerCase() || 
+                      foundCameraName.toLowerCase() === deviceId.toLowerCase()) {
+                    isMatch = true;
+                  }
+               }
              }
  
-             // Pattern B: Legacy ID format {deviceId}__{cameraName}_{YYYYMMDD}_{HHMMSS}.png
+             // Pattern C: Legacy ID format {deviceId}__{cameraName}_{YYYYMMDD}_{HHMMSS}.png
              if (!isMatch) {
                const idSplit = file.split("__");
                if (idSplit.length > 1) {
@@ -201,19 +228,25 @@ export async function GET(request: NextRequest) {
              const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
  
              if (timestamp >= startLimit && timestamp <= endLimit) {
-              const isVideo = file.endsWith(".mp4");
-              const stats = fs.statSync(filePath);
-              // Simple heuristic: if file is very small (< 150KB), it's probably a 1s snapshot fallback
-              const isShortVideo = isVideo && stats.size < 150000; 
+               const stats = fs.statSync(filePath);
+               const isVideo = file.endsWith(".mp4");
+               // Simple heuristic: if file is very small (< 150KB), it's probably a 1s snapshot fallback
+               const isShortVideo = isVideo && stats.size < 150000; 
 
-              allPeriods.push({
-                startTimeMs: timestamp,
-                durationMs: isVideo ? (isShortVideo ? 1000 : 60000) : 0,
-                isScreenshot: file.endsWith(".png") || isShortVideo,
-                isVideo: isVideo && !isShortVideo,
-                isLocal: true,
-                serverId: "local-storage",
-                fileName: file,
+               // Estimate duration from file mtime if it's a local video
+               // This provides a more accurate duration (e.g. 11s) than the previous 60s hardcoded value.
+               let durationMs = isVideo ? (isShortVideo ? 1000 : Math.max(1000, stats.mtimeMs - timestamp)) : 0;
+               // Safety cap: if mtime suggests more than 1 hour, fallback to 1 minute
+               if (durationMs > 3600000) durationMs = 60000;
+
+               allPeriods.push({
+                 startTimeMs: timestamp,
+                 durationMs: durationMs,
+                 isScreenshot: file.endsWith(".png") || isShortVideo,
+                 isVideo: isVideo && !isShortVideo,
+                 isLocal: true,
+                 serverId: "local-storage",
+                 fileName: file,
                  dateFolder: dateFolder,
                  cameraName: foundCameraName || searchCameraName || "Unknown",
                  cameraFolderName: null, // No subfolder for flat files
@@ -305,30 +338,41 @@ export async function GET(request: NextRequest) {
          // 1. Explicit filename check (Same download link)
          if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
 
-         // 2. Time-based deduplication (If within 10 seconds of each other)
-         const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
-         if (timeDiff < 10000) {
-            // If we have a VMS record and a local one (Snapshot or Video), merge them.
-            // We prefer keeping the LOCAL record for snapshots to avoid VMS 404s.
-            if (!p.isLocal && candidate.isLocal) {
-               if (p.isScreenshot || candidate.isScreenshot) return false; // Keep searching/Don't skip candidate yet (it will become 'p' later because it's sorted)
-               return true; // Skip local video if VMS video exists
-            }
-            if (p.isLocal && !candidate.isLocal) {
-               if (p.isScreenshot || candidate.isScreenshot) return true; // Skip VMS screenshot if local exists
-            }
+          // 2. Time-based deduplication (If within 65 seconds of each other)
+          // We use 65s because local files are rounded to the minute (:00), 
+          // so a VMS record at :59 would be 59s away.
+          const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
+          if (timeDiff < 65000) {
+             // If we have a VMS record (p) and a local one (candidate), merge them.
+             // We prefer keeping the VMS record for its accurate duration, 
+             // but we enrich it with the local file path for reliable downloading.
+             if (!p.isLocal && candidate.isLocal) {
+                if (p.isScreenshot || candidate.isScreenshot) return false; 
+                
+                p.isLocal = true;
+                p.fileName = candidate.fileName;
+                p.dateFolder = candidate.dateFolder;
+                p.url = candidate.url;
+                return true; // Skip candidate (merged into p)
+             }
+             
+             if (p.isLocal && !candidate.isLocal) {
+                if (p.isScreenshot || candidate.isScreenshot) {
+                   // For screenshots, we already have the local one (p). 
+                   // Keep it and skip the VMS candidate.
+                   return true;
+                }
+             }
 
-            // If both are local, keep the first one (Screenshot) and skip the second (Video)
-            if (p.isLocal && candidate.isLocal) {
-               // If one is a screenshot and they are in the same minute, skip the video
-               const sameMinute = Math.floor(p.startTimeMs / 60000) === Math.floor(candidate.startTimeMs / 60000);
-               if (sameMinute && (p.isScreenshot || candidate.isScreenshot)) return true;
-               return true; 
-            }
+             // If both are local, keep the first one (usually Screenshot due to sort)
+             if (p.isLocal && candidate.isLocal) {
+                const sameMinute = Math.floor(p.startTimeMs / 60000) === Math.floor(candidate.startTimeMs / 60000);
+                if (sameMinute) return true;
+             }
 
-            // If both are from VMS, skip the duplicate.
-            if (!p.isLocal && !candidate.isLocal && timeDiff < 2000) return true;
-         }
+             // If both are from VMS, skip the duplicate.
+             if (!p.isLocal && !candidate.isLocal && timeDiff < 5000) return true;
+          }
          return false;
       });
 
@@ -344,7 +388,12 @@ export async function GET(request: NextRequest) {
     logger.warn("[recordings] Failed to scan local storage folders:", err);
   }
     
-    return NextResponse.json(allPeriods);
+    return NextResponse.json(allPeriods, {
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
+
   } catch (error) {
     logger.error("[recordings] Exception:", error);
     return NextResponse.json(

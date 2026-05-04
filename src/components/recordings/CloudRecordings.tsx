@@ -457,17 +457,43 @@ export default function CloudRecordings() {
   };
 
   const confirmCancelAction = async () => {
-    for (const id of pendingCancelIds) {
-      await cancelSchedule(id, pendingCancelForceDelete);
-    }
+    // Record action time to prevent polling race condition
+    lastActionTime.current = Date.now();
+    
+    const idsToCancel = [...pendingCancelIds];
     setIsCancelConfirmOpen(false);
     setPendingCancelIds([]);
+
+    // To avoid multiple rapid state updates and saves, we process VMS stops first 
+    // and then perform a single state update at the end.
+    for (const id of idsToCancel) {
+      const rec = scheduledRecordings.find(r => r.id === id);
+      if (rec && rec.status === "recording") {
+        try {
+          const cameraDeviceId = getOriginalDeviceId(rec.cameraId);
+          await nxAPI.updateDevice(cameraDeviceId, {
+            schedule: { isEnabled: false }
+          });
+          console.log(`[CloudRecordings] Recording stopped on VMS for ${rec.cameraName}`);
+        } catch (err) {
+          console.error("[CloudRecordings] Failed to stop recording on VMS:", err);
+        }
+      }
+    }
+
+    // Now update state ONCE for the entire batch
+    setScheduledRecordings(prev => {
+      const toRemove = new Set(idsToCancel);
+      return prev.filter(r => !toRemove.has(r.id));
+    });
+    
     setPendingCancelForceDelete(false);
   };
 
   const scheduleTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const originalSchedules = useRef<Map<string, any>>(new Map());
   const hasLoadedFromDisk = useRef(false);
+  const lastActionTime = useRef(0);
 
   // ---- Persistence Logic ----
   const saveToPersistence = async (scheds: ScheduledRecording[], originals: any) => {
@@ -491,6 +517,11 @@ export default function CloudRecordings() {
   };
 
   const loadFromPersistence = async () => {
+    // RACE CONDITION PREVENTION:
+    // If we recently performed an action (save/delete), skip polling for 5 seconds
+    // to give the server time to finish writing the file and for the next poll to get fresh data.
+    if (Date.now() - lastActionTime.current < 5000) return;
+
     try {
       const res = await fetch("/api/cloud/recordings/scheduled");
       if (res.ok) {
@@ -655,10 +686,22 @@ export default function CloudRecordings() {
   useEffect(() => {
     if (scheduledRecordings.length < prevScheduledCount.current) {
       // A task finished or was removed. Refresh the list to show new recording/snapshot.
+      // We also force a re-load of the persistence to ensure state is in sync with server watchdog.
+      loadFromPersistence();
       setTimeout(() => handleSearchRecentRecordings(), 1500); // Small delay to allow VMS to index
     }
     prevScheduledCount.current = scheduledRecordings.length;
   }, [scheduledRecordings.length]);
+
+  // Periodic results refresh (every 30s) to catch any background completions not detected by count changes
+  useEffect(() => {
+    const resultsPollId = setInterval(() => {
+      if (scheduledRecordings.some(r => r.status === "recording" || r.status === "in progress" || r.status === "capturing")) {
+        handleSearchRecentRecordings();
+      }
+    }, 30000);
+    return () => clearInterval(resultsPollId);
+  }, [scheduledRecordings]);
 
   // ---- Recent Recordings tab state ----
   const [recentRecordings, setRecentRecordings] = useState<RecentRecording[]>([]);
@@ -1109,104 +1152,6 @@ export default function CloudRecordings() {
         const entryId = `sched-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
         const [sh, sm] = tStart.split(":").map(Number);
 
-        // ── CASE: IMMEDIATE SNAPSHOT (Special Fast Path) ────────────────────
-        if (scheduleType === "screenshot" && (startMs <= nowMs + 10000)) {
-          const immediateEntryId = `snap-${Date.now()}`;
-          const snapshotEntry: ScheduledRecording = {
-            id: immediateEntryId,
-            cameraId: normalizeId(cameraDeviceId),
-            cameraName: device?.name || "Sensor",
-            systemId: systemId,
-            systemName: device?.systemName || "",
-            date: finalTDate,
-            startTime: tStart, // Always use the original intended time
-            endTime: tEnd,
-            startMs: startMs,
-            endMs: endMs,
-            type: "screenshot",
-            status: "capturing",
-            scheduledBy: effectiveUser?.username || "System",
-            batchId,
-          };
-          setScheduledRecordings(prev => {
-            // Remove any existing duplicate tasks for this camera/time/type to prevent double-firing
-            const filtered = prev.filter(r => !(
-              r.cameraId === snapshotEntry.cameraId &&
-              r.startTime === snapshotEntry.startTime &&
-              r.type === snapshotEntry.type &&
-              new Date(r.date).toDateString() === new Date(snapshotEntry.date).toDateString()
-            ));
-            return [snapshotEntry, ...filtered];
-          });
-          totalTasksScheduled++;
-
-          (async () => {
-            try {
-              await fetch("/api/cloud/recordings/screenshot", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  systemId: systemId,
-                  deviceId: cameraDeviceId,
-                  cameraName: device?.name || "Camera",
-                  timestampMs: Date.now(),
-                  scheduledStartTime: tStart, // Pass the original time
-                })
-              });
-
-              // For recurring snapshots, we actually want them to persist and move to next occurrence
-              if (isRecurring) {
-                const nextOccurDate = new Date(finalTDate);
-                if (scheduleDays.length > 0) {
-                  nextOccurDate.setDate(nextOccurDate.getDate() + 7);
-                } else {
-                  // Monthly
-                  const dayNum = Number(scheduleMonthDay);
-                  let y = nextOccurDate.getFullYear();
-                  let mIdx = nextOccurDate.getMonth();
-                  while (true) {
-                    mIdx++;
-                    const next = new Date(y, mIdx, dayNum);
-                    if (next.getDate() === dayNum) { nextOccurDate.setTime(next.getTime()); break; }
-                  }
-                }
-
-                setScheduledRecordings(prev => {
-                  const filtered = prev.filter(r => r.id !== immediateEntryId);
-                  const recurringFollowup: ScheduledRecording = {
-                    ...snapshotEntry,
-                    id: entryId,
-                    date: nextOccurDate,
-                    status: "pending",
-                    screenshotTime: tStart, // Preserve the time display
-                    startMs: nextOccurDate.setHours(sh, sm, 0, 0),
-                    endMs: nextOccurDate.setHours(sh, sm, 0, 0),
-                    recurrence: scheduleDays.length > 0 ? "weekday" : "monthday",
-                    recurrenceDay: scheduleDays.length > 0 ? undefined : Number(scheduleMonthDay),
-                  };
-                  return [recurringFollowup, ...filtered];
-                });
-              } else {
-                setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
-              }
-
-              addPersistentNotification({
-                type: 'success',
-                title: 'Snapshot Captured',
-                message: `Snapshot for ${device?.name || "Camera"} is complete and stored in local archive.`,
-                systemId: systemId,
-                deviceId: cameraDeviceId,
-                startTimeMs: Date.now(),
-                durationMs: 0
-              });
-              setTimeout(() => handleSearchRecentRecordings(), 1500);
-            } catch (err: any) {
-              setScheduledRecordings(prev => prev.filter(r => r.id !== immediateEntryId));
-              addPersistentNotification({ type: 'error', title: 'Snapshot Failed', message: err.message });
-            }
-          })();
-          return;
-        }
 
         // ── CASE: FUTURE TASKS (Delegated to Watchdog) ──────────────────────
         const entryStatus = startMs > nowMs ? "pending" : (scheduleType === "screenshot" ? "in progress" : "recording");
@@ -1239,6 +1184,7 @@ export default function CloudRecordings() {
     });
 
     if (totalTasksScheduled > 0) {
+      lastActionTime.current = Date.now();
       setScheduledRecordings(prev => {
         // Remove old entries for this batch OR remove duplicates if adding individual tasks
         let filtered = prev;
@@ -1599,21 +1545,19 @@ export default function CloudRecordings() {
                                   </TableCell>
                                   <TableCell className="text-right">
                                     <div className="flex items-center justify-end gap-1">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => {
-                                          if (!rec.isScreenshot) {
-                                            addPersistentNotification({ type: 'info', title: 'Preview Disabled', message: 'Video preview is currently disabled for optimization.' });
-                                            return;
-                                          }
-                                          handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
-                                        }}
-                                        className={cn("h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all", !rec.isScreenshot && "opacity-50")}
-                                        title={rec.isScreenshot ? "View Image" : "Preview"}
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
+                                      {rec.isScreenshot && (
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => {
+                                            handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
+                                          }}
+                                          className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                          title="View Image"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                      )}
                                       <Button
                                         variant="ghost"
                                         size="icon"

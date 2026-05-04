@@ -166,441 +166,31 @@ const startWatchdog = () => {
           changed = true; // Mark as changed to save the cleaned-up list
         }
       }
+      const saveState = async (scheds: any[]) => {
+        // ── CRITICAL: Re-read the file to avoid overwriting user changes (like deletions) ──
+        // that happened while the watchdog was performing async work.
+        let diskData: any = { schedules: [] };
+        try {
+          const content = await fs.readFile(DATA_FILE, "utf-8");
+          diskData = JSON.parse(content);
+        } catch (e) {}
 
-      const updatedSchedules = await Promise.all(
-        uniqueSchedules.map(async (rec: any) => {
-          // Skip permanently finished tasks
-          if (rec.status === "completed") return rec;
-
-          // Calculate start/end times in MS
-          const startParts = rec.startTime.split(":").map(Number);
-          const endParts = (rec.endTime || rec.startTime).split(":").map(Number);
-
-          const sh = startParts[0];
-          const sm = startParts[1];
-          const ss = startParts[2] || 0; // Default to 0 seconds for start
-
-          const eh = endParts[0];
-          const em = endParts[1];
-          const es = endParts[2] !== undefined ? endParts[2] : 59; // Default to 59s for end
-
-          // Determine absolute start/end times
-          const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, ss, 0);
-          const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, es, 999);
-
-          // ── SCREENSHOT FAST PATH ─────────────────────────────────────────────
-          if (rec.type === "screenshot") {
-            const catchUpWindowMs = 2 * 60 * 1000; // 2 minutes
-            const isWithinWindow = now >= startMs && now < startMs + catchUpWindowMs;
-
-            if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress") && isWithinWindow) {
-              // ── IMMEDIATELY mark as "capturing" to prevent re-entry on next tick ──
-              rec.status = "capturing" as any;
-              changed = true;
-
-              const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-              // logger.debug(`[Watchdog] 📸 Firing snapshot for ${rec.cameraName} (Scheduled: ${rec.startTime}, Now: ${time})`);
-              try {
-                const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
-                const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
-
-                const screenshotHeaders: Record<string, string> = {
-                  "Content-Type": "application/json",
-                };
-                const currentAuth = rec.auth || globalAuth;
-                if (currentAuth) screenshotHeaders["x-watchdog-auth"] = currentAuth;
-                if (nxLocationIp && nxLocationIp !== "localhost" && nxLocationIp !== "null") {
-                  screenshotHeaders["x-nx-location-ip"] = nxLocationIp;
-                }
-                if (nxLocationPort && nxLocationPort !== "7001" && nxLocationPort !== "null") {
-                  screenshotHeaders["x-nx-location-port"] = nxLocationPort;
-                }
-
-                // logger.debug(`[Watchdog] Internal POST to ${internalUrl} for ${rec.cameraName} (VMS: ${nxLocationIp || "Cloud Relay"})`);
-                const screenshotRes = await fetch(internalUrl, {
-                  method: "POST",
-                  headers: screenshotHeaders,
-                  body: JSON.stringify({
-                    systemId: rec.systemId,
-                    deviceId: rec.cameraId,
-                    cameraName: rec.cameraName,
-                    scheduledStartTime: rec.startTime, // Pass the original human-set time
-                    // removed timestampMs to force Live frame capture (most reliable)
-                  }),
-                });
-
-                if (!screenshotRes.ok) {
-                  const errText = await screenshotRes.text();
-                  logger.error(`[Watchdog] 📸 Snapshot API failed (${screenshotRes.status}): ${errText}`);
-                  rec.status = "failed";
-                  rec.record = false;
-                } else {
-                  const result = await screenshotRes.json();
-                  console.log(`[Watchdog] ✅ Snapshot saved for ${rec.cameraName}: ${result.fileName}`);
-                  logRecordingEvent(`Snapshot captured successfully: ${rec.cameraName}`, rec.scheduledBy);
-                  rec.record = false;
-
-                  if (rec.recurrence && rec.recurrence !== "none") {
-                    const nextDate = new Date(rec.date);
-                    if (rec.recurrence === "weekday") {
-                      nextDate.setDate(nextDate.getDate() + 7);
-                    } else if (rec.recurrence === "monthday") {
-                      const targetDay = rec.recurrenceDay;
-                      if (targetDay) {
-                        let year = nextDate.getFullYear();
-                        let monthIdx = nextDate.getMonth() + 1;
-                        let next = new Date(year, monthIdx, targetDay);
-                        while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-                        nextDate.setTime(next.getTime());
-                      } else {
-                        nextDate.setMonth(nextDate.getMonth() + 1);
-                      }
-                    }
-
-                    // Reset to original intended time for the next occurrence
-                    nextDate.setHours(sh, sm, ss, 0);
-
-                    rec.status = "pending";
-                    rec.date = nextDate.toISOString();
-                    rec.startMs = nextDate.getTime();
-                    rec.endMs = nextDate.getTime() + (endMs - startMs);
-                  } else {
-                    rec.status = "completed";
-
-                    // Trigger persistent notification for WATCHDOG completion (screenshots)
-                    const currentUserKey = rec.userKey || notificationUserKey;
-                    const currentAuth = rec.auth || globalAuth;
-                    if (currentUserKey) {
-                      const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
-                      const notifHeaders: Record<string, string> = { "Content-Type": "application/json" };
-                      if (currentAuth) notifHeaders["x-watchdog-auth"] = currentAuth;
-
-                      await fetch(`http://127.0.0.1:${port}/api/notifications`, {
-                        method: "POST",
-                        headers: notifHeaders,
-                        body: JSON.stringify({
-                          username: currentUserKey,
-                          type: "success",
-                          title: "Snapshot Done",
-                          message: `Scheduled snapshot for ${rec.cameraName} is finished.`,
-                          systemId: rec.systemId,
-                          deviceId: rec.cameraId,
-                          startTimeMs: startMs,
-                          durationMs: 0
-                        })
-                      }).catch(e => console.error("[Watchdog] Notification failed:", e.message));
-                    }
-                  }
-                }
-                changed = true;
-              } catch (e: any) {
-                logger.error(`[Watchdog] 🛑 Snapshot exception for ${rec.cameraName}:`, e.message);
-                logRecordingEvent(`Scheduled snapshot FAILED for ${rec.cameraName}: ${e.message}`, rec.scheduledBy);
-                rec.status = "failed";
-                rec.record = false;
-                changed = true;
-              }
-            }
-            return rec;
+        const diskSchedules = diskData.schedules || [];
+        
+        // Update statuses in the disk list based on our processed list
+        const finalSchedules = diskSchedules.map((diskRec: any) => {
+          const ourRec = scheds.find(s => s.id === diskRec.id);
+          if (ourRec) {
+            return { ...diskRec, status: ourRec.status, date: ourRec.date, startMs: ourRec.startMs, endMs: ourRec.endMs, record: ourRec.record };
           }
+          return diskRec;
+        });
 
-          // ── VIDEO RECORDING: CASE 1 — Start or Retry ──────────────────────
-          if (
-            (rec.status === "pending" || rec.status === "failed" || rec.status === "in progress" || rec.status === "recording") &&
-            now >= startMs &&
-            now < endMs
-          ) {
-            if (rec.status === "recording" && originalSchedules[rec.id]) {
-              return rec;
-            }
-
-            console.log(`[Watchdog] Starting/Retrying video recording for ${rec.cameraName} (VMS: ${ip}:${port})`);
-            if (!globalAuth || !ip || ip === "localhost") {
-              logger.warn(`[Watchdog] Cannot patch camera ${rec.cameraName}: VMS IP is not configured or auth is missing. (Current IP: ${ip})`);
-              return rec;
-            }
-            try {
-              const cleanId = rec.cameraId.replace(/[{}]/g, "");
-              const dDate = new Date(rec.date);
-              let dayOfWeek = dDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-              if (dayOfWeek === 0) dayOfWeek = 7; // Convert to 1-7 (Mon-Sun)
-
-              // Calculate seconds from start of day for 'in progress' tasks
-              const dNow = new Date();
-              const nowSecondsOfDay = dNow.getHours() * 3600 + dNow.getMinutes() * 60 + dNow.getSeconds();
-
-              let startSec = sh * 3600 + sm * 60;
-              let endSec = eh * 3600 + em * 60 + 59;
-
-              // Apply Sunday offset (-3600s) to match CameraInventory logic
-              if (dayOfWeek === 7) {
-                startSec -= 3600;
-                endSec -= 3600;
-              }
-
-              if (rec.status === "in progress") {
-                // If in-progress, start NOW and limit to at most 1 minute, 
-                // but no further than the scheduled end (inclusive of the target minute's end)
-                startSec = nowSecondsOfDay;
-                endSec = Math.min(endSec, startSec + 60);
-
-                // Update absolute endMs so CASE 2 triggers correctly at the end of this minute/window
-                rec.endMs = dNow.getTime() + (endSec - startSec) * 1000;
-              }
-              const currentAuth = rec.auth || globalAuth;
-              try {
-                const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, currentAuth, ip, port);
-                if (cam?.schedule) {
-                  originalSchedules[rec.id] = cam.schedule;
-                } else {
-                  originalSchedules[rec.id] = { isEnabled: false };
-                }
-              } catch (e) {
-                logger.debug(`[Watchdog] Could not fetch original schedule for ${rec.cameraName}:`, e);
-                // Set a placeholder to prevent re-fetching/patching every 2 seconds on failure
-                originalSchedules[rec.id] = originalSchedules[rec.id] || { isEnabled: false };
-              }
-
-              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
-                schedule: {
-                  isEnabled: true,
-                  tasks: [
-                    {
-                      startTime: startSec,
-                      endTime: endSec,
-                      dayOfWeek: dayOfWeek,
-                      recordingType: "always",
-                      streamQuality: "lowest",
-                      fps: 0,
-                      bitrateKbps: 0,
-                      metadataTypes: "none"
-                    }
-                  ]
-                },
-              }, currentAuth, ip, port);
-
-              // logger.debug(`[Watchdog] VMS schedule set for ${rec.cameraName} (${startSec}s → ${endSec}s, day ${dayOfWeek})`);
-              logRecordingEvent(`Scheduled recording task executed for ${rec.cameraName}`, rec.scheduledBy);
-              rec.status = "recording";
-              rec.record = true;
-              changed = true;
-            } catch (e) {
-              logger.debug(`[Watchdog] Failed to start video recording:`, e);
-              rec.status = "failed";
-              rec.record = false;
-              changed = true;
-            }
-            return rec;
-          }
-
-          // ── VIDEO RECORDING: CASE 2 — Stop & Complete ──────────────────────
-          else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress")) {
-            logger.debug(`[Watchdog] Completing video recording for ${rec.cameraName}`);
-
-            // ── IMMEDIATELY mark as "completing" to prevent re-entry on next tick ──
-            // The watchdog runs every 2s. Without this guard, the async VMS PATCH
-            // below would still be running when the next tick fires, causing
-            // duplicate log entries and duplicate auto-save triggers.
-            rec.status = "completing" as any;
-            changed = true;
-
-            const currentAuth = rec.auth || globalAuth;
-            if (!currentAuth) {
-              console.warn(`[Watchdog] No auth available — cannot revert VMS schedule for ${rec.cameraName}.`);
-              rec.status = "completed";
-              return rec;
-            }
-            try {
-              const cleanId = rec.cameraId.replace(/[{}]/g, "");
-
-              // ── Step 1: DISABLE recording immediately ──────────────────────
-              // Always disable first to guarantee the camera stops NOW,
-              // regardless of what the original schedule says.
-              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
-                schedule: { isEnabled: false }
-              }, currentAuth, ip, port);
-              // logger.debug(`[Watchdog] Recording stopped for ${rec.cameraName}`);
-
-              // ── Step 3: Trigger Auto-Download (Server-side) ────────────────
-              // We trigger the internal download API to pull the clip and save it to disk.
-              // We wait 5s to let the VMS index the new clip before trying to fetch it.
-              const isTooOld = (now - endMs) > MAX_AUTOSAVE_AGE_MS;
-
-              if (!isTooOld) {
-                // Trigger auto-save immediately in the background
-                (async () => {
-                  try {
-                    const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
-                    const autoSaveUrl = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
-
-                    // logger.debug(`[Watchdog] Triggering auto-save for ${rec.cameraName} via ${autoSaveUrl}`);
-
-                    const downloadHeaders: Record<string, string> = {};
-                    const currentAuth = rec.auth || globalAuth;
-                    if (currentAuth) downloadHeaders["x-watchdog-auth"] = currentAuth;
-                    if (nxLocationIp && nxLocationIp !== "localhost" && nxLocationIp !== "null") {
-                      downloadHeaders["x-nx-location-ip"] = nxLocationIp;
-                    }
-                    if (nxLocationPort && nxLocationPort !== "7001" && nxLocationPort !== "null") {
-                      downloadHeaders["x-nx-location-port"] = nxLocationPort;
-                    }
-
-                    const downloadRes = await fetch(autoSaveUrl, {
-                      headers: downloadHeaders
-                    });
-                    const downloadResult = await downloadRes.json();
-                    if (downloadResult.success) {
-                      console.log(`[Watchdog] ✅ Auto-save complete for ${rec.cameraName}: ${downloadResult.file}`);
-
-                      // Trigger persistent notification for WATCHDOG completion (videos)
-                      const currentUserKey = rec.userKey || notificationUserKey;
-                      const currentAuth = rec.auth || globalAuth;
-                      if (currentUserKey) {
-                        const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
-                        const notifHeaders: Record<string, string> = { "Content-Type": "application/json" };
-                        if (currentAuth) notifHeaders["x-watchdog-auth"] = currentAuth;
-
-                        await fetch(`http://127.0.0.1:${port}/api/notifications`, {
-                          method: "POST",
-                          headers: notifHeaders,
-                          body: JSON.stringify({
-                            username: currentUserKey,
-                            type: "success",
-                            title: "Auto-Save Done",
-                            message: `Scheduled recording for ${rec.cameraName} is saved to disk.`,
-                            systemId: rec.systemId,
-                            deviceId: cleanId,
-                            startTimeMs: rec.startMs,
-                            durationMs: rec.endMs - rec.startMs
-                          })
-                        }).catch(e => console.error("[Watchdog] Notification failed:", e.message));
-                      }
-                    } else {
-                      console.warn(`[Watchdog] ⚠️ Auto-save failed for ${rec.cameraName}:`, downloadResult.error || JSON.stringify(downloadResult));
-                    }
-                  } catch (saveErr: any) {
-                    console.error(`[Watchdog] 🛑 Auto-save trigger exception for ${rec.cameraName}:`, saveErr.message);
-                  }
-                })();
-              } else {
-                // logger.debug(`[Watchdog] ⏩ Skipping auto-save for ${rec.cameraName} (Recording is too old: ${Math.round((now - endMs) / 60000)}m ago)`);
-              }
-
-              // ── Step 2: Restore original schedule (with isEnabled: false) ───────────
-              // Only restore if the original had tasks (don't re-enable a blank schedule)
-              const original = originalSchedules[rec.id];
-              if (original) {
-                // Force isEnabled: false at the end of our scheduled task
-                const updatedSchedule = { ...original, isEnabled: false };
-                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: updatedSchedule }, globalAuth, ip, port);
-                // console.log(`[Watchdog] Restored original schedule (Disabled) for ${rec.cameraName}`);
-              } else {
-                // If no original schedule was saved, ensure tasks are cleared
-                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
-                  schedule: { isEnabled: false, tasks: [] }
-                }, globalAuth, ip, port);
-                // console.log(`[Watchdog] Cleared temporary tasks for ${rec.cameraName}`);
-              }
-
-              delete originalSchedules[rec.id];
-
-              if (rec.recurrence && rec.recurrence !== "none") {
-                const nextDate = new Date(rec.date);
-                if (rec.recurrence === "weekday") {
-                  nextDate.setDate(nextDate.getDate() + 7);
-                } else if (rec.recurrence === "monthday") {
-                  const targetDay = rec.recurrenceDay;
-                  if (targetDay) {
-                    let year = nextDate.getFullYear();
-                    let monthIdx = nextDate.getMonth() + 1;
-                    let next = new Date(year, monthIdx, targetDay);
-                    while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-                    nextDate.setTime(next.getTime());
-                  } else {
-                    nextDate.setMonth(nextDate.getMonth() + 1);
-                  }
-                }
-
-                // Reset to original intended time for the next occurrence
-                nextDate.setHours(sh, sm, ss, 0);
-
-                rec.status = "pending";
-                rec.record = false;
-                rec.date = nextDate.toISOString();
-                rec.startMs = nextDate.getTime();
-                rec.endMs = nextDate.getTime() + (endMs - startMs);
-              } else {
-                rec.status = "completed";
-                rec.record = false;
-              }
-              // Log exactly once after final status is set
-              logRecordingEvent(`Recording finished successfully: ${rec.cameraName}`, rec.scheduledBy);
-              changed = true;
-            } catch (e: any) {
-              const retryCount = (rec.stopRetryCount || 0) + 1;
-              const lastRetry = rec.lastStopRetryMs || 0;
-              const waitMs = 30000; // 30 seconds backoff
-
-              if (now - lastRetry > waitMs) {
-                if (retryCount <= 5) {
-                  console.error(`[Watchdog] Stop failed (Retry ${retryCount}/5 in 30s):`, e.message);
-                  logRecordingEvent(`Stop recording RETRY (${retryCount}/5) for ${rec.cameraName}: ${e.message}`, rec.scheduledBy);
-                  rec.stopRetryCount = retryCount;
-                  rec.lastStopRetryMs = now;
-                } else {
-                  console.error(`[Watchdog] Stop FAILED after 5 retries for ${rec.cameraName}:`, e.message);
-                  logRecordingEvent(`Stop recording PERMANENTLY FAILED after 5 retries for ${rec.cameraName}`, rec.scheduledBy);
-                  rec.status = "failed";
-                  rec.stopRetryCount = 0;
-                }
-              }
-              // Keep as "recording" so we stay in this loop until max retries
-              if (rec.status !== "failed") rec.status = "recording";
-              changed = true;
-            }
-          }
-
-
-          // ── CASE 3: Missed/Expired Tasks ──────────────────────────────────
-          else if (now >= endMs && rec.status === "pending") {
-            // logger.debug(`[Watchdog] Marking missed task as completed/expired: ${rec.cameraName} (End was ${new Date(endMs).toLocaleString()})`);
-
-            if (rec.recurrence && rec.recurrence !== "none") {
-              const nextDate = new Date(rec.date);
-              if (rec.recurrence === "weekday") {
-                nextDate.setDate(nextDate.getDate() + 7);
-              } else if (rec.recurrence === "monthday") {
-                const targetDay = rec.recurrenceDay;
-                if (targetDay) {
-                  let year = nextDate.getFullYear();
-                  let monthIdx = nextDate.getMonth() + 1;
-                  let next = new Date(year, monthIdx, targetDay);
-                  while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-                  nextDate.setTime(next.getTime());
-                } else {
-                  nextDate.setMonth(nextDate.getMonth() + 1);
-                }
-              }
-              nextDate.setHours(sh, sm, ss, 0);
-              rec.status = "pending";
-              rec.date = nextDate.toISOString();
-              rec.startMs = nextDate.getTime();
-              rec.endMs = nextDate.getTime() + (endMs - startMs);
-            } else {
-              rec.status = "completed";
-            }
-            changed = true;
-          }
-
-          return rec;
-        })
-      );
-
-      if (changed) {
         await fs.writeFile(
           DATA_FILE,
           JSON.stringify({
-            schedules: updatedSchedules,
+            ...diskData,
+            schedules: finalSchedules,
             originalSchedules,
             globalAuth,
             nxLocationIp,
@@ -609,15 +199,209 @@ const startWatchdog = () => {
             appPort: detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010")
           }, null, 2)
         );
+      };
+
+      // ── Phase 1: Identify and Mark Tasks to Process ────────────────────────
+      const tasksToExecute: any[] = [];
+      for (const rec of uniqueSchedules) {
+        if (rec.status === "completed") continue;
+
+        const startParts = rec.startTime.split(":").map(Number);
+        const endParts = (rec.endTime || rec.startTime).split(":").map(Number);
+        const sh = startParts[0], sm = startParts[1], ss = startParts[2] || 0;
+        const eh = endParts[0], em = endParts[1], es = endParts[2] !== undefined ? endParts[2] : 59;
+        const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, ss, 0);
+        const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, es, 999);
+
+        // Screenshot logic
+        if (rec.type === "screenshot") {
+          const catchUpWindowMs = 2 * 60 * 1000;
+          const isWithinWindow = now >= startMs && now < startMs + catchUpWindowMs;
+          if ((rec.status === "pending" || rec.status === "in progress") && isWithinWindow) {
+            rec.status = "capturing";
+            changed = true;
+            tasksToExecute.push({ type: "screenshot", rec, startMs, endMs, sh, sm, ss });
+          }
+        } 
+        // Video logic
+        else if (now >= startMs && now < endMs) {
+          if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress")) {
+            rec.status = "recording";
+            rec.record = true;
+            changed = true;
+            tasksToExecute.push({ type: "video_start", rec, startMs, endMs, sh, sm, ss, eh, em, es });
+          }
+        }
+        else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress")) {
+          rec.status = "completing";
+          changed = true;
+          tasksToExecute.push({ type: "video_stop", rec, startMs, endMs, sh, sm, ss, eh, em, es });
+        }
+        else if (now >= endMs && rec.status === "pending") {
+          // Missed task
+          tasksToExecute.push({ type: "expire", rec, startMs, endMs, sh, sm, ss });
+        }
       }
+
+      // Save the "in-progress" status to disk BEFORE starting any async work
+      if (changed) {
+        await saveState(uniqueSchedules);
+      }
+
+      // ── Phase 2: Execute Tasks in Parallel ─────────────────────────────────
+      await Promise.all(tasksToExecute.map(async (task) => {
+        const { rec, startMs, endMs, sh, sm, ss } = task;
+
+        if (task.type === "screenshot") {
+          try {
+            const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
+            const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
+            const headers: any = { "Content-Type": "application/json" };
+            if (globalAuth) headers["x-watchdog-auth"] = globalAuth;
+            if (nxLocationIp && nxLocationIp !== "localhost") headers["x-nx-location-ip"] = nxLocationIp;
+            if (nxLocationPort && nxLocationPort !== "7001") headers["x-nx-location-port"] = nxLocationPort;
+
+            const res = await fetch(internalUrl, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                systemId: rec.systemId,
+                deviceId: rec.cameraId,
+                cameraName: rec.cameraName,
+                timestampMs: startMs,
+                scheduledStartTime: rec.startTime,
+                notificationUserKey: notificationUserKey
+              })
+            });
+
+            if (!res.ok) {
+              rec.status = "failed";
+            } else {
+              if (rec.recurrence && rec.recurrence !== "none") {
+                const nextDate = calculateNextOccurrence(rec, sh, sm, ss);
+                rec.status = "pending";
+                rec.date = nextDate.toISOString();
+                rec.startMs = nextDate.getTime();
+                rec.endMs = nextDate.getTime() + (endMs - startMs);
+              } else {
+                rec.status = "completed";
+              }
+            }
+          } catch (e) {
+            rec.status = "failed";
+          }
+        }
+
+        if (task.type === "video_start") {
+          try {
+            const cleanId = rec.cameraId.replace(/[{}]/g, "");
+            const auth = rec.auth || globalAuth;
+            if (!auth || !ip || ip === "localhost") return;
+
+            // Patch VMS
+            const dDate = new Date(rec.date);
+            let dayOfWeek = dDate.getDay();
+            if (dayOfWeek === 0) dayOfWeek = 7;
+            let startSec = sh * 3600 + sm * 60;
+            let endSec = task.eh * 3600 + task.em * 60 + 59;
+            if (dayOfWeek === 7) { startSec -= 3600; endSec -= 3600; }
+
+            // Store original schedule
+            try {
+              const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, auth, ip, port);
+              originalSchedules[rec.id] = cam?.schedule || { isEnabled: false };
+            } catch (e) {
+              originalSchedules[rec.id] = { isEnabled: false };
+            }
+
+            await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
+              schedule: { isEnabled: true, tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", streamQuality: "lowest", fps: 0, bitrateKbps: 0, metadataTypes: "none" }] }
+            }, auth, ip, port);
+            
+            rec.status = "recording";
+            rec.record = true;
+          } catch (e) {
+            rec.status = "failed";
+          }
+        }
+
+        if (task.type === "video_stop") {
+          try {
+            const cleanId = rec.cameraId.replace(/[{}]/g, "");
+            const auth = rec.auth || globalAuth;
+            if (auth && ip && ip !== "localhost") {
+              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { isEnabled: false } }, auth, ip, port);
+              
+              // Restore original
+              const original = originalSchedules[rec.id];
+              if (original) {
+                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { ...original, isEnabled: false } }, auth, ip, port);
+              }
+              delete originalSchedules[rec.id];
+
+              // Trigger auto-save background (don't await)
+              triggerAutoSave(rec, cleanId, auth, nxLocationIp, nxLocationPort);
+            }
+          } catch (e) {
+            rec.status = "recording";
+          }
+        }
+
+        if (task.type === "expire") {
+          if (rec.recurrence && rec.recurrence !== "none") {
+            const nextDate = calculateNextOccurrence(rec, sh, sm, ss);
+            rec.status = "pending";
+            rec.date = nextDate.toISOString();
+            rec.startMs = nextDate.getTime();
+            rec.endMs = nextDate.getTime() + (endMs - startMs);
+          } else {
+            rec.status = "completed";
+          }
+        }
+      }));
+
+      // Final save to disk with updated statuses
+      await saveState(uniqueSchedules);
 
     } catch (err) {
       console.error("[Watchdog] Error in loop:", err);
     } finally {
       global._nxWatchdogActive = false;
     }
-  }, 2000); // Check every 2 seconds
+  }, 2000);
 };
+
+// Helper functions for the refactored watchdog
+function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
+  const nextDate = new Date(rec.date);
+  if (rec.recurrence === "weekday") {
+    nextDate.setDate(nextDate.getDate() + 7);
+  } else if (rec.recurrence === "monthday") {
+    const targetDay = rec.recurrenceDay;
+    if (targetDay) {
+      let year = nextDate.getFullYear();
+      let monthIdx = nextDate.getMonth() + 1;
+      let next = new Date(year, monthIdx, targetDay);
+      while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
+      nextDate.setTime(next.getTime());
+    } else {
+      nextDate.setMonth(nextDate.getMonth() + 1);
+    }
+  }
+  nextDate.setHours(sh, sm, ss, 0);
+  return nextDate;
+}
+
+function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
+  const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
+  const url = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
+  const headers: any = {};
+  if (auth) headers["x-watchdog-auth"] = auth;
+  if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;
+  if (nxPort && nxPort !== "7001") headers["x-nx-location-port"] = nxPort;
+  
+  fetch(url, { headers }).catch(() => {});
+}
 
 // Ensure watchdog starts when this module is used
 startWatchdog();

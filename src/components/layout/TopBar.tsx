@@ -266,14 +266,16 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
                             {/* Action Buttons for recording/snapshots - only show if we have timing data */}
                             {(n.deviceId && n.systemId && n.startTimeMs) && (
                               <div className="flex items-center gap-2 pt-2">
-                                <Button 
-                                  size="sm" 
-                                  variant="outline" 
-                                  className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
-                                  onClick={() => handlePreview(n)}
-                                >
-                                  <Eye className="w-3 h-3" /> Preview
-                                </Button>
+                                {(!n.durationMs || n.durationMs <= 5000) && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="h-7 text-[10px] gap-1.5 border-slate-200 hover:bg-primary/5 hover:text-primary transition-all"
+                                    onClick={() => handlePreview(n)}
+                                  >
+                                    <Eye className="w-3 h-3" /> Preview
+                                  </Button>
+                                )}
                                 <Button 
                                   size="sm" 
                                   variant="outline" 
