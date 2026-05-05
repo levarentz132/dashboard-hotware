@@ -22,7 +22,10 @@ async function vmsRequest(
   nxIp: string,
   nxPort: string
 ): Promise<any> {
-  const url = `https://${nxIp}:${nxPort}${endpoint}`;
+  // Determine protocol: default https for everything EXCEPT non-standard ports
+  // (Standardizing on the logic in cloud-api.ts)
+  const protocol = (nxPort === '7001' || !nxPort) ? 'https' : 'http';
+  const url = `${protocol}://${nxIp}:${nxPort}${endpoint}`;
   try {
     const isLocalToken = authToken.startsWith("vms-");
     const headers: Record<string, string> = {
@@ -120,8 +123,8 @@ const startWatchdog = () => {
         schedules = [],
         originalSchedules = {},
         globalAuthFallback = null,
-        nxLocationIp = "localhost",
-        nxLocationPort = "7001",
+        nxLocationIp = API_CONFIG.serverHost || "localhost",
+        nxLocationPort = API_CONFIG.serverPort || "7001",
         globalUserKeyFallback = null,
         appPort = process.env.NODE_ENV === "production" ? "3030" : "3010"
       } = parsed;
@@ -135,8 +138,8 @@ const startWatchdog = () => {
       }
 
       // ── Resolve VMS IP: Prioritize configured IP over defaults ────────────
-      let ip = nxLocationIp && nxLocationIp !== "null" ? nxLocationIp : "localhost";
-      let port = nxLocationPort && nxLocationPort !== "null" ? nxLocationPort : "7001";
+      let ip = nxLocationIp && nxLocationIp !== "null" && nxLocationIp !== "localhost" ? nxLocationIp : (API_CONFIG.serverHost || "localhost");
+      let port = nxLocationPort && nxLocationPort !== "null" && nxLocationPort !== "7001" ? nxLocationPort : (API_CONFIG.serverPort || "7001");
 
       // If the specific schedule doesn't have an IP, or it's localhost, use the global config
       if (ip === "localhost" || !ip) {
@@ -435,8 +438,15 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
       }
     } catch (e) { }
 
-    let finalIp = nxIp || request.cookies.get("nx_location_ip")?.value || API_CONFIG.serverHost || "localhost";
-    let finalPort = nxPort || request.cookies.get("nx_location_port")?.value || API_CONFIG.serverPort || "7001";
+    // Resolve Host: Prioritize cookies -> global config -> provided IP -> localhost
+    let finalIp = request.cookies.get("nx_location_ip")?.value || 
+                  API_CONFIG.serverHost || 
+                  (nxIp && nxIp !== "localhost" && nxIp !== "null" ? nxIp : "localhost");
+
+    // Resolve Port: Prioritize cookies -> global config -> provided Port -> 7001
+    let finalPort = request.cookies.get("nx_location_port")?.value || 
+                    API_CONFIG.serverPort || 
+                    (nxPort && nxPort !== "7001" && nxPort !== "null" ? nxPort : "7001");
 
     if (finalIp === "localhost" || !finalIp) {
       try {
@@ -484,39 +494,25 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
       console.warn(`[getUserResourceRights] Failed to fetch accessible devices: ${e.message}`);
     }
 
-    // ── STEP 2: Fetch user profile for role/admin status ────────────────────
-    const paths = [
-      "/rest/v3/users",
-      `/rest/v3/users?name=${encodeURIComponent(username)}`
-    ];
+    // ── STEP 2: Fetch direct VMS permissions for admin status ───────────────
+    try {
+      const permsData = await vmsRequest("GET", "/rest/v3/users/-/permissions", null, token, finalIp, finalPort);
+      const permissions = (permsData?.permissions || "").toLowerCase();
+      const vmsIsAdmin = permissions.includes("administrator");
+      
+      console.log(`[getUserResourceRights] VMS permissions for ${username}: ${permissions} (isAdmin: ${vmsIsAdmin})`);
 
-    for (const path of paths) {
-      try {
-        const data = await vmsRequest("GET", path, null, token, finalIp, finalPort);
-        const users = Array.isArray(data) ? data : (data.reply || [data]);
-
-        const currentVmsUser = users.find((u: any) =>
-          u && u.name?.toLowerCase() === username.toLowerCase()
-        );
-
-        if (currentVmsUser) {
-          // Check for explicit admin strings
-          const vmsIsAdmin = username.toLowerCase() === "admin" || 
-                            (currentVmsUser.permissions || "").toLowerCase().includes("admin") || 
-                            (currentVmsUser.groupNames || []).some((g: string) => g.toLowerCase().includes("admin"));
-          
-          // Merge VMS-reported rights with our device-list rights
-          const combinedRights = { ...accessibleRights, ...(currentVmsUser.resourceAccessRights || {}) };
-          
-          return {
-            rights: vmsIsAdmin ? null : combinedRights,
-            isAdmin: isDashboardAdmin || vmsIsAdmin,
-            username
-          };
-        }
-      } catch (e) { }
+      return {
+        rights: vmsIsAdmin ? null : accessibleRights,
+        isAdmin: isDashboardAdmin || vmsIsAdmin,
+        username
+      };
+    } catch (e: any) {
+      console.warn(`[getUserResourceRights] Failed to fetch VMS permissions: ${e.message}`);
     }
-    console.log(`[getUserResourceRights] No VMS user found for ${username}. isDashboardAdmin=${isDashboardAdmin}. Using device-list rights.`);
+
+    console.log(`[getUserResourceRights] No direct VMS permissions found for ${username}. isDashboardAdmin=${isDashboardAdmin}. Using device-list rights.`);
+    return { rights: accessibleRights, isAdmin: isDashboardAdmin, username };
     return { rights: accessibleRights, isAdmin: isDashboardAdmin, username };
   } catch (err) {
     return { rights: null, isAdmin: false, username: "System" };
@@ -564,7 +560,8 @@ export async function GET(request: NextRequest) {
         const originalCount = (data.schedules || []).length;
         data.schedules = (data.schedules || []).filter((s: any) => {
           const nid = normalizeId(s.cameraId);
-          const r = rights[nid] || rights[s.cameraId] || "";
+          const r = (rights[nid] || rights[s.cameraId] || "").toLowerCase();
+          // Escalated: Any non-empty right grants access
           return r !== "" && r !== "none";
         });
         console.log(`[GET /scheduled] Restricted user: Filtered schedules from ${originalCount} down to ${data.schedules.length}`);
@@ -590,7 +587,12 @@ export async function GET(request: NextRequest) {
     delete data.globalAuthFallback;
     delete data.globalUserKeyFallback;
 
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ...data,
+      isAdmin: userIsAdmin,
+      vmsUsername: username,
+      resourceAccessRights: rights
+    });
   } catch (e) {
     return NextResponse.json({ schedules: [], originalSchedules: {} });
   }

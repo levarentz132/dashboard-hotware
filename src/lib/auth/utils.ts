@@ -136,6 +136,10 @@ export function hasCameraEditPermission(user: UserPublic | null | undefined, cam
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
     
-    const userRights = rights[nid] || rights[cameraId] || "";
-    return userRights.includes("edit");
+    const userRights = (rights[nid] || rights[cameraId] || "").toLowerCase();
+    const allowed = userRights !== "" && userRights !== "none";
+    if (!allowed && user) {
+        console.warn(`[Permission] User ${user.username} denied edit for camera ${cameraId}. Rights:`, rights);
+    }
+    return allowed;
 }

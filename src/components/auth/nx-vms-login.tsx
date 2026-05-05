@@ -144,19 +144,6 @@ export function NxVmsLogin() {
                     if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
                         Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, { expires: 365, path: '/' });
                     }
-
-                    if (data.config.has_vms_credentials && !session && !Cookies.get("local_nx_user")) {
-                        setSession({ token: "SERVER_MANAGED", username: "Admin (Shared)" });
-                    }
-
-                    if (data.config.has_cloud_token && data.config.NEXT_PUBLIC_NX_CLOUD_USERNAME && !cloudSession && !Cookies.get("nx_cloud_session")) {
-                        setCloudSession({
-                            accessToken: "SERVER_MANAGED",
-                            refreshToken: "",
-                            email: data.config.NEXT_PUBLIC_NX_CLOUD_USERNAME,
-                            systems: []
-                        });
-                    }
                 }
             } catch (e) { }
         };

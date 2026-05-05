@@ -151,6 +151,8 @@ const SearchableCameraSelect = ({
 
   const filteredDevices = devices
     .filter(d => (d.name || d.id || "").toLowerCase().includes(searchTerm.toLowerCase()))
+    // canEdit is still used for disabling if needed, but we filter out only truly restricted ones
+    .filter(d => canEdit ? canEdit(d.id) : true) 
     .sort((a, b) => {
       const statusA = (a.status || "Offline").toLowerCase();
       const statusB = (b.status || "Offline").toLowerCase();
@@ -234,9 +236,7 @@ const SearchableCameraSelect = ({
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {isDisabled && (
-                            <Badge variant="outline" className="text-[8px] py-0 h-3.5 border-yellow-500/20 text-yellow-500 bg-yellow-500/5">Read Only</Badge>
-                          )}
+                          {/* Read Only badge removed as they are now filtered out */}
                           <div className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-slate-300"}`} />
                           <span className={cn(
                             "text-[9px] font-black uppercase tracking-widest",
@@ -323,8 +323,10 @@ export default function CloudRecordings() {
       return;
     }
 
-    // Initialize with localUser data but mark username as verifying until VMS responds
-    setVmsEnrichedUser({ ...localUser, username: "Verifying..." });
+    // Initialize with localUser data. 
+    // Immediate admin fallback for 'admin' account to avoid flashing restricted UI.
+    const initialRole = (localUser.username?.toLowerCase() === 'admin' || isAdmin(localUser)) ? "admin" : "operator";
+    setVmsEnrichedUser({ ...localUser, username: localUser.username || "Verifying...", role: initialRole });
 
     // If we're in Electron/NX context, try to fetch the latest resource rights and username from the VMS
     const fetchUserRights = async () => {
@@ -355,7 +357,8 @@ export default function CloudRecordings() {
 
         // ── STEP 2: Fetch permissions for this user ──
         const paths = [
-          "/nx/rest/v3/users",
+          "/api/nx/rest/v3/users/-/permissions",
+          "/api/nx/rest/v3/users",
           `/api/nx/users?name=${encodeURIComponent(nxUsername)}&systemId=${systemId || ""}`
         ];
 
@@ -371,6 +374,24 @@ export default function CloudRecordings() {
 
             if (response.ok) {
               const data = await response.json();
+              
+              // Handle /rest/v3/users/-/permissions
+              if (path.includes("/permissions") && data.permissions) {
+                const perms = (data.permissions || "").toLowerCase();
+                const isVmsAdmin = perms.includes("administrator");
+                
+                console.log(`[CloudRecordings] VMS Direct Permissions: ${perms} (isAdmin: ${isVmsAdmin})`);
+                
+                setVmsEnrichedUser(prev => prev ? ({
+                  ...prev,
+                  role: isVmsAdmin ? "admin" : "operator",
+                  // Keep existing resourceAccessRights if any
+                } as UserPublic) : null);
+                
+                // Continue to other paths if we need actual camera rights
+                continue; 
+              }
+
               const users = Array.isArray(data) ? data : (data.reply || [data]);
 
               const currentVmsUser = users.find((u: any) =>
@@ -386,7 +407,10 @@ export default function CloudRecordings() {
                 setVmsEnrichedUser(prev => prev ? ({
                   ...prev,
                   username: currentVmsUser.name || nxUsername, // Always use VMS name
-                  resourceAccessRights: currentVmsUser.resourceAccessRights || {}
+                  resourceAccessRights: currentVmsUser.resourceAccessRights || {},
+                  // Final check for admin status from profile:
+                  // Only set to admin if the VMS profile explicitly says so.
+                  role: (currentVmsUser.permissions || "").toLowerCase().includes("admin") ? "admin" : "operator"
                 } as UserPublic) : null);
                 rightsFound = true;
               }
@@ -402,7 +426,16 @@ export default function CloudRecordings() {
   }, [localUser]);
 
   const effectiveUser = vmsEnrichedUser || localUser;
-  const isEffectiveAdmin = isAdmin(effectiveUser);
+  const isEffectiveAdmin = React.useMemo(() => {
+    if (!vmsEnrichedUser || vmsEnrichedUser.username === "Verifying...") return false;
+    return isAdmin(vmsEnrichedUser);
+  }, [vmsEnrichedUser]);
+
+  const visibleDevices = React.useMemo(() => {
+    if (!effectiveUser) return [];
+    if (isEffectiveAdmin && !Object.keys(effectiveUser.resourceAccessRights || {}).length) return devices;
+    return devices.filter(d => hasCameraEditPermission(effectiveUser, d.id));
+  }, [devices, effectiveUser, isEffectiveAdmin]);
 
   // ---- Permission-filtered view of schedules (always uses current localUser/enrichedUser) ----
   const visibleScheduledRecordings = React.useMemo(() => {
@@ -417,8 +450,8 @@ export default function CloudRecordings() {
         return scheduledRecordings;
     }
     
-    const filtered = scheduledRecordings.filter(s => hasCameraViewPermission(effectiveUser, s.cameraId));
-    console.log("[CloudRecordings] Filtered count:", filtered.length);
+    const filtered = scheduledRecordings.filter(s => hasCameraEditPermission(effectiveUser, s.cameraId));
+    console.log("[CloudRecordings] Filtered count:", filtered.length, "for user:", effectiveUser.username);
     return filtered;
   }, [scheduledRecordings, effectiveUser, isEffectiveAdmin]);
 
@@ -554,6 +587,14 @@ export default function CloudRecordings() {
               }
             });
           }
+        }
+        if (data.isAdmin !== undefined || data.vmsUsername) {
+          setVmsEnrichedUser(prev => prev ? ({
+            ...prev,
+            username: data.vmsUsername || prev.username,
+            role: data.isAdmin ? "admin" : "operator",
+            resourceAccessRights: data.resourceAccessRights || prev.resourceAccessRights
+          } as UserPublic) : null);
         }
         // Mark as loaded so saveToPersistence knows it's safe to write
         hasLoadedFromDisk.current = true;
@@ -1001,9 +1042,14 @@ export default function CloudRecordings() {
   };
 
   const handleScheduleRecording = () => {
+    console.log("[CloudRecordings] handleScheduleRecording triggered", { scheduleCamera, scheduleType, scheduleDays, scheduleMonthDay, scheduleDates });
     setScheduleError("");
     setScheduleSuccess("");
-    if (!scheduleCamera) { setScheduleError("Please select a camera."); return; }
+    if (!scheduleCamera) { 
+      console.warn("[CloudRecordings] No camera selected");
+      setScheduleError("Please select a camera."); 
+      return; 
+    }
 
     // GUARD: Never allow "all" cameras for scheduling
     if (scheduleCamera === "all") {
@@ -1058,7 +1104,9 @@ export default function CloudRecordings() {
             scheduleTargets.push({ date: targetDate, start: scheduleScreenshotTime, end: scheduleScreenshotTime });
           } else {
             scheduleTimeRanges.forEach(range => {
-              scheduleTargets.push({ date: targetDate, start: range.start, end: range.end });
+              if (range.start && range.end) {
+                scheduleTargets.push({ date: targetDate, start: range.start, end: range.end });
+              }
             });
           }
         });
@@ -1101,7 +1149,10 @@ export default function CloudRecordings() {
         });
       }
 
-      if (scheduleTargets.length === 0) return;
+      if (scheduleTargets.length === 0) {
+        console.warn("[CloudRecordings] No valid schedule targets generated");
+        return;
+      }
 
       scheduleTargets.forEach(target => {
         const { date: tDate, start: tStart, end: tEnd } = target;
@@ -1442,15 +1493,17 @@ export default function CloudRecordings() {
 
           {/* Global Action Bar */}
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setIsSettingsOpen(true)}
-              className="h-9 gap-2 shadow-sm border-slate-200 hover:bg-slate-50"
-              title="Snapshot Settings"
-            >
-              <Settings className="h-4 w-4 text-slate-500" />
-              Settings
-            </Button>
+            {isEffectiveAdmin && (
+              <Button
+                variant="outline"
+                onClick={() => setIsSettingsOpen(true)}
+                className="h-9 gap-2 shadow-sm border-slate-200 hover:bg-slate-50"
+                title="Snapshot Settings"
+              >
+                <Settings className="h-4 w-4 text-slate-500" />
+                Settings
+              </Button>
+            )}
             <Button onClick={() => {
               if (scheduleType === "screenshot" && !storagePath) {
                 addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a snapshot storage path in Settings.' });
@@ -1473,12 +1526,13 @@ export default function CloudRecordings() {
                   <div className="w-64">
                     <SearchableCameraSelect
                       value={selectedDevice}
-                      onValueChange={handleSelectDevice}
-                      devices={devices}
+                      onValueChange={setSelectedDevice}
+                      devices={visibleDevices}
                       loadingDevices={loadingDevices}
                       normalizeId={normalizeId}
                       showAllOption={true}
                       placeholder="All Cameras"
+                      canEdit={(id) => hasCameraEditPermission(effectiveUser, id)}
                     />
                   </div>
 
@@ -1598,15 +1652,17 @@ export default function CloudRecordings() {
                   Active Tasks ({visibleScheduledRecordings.length})
                 </h2>
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => requestCancel(visibleScheduledRecordings.map(r => r.id), true)}
-                    className="h-8 text-[10px] uppercase font-black tracking-widest text-destructive hover:bg-destructive/10 rounded-lg"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-2" />
-                    Cancel All
-                  </Button>
+                  {isEffectiveAdmin && visibleScheduledRecordings.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => requestCancel(visibleScheduledRecordings.map(r => r.id), true)}
+                      className="h-8 text-[10px] uppercase font-black tracking-widest text-destructive hover:bg-destructive/10 rounded-lg"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-2" />
+                      Cancel All
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1711,37 +1767,50 @@ export default function CloudRecordings() {
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    disabled={!hasCameraEditPermission(effectiveUser, first.cameraId)}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setScheduleCamera(`${first.systemId}:${first.cameraId}`);
-                                      setScheduleSystem(first.systemId);
-                                      setScheduleType(first.type);
-                                      setScheduleBatchId(first.batchId || null);
-                                      setScheduleDates(group.map(r => new Date(r.date)));
-                                      if (first.type === "video") {
-                                        setScheduleTimeRanges([{ start: first.startTime, end: first.endTime }]);
-                                      } else {
-                                        setScheduleScreenshotTime(first.startTime);
-                                      }
-                                      setIsScheduleOpen(true);
-                                    }}
-                                    className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all disabled:opacity-30"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    disabled={!hasCameraEditPermission(effectiveUser, first.cameraId)}
-                                    onClick={(e) => { e.stopPropagation(); requestCancel(group.map(r => r.id), true); }}
-                                    className="h-8 w-8 rounded-md border border-slate-200 hover:bg-red-50 text-black hover:text-red-600 transition-all disabled:opacity-30"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </Button>
+                                  {(() => {
+                                    const isOwner = first.scheduledBy === effectiveUser?.username;
+                                    const canModify = isEffectiveAdmin || isOwner;
+                                    const hasCamEdit = hasCameraEditPermission(effectiveUser, first.cameraId);
+                                    const modifyDisabled = !canModify || !hasCamEdit;
+
+                                    return (
+                                      <>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          disabled={modifyDisabled}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setScheduleCamera(`${first.systemId}:${first.cameraId}`);
+                                            setScheduleSystem(first.systemId);
+                                            setScheduleType(first.type);
+                                            setScheduleBatchId(first.batchId || null);
+                                            setScheduleDates(group.map(r => new Date(r.date)));
+                                            if (first.type === "video") {
+                                              setScheduleTimeRanges([{ start: first.startTime, end: first.endTime }]);
+                                            } else {
+                                              setScheduleScreenshotTime(first.startTime);
+                                            }
+                                            setIsScheduleOpen(true);
+                                          }}
+                                          className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all disabled:opacity-30"
+                                          title={!canModify ? "Only admins or the creator can edit this schedule" : !hasCamEdit ? "No edit permission for this camera" : "Edit Schedule"}
+                                        >
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          disabled={modifyDisabled}
+                                          onClick={(e) => { e.stopPropagation(); requestCancel(group.map(r => r.id), true); }}
+                                          className="h-8 w-8 rounded-md border border-slate-200 hover:bg-red-50 text-black hover:text-red-600 transition-all disabled:opacity-30"
+                                          title={!canModify ? "Only admins or the creator can remove this schedule" : !hasCamEdit ? "No edit permission for this camera" : "Remove Schedule"}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </>
+                                    );
+                                  })()}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1787,7 +1856,7 @@ export default function CloudRecordings() {
             <SearchableCameraSelect
               value={scheduleCamera}
               onValueChange={handleScheduleSelectDevice}
-              devices={devices}
+              devices={visibleDevices}
               loadingDevices={loadingDevices}
               normalizeId={normalizeId}
               placeholder="Choose Camera"
@@ -1974,7 +2043,8 @@ export default function CloudRecordings() {
               <Button
                 onClick={handleScheduleRecording}
                 className="flex-1 font-bold gap-2"
-                disabled={!scheduleCamera || !hasCameraEditPermission(effectiveUser, scheduleCamera)}
+                disabled={!scheduleCamera || !hasCameraEditPermission(effectiveUser, scheduleCamera.includes(':') ? scheduleCamera.split(':')[1] : scheduleCamera)}
+                title={!scheduleCamera ? "Select a camera" : !hasCameraEditPermission(effectiveUser, scheduleCamera.includes(':') ? scheduleCamera.split(':')[1] : scheduleCamera) ? "No permission for this camera" : "Save Schedule"}
               >
                 <PlayCircle className="h-4 w-4" /> Save Schedule
               </Button>

@@ -45,30 +45,72 @@ export function LicenseLogin() {
         const savedUser = Cookies.get("license_saved_user");
         const savedPass = Cookies.get("license_saved_pass");
 
-        if (savedUser && savedPass) {
-            setHasSaved(true);
-            setValue("username", savedUser);
-            setValue("password", savedPass);
-        } else {
-            const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
-            if (extConfig) {
-                if (extConfig.NEXT_PUBLIC_NX_USERNAME) setValue("username", extConfig.NEXT_PUBLIC_NX_USERNAME);
-                if (extConfig.NEXT_PUBLIC_NX_PASSWORD) setValue("password", extConfig.NEXT_PUBLIC_NX_PASSWORD);
-            } else {
-                const envUser = process.env.NEXT_PUBLIC_NX_USERNAME;
-                const envPass = process.env.NEXT_PUBLIC_NX_PASSWORD;
-                if (envUser) setValue("username", envUser);
-                if (envPass) setValue("password", envPass);
+        const fetchGlobalConfig = async () => {
+            try {
+                const res = await fetch("/api/config/nx");
+                const data = await res.json();
+                if (data.success && data.config) {
+                    const { NEXT_PUBLIC_NX_USERNAME, NEXT_PUBLIC_NX_PASSWORD } = data.config;
+                    
+                    // Prioritize server config if cookies are missing or if we want global sync
+                    if (NEXT_PUBLIC_NX_USERNAME && NEXT_PUBLIC_NX_PASSWORD) {
+                        setHasSaved(true);
+                        setValue("username", NEXT_PUBLIC_NX_USERNAME);
+                        setValue("password", NEXT_PUBLIC_NX_PASSWORD);
+                        
+                        // Also sync to cookies for other components that might use them
+                        Cookies.set("license_saved_user", NEXT_PUBLIC_NX_USERNAME, { expires: 365, path: '/' });
+                        Cookies.set("license_saved_pass", NEXT_PUBLIC_NX_PASSWORD, { expires: 365, path: '/' });
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn("[LicenseLogin] Failed to fetch global config", e);
             }
-        }
+
+            // Fallback to existing logic if server fetch fails or returns empty
+            if (savedUser && savedPass) {
+                setHasSaved(true);
+                setValue("username", savedUser);
+                setValue("password", savedPass);
+            } else {
+                const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+                if (extConfig) {
+                    if (extConfig.NEXT_PUBLIC_NX_USERNAME) setValue("username", extConfig.NEXT_PUBLIC_NX_USERNAME);
+                    if (extConfig.NEXT_PUBLIC_NX_PASSWORD) setValue("password", extConfig.NEXT_PUBLIC_NX_PASSWORD);
+                } else {
+                    const envUser = process.env.NEXT_PUBLIC_NX_USERNAME;
+                    const envPass = process.env.NEXT_PUBLIC_NX_PASSWORD;
+                    if (envUser) setValue("username", envUser);
+                    if (envPass) setValue("password", envPass);
+                }
+            }
+        };
+
+        fetchGlobalConfig();
     }, [setValue]);
 
     const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
     const handleSaveCredentials = async (data: LoginFormData) => {
+        // Save locally for immediate feedback
         Cookies.set("license_saved_user", data.username, { expires: 365, path: '/' });
         Cookies.set("license_saved_pass", data.password, { expires: 365, path: '/' });
         
+        // Save to server for all network users
+        try {
+            await fetch("/api/config/nx", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    NEXT_PUBLIC_NX_USERNAME: data.username,
+                    NEXT_PUBLIC_NX_PASSWORD: data.password
+                })
+            });
+        } catch (e) {
+            console.error("[LicenseLogin] Failed to sync shared credentials", e);
+        }
+
         setIsSaved(true);
         setHasSaved(true);
         setTimeout(() => setIsSaved(false), 3000);

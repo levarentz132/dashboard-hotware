@@ -21,12 +21,10 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: true,
       config: {
-        NEXT_PUBLIC_NX_SYSTEM_ID: config?.NEXT_PUBLIC_NX_SYSTEM_ID || "",
         NEXT_PUBLIC_NX_SERVER_HOST: nxLocationIp,
         NEXT_PUBLIC_NX_SERVER_PORT: nxLocationPort,
-        NEXT_PUBLIC_NX_CLOUD_USERNAME: config?.NEXT_PUBLIC_NX_CLOUD_USERNAME || "",
-        has_cloud_token: !!config?.NX_CLOUD_TOKEN,
-        has_vms_credentials: !!(config?.NEXT_PUBLIC_NX_USERNAME && (config?.NEXT_PUBLIC_NX_PASSWORD || config?.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED))
+        NEXT_PUBLIC_NX_USERNAME: config?.NEXT_PUBLIC_NX_USERNAME || "",
+        NEXT_PUBLIC_NX_PASSWORD: config?.NEXT_PUBLIC_NX_PASSWORD || ""
       }
     });
   } catch (error) {
