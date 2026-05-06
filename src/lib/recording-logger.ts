@@ -2,7 +2,7 @@ import logger from "./logger";
 import fs from "fs";
 import path from "path";
 
-const LOG_FILE = path.join(process.cwd(), "data", "recordings.log");
+const LOG_FILE = path.join(process.cwd(), "data", "main.log");
 
 /**
  * Formats a date to: DD Mon YYYY HH:mm:ss
@@ -22,13 +22,12 @@ export function formatAuditDate(date: Date | string | number = new Date()): stri
 }
 
 /**
- * Appends a detailed audit log entry to data/recordings.log
+ * Appends a detailed audit log entry to data/main.log
  */
-export function logRecordingEvent(message: string, username?: string, timestamp?: Date) {
+export function logRecordingEvent(message: string) {
   try {
-    const formattedTime = formatAuditDate(timestamp);
-    const userPrefix = username ? `[${username}] ` : "";
-    const logLine = `(${formattedTime}) ${userPrefix}${message}\n`;
+    const formattedTime = formatAuditDate(new Date());
+    const logLine = `(${formattedTime}) ${message}\n`;
     
     const logDir = path.dirname(LOG_FILE);
     if (!fs.existsSync(logDir)) {

@@ -313,6 +313,7 @@ export default function CloudRecordings() {
   const [pendingCancelIds, setPendingCancelIds] = useState<string[]>([]);
   const [pendingCancelForceDelete, setPendingCancelForceDelete] = useState(false);
   const [scheduledSearch, setScheduledSearch] = useState("");
+  const [scheduleFrequencyTab, setScheduleFrequencyTab] = useState("weekly");
   // ---- Enrichment state for permissions and VMS identity ----
   const [vmsEnrichedUser, setVmsEnrichedUser] = useState<UserPublic | null>(null);
 
@@ -441,11 +442,8 @@ export default function CloudRecordings() {
   const visibleScheduledRecordings = React.useMemo(() => {
     if (!effectiveUser) return [];
     
-    const rights = effectiveUser.resourceAccessRights || {};
-    const hasSpecificRights = Object.keys(rights).length > 0;
-    
-    // Global admin bypass only if no specific resource restrictions are defined
-    if (isEffectiveAdmin && !hasSpecificRights) {
+    // Admin bypass: admins always see all schedules
+    if (isEffectiveAdmin) {
         console.log("[CloudRecordings] Admin showing all:", scheduledRecordings.length);
         return scheduledRecordings;
     }
@@ -476,6 +474,7 @@ export default function CloudRecordings() {
     setScheduleTimeRanges([{ start: "09:00", end: "10:00" }]);
     setScheduleScreenshotTime("12:00");
     setScheduleType("video");
+    setScheduleFrequencyTab("weekly");
     setScheduleError("");
     setScheduleSuccess("");
     setScheduleBatchId(null);
@@ -571,12 +570,11 @@ export default function CloudRecordings() {
           })).filter((s: any) => s.status !== "completed" && s.status !== "failed");
 
           // BREAK INFINITE LOOP: Only update state if data actually changed
-          const currentIds = scheduledRecordings.map(s => s.id).sort().join(",");
-          const loadedIds = loadedScheds.map((s: any) => s.id).sort().join(",");
-          const currentStatuses = scheduledRecordings.map(s => s.status).sort().join(",");
-          const loadedStatuses = loadedScheds.map((s: any) => s.status).sort().join(",");
+          // Include 'record' flag in comparison so UI updates when watchdog processes tasks
+          const currentFingerprint = scheduledRecordings.map(s => `${s.id}:${s.status}:${(s as any).record || false}`).sort().join(",");
+          const loadedFingerprint = loadedScheds.map((s: any) => `${s.id}:${s.status}:${s.record || false}`).sort().join(",");
 
-          if (currentIds !== loadedIds || currentStatuses !== loadedStatuses) {
+          if (currentFingerprint !== loadedFingerprint) {
             // Store full list in state — permission filtering is done at render time
             // via visibleScheduledRecordings useMemo (avoids stale closure issues)
             setScheduledRecordings(loadedScheds);
@@ -603,10 +601,6 @@ export default function CloudRecordings() {
   };
 
   const reconcileTimer = (rec: ScheduledRecording) => {
-    // ONLY handle video tasks on client-side. 
-    // Screenshot tasks are exclusively handled by the server-side watchdog.
-    if (rec.type === "screenshot") return;
-
     // Clear existing timers for this record to avoid duplicates on re-load/poll
     if (scheduleTimers.current.has(rec.id + "-start")) {
       clearTimeout(scheduleTimers.current.get(rec.id + "-start"));
@@ -618,9 +612,31 @@ export default function CloudRecordings() {
     }
 
     const [sh, sm] = rec.startTime.split(":").map(Number);
-    const [eh, em] = rec.endTime.split(":").map(Number);
     const now = Date.now();
     const startMs = new Date(rec.date).setHours(sh, sm, 0, 0);
+
+    // --- CASE 1: SCREENSHOTS (Snapshots) ---
+    if (rec.type === "screenshot") {
+      const captureDelay = 3000; // Reduced to 3s for better responsiveness
+      if (now >= startMs + captureDelay) return;
+
+      const timer = setTimeout(() => {
+        console.log(`[CloudRecordings] Snapshot time reached for ${rec.cameraName}. Cleaning up UI.`);
+        if (rec.recurrence === "none") {
+          setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
+        } else {
+          loadFromPersistence();
+        }
+        // Auto-refresh results to show the new snapshot
+        setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 3000);
+      }, (startMs + captureDelay) - now);
+      
+      scheduleTimers.current.set(rec.id + "-start", timer);
+      return;
+    }
+
+    // --- CASE 2: VIDEOS ---
+    const [eh, em] = rec.endTime.split(":").map(Number);
     const endMs = new Date(rec.date).setHours(eh, em, 59, 999);
 
     if (now >= endMs) {
@@ -673,6 +689,10 @@ export default function CloudRecordings() {
           // but we can trigger a reload to stay in sync.
           loadFromPersistence();
         }
+        
+        // Auto-refresh results after recording finishes
+        // We use a larger delay for video to allow VMS to index and watchdog to auto-save
+        setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 7000);
       }, endMs - now);
 
       scheduleTimers.current.set(rec.id + "-end", timer);
@@ -709,8 +729,8 @@ export default function CloudRecordings() {
   useEffect(() => {
     loadFromPersistence();
     fetchSettings();
-    // Poll every 10 seconds to get updates from the watchdog (like captured screenshots)
-    const pollId = setInterval(loadFromPersistence, 10000);
+    // Poll every 5 seconds to get updates from the watchdog (like captured screenshots)
+    const pollId = setInterval(loadFromPersistence, 5000);
     return () => clearInterval(pollId);
   }, []);
 
@@ -729,18 +749,18 @@ export default function CloudRecordings() {
       // A task finished or was removed. Refresh the list to show new recording/snapshot.
       // We also force a re-load of the persistence to ensure state is in sync with server watchdog.
       loadFromPersistence();
-      setTimeout(() => handleSearchRecentRecordings(), 1500); // Small delay to allow VMS to index
+      setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 3000); // Small delay to allow VMS to index
     }
     prevScheduledCount.current = scheduledRecordings.length;
   }, [scheduledRecordings.length]);
 
-  // Periodic results refresh (every 30s) to catch any background completions not detected by count changes
+  // Periodic results refresh (every 10s) to catch any background completions not detected by count changes
   useEffect(() => {
     const resultsPollId = setInterval(() => {
       if (scheduledRecordings.some(r => r.status === "recording" || r.status === "in progress" || r.status === "capturing")) {
-        handleSearchRecentRecordings();
+        handleSearchRecentRecordings(undefined, undefined, undefined, true);
       }
-    }, 30000);
+    }, 10000);
     return () => clearInterval(resultsPollId);
   }, [scheduledRecordings]);
 
@@ -1249,6 +1269,13 @@ export default function CloudRecordings() {
         }
         return [...filtered, ...newScheduledEntries];
       });
+
+      // Set up client-side end timers immediately for tasks that start now
+      // This ensures the UI cleans up even if polling hasn't synced yet
+      newScheduledEntries.forEach(entry => {
+        reconcileTimer(entry);
+      });
+
       setScheduleSuccess(`Successfully ${scheduleBatchId ? "updated" : "scheduled"} ${totalTasksScheduled} task(s).`);
       setTimeout(() => setIsScheduleOpen(false), 1500);
     } else {
@@ -1329,10 +1356,13 @@ export default function CloudRecordings() {
   };
 
   // ---- Recent Recordings ----
-  const handleSearchRecentRecordings = async (overrideDevice?: string, overrideDate?: Date, overrideSystem?: string) => {
+  const handleSearchRecentRecordings = async (overrideDevice?: string, overrideDate?: Date, overrideSystem?: string, isAutoRefresh: boolean = false) => {
     const targetDevice = overrideDevice || selectedDevice;
     const targetDate = overrideDate || date;
     const targetSystem = overrideSystem || selectedSystem;
+    
+    // Don't auto-trigger if nothing is selected yet
+    if (isAutoRefresh && !targetDevice) return;
 
     if (!targetDevice || !targetDate) { setRecentError("Please select a camera and date."); return; }
 
@@ -1387,10 +1417,16 @@ export default function CloudRecordings() {
           };
         });
         mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
+        
+        if (isAutoRefresh && mapped.length === 0 && recentRecordings.length > 0) {
+          // Only guard if we already have records; if it's the first time or we just cleared, let it through
+          return;
+        }
+
         setRecentRecordings(mapped);
         if (mapped.length === 0) setRecentError("No recordings found for any camera on this date.");
       } catch (err: any) {
-        setRecentError(err.message || "Failed to fetch all recordings.");
+        if (!isAutoRefresh) setRecentError(err.message || "Failed to fetch all recordings.");
       } finally {
         setRecentLoading(false);
       }
@@ -1398,8 +1434,10 @@ export default function CloudRecordings() {
     }
 
     setRecentLoading(true);
-    setRecentError("");
-    setRecordings([]); // Clear specific search
+    if (!isAutoRefresh) {
+       setRecentError("");
+       setRecordings([]); // Only clear specific search if manual
+    }
     try {
       const startMs = new Date(targetDate).setHours(0, 0, 0, 0);
       const endMs = new Date(targetDate).setHours(23, 59, 59, 999);
@@ -1408,6 +1446,8 @@ export default function CloudRecordings() {
         targetSystem, getOriginalDeviceId(targetDevice), startMs, endMs, undefined
       );
       const periods = Array.isArray(data) ? data : data?.reply || [];
+
+      if (isAutoRefresh && periods.length === 0) return; // VMS slow indexing, skip update
 
       // Get camera name for display metadata
       const dev = devices.find(d => normalizeId(d.id) === targetDevice && d.systemId === targetSystem);
@@ -1729,9 +1769,7 @@ export default function CloudRecordings() {
                           const anyRecording = group.some((r: ScheduledRecording) => r.status === "recording" || r.status === "in progress" || r.status === "capturing");
                           const isRecurring = group.some(r => r.recurrence && r.recurrence !== "none");
                           const allCompleted = group.every(r => r.status === "completed" || r.status === "failed");
-                          const mainStatus = anyRecording
-                            ? (group.some(r => r.status === "recording") ? "recording" : (group.some(r => r.status === "capturing") ? "capturing" : "in progress"))
-                            : (isRecurring ? "active" : (allCompleted ? "completed" : "pending"));
+                          const mainStatus = anyRecording ? "in progress" : "active";
 
                           const sortedDates = [...group].map(r => new Date(r.date)).sort((a, b) => a.getTime() - b.getTime());
                           const dateList = sortedDates.map(d => format(d, "MMM d"));
@@ -1742,9 +1780,8 @@ export default function CloudRecordings() {
                               <TableCell className="text-center">
                                 <span className={cn(
                                   "text-[12px] px-2 py-0.5 rounded-full border",
-                                  mainStatus === "recording" ? "bg-red-50 text-red-600 border-red-100 animate-pulse" :
-                                    mainStatus === "active" ? "bg-sky-50 text-sky-600 border-sky-100" :
-                                      "text-black border-transparent"
+                                  mainStatus === "in progress" ? "bg-red-50 text-red-600 border-red-100 animate-pulse" :
+                                    "bg-sky-50 text-sky-600 border-sky-100"
                                 )}>
                                   {mainStatus}
                                 </span>
@@ -1791,6 +1828,22 @@ export default function CloudRecordings() {
                                             } else {
                                               setScheduleScreenshotTime(first.startTime);
                                             }
+
+                                            // Choose the correct frequency tab
+                                            if (first.recurrence === "weekday") {
+                                              setScheduleFrequencyTab("weekly");
+                                              // scheduleDays are set by group mapping if implemented, 
+                                              // but for now we extract from the group
+                                              const days = group.filter(r => r.recurrence === "weekday").map(r => new Date(r.date).getDay());
+                                              setScheduleDays([...new Set(days)]);
+                                            } else if (first.recurrence === "monthday") {
+                                              setScheduleFrequencyTab("monthly");
+                                              setScheduleMonthDay(first.recurrenceDay || "");
+                                            } else {
+                                              setScheduleFrequencyTab("specific");
+                                              setScheduleDates(group.map(r => new Date(r.date)));
+                                            }
+
                                             setIsScheduleOpen(true);
                                           }}
                                           className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all disabled:opacity-30"
@@ -1878,7 +1931,7 @@ export default function CloudRecordings() {
             <div className="space-y-4 border-t pt-4">
               <Label className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-primary" /> Recurrence / Frequency</Label>
 
-              <Tabs defaultValue="weekly" className="w-full">
+              <Tabs value={scheduleFrequencyTab} onValueChange={setScheduleFrequencyTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-3 h-9">
                   <TabsTrigger value="weekly" className="text-[10px] font-bold uppercase tracking-tighter">Weekly</TabsTrigger>
                   <TabsTrigger value="specific" className="text-[10px] font-bold uppercase tracking-tighter">Specific Dates</TabsTrigger>

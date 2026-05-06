@@ -3,7 +3,7 @@ import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderF
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { logRecordingEvent } from "@/lib/recording-logger";
+
 import { promisify } from "util";
 import { spawn } from "child_process";
 import { Readable } from "stream";
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     const autoSave = searchParams.get("autoSave") === "true"; // If 'true', save to disk only — no streaming
     const isSnapshotParam = searchParams.get("isSnapshot") === "true";
 
-    console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, autoSave=${autoSave}`);
+    // console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, autoSave=${autoSave}`);
 
     if (!systemId || !deviceId || !startTime) {
       return NextResponse.json(
@@ -115,20 +115,6 @@ export async function GET(request: NextRequest) {
       delete headers["Content-Type"];
     }
 
-    // Build storage base directory
-    let videosBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
-    try {
-      const settingsFile = path.join(process.cwd(), "data", "settings.json");
-      if (fs.existsSync(settingsFile)) {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-        if (settings.videoStoragePath) {
-          videosBaseDir = settings.videoStoragePath;
-        } else if (settings.storagePath) {
-          videosBaseDir = settings.storagePath;
-        }
-      }
-    } catch (e) { /* ignore */ }
-
     // ── AUTO-SAVE ONLY (no streaming) ───────────────────────────────────────
     // Called automatically when a scheduled recording finishes. Encodes and saves
     // the clip to the storage folder, returns JSON. No body is streamed to the client.
@@ -139,23 +125,36 @@ export async function GET(request: NextRequest) {
       const DD = recDate.getDate().toString().padStart(2, "0");
       const HH = recDate.getHours().toString().padStart(2, "0");
       const mmP = recDate.getMinutes().toString().padStart(2, "0");
-      const SS = recDate.getSeconds().toString().padStart(2, "0");
       const dateFolder = `${YYYY}-${MM}-${DD}`;
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim();
       
+      // Use configured PNG path (storagePath) for auto-saves as requested
+      let autoSaveBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+      try {
+        const settingsFile = path.join(process.cwd(), "data", "settings.json");
+        if (fs.existsSync(settingsFile)) {
+          const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+          if (settings.videoStoragePath) {
+            autoSaveBaseDir = settings.videoStoragePath;
+          } else if (settings.storagePath) {
+            autoSaveBaseDir = settings.storagePath;
+          }
+        }
+      } catch (e) { }
+
       const finalFileName = `${safeCameraName}_${HH}${mmP}00.mp4`;
-      const saveDir = path.join(videosBaseDir, dateFolder);
+      const saveDir = path.join(autoSaveBaseDir, dateFolder);
       if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
       const savePath = path.join(saveDir, finalFileName);
 
       // DEDUPLICATION: Check if file already exists before fetching from VMS
       if (fs.existsSync(savePath)) {
-        console.log(`[recordings/download] AUTO-SAVE: File already exists, skipping: ${savePath}`);
+        // console.log(`[recordings/download] AUTO-SAVE: File already exists, skipping: ${savePath}`);
         return NextResponse.json({ success: true, path: savePath, file: finalFileName, skipped: true });
       }
 
-      console.log(`[recordings/download] AUTO-SAVE triggered for ${deviceId} startTime=${startTime}`);
+      // console.log(`[recordings/download] AUTO-SAVE triggered for ${deviceId} startTime=${startTime}`);
 
       let videoResponse: Response;
       try {
@@ -165,7 +164,7 @@ export async function GET(request: NextRequest) {
         // Pulse Filtering: Skip auto-save if duration is under 10 seconds
         const durationMs = (endTime && startTime) ? parseInt(endTime) - parseInt(startTime) : 0;
         if (durationMs > 0 && durationMs < 10000) {
-          console.log(`[recordings/download] AUTO-SAVE skipped: Clip is a pulse (${Math.round(durationMs/1000)}s)`);
+          // console.log(`[recordings/download] AUTO-SAVE skipped: Clip is a pulse (${Math.round(durationMs/1000)}s)`);
           clearTimeout(autoSaveTimeout);
           return NextResponse.json({ success: true, skipped: true, reason: "pulse_filter" });
         }
@@ -175,15 +174,15 @@ export async function GET(request: NextRequest) {
 
         if (!videoResponse.ok || !videoResponse.body) {
           const errText = await videoResponse.text().catch(() => "");
-          console.error(`[recordings/download] AUTO-SAVE fetch failed (${videoResponse.status}):`, errText);
+          // console.error(`[recordings/download] AUTO-SAVE fetch failed (${videoResponse.status}):`, errText);
           return NextResponse.json({ error: "Auto-save fetch failed", status: videoResponse.status }, { status: 500 });
         }
       } catch (fetchErr: any) {
-        console.error("[recordings/download] AUTO-SAVE fetch error:", fetchErr);
+        // console.error("[recordings/download] AUTO-SAVE fetch error:", fetchErr);
         return NextResponse.json({ error: "Auto-save fetch error", details: fetchErr.message }, { status: 500 });
       }
 
-      console.log(`[recordings/download] AUTO-SAVE encoding to: ${savePath}`);
+      // console.log(`[recordings/download] AUTO-SAVE encoding to: ${savePath}`);
 
       const ffmpegPath = getFfmpegPath();
       const ffmpegAutoSave = spawn(ffmpegPath, [
@@ -199,7 +198,7 @@ export async function GET(request: NextRequest) {
       ], { windowsHide: true });
 
       ffmpegAutoSave.stdin.on("error", (e) => {
-        console.error("[recordings/download] AUTO-SAVE FFmpeg stdin error:", e);
+        // console.error("[recordings/download] AUTO-SAVE FFmpeg stdin error:", e);
       });
 
       const autoSaveInput = Readable.fromWeb(videoResponse.body as any);
@@ -208,16 +207,16 @@ export async function GET(request: NextRequest) {
       return await new Promise<NextResponse>((resolve) => {
         ffmpegAutoSave.on("close", (code) => {
           if (code !== 0) {
-            console.error(`[recordings/download] AUTO-SAVE FFmpeg failed (code ${code})`);
+            // console.error(`[recordings/download] AUTO-SAVE FFmpeg failed (code ${code})`);
             resolve(NextResponse.json({ error: "FFmpeg failed during auto-save", code }, { status: 500 }));
           } else {
-            console.log(`[recordings/download] AUTO-SAVE complete: ${savePath}`);
-            logRecordingEvent(`Auto-saved video to disk: ${safeCameraName}`);
+            // console.log(`[recordings/download] AUTO-SAVE complete: ${savePath}`);
+            // logRecordingEvent(`Auto-saved video to disk: ${safeCameraName}`);
             resolve(NextResponse.json({ success: true, path: savePath, file: finalFileName }));
           }
         });
         ffmpegAutoSave.on("error", (err) => {
-          console.error("[recordings/download] AUTO-SAVE FFmpeg spawn error:", err);
+          // console.error("[recordings/download] AUTO-SAVE FFmpeg spawn error:", err);
           resolve(NextResponse.json({ error: "FFmpeg not found", details: err.message }, { status: 500 }));
         });
       });
@@ -281,6 +280,7 @@ export async function GET(request: NextRequest) {
           const mm = recDate.getMinutes().toString().padStart(2, "0");
           const ss = recDate.getSeconds().toString().padStart(2, "0");
           const timeStr = `${HH}${mm}${ss}`;
+          const timeStrRounded = `${HH}${mm}00`; // Search for both exact and rounded times
           
           const localBaseDirs = [path.join(process.cwd(), "data", "recorded_screenshots")];
           // Add custom storage path if exists
@@ -288,8 +288,8 @@ export async function GET(request: NextRequest) {
             const settingsFile = path.join(process.cwd(), "data", "settings.json");
             if (fs.existsSync(settingsFile)) {
               const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-              if (settings.storagePath) localBaseDirs.push(settings.storagePath);
               if (settings.videoStoragePath) localBaseDirs.push(settings.videoStoragePath);
+              if (settings.storagePath) localBaseDirs.push(settings.storagePath);
             }
           } catch {}
 
@@ -302,10 +302,11 @@ export async function GET(request: NextRequest) {
               // Scan for matching file
               const files = fs.readdirSync(folderPath);
               for (const file of files) {
-                // Match by time and deviceId/cameraName
-                // simplified check: does it contain deviceId and timeStr?
-                const isMatch = (file.includes(deviceId) || (searchParams.get("cameraName") && file.includes(searchParams.get("cameraName")!))) && file.includes(timeStr);
-                if (isMatch) {
+                // Match by time (exact or rounded) and deviceId/cameraName
+                const isTimeMatch = file.includes(timeStr) || (isImage && file.includes(timeStrRounded));
+                const isNameMatch = (file.includes(deviceId) || (searchParams.get("cameraName") && file.includes(searchParams.get("cameraName")!)));
+                
+                if (isTimeMatch && isNameMatch) {
                   const localPath = path.join(folderPath, file);
                   // console.log(`[recordings/download] Fallback found local file: ${localPath}`);
                   
@@ -371,14 +372,15 @@ export async function GET(request: NextRequest) {
       const DD = recDate.getDate().toString().padStart(2, "0");
       const HH = recDate.getHours().toString().padStart(2, "0");
       const mm = recDate.getMinutes().toString().padStart(2, "0");
-      const ss = "00"; // Round down to :00 per user request
-      const timestamp = `${YYYY}${MM}${DD}_${HH}${mm}${ss}`;
+      const ss = recDate.getSeconds().toString().padStart(2, "0");
+      const timestamp = `${HH}${mm}${ss}`;
+      const dateStr = `${YYYY}${MM}${DD}`;
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").trim();
 
       const filename = effectiveIsImage
-        ? `${safeCameraName}_${timestamp}.png`
-        : `${safeCameraName}_${timestamp}.mp4`;
+        ? `${dateStr}_${safeCameraName}_${timestamp}.png`
+        : `${dateStr}_${safeCameraName}_${timestamp}.mp4`;
 
       // If it's a screenshot, save a local copy to the data folder using date-based structure
       if (effectiveIsImage) {
@@ -404,7 +406,7 @@ export async function GET(request: NextRequest) {
 
           const cameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
             .replace(/[<>:"/\\|?*]/g, "_").trim();
-          const baseFileName = `${cameraName}_${dateFolder}_${HH}${mm}${SS}`;
+          const baseFileName = `${cameraName}_${HH}${mm}${SS}`;
 
           const screenshotsDir = path.join(snapshotsBaseDir, dateFolder);
           if (!fs.existsSync(screenshotsDir)) {
@@ -495,6 +497,7 @@ export async function GET(request: NextRequest) {
                 const settingsFile = path.join(process.cwd(), "data", "settings.json");
                 if (fs.existsSync(settingsFile)) {
                   const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+                  // Use storagePath (PNG path) as requested
                   if (settings.videoStoragePath) {
                     videosBaseDir = settings.videoStoragePath;
                   } else if (settings.storagePath) {
@@ -503,7 +506,7 @@ export async function GET(request: NextRequest) {
                 }
               } catch (e) { /* ignore settings read errors */ }
 
-              // Build filename: cameraName_YYYYMMDD_HHMMSS.mp4  (use recording startTime, not wall clock)
+              // Build filename: cameraName_YYYYMMDD_HHMMSS.mp4  (use recording startTime)
               const recDate = startTime ? new Date(parseInt(startTime, 10)) : new Date();
               const YYYY = recDate.getFullYear().toString();
               const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
@@ -525,7 +528,7 @@ export async function GET(request: NextRequest) {
               // Manual downloads do not save to local disk per user request.
               // This block is only for streaming/downloading to the client.
             } catch (saveErr) {
-              console.error("[recordings/download] Auto-save video error:", saveErr);
+              // console.error("[recordings/download] Auto-save video error:", saveErr);
             }
 
             // Stream the fixed file back to the client
@@ -592,7 +595,7 @@ export async function GET(request: NextRequest) {
         ]);
 
         ffmpegPreview.stdin.on("error", (e) => {
-          console.error("[recordings/download] FFmpeg preview stdin error:", e);
+          // console.error("[recordings/download] FFmpeg preview stdin error:", e);
         });
         ffmpegPreview.stderr.on("data", (chunk) => {
           // Only log first stderr chunk to avoid log spam

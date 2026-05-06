@@ -75,6 +75,17 @@ export async function GET(request: NextRequest) {
     
     // logger.debug("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
     
+    // Fetch device info early to help with deduplication and naming
+    let searchCameraName = "";
+    try {
+      const deviceUrl = buildCloudUrl(systemId, `/rest/v3/devices/${deviceId}`, new URLSearchParams(), request, systemName || undefined);
+      const devRes = await fetch(deviceUrl, { headers, buildCloudHeaders: true } as any);
+      if (devRes.ok) {
+        const devData = await devRes.json();
+        searchCameraName = (devData.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+      }
+    } catch (e) { }
+
     // NX API returns { reply: [{ guid: "serverId", periods: [{startTimeMs, durationMs}] }] }
     // We need to flatten all periods from all servers
     let allPeriods: any[] = [];
@@ -102,6 +113,9 @@ export async function GET(request: NextRequest) {
           ...p,
           startTimeMs,
           durationMs,
+          deviceId,
+          cameraName: searchCameraName || "Unknown",
+          isScreenshot: durationMs > 0 && durationMs <= 5000,
           serverId: item.guid || p.guid,
         });
       }
@@ -109,34 +123,27 @@ export async function GET(request: NextRequest) {
     
     // 2. Fetch local files from data folders (date-based folder structure)
     try {
-      const defaultDir = path.join(process.cwd(), "data", "recorded_screenshots");
+      const defaultDir = path.resolve(process.cwd(), "data", "recorded_screenshots");
       const baseDirs = new Set<string>([defaultDir]);
+      const seenLocalFiles = new Set<string>();
 
       try {
         const settingsFile = path.join(process.cwd(), "data", "settings.json");
         if (fs.existsSync(settingsFile)) {
           const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-          if (settings.storagePath) baseDirs.add(settings.storagePath);
-          if (settings.videoStoragePath) baseDirs.add(settings.videoStoragePath);
+          if (settings.storagePath) baseDirs.add(path.resolve(settings.storagePath));
+          if (settings.videoStoragePath) baseDirs.add(path.resolve(settings.videoStoragePath));
         }
       } catch (e) { }
 
-      for (const screenshotsBaseDir of baseDirs) {
+      const normalizedBaseDirs = Array.from(baseDirs).map(d => path.resolve(d));
+      const uniqueBaseDirs = new Set(normalizedBaseDirs);
+
+      for (const screenshotsBaseDir of uniqueBaseDirs) {
 
       if (fs.existsSync(screenshotsBaseDir)) {
         const startLimit = startTime ? parseInt(startTime, 10) : 0;
         const endLimit = endTime ? parseInt(endTime, 10) : Infinity;
-
-        // 2a. Fetch some device info if we have a deviceId to help filter legacy screenshots
-        let searchCameraName = "";
-        try {
-          const deviceUrl = buildCloudUrl(systemId, `/rest/v3/devices/${deviceId}`, new URLSearchParams(), request, systemName || undefined);
-          const devRes = await fetch(deviceUrl, { headers, cache: 'no-store' });
-          if (devRes.ok) {
-            const devData = await devRes.json();
-            searchCameraName = (devData.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-          }
-        } catch (e) { }
 
         // Scan date-based folders (Include both legacy YYYYMMDD and new YYYY-MM-DD format)
         const dateFolders = fs.readdirSync(screenshotsBaseDir).filter(f => {
@@ -154,18 +161,21 @@ export async function GET(request: NextRequest) {
            for (const file of folderFiles) {
              const filePath = path.join(folderPath, file);
              if (fs.statSync(filePath).isDirectory()) continue;
+
+             // Avoid adding the same file twice if it matches multiple patterns or directories
+             if (seenLocalFiles.has(file)) continue;
  
              let isMatch = false;
              let timeStr = "";
              let foundCameraName = "";
  
-             // Pattern A: New format {CameraName}_{YYYY-MM-DD}_{HHmmss}_{ID}.png
-             const newFormatMatch = file.match(/^(.+)_(\d{4}-\d{2}-\d{2})_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
-             if (newFormatMatch) {
-               foundCameraName = newFormatMatch[1];
-               const fileDateStr = newFormatMatch[2];
-               timeStr = newFormatMatch[3];
-               const fileIdHash = newFormatMatch[4];
+              // Pattern A: Legacy format {CameraName}_{YYYY-MM-DD}_{HHmmss}_{ID}.png
+              const legacyFormatMatch = file.match(/^(.+)_(\d{4}-\d{2}-\d{2})_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
+              if (legacyFormatMatch) {
+                foundCameraName = legacyFormatMatch[1];
+                const fileDateStr = legacyFormatMatch[2];
+                timeStr = legacyFormatMatch[3];
+                const fileIdHash = legacyFormatMatch[4];
 
                const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
                const isNameMatch = foundCameraName.toLowerCase() === safeTarget.toLowerCase();
@@ -179,19 +189,27 @@ export async function GET(request: NextRequest) {
                }
              }
 
-             // Pattern B: Legacy simplified format {CameraName}_{HHmmss}.png
-             if (!isMatch) {
-               const simpleMatch = file.match(/^(.+)_(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
-               if (simpleMatch) {
-                  foundCameraName = simpleMatch[1];
-                  timeStr = simpleMatch[2];
-                  const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-                  if (foundCameraName.toLowerCase() === safeTarget.toLowerCase() || 
-                      foundCameraName.toLowerCase() === deviceId.toLowerCase()) {
-                    isMatch = true;
-                  }
-               }
-             }
+              // Pattern B: New format {CameraName}_{HHmmss}_{idHash}.png
+              if (!isMatch) {
+                const simpleMatch = file.match(/^(.+)_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
+                if (simpleMatch) {
+                   foundCameraName = simpleMatch[1];
+                   timeStr = simpleMatch[2];
+                   const fileIdHash = simpleMatch[3];
+
+                    const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim().toLowerCase().replace(/_/g, " ");
+                    const foundLower = foundCameraName.toLowerCase().replace(/_/g, " ");
+                    const isNameMatch = foundLower === safeTarget || 
+                                        foundLower === deviceId.toLowerCase();
+                    
+                    const idHash = deviceId.slice(-4).toLowerCase();
+                    const isIdMatch = fileIdHash && fileIdHash === idHash;
+ 
+                    if (isIdMatch || (isNameMatch && !fileIdHash)) {
+                      isMatch = true;
+                    }
+                }
+              }
  
              // Pattern C: Legacy ID format {deviceId}__{cameraName}_{YYYYMMDD}_{HHMMSS}.png
              if (!isMatch) {
@@ -230,13 +248,9 @@ export async function GET(request: NextRequest) {
              if (timestamp >= startLimit && timestamp <= endLimit) {
                const stats = fs.statSync(filePath);
                const isVideo = file.endsWith(".mp4");
-               // Simple heuristic: if file is very small (< 150KB), it's probably a 1s snapshot fallback
                const isShortVideo = isVideo && stats.size < 150000; 
 
-               // Estimate duration from file mtime if it's a local video
-               // This provides a more accurate duration (e.g. 11s) than the previous 60s hardcoded value.
                let durationMs = isVideo ? (isShortVideo ? 1000 : Math.max(1000, stats.mtimeMs - timestamp)) : 0;
-               // Safety cap: if mtime suggests more than 1 hour, fallback to 1 minute
                if (durationMs > 3600000) durationMs = 60000;
 
                allPeriods.push({
@@ -245,17 +259,18 @@ export async function GET(request: NextRequest) {
                  isScreenshot: file.endsWith(".png") || isShortVideo,
                  isVideo: isVideo && !isShortVideo,
                  isLocal: true,
+                 deviceId: deviceId,
                  serverId: "local-storage",
                  fileName: file,
                  dateFolder: dateFolder,
                  cameraName: foundCameraName || searchCameraName || "Unknown",
-                 cameraFolderName: null, // No subfolder for flat files
                  url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(file)}`,
                });
+               seenLocalFiles.add(file);
              }
            }
  
-           // --- 2. Scan Nested Structure (For backward compatibility with existing folders) ---
+           // --- 2. Scan Nested Structure (For backward compatibility) ---
            const subFolders = fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory());
            
            for (const cameraFolderName of subFolders) {
@@ -269,6 +284,8 @@ export async function GET(request: NextRequest) {
              const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
  
              for (const file of files) {
+               if (seenLocalFiles.has(file)) continue;
+
                const timeMatch = file.match(/^(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
                if (!timeMatch) continue;
  
@@ -278,24 +295,29 @@ export async function GET(request: NextRequest) {
                const hour = parseInt(timeStr.substring(0, 2), 10);
                const minute = parseInt(timeStr.substring(2, 4), 10);
                const second = parseInt(timeStr.substring(4, 6), 10);
-               // For scheduled PNG snapshots, round down seconds to :00
                const isScheduledPng = file.endsWith(".png");
                const displaySecond = isScheduledPng ? 0 : second;
                const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
- 
+               
+               const isVideo = file.endsWith(".mp4");
+               const stats = fs.statSync(path.join(cameraPath, file));
+               const isShortVideo = isVideo && stats.size < 150000;
+
                if (timestamp >= startLimit && timestamp <= endLimit) {
                  allPeriods.push({
                    startTimeMs: timestamp,
-                   durationMs: file.endsWith(".mp4") ? 60000 : 0,
-                   isScreenshot: file.endsWith(".png"),
-                   isVideo: file.endsWith(".mp4"),
+                   durationMs: isVideo ? (isShortVideo ? 1000 : 60000) : 0,
+                   isScreenshot: file.endsWith(".png") || isShortVideo,
+                   isVideo: isVideo && !isShortVideo,
                    isLocal: true,
+                   deviceId: deviceId,
                    serverId: "local-storage",
                    fileName: file,
                    dateFolder: dateFolder,
                    cameraName: cameraFolderName,
                    url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&camera=${encodeURIComponent(cameraFolderName)}&file=${encodeURIComponent(file)}`,
                  });
+                 seenLocalFiles.add(file);
                }
              }
            }
@@ -303,85 +325,65 @@ export async function GET(request: NextRequest) {
       }
     } // End of baseDirs loop
 
-    // 3. Final Deduplication and Post-Processing
-    // We group entries by a 5-second window to resolve duplicates between VMS pulses, 
-    // new ID-based snapshots, and legacy name-based snapshots.
+    // 3. Final Deduplication
     const finalPeriods: any[] = [];
     const sortedCandidateList = [...allPeriods].sort((a, b) => {
-       // 1. Prioritize VMS (non-local) records first to ensure they are the 'p' in comparison
-       // EXCEPTION: For screenshots, prioritize LOCAL records so we can serve them even if VMS 404s
-       if (a.isLocal !== b.isLocal) {
-          if (a.isScreenshot || b.isScreenshot) return a.isLocal ? -1 : 1;
-          return a.isLocal ? 1 : -1;
-       }
-       
-       if (a.isLocal && b.isLocal) {
-          const aHasId = (a.fileName || "").includes("__") ? 0 : 1;
-          const bHasId = (b.fileName || "").includes("__") ? 0 : 1;
-          if (aHasId !== bHasId) return aHasId - bHasId;
-       }
-       
-       // 2. Prioritize rounded times (e.g., :00 seconds) to favor scheduled times over real-time offsets
-       const aRounded = a.startTimeMs % 10000 === 0; // Prefer multiples of 10s (usually :00)
-       const bRounded = b.startTimeMs % 10000 === 0;
-       if (aRounded !== bRounded) return aRounded ? -1 : 1;
-       
-       // 3. Prioritize Screenshots over Videos for the same time window
+        // Prioritize VMS over Local for merging base (Timezone-agnostic)
+        const diff = Math.abs(a.startTimeMs - b.startTimeMs);
+        const subH = diff % 3600000;
+        const isTimeMatch = (diff < 10000) || subH < 10000 || subH > 3590000;
+
+        if (isTimeMatch) {
+           if (a.isLocal !== b.isLocal) return a.isLocal ? 1 : -1;
+        }
+
+       // Prefer screenshots over videos for same time
        if (a.isScreenshot !== b.isScreenshot) return a.isScreenshot ? -1 : 1;
        
-       // 4. Sort by start time descending
+       // Sort by start time descending
        return b.startTimeMs - a.startTimeMs;
     });
 
-    for (const candidate of sortedCandidateList) {
-      const isDuplicate = finalPeriods.some(p => {
-         // 1. Explicit filename check (Same download link)
-         if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
+     for (const candidate of sortedCandidateList) {
+       const isDuplicate = finalPeriods.some(p => {
+          if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
+ 
+          const getMinuteOffset = (ms: number) => {
+             const d = new Date(ms);
+             return (d.getMinutes() * 60000) + (d.getSeconds() * 1000);
+          };
 
-          // 2. Time-based deduplication (If within 65 seconds of each other)
-          // We use 65s because local files are rounded to the minute (:00), 
-          // so a VMS record at :59 would be 59s away.
-          const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
-          if (timeDiff < 65000) {
-             // If we have a VMS record (p) and a local one (candidate), merge them.
-             // We prefer keeping the VMS record for its accurate duration, 
-             // but we enrich it with the local file path for reliable downloading.
-             if (!p.isLocal && candidate.isLocal) {
-                if (p.isScreenshot || candidate.isScreenshot) return false; 
-                
+          const pNorm = getMinuteOffset(p.startTimeMs);
+          const cNorm = getMinuteOffset(candidate.startTimeMs);
+          let normDiff = Math.abs(pNorm - cNorm);
+          if (normDiff > 1800000) normDiff = 3600000 - normDiff;
+
+          if (normDiff < 300000) { // 5 minute window
+             // Merge logic: ensure we keep the VMS metadata (duration) but Local file (url)
+             const vmsRecord = !p.isLocal ? p : (!candidate.isLocal ? candidate : null);
+             const localRecord = p.isLocal ? p : (candidate.isLocal ? candidate : null);
+
+             if (vmsRecord) {
+                p.startTimeMs = vmsRecord.startTimeMs;
+                p.durationMs = vmsRecord.durationMs;
+                p.isScreenshot = vmsRecord.isScreenshot;
+             }
+             if (localRecord) {
                 p.isLocal = true;
-                p.fileName = candidate.fileName;
-                p.dateFolder = candidate.dateFolder;
-                p.url = candidate.url;
-                return true; // Skip candidate (merged into p)
+                p.fileName = localRecord.fileName;
+                p.dateFolder = localRecord.dateFolder;
+                p.url = localRecord.url;
              }
-             
-             if (p.isLocal && !candidate.isLocal) {
-                if (p.isScreenshot || candidate.isScreenshot) {
-                   // For screenshots, we already have the local one (p). 
-                   // Keep it and skip the VMS candidate.
-                   return true;
-                }
-             }
-
-             // If both are local, keep the first one (usually Screenshot due to sort)
-             if (p.isLocal && candidate.isLocal) {
-                const sameMinute = Math.floor(p.startTimeMs / 60000) === Math.floor(candidate.startTimeMs / 60000);
-                if (sameMinute) return true;
-             }
-
-             // If both are from VMS, skip the duplicate.
-             if (!p.isLocal && !candidate.isLocal && timeDiff < 5000) return true;
+             return true; 
           }
-         return false;
-      });
+          return false;
+       });
+ 
+       if (!isDuplicate) {
+         finalPeriods.push(candidate);
+       }
+     }
 
-      if (!isDuplicate) {
-        finalPeriods.push(candidate);
-      }
-    }
-
-    // Final sort by start time descending (newest first)
     finalPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
     allPeriods = finalPeriods;
   } catch (err) {

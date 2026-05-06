@@ -46,13 +46,13 @@ async function vmsRequest(
     });
     if (!res.ok) {
       const text = await res.text();
-      logger.debug(`[Watchdog] VMS ${method} ${url} failed with status ${res.status}: ${text}`);
+      // logger.debug(`[Watchdog] VMS ${method} ${url} failed with status ${res.status}: ${text}`);
       throw new Error(`VMS ${res.status}: ${text}`);
     }
     const ct = res.headers.get("content-type") || "";
     return ct.includes("application/json") ? res.json() : res.text();
   } catch (err: any) {
-    logger.debug(`[Watchdog] Network error for VMS ${method} ${url}:`, err.message);
+    // logger.debug(`[Watchdog] Network error for VMS ${method} ${url}:`, err.message);
     throw err;
   }
 }
@@ -60,11 +60,26 @@ async function vmsRequest(
 const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
 const MAX_AUTOSAVE_AGE_MS = 60 * 60 * 1000; // 1 hour grace period for auto-download
 
+/**
+ * Helper to read the data file and strip Byte Order Mark (BOM) if present.
+ * This prevents "Unexpected token" errors when the file is saved with BOM on Windows.
+ */
+async function readDataFile(filePath: string): Promise<string> {
+  const content = await fs.readFile(filePath, "utf-8");
+  return content.replace(/^\uFEFF/, "");
+}
+
 // Background Watchdog (In-memory for the server session)
 declare global {
   var _nxWatchdogInterval: NodeJS.Timeout | undefined;
   var _nxWatchdogActive: boolean | undefined;
   var _nxAppPort: string | undefined;
+  var _nxExecutingTasks: Set<string> | undefined;
+}
+
+// Initialize execution lock set
+if (typeof global !== "undefined" && !global._nxExecutingTasks) {
+  global._nxExecutingTasks = new Set<string>();
 }
 
 /**
@@ -72,16 +87,15 @@ declare global {
  * Useful in dev where ports can change (e.g. 3010, 3011).
  */
 function detectCurrentPort(fallback: string): string {
-  if (global._nxAppPort) return global._nxAppPort;
-  if (process.env.PORT) return process.env.PORT;
-
-  // Check process arguments (e.g. next dev -p 3010)
+  // 1. Check process arguments (e.g. next dev -p 3030)
   const pIndex = process.argv.indexOf("-p");
-  if (pIndex !== -1 && process.argv[pIndex + 1]) {
-    return process.argv[pIndex + 1];
-  }
+  if (pIndex !== -1 && process.argv[pIndex + 1]) return process.argv[pIndex + 1];
 
-  return fallback;
+  // 2. Check detected port from recent dashboard request
+  if (global._nxAppPort) return global._nxAppPort;
+  
+  // 3. Fallback to env or provided fallback (usually 3030)
+  return process.env.PORT || fallback || "3030";
 }
 
 
@@ -102,7 +116,7 @@ const startWatchdog = () => {
         global._nxWatchdogActive = false;
         return;
       }
-      const dataStr = await fs.readFile(DATA_FILE, "utf-8").catch(() =>
+      const dataStr = await readDataFile(DATA_FILE).catch(() =>
         JSON.stringify({ schedules: [], originalSchedules: {}, globalAuth: null })
       );
       
@@ -115,7 +129,7 @@ const startWatchdog = () => {
       try {
         parsed = JSON.parse(dataStr);
       } catch (e: any) {
-        console.error("[Watchdog] Failed to parse data file:", e.message);
+        // console.error("[Watchdog] Failed to parse data file:", e.message);
         global._nxWatchdogActive = false;
         return;
       }
@@ -152,9 +166,7 @@ const startWatchdog = () => {
           port = configPort;
         }
       }
-
       let changed = false;
-
       const now = Date.now();
 
       // ── DEDUPLICATION: Remove identical tasks before processing ──────────
@@ -169,12 +181,24 @@ const startWatchdog = () => {
           changed = true; // Mark as changed to save the cleaned-up list
         }
       }
+
+      // ── CLEANUP: Reset stale tasks ─────────────────────────────────────────
+      // If a task has been 'recording' or 'capturing' for more than 1 hour, reset it.
+      uniqueSchedules.forEach((rec: any) => {
+        if (rec.status === "recording" || rec.status === "capturing" || rec.status === "in progress") {
+          const startTime = rec.startMs || (rec.date ? new Date(rec.date).getTime() : 0);
+          if (startTime > 0 && (now - startTime > 3600000)) {
+            rec.status = "failed";
+            changed = true;
+          }
+        }
+      });
       const saveState = async (scheds: any[]) => {
         // ── CRITICAL: Re-read the file to avoid overwriting user changes (like deletions) ──
         // that happened while the watchdog was performing async work.
         let diskData: any = { schedules: [] };
         try {
-          const content = await fs.readFile(DATA_FILE, "utf-8");
+          const content = await readDataFile(DATA_FILE);
           diskData = JSON.parse(content);
         } catch (e) {}
 
@@ -216,6 +240,9 @@ const startWatchdog = () => {
         const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, ss, 0);
         const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, es, 999);
 
+        // Skip if already being processed by an active watchdog task
+        if (global._nxExecutingTasks?.has(rec.id)) continue;
+
         // Screenshot logic
         if (rec.type === "screenshot") {
           const catchUpWindowMs = 2 * 60 * 1000;
@@ -223,15 +250,20 @@ const startWatchdog = () => {
           if ((rec.status === "pending" || rec.status === "in progress") && isWithinWindow) {
             rec.status = "capturing";
             changed = true;
+            global._nxExecutingTasks?.add(rec.id);
             tasksToExecute.push({ type: "screenshot", rec, startMs, endMs, sh, sm, ss });
           }
         } 
         // Video logic
         else if (now >= startMs && now < endMs) {
-          if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress")) {
+          // FIX: Also handle status "recording" when rec.record is not yet set.
+          // This covers the case where the client sets status to "recording" for
+          // immediate tasks, but the VMS has not been patched yet.
+          if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress" || (rec.status === "recording" && !rec.record))) {
             rec.status = "recording";
             rec.record = true;
             changed = true;
+            global._nxExecutingTasks?.add(rec.id);
             tasksToExecute.push({ type: "video_start", rec, startMs, endMs, sh, sm, ss, eh, em, es });
           }
         }
@@ -257,7 +289,7 @@ const startWatchdog = () => {
 
         if (task.type === "screenshot") {
           try {
-            const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
+            const port = detectCurrentPort(appPort || "3030");
             const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
             const headers: any = { "Content-Type": "application/json" };
             if (globalAuth) headers["x-watchdog-auth"] = globalAuth;
@@ -299,7 +331,10 @@ const startWatchdog = () => {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const auth = rec.auth || globalAuth;
-            if (!auth || !ip || ip === "localhost") return;
+            if (!auth || !ip || ip === "localhost") {
+              // logger.debug(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
+              return;
+            }
 
             // Patch VMS
             const dDate = new Date(rec.date);
@@ -308,6 +343,8 @@ const startWatchdog = () => {
             let startSec = sh * 3600 + sm * 60;
             let endSec = task.eh * 3600 + task.em * 60 + 59;
             if (dayOfWeek === 7) { startSec -= 3600; endSec -= 3600; }
+
+            // logger.debug(`[Watchdog] video_start for ${rec.cameraName} (${cleanId}): VMS=${ip}:${port}, dayOfWeek=${dayOfWeek}, startSec=${startSec}, endSec=${endSec}`);
 
             // Store original schedule
             try {
@@ -318,12 +355,17 @@ const startWatchdog = () => {
             }
 
             await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
-              schedule: { isEnabled: true, tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", streamQuality: "lowest", fps: 0, bitrateKbps: 0, metadataTypes: "none" }] }
+              schedule: { isEnabled: true, tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", streamQuality: "highest", fps: 0, bitrateKbps: 0, metadataTypes: "none" }] }
             }, auth, ip, port);
             
+            // Removed redundant execution log to keep main.log clean as requested
+            // logRecordingEvent(`schedule for camera ${rec.cameraName} at ${rec.startTime} started`);
+            // logger.debug(`[Watchdog] video_start SUCCESS for ${rec.cameraName}`);
             rec.status = "recording";
             rec.record = true;
-          } catch (e) {
+            global._nxExecutingTasks?.add(rec.id);
+          } catch (e: any) {
+            // logger.debug(`[Watchdog] video_start FAILED for ${rec.cameraName}: ${e.message}`);
             rec.status = "failed";
           }
         }
@@ -344,6 +386,19 @@ const startWatchdog = () => {
 
               // Trigger auto-save background (don't await)
               triggerAutoSave(rec, cleanId, auth, nxLocationIp, nxLocationPort);
+              logRecordingEvent(`finished recording, reverting back schedule for camera ${rec.cameraName}`);
+            }
+
+            // FIX: Transition status from "completing" to final state
+            if (rec.recurrence && rec.recurrence !== "none") {
+              const nextDate = calculateNextOccurrence(rec, task.sh, task.sm, task.ss || 0);
+              rec.status = "pending";
+              rec.record = false;
+              rec.date = nextDate.toISOString();
+              rec.startMs = nextDate.getTime();
+              rec.endMs = nextDate.getTime() + (endMs - startMs);
+            } else {
+              rec.status = "completed";
             }
           } catch (e) {
             rec.status = "recording";
@@ -366,8 +421,13 @@ const startWatchdog = () => {
       // Final save to disk with updated statuses
       await saveState(uniqueSchedules);
 
+      // Remove from executing set after iteration finishes
+      tasksToExecute.forEach(task => {
+        if (task.rec?.id) global._nxExecutingTasks?.delete(task.rec.id);
+      });
+
     } catch (err) {
-      console.error("[Watchdog] Error in loop:", err);
+      // console.error("[Watchdog] Error in loop:", err);
     } finally {
       global._nxWatchdogActive = false;
     }
@@ -396,8 +456,8 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
 }
 
 function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
-  const port = detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010");
-  const url = `http://127.0.0.1:${port}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
+  const currentPort = detectCurrentPort(global._nxAppPort || "3030");
+  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;
@@ -427,7 +487,7 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
       const scrubbedCookie = userCookie.startsWith("{") ? JSON.parse(userCookie) : { token: "present" };
       if (scrubbedCookie.token) scrubbedCookie.token = "SCRUBBED";
       if (scrubbedCookie.accessToken) scrubbedCookie.accessToken = "SCRUBBED";
-      console.log(`[getUserResourceRights] userCookie:`, scrubbedCookie);
+      // console.log(`[getUserResourceRights] userCookie:`, scrubbedCookie);
 
       if (userCookie.startsWith("{")) {
         const parsed = JSON.parse(userCookie);
@@ -467,15 +527,15 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
         const sessionData = await vmsRequest("GET", "/rest/v3/login/sessions/-", null, token, finalIp, finalPort);
         if (sessionData && sessionData.username) {
           username = sessionData.username;
-          console.log(`[getUserResourceRights] Resolved username from VMS session: ${username}`);
+          // console.log(`[getUserResourceRights] Resolved username from VMS session: ${username}`);
         }
       } catch (e: any) {
-        console.warn(`[getUserResourceRights] Failed to resolve username from VMS session: ${e.message}`);
+        // console.warn(`[getUserResourceRights] Failed to resolve username from VMS session: ${e.message}`);
       }
     }
 
     if (!token || !username) {
-      console.log(`[getUserResourceRights] No token or username found. Using fallback: ${username || "System"}`);
+      // console.log(`[getUserResourceRights] No token or username found. Using fallback: ${username || "System"}`);
       return { rights: null, isAdmin: isDashboardAdmin, username: username || "System" };
     }
 
@@ -488,10 +548,10 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
         devices.forEach((d: any) => {
           if (d.id) accessibleRights[normalizeId(d.id)] = "view";
         });
-        console.log(`[getUserResourceRights] User ${username} can access ${devices.length} cameras.`);
+        // console.log(`[getUserResourceRights] User ${username} can access ${devices.length} cameras.`);
       }
     } catch (e: any) {
-      console.warn(`[getUserResourceRights] Failed to fetch accessible devices: ${e.message}`);
+      // console.warn(`[getUserResourceRights] Failed to fetch accessible devices: ${e.message}`);
     }
 
     // ── STEP 2: Fetch direct VMS permissions for admin status ───────────────
@@ -500,7 +560,7 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
       const permissions = (permsData?.permissions || "").toLowerCase();
       const vmsIsAdmin = permissions.includes("administrator");
       
-      console.log(`[getUserResourceRights] VMS permissions for ${username}: ${permissions} (isAdmin: ${vmsIsAdmin})`);
+      // console.log(`[getUserResourceRights] VMS permissions for ${username}: ${permissions} (isAdmin: ${vmsIsAdmin})`);
 
       return {
         rights: vmsIsAdmin ? null : accessibleRights,
@@ -508,11 +568,10 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
         username
       };
     } catch (e: any) {
-      console.warn(`[getUserResourceRights] Failed to fetch VMS permissions: ${e.message}`);
+      // console.warn(`[getUserResourceRights] Failed to fetch VMS permissions: ${e.message}`);
     }
 
-    console.log(`[getUserResourceRights] No direct VMS permissions found for ${username}. isDashboardAdmin=${isDashboardAdmin}. Using device-list rights.`);
-    return { rights: accessibleRights, isAdmin: isDashboardAdmin, username };
+    // console.log(`[getUserResourceRights] No direct VMS permissions found for ${username}. isDashboardAdmin=${isDashboardAdmin}. Using device-list rights.`);
     return { rights: accessibleRights, isAdmin: isDashboardAdmin, username };
   } catch (err) {
     return { rights: null, isAdmin: false, username: "System" };
@@ -530,7 +589,7 @@ export async function GET(request: NextRequest) {
     global._nxAppPort = detectedPort;
     (async () => {
       try {
-        const dataStr = await fs.readFile(DATA_FILE, "utf-8").catch(() => "{}");
+        const dataStr = await readDataFile(DATA_FILE).catch(() => "{}");
         const data = JSON.parse(dataStr);
         data.appPort = detectedPort;
         await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
@@ -540,37 +599,30 @@ export async function GET(request: NextRequest) {
 
   startWatchdog();
   try {
-    const dataStr = await fs.readFile(DATA_FILE, "utf-8");
+    const dataStr = await readDataFile(DATA_FILE);
     const data = JSON.parse(dataStr);
 
     // ── Multi-Tenant Filtering ──────────────────────────────────────────────
     const { rights, isAdmin: userIsAdmin, username } = await getUserResourceRights(request, data.nxLocationIp, data.nxLocationPort);
 
-    console.log(`[GET /scheduled] Found ${data.schedules?.length || 0} raw schedules on disk.`);
+    // console.log(`[GET /scheduled] Found ${data.schedules?.length || 0} raw schedules on disk.`);
 
-    // If rights were fetched (even if empty)
-    if (rights) {
-      const hasSpecificRights = Object.keys(rights).length > 0;
-      console.log(`[GET /scheduled] Processing rights for ${username}: userIsAdmin=${userIsAdmin}, hasSpecificRights=${hasSpecificRights}`);
-
-      // If user is admin and has no specific restrictions, show everything.
-      // Otherwise, filter strictly by rights.
-      if (!(userIsAdmin && !hasSpecificRights)) {
-        const normalizeId = (id: string) => id.replace(/[{}]/g, "");
-        const originalCount = (data.schedules || []).length;
-        data.schedules = (data.schedules || []).filter((s: any) => {
-          const nid = normalizeId(s.cameraId);
-          const r = (rights[nid] || rights[s.cameraId] || "").toLowerCase();
-          // Escalated: Any non-empty right grants access
-          return r !== "" && r !== "none";
-        });
-        console.log(`[GET /scheduled] Restricted user: Filtered schedules from ${originalCount} down to ${data.schedules.length}`);
-      } else {
-        console.log(`[GET /scheduled] Admin user: Showing all ${data.schedules.length} schedules.`);
-      }
-    } else if (!userIsAdmin) {
-      // Could not verify rights and user is not a dashboard admin -> show nothing
-      console.log(`[GET /scheduled] Restricted user (No rights found): Showing 0 schedules.`);
+    // Admin bypass: admins always see all schedules
+    if (userIsAdmin) {
+      // console.log(`[GET /scheduled] Admin user ${username}: Showing all ${data.schedules?.length || 0} schedules.`);
+    } else if (rights) {
+      // Non-admin with rights: filter by accessible cameras
+      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+      const originalCount = (data.schedules || []).length;
+      data.schedules = (data.schedules || []).filter((s: any) => {
+        const nid = normalizeId(s.cameraId);
+        const r = (rights[nid] || rights[s.cameraId] || "").toLowerCase();
+        return r !== "" && r !== "none";
+      });
+      // console.log(`[GET /scheduled] Restricted user ${username}: Filtered schedules from ${originalCount} down to ${data.schedules.length}`);
+    } else {
+      // Could not verify rights and user is not admin -> show nothing
+      // console.log(`[GET /scheduled] Restricted user ${username} (No rights found): Showing 0 schedules.`);
       data.schedules = [];
     }
 
@@ -617,12 +669,14 @@ export async function POST(request: NextRequest) {
     // 1. Get existing data from disk
     let existingData: any = { schedules: [], originalSchedules: {} };
     try {
-      const dataStr = await fs.readFile(DATA_FILE, "utf-8");
+      const dataStr = await readDataFile(DATA_FILE);
       existingData = JSON.parse(dataStr);
     } catch (e) { }
 
     // 2. Identify current user and their rights
     const { rights, isAdmin: userIsAdmin, username } = await getUserResourceRights(request, body.nxLocationIp || existingData.nxLocationIp, body.nxLocationPort || existingData.nxLocationPort);
+
+    logRecordingEvent(`logged in as: ${username}(admin:${userIsAdmin})`);
 
     let token = request.cookies.get("local_nx_user")?.value;
     if (!token) token = request.cookies.get("nx_cloud_session")?.value;
@@ -635,11 +689,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Smart Merge: Keep existing schedules for cameras the user CAN'T see
-    if (rights) {
-      const hasSpecificRights = Object.keys(rights).length > 0;
-
-      // If NOT a restricted-free admin, perform merge
-      if (!(userIsAdmin && !hasSpecificRights)) {
+    // Admin users do a full replace; non-admins merge to preserve other users' schedules
+    if (rights && !userIsAdmin) {
         const normalizeId = (id: string) => id.replace(/[{}]/g, "");
 
         // Filter out only the schedules for cameras the user HAS access to from the EXISTING list
@@ -669,7 +720,6 @@ export async function POST(request: NextRequest) {
           ...(existingData.originalSchedules || {}),
           ...(body.originalSchedules || {})
         };
-      }
     }
 
     // ── Update Auth & Metadata ──────────────────────────────────────────────
@@ -727,6 +777,12 @@ export async function POST(request: NextRequest) {
       globalAuthFallback: token,
       globalUserKeyFallback: userKey
     }, null, 2), "utf-8");
+
+    // Log the creation event only once per batch
+    if (body.schedules && body.schedules.length > 0) {
+      const firstCam = body.schedules[0].cameraName || "Unknown Camera";
+      logRecordingEvent(`schedule for camera ${firstCam} created`);
+    }
 
     return NextResponse.json({ success: true });
   } catch (e: any) {

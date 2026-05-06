@@ -143,8 +143,11 @@ export async function GET(request: NextRequest) {
       const hasCameraName = safeCameraName && baseName.includes(safeCameraName);
       
       if (safeCameraName && !hasCameraName) {
-        suggestedFileName = `${safeCameraName}_${dateStr}_${baseName}.${extension}`;
+        suggestedFileName = `${dateStr}_${safeCameraName}_${baseName}.${extension}`;
       } else if (!hasCameraName) {
+        suggestedFileName = `${dateStr}_${baseName}.${extension}`;
+      } else if (hasCameraName) {
+        // If it already has camera name, just prepend date
         suggestedFileName = `${dateStr}_${baseName}.${extension}`;
       }
     }

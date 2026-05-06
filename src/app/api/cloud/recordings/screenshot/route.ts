@@ -3,7 +3,7 @@ import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderF
 import { API_CONFIG } from "@/lib/config";
 import fs from "fs";
 import path from "path";
-import { logRecordingEvent } from "@/lib/recording-logger";
+
 
 /**
  * POST /api/cloud/recordings/screenshot
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
     const screenshotsDir = path.join(screenshotsBaseDir, dateFolder);
     if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir, { recursive: true });
 
-    const finalFileName = `${safeCameraName}_${YYYY}-${MM}-${DD}_${timestampStr}_${idHash}.png`;
+    const finalFileName = `${safeCameraName}_${timestampStr}_${idHash}.png`;
     const filePath = path.join(screenshotsDir, finalFileName);
 
     if (fs.existsSync(filePath)) {
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    console.log(`[screenshot] Capturing PNG for ${safeCameraName} (${cleanDeviceId}) on system ${systemId}`);
+    // console.log(`[screenshot] Capturing PNG for ${safeCameraName} (${cleanDeviceId}) on system ${systemId}`);
 
     // Pulse recording to ensure live stream is ready
     let originalSchedule = null;
@@ -188,7 +188,7 @@ export async function POST(request: NextRequest) {
     }
 
     fs.writeFileSync(filePath, buffer);
-    console.log(`[screenshot] Saved: ${filePath} (${buffer.length} bytes)`);
+    // console.log(`[screenshot] Saved: ${filePath} (${buffer.length} bytes)`);
 
     // ── Send Notification ───────────────────────────────────────────────────
     const notificationUserKey = body.notificationUserKey || getNotificationUserKey(request);
@@ -207,7 +207,7 @@ export async function POST(request: NextRequest) {
           startTimeMs: targetDate.getTime(),
           durationMs: 0
         })
-      }).catch(err => console.error("[screenshot] Notification failed:", err));
+      }).catch(err => {}); // console.error("[screenshot] Notification failed:", err));
     }
 
     return NextResponse.json({
@@ -220,7 +220,7 @@ export async function POST(request: NextRequest) {
       timestamp: targetDate.toISOString(),
     });
   } catch (error: any) {
-    console.error("[screenshot] Internal error:", error);
+    // console.error("[screenshot] Internal error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
