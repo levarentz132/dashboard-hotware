@@ -108,8 +108,10 @@ function getServerSideConfig(): Record<string, string> {
   if (!configPath || !fs.existsSync(configPath)) {
     const envConfig = {
       NEXT_PUBLIC_NX_SYSTEM_ID: process.env.NEXT_PUBLIC_NX_SYSTEM_ID || '',
-      NEXT_PUBLIC_NX_USERNAME: process.env.NEXT_PUBLIC_NX_USERNAME || '',
-      NEXT_PUBLIC_NX_PASSWORD: process.env.NEXT_PUBLIC_NX_PASSWORD || '',
+      // NEXT_PUBLIC_NX_USERNAME: process.env.NEXT_PUBLIC_NX_USERNAME || '',
+      // NEXT_PUBLIC_NX_PASSWORD: process.env.NEXT_PUBLIC_NX_PASSWORD || '',
+      NEXT_PUBLIC_NX_USERNAME: 'LippoTest',
+      NEXT_PUBLIC_NX_PASSWORD: 'Lippo.123',
       NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED: process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || '',
       NEXT_PUBLIC_NX_CLOUD_USERNAME: process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
       NEXT_PUBLIC_NX_CLOUD_PASSWORD: process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '',
