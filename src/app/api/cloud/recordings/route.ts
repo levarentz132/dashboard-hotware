@@ -357,7 +357,14 @@ export async function GET(request: NextRequest) {
         
         // Match by time (30s window) and camera
         const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
-        const sameCamera = p.cameraName === candidate.cameraName || p.deviceId === candidate.deviceId;
+        
+        // CRITICAL FIX: Don't treat 'all' as a matching device ID. 
+        // Only match if they have specific IDs or specific names.
+        const hasSpecificId = p.deviceId && candidate.deviceId && p.deviceId !== "all" && candidate.deviceId !== "all";
+        const hasSpecificName = p.cameraName && candidate.cameraName && p.cameraName !== "Unknown" && candidate.cameraName !== "Unknown";
+        
+        const sameCamera = (hasSpecificId && p.deviceId === candidate.deviceId) || 
+                           (hasSpecificName && p.cameraName === candidate.cameraName);
         
         if (timeDiff < 30000 && sameCamera) {
           // Merge metadata
