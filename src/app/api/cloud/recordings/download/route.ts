@@ -7,6 +7,7 @@ import os from "os";
 import { promisify } from "util";
 import { spawn } from "child_process";
 import { Readable } from "stream";
+import { logRecordingEvent } from "@/lib/recording-logger";
 
 const writeFile = promisify(fs.writeFile);
 const mkdir = promisify(fs.mkdir);
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
     const autoSave = searchParams.get("autoSave") === "true"; // If 'true', save to disk only — no streaming
     const isSnapshotParam = searchParams.get("isSnapshot") === "true";
 
-    // console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, autoSave=${autoSave}`);
+    console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}, autoSave=${autoSave}`);
 
     if (!systemId || !deviceId || !startTime) {
       return NextResponse.json(
@@ -150,11 +151,11 @@ export async function GET(request: NextRequest) {
 
       // DEDUPLICATION: Check if file already exists before fetching from VMS
       if (fs.existsSync(savePath)) {
-        // console.log(`[recordings/download] AUTO-SAVE: File already exists, skipping: ${savePath}`);
+        console.log(`[recordings/download] AUTO-SAVE: File already exists, skipping: ${savePath}`);
         return NextResponse.json({ success: true, path: savePath, file: finalFileName, skipped: true });
       }
 
-      // console.log(`[recordings/download] AUTO-SAVE triggered for ${deviceId} startTime=${startTime}`);
+      console.log(`[recordings/download] AUTO-SAVE triggered for ${deviceId} startTime=${startTime}, duration=${Math.round((parseInt(endTime || startTime) - parseInt(startTime))/1000)}s`);
 
       let videoResponse: Response;
       try {
@@ -164,7 +165,7 @@ export async function GET(request: NextRequest) {
         // Pulse Filtering: Skip auto-save if duration is under 10 seconds
         const durationMs = (endTime && startTime) ? parseInt(endTime) - parseInt(startTime) : 0;
         if (durationMs > 0 && durationMs < 10000) {
-          // console.log(`[recordings/download] AUTO-SAVE skipped: Clip is a pulse (${Math.round(durationMs/1000)}s)`);
+          console.log(`[recordings/download] AUTO-SAVE skipped: Clip is a pulse (${Math.round(durationMs/1000)}s)`);
           clearTimeout(autoSaveTimeout);
           return NextResponse.json({ success: true, skipped: true, reason: "pulse_filter" });
         }
@@ -174,15 +175,15 @@ export async function GET(request: NextRequest) {
 
         if (!videoResponse.ok || !videoResponse.body) {
           const errText = await videoResponse.text().catch(() => "");
-          // console.error(`[recordings/download] AUTO-SAVE fetch failed (${videoResponse.status}):`, errText);
+          console.error(`[recordings/download] AUTO-SAVE fetch failed (${videoResponse.status}):`, errText);
           return NextResponse.json({ error: "Auto-save fetch failed", status: videoResponse.status }, { status: 500 });
         }
       } catch (fetchErr: any) {
-        // console.error("[recordings/download] AUTO-SAVE fetch error:", fetchErr);
+        console.error("[recordings/download] AUTO-SAVE fetch error:", fetchErr.message || fetchErr);
         return NextResponse.json({ error: "Auto-save fetch error", details: fetchErr.message }, { status: 500 });
       }
 
-      // console.log(`[recordings/download] AUTO-SAVE encoding to: ${savePath}`);
+      console.log(`[recordings/download] AUTO-SAVE encoding to: ${savePath}`);
 
       const ffmpegPath = getFfmpegPath();
       const ffmpegAutoSave = spawn(ffmpegPath, [
@@ -198,26 +199,37 @@ export async function GET(request: NextRequest) {
       ], { windowsHide: true });
 
       ffmpegAutoSave.stdin.on("error", (e) => {
-        // console.error("[recordings/download] AUTO-SAVE FFmpeg stdin error:", e);
+        console.error("[recordings/download] AUTO-SAVE FFmpeg stdin error:", e.message);
       });
 
-      const autoSaveInput = Readable.fromWeb(videoResponse.body as any);
-      autoSaveInput.pipe(ffmpegAutoSave.stdin);
+      ffmpegAutoSave.stderr.on("data", (data) => {
+        // Log FFmpeg progress/errors for debugging
+        const msg = data.toString();
+        if (msg.includes("error") || msg.includes("Error")) {
+          console.error("[recordings/download] FFmpeg stderr:", msg.trim());
+        }
+      });
 
+      // Pipe video stream to FFmpeg
+      const autoSaveStream = Readable.fromWeb(videoResponse.body as any);
+      autoSaveStream.pipe(ffmpegAutoSave.stdin);
+
+      // Wait for FFmpeg to finish
       return await new Promise<NextResponse>((resolve) => {
         ffmpegAutoSave.on("close", (code) => {
           if (code !== 0) {
-            // console.error(`[recordings/download] AUTO-SAVE FFmpeg failed (code ${code})`);
+            console.error(`[recordings/download] AUTO-SAVE FFmpeg failed with code ${code}`);
             resolve(NextResponse.json({ error: "FFmpeg failed during auto-save", code }, { status: 500 }));
           } else {
-            // console.log(`[recordings/download] AUTO-SAVE complete: ${savePath}`);
-            // logRecordingEvent(`Auto-saved video to disk: ${safeCameraName}`);
+            console.log(`[recordings/download] AUTO-SAVE complete: ${finalFileName}`);
+            logRecordingEvent(`Auto-saved video: ${safeCameraName}`);
             resolve(NextResponse.json({ success: true, path: savePath, file: finalFileName }));
           }
         });
+
         ffmpegAutoSave.on("error", (err) => {
-          // console.error("[recordings/download] AUTO-SAVE FFmpeg spawn error:", err);
-          resolve(NextResponse.json({ error: "FFmpeg not found", details: err.message }, { status: 500 }));
+          console.error("[recordings/download] AUTO-SAVE FFmpeg spawn error:", err.message);
+          resolve(NextResponse.json({ error: "FFmpeg not found or failed to start", details: err.message }, { status: 500 }));
         });
       });
     }

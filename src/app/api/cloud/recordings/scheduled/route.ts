@@ -331,8 +331,8 @@ const startWatchdog = () => {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const auth = rec.auth || globalAuth;
-            if (!auth || !ip || ip === "localhost") {
-              // logger.debug(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
+            if (!auth || !ip ) {
+              console.warn(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
               return;
             }
 
@@ -344,28 +344,29 @@ const startWatchdog = () => {
             let endSec = task.eh * 3600 + task.em * 60 + 59;
             if (dayOfWeek === 7) { startSec -= 3600; endSec -= 3600; }
 
-            // logger.debug(`[Watchdog] video_start for ${rec.cameraName} (${cleanId}): VMS=${ip}:${port}, dayOfWeek=${dayOfWeek}, startSec=${startSec}, endSec=${endSec}`);
+            console.log(`[Watchdog] Starting recording for ${rec.cameraName} (${cleanId}): dayOfWeek=${dayOfWeek}, startSec=${startSec}, endSec=${endSec}`);
 
             // Store original schedule
             try {
               const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, auth, ip, port);
               originalSchedules[rec.id] = cam?.schedule || { isEnabled: false };
+              console.log(`[Watchdog] Stored original schedule for ${rec.cameraName}`);
             } catch (e) {
               originalSchedules[rec.id] = { isEnabled: false };
+              console.warn(`[Watchdog] Could not fetch original schedule for ${rec.cameraName}, using default`);
             }
 
             await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
               schedule: { isEnabled: true, tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", streamQuality: "highest", fps: 0, bitrateKbps: 0, metadataTypes: "none" }] }
             }, auth, ip, port);
             
-            // Removed redundant execution log to keep main.log clean as requested
-            // logRecordingEvent(`schedule for camera ${rec.cameraName} at ${rec.startTime} started`);
-            // logger.debug(`[Watchdog] video_start SUCCESS for ${rec.cameraName}`);
+            console.log(`[Watchdog] Recording started on VMS for ${rec.cameraName}`);
+            logRecordingEvent(`recording started for camera ${rec.cameraName} at ${rec.startTime}`);
             rec.status = "recording";
             rec.record = true;
             global._nxExecutingTasks?.add(rec.id);
           } catch (e: any) {
-            // logger.debug(`[Watchdog] video_start FAILED for ${rec.cameraName}: ${e.message}`);
+            console.error(`[Watchdog] video_start FAILED for ${rec.cameraName}:`, e.message);
             rec.status = "failed";
           }
         }
@@ -374,19 +375,24 @@ const startWatchdog = () => {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const auth = rec.auth || globalAuth;
+            console.log(`[Watchdog] Stopping recording for ${rec.cameraName} (${cleanId})`);
             if (auth && ip && ip !== "localhost") {
               await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { isEnabled: false } }, auth, ip, port);
+              console.log(`[Watchdog] Recording stopped on VMS for ${rec.cameraName}`);
               
               // Restore original
               const original = originalSchedules[rec.id];
               if (original) {
                 await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { ...original, isEnabled: false } }, auth, ip, port);
+                console.log(`[Watchdog] Original schedule restored for ${rec.cameraName}`);
               }
               delete originalSchedules[rec.id];
 
               // Trigger auto-save background (don't await)
               triggerAutoSave(rec, cleanId, auth, nxLocationIp, nxLocationPort);
               logRecordingEvent(`finished recording, reverting back schedule for camera ${rec.cameraName}`);
+            } else {
+              console.warn(`[Watchdog] Cannot stop recording for ${rec.cameraName}: missing auth or IP`);
             }
 
             // FIX: Transition status from "completing" to final state
@@ -463,7 +469,25 @@ function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, 
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;
   if (nxPort && nxPort !== "7001") headers["x-nx-location-port"] = nxPort;
   
-  fetch(url, { headers }).catch(() => {});
+  console.log(`[Watchdog] Triggering auto-save for ${rec.cameraName}: ${url}`);
+  fetch(url, { headers })
+    .then(res => {
+      if (!res.ok) {
+        console.error(`[Watchdog] Auto-save failed for ${rec.cameraName}: HTTP ${res.status}`);
+        return res.text().then(text => console.error(`[Watchdog] Error details: ${text}`));
+      }
+      return res.json();
+    })
+    .then(data => {
+      if (data?.success) {
+        console.log(`[Watchdog] Auto-save successful for ${rec.cameraName}: ${data.path || data.file}`);
+      } else if (data?.skipped) {
+        console.log(`[Watchdog] Auto-save skipped for ${rec.cameraName}: ${data.reason || 'already exists'}`);
+      }
+    })
+    .catch(err => {
+      console.error(`[Watchdog] Auto-save request failed for ${rec.cameraName}:`, err.message);
+    });
 }
 
 // Ensure watchdog starts when this module is used
