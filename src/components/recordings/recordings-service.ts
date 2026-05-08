@@ -124,7 +124,8 @@ export async function fetchRecordedTimePeriods(
   deviceId: string,
   startTime?: number,
   endTime?: number,
-  basicAuth?: BasicAuthCredentials
+  basicAuth?: BasicAuthCredentials,
+  signal?: AbortSignal
 ): Promise<any> {
   try {
     const headers: Record<string, string> = {
@@ -147,6 +148,7 @@ export async function fetchRecordedTimePeriods(
       method: "GET",
       credentials: "include",
       headers,
+      signal,
     });
 
     if (!response.ok) {
@@ -156,7 +158,8 @@ export async function fetchRecordedTimePeriods(
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'AbortError') throw error;
     console.error("[recordings-service] fetchRecordedTimePeriods error:", error);
     throw error;
   }

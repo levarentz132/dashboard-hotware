@@ -7,13 +7,35 @@ import path from "path";
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+// Simple in-memory cache to reduce redundant disk scans and API calls
+// Keys: systemId:deviceId:startTime:endTime
+const recordingsCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 20000; // 20 seconds for active caching
+
+function getCache(key: string) {
+  const cached = recordingsCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+}
+
+function setCache(key: string, data: any) {
+  recordingsCache.set(key, { data, timestamp: Date.now() });
+  // Cleanup old entries
+  if (recordingsCache.size > 200) {
+    const oldestKey = recordingsCache.keys().next().value;
+    if (oldestKey) recordingsCache.delete(oldestKey);
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const { systemId, systemName } = validateSystemId(request);
     const deviceIdRaw = searchParams.get("deviceId") || "";
-    const deviceId = deviceIdRaw.replace(/[{}]/g, "");
+    const isAllCameras = deviceIdRaw === "all";
+    const deviceId = isAllCameras ? "all" : deviceIdRaw.replace(/[{}]/g, "");
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
 
@@ -24,9 +46,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Check cache
+    const cacheKey = `${systemId}:${deviceId}:${startTime}:${endTime}`;
+    const cachedData = getCache(cacheKey);
+    if (cachedData) {
+      // logger.debug(`[recordings] Returning cached data for ${cacheKey}`);
+      return NextResponse.json(cachedData, {
+        headers: { 'X-Cache': 'HIT', 'Cache-Control': 'no-store, max-age=0' }
+      });
+    }
+
     // Build query params for recorded time periods
     const params = new URLSearchParams();
-    params.set("cameraId", deviceIdRaw);
+    if (!isAllCameras) {
+      params.set("cameraId", deviceIdRaw);
+    }
     if (startTime) params.set("startTime", startTime);
     if (endTime) params.set("endTime", endTime);
     params.set("detail", "2"); // Get detailed periods
@@ -73,18 +107,18 @@ export async function GET(request: NextRequest) {
     // Use responseData instead of data
     const data = responseData;
     
-    // logger.debug("[recordings] Raw response sample:", JSON.stringify(data).substring(0, 500));
-    
-    // Fetch device info early to help with deduplication and naming
+    // Fetch device info early to help with deduplication and naming (only if specific device)
     let searchCameraName = "";
-    try {
-      const deviceUrl = buildCloudUrl(systemId, `/rest/v3/devices/${deviceId}`, new URLSearchParams(), request, systemName || undefined);
-      const devRes = await fetch(deviceUrl, { headers, buildCloudHeaders: true } as any);
-      if (devRes.ok) {
-        const devData = await devRes.json();
-        searchCameraName = (devData.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-      }
-    } catch (e) { }
+    if (!isAllCameras) {
+      try {
+        const deviceUrl = buildCloudUrl(systemId, `/rest/v3/devices/${deviceId}`, new URLSearchParams(), request, systemName || undefined);
+        const devRes = await fetch(deviceUrl, { headers, buildCloudHeaders: true } as any);
+        if (devRes.ok) {
+          const devData = await devRes.json();
+          searchCameraName = (devData.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+        }
+      } catch (e) { }
+    }
 
     // NX API returns { reply: [{ guid: "serverId", periods: [{startTimeMs, durationMs}] }] }
     // We need to flatten all periods from all servers
@@ -113,7 +147,7 @@ export async function GET(request: NextRequest) {
           ...p,
           startTimeMs,
           durationMs,
-          deviceId,
+          deviceId: p.deviceId || deviceId, // Use per-period deviceId if available (for 'all' query)
           cameraName: searchCameraName || "Unknown",
           isScreenshot: durationMs > 0 && durationMs <= 5000,
           serverId: item.guid || p.guid,
@@ -139,13 +173,13 @@ export async function GET(request: NextRequest) {
       const normalizedBaseDirs = Array.from(baseDirs).map(d => path.resolve(d));
       const uniqueBaseDirs = new Set(normalizedBaseDirs);
 
-      for (const screenshotsBaseDir of uniqueBaseDirs) {
+      for (const screenshotsBaseDir of Array.from(uniqueBaseDirs)) {
+        if (!fs.existsSync(screenshotsBaseDir)) continue;
 
-      if (fs.existsSync(screenshotsBaseDir)) {
         const startLimit = startTime ? parseInt(startTime, 10) : 0;
         const endLimit = endTime ? parseInt(endTime, 10) : Infinity;
 
-        // Scan date-based folders (Include both legacy YYYYMMDD and new YYYY-MM-DD format)
+        // Scan date-based folders
         const dateFolders = fs.readdirSync(screenshotsBaseDir).filter(f => {
           const fullPath = path.join(screenshotsBaseDir, f);
           return fs.statSync(fullPath).isDirectory() && /^(\d{8}|\d{4}-\d{2}-\d{2})$/.test(f);
@@ -153,254 +187,205 @@ export async function GET(request: NextRequest) {
 
         for (const dateFolder of dateFolders) {
           const folderPath = path.join(screenshotsBaseDir, dateFolder);
-          
-          // --- 1. Scan Flat Files (directly in dateFolder) ---
-           // This handles both new format (CameraName_HHmmss) and legacy formats
-           const folderFiles = fs.readdirSync(folderPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
- 
-           for (const file of folderFiles) {
-             const filePath = path.join(folderPath, file);
-             if (fs.statSync(filePath).isDirectory()) continue;
+          const folderFiles = fs.readdirSync(folderPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
 
-             // Avoid adding the same file twice if it matches multiple patterns or directories
-             if (seenLocalFiles.has(file)) continue;
- 
-             let isMatch = false;
-             let timeStr = "";
-             let foundCameraName = "";
- 
-              // Pattern A: Legacy format {CameraName}_{YYYY-MM-DD}_{HHmmss}_{ID}.png
-              const legacyFormatMatch = file.match(/^(.+)_(\d{4}-\d{2}-\d{2})_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
-              if (legacyFormatMatch) {
-                foundCameraName = legacyFormatMatch[1];
-                const fileDateStr = legacyFormatMatch[2];
-                timeStr = legacyFormatMatch[3];
-                const fileIdHash = legacyFormatMatch[4];
+          for (const file of folderFiles) {
+            const filePath = path.join(folderPath, file);
+            if (fs.statSync(filePath).isDirectory()) continue;
+            if (seenLocalFiles.has(file)) continue;
 
-               const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-               const isNameMatch = foundCameraName.toLowerCase() === safeTarget.toLowerCase();
-               
-               // If we have an ID hash in the filename, use it for exact matching
-               const idHash = deviceId.slice(-4).toLowerCase();
-               const isIdMatch = fileIdHash && fileIdHash === idHash;
+            let isMatch = false;
+            let timeStr = "";
+            let foundCameraName = "";
+            let fileDeviceId = "";
 
-               if (isIdMatch || (isNameMatch && !fileIdHash)) {
-                 isMatch = true;
-               }
-             }
+            // Pattern A: Legacy format {CameraName}_{YYYY-MM-DD}_{HHmmss}_{ID}.png
+            const legacyFormatMatch = file.match(/^(.+)_(\d{4}-\d{2}-\d{2})_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
+            if (legacyFormatMatch) {
+              foundCameraName = legacyFormatMatch[1];
+              timeStr = legacyFormatMatch[3];
+              const fileIdHash = legacyFormatMatch[4];
+              
+              if (isAllCameras) {
+                isMatch = true;
+              } else {
+                const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+                const isNameMatch = foundCameraName.toLowerCase() === safeTarget.toLowerCase();
+                const idHash = deviceId.slice(-4).toLowerCase();
+                const isIdMatch = fileIdHash && fileIdHash === idHash;
+                if (isIdMatch || (isNameMatch && !fileIdHash)) isMatch = true;
+              }
+            }
 
-              // Pattern B: New format {CameraName}_{HHmmss}_{idHash}.png
-              if (!isMatch) {
-                const simpleMatch = file.match(/^(.+)_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
-                if (simpleMatch) {
-                   foundCameraName = simpleMatch[1];
-                   timeStr = simpleMatch[2];
-                   const fileIdHash = simpleMatch[3];
+            // Pattern B: New format {CameraName}_{HHmmss}_{idHash}.png
+            if (!isMatch) {
+              const simpleMatch = file.match(/^(.+)_(\d{6})(?:_([a-z0-9]+))?\.(?:png|mp4)$/);
+              if (simpleMatch) {
+                foundCameraName = simpleMatch[1];
+                timeStr = simpleMatch[2];
+                const fileIdHash = simpleMatch[3];
 
-                    const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim().toLowerCase().replace(/_/g, " ");
-                    const foundLower = foundCameraName.toLowerCase().replace(/_/g, " ");
-                    const isNameMatch = foundLower === safeTarget || 
-                                        foundLower === deviceId.toLowerCase();
-                    
-                    const idHash = deviceId.slice(-4).toLowerCase();
-                    const isIdMatch = fileIdHash && fileIdHash === idHash;
- 
-                    if (isIdMatch || (isNameMatch && !fileIdHash)) {
-                      isMatch = true;
-                    }
+                if (isAllCameras) {
+                  isMatch = true;
+                } else {
+                  const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim().toLowerCase().replace(/_/g, " ");
+                  const foundLower = foundCameraName.toLowerCase().replace(/_/g, " ");
+                  const isNameMatch = foundLower === safeTarget || foundLower === deviceId.toLowerCase();
+                  const idHash = deviceId.slice(-4).toLowerCase();
+                  const isIdMatch = fileIdHash && fileIdHash === idHash;
+                  if (isIdMatch || (isNameMatch && !fileIdHash)) isMatch = true;
                 }
               }
- 
-             // Pattern C: Legacy ID format {deviceId}__{cameraName}_{YYYYMMDD}_{HHMMSS}.png
-             if (!isMatch) {
-               const idSplit = file.split("__");
-               if (idSplit.length > 1) {
-                 if (idSplit[0].toLowerCase() === deviceId.toLowerCase()) {
-                   isMatch = true;
-                   const timeParts = file.match(/_(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
-                   if (timeParts) timeStr = timeParts[1];
-                 }
-               }
-             }
- 
-             // Pattern C: Legacy Name format {cameraName}_{YYYY-MM-DD}_{HHMMSS}.png
-             if (!isMatch && searchCameraName) {
-                const safeSearchName = searchCameraName.replace(/[<>:"/\\|?*]/g, "_").trim();
-                if (file.startsWith(safeSearchName + "_")) {
-                   isMatch = true;
-                   const timeParts = file.match(/_(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
-                   if (timeParts) timeStr = timeParts[1];
+            }
+
+            // Pattern C: Legacy ID formats...
+            if (!isMatch) {
+              const idSplit = file.split("__");
+              if (idSplit.length > 1) {
+                if (isAllCameras || idSplit[0].toLowerCase() === deviceId.toLowerCase()) {
+                  isMatch = true;
+                  fileDeviceId = idSplit[0];
+                  const timeParts = file.match(/_(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
+                  if (timeParts) timeStr = timeParts[1];
                 }
-             }
- 
-             if (!isMatch || !timeStr) continue;
- 
-             const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
-             const hour = parseInt(timeStr.substring(0, 2), 10);
-             const minute = parseInt(timeStr.substring(2, 4), 10);
-             const second = parseInt(timeStr.substring(4, 6), 10);
-             // For scheduled PNG snapshots, round down seconds to :00 so the display time
-             // matches the user-set schedule time (e.g. 10:07:03 -> 10:07:00)
-             const isScheduledPng = file.endsWith(".png");
-             const displaySecond = isScheduledPng ? 0 : second;
-             const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
- 
-             if (timestamp >= startLimit && timestamp <= endLimit) {
-               const stats = fs.statSync(filePath);
-               const isVideo = file.endsWith(".mp4");
-               const isShortVideo = isVideo && stats.size < 150000; 
+              }
+            }
 
-               let durationMs = isVideo ? (isShortVideo ? 1000 : Math.max(1000, stats.mtimeMs - timestamp)) : 0;
-               if (durationMs > 3600000) durationMs = 60000;
+            if (!isMatch || !timeStr) continue;
 
-               allPeriods.push({
-                 startTimeMs: timestamp,
-                 durationMs: durationMs,
-                 isScreenshot: file.endsWith(".png") || isShortVideo,
-                 isVideo: isVideo && !isShortVideo,
-                 isLocal: true,
-                 deviceId: deviceId,
-                 serverId: "local-storage",
-                 fileName: file,
-                 dateFolder: dateFolder,
-                 cameraName: foundCameraName || searchCameraName || "Unknown",
-                 url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(file)}`,
-               });
-               seenLocalFiles.add(file);
-             }
-           }
- 
-           // --- 2. Scan Nested Structure (For backward compatibility) ---
-           const subFolders = fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory());
-           
-           for (const cameraFolderName of subFolders) {
-             const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-             const isNameMatch = safeTarget && cameraFolderName === safeTarget;
-             const isIdMatch = cameraFolderName.toLowerCase() === deviceId.toLowerCase();
-             
-             if (!isNameMatch && !isIdMatch) continue;
- 
-             const cameraPath = path.join(folderPath, cameraFolderName);
-             const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
- 
-             for (const file of files) {
-               if (seenLocalFiles.has(file)) continue;
+            const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
+            const hour = parseInt(timeStr.substring(0, 2), 10);
+            const minute = parseInt(timeStr.substring(2, 4), 10);
+            const second = parseInt(timeStr.substring(4, 6), 10);
+            const isScheduledPng = file.endsWith(".png");
+            const displaySecond = isScheduledPng ? 0 : second;
+            const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
 
-               const timeMatch = file.match(/^(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
-               if (!timeMatch) continue;
- 
-               const timeStr = timeMatch[1];
-               const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
-               
-               const hour = parseInt(timeStr.substring(0, 2), 10);
-               const minute = parseInt(timeStr.substring(2, 4), 10);
-               const second = parseInt(timeStr.substring(4, 6), 10);
-               const isScheduledPng = file.endsWith(".png");
-               const displaySecond = isScheduledPng ? 0 : second;
-               const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
-               
-               const isVideo = file.endsWith(".mp4");
-               const stats = fs.statSync(path.join(cameraPath, file));
-               const isShortVideo = isVideo && stats.size < 150000;
+            if (timestamp >= startLimit && timestamp <= endLimit) {
+              const stats = fs.statSync(filePath);
+              const isVideo = file.endsWith(".mp4");
+              const isShortVideo = isVideo && stats.size < 150000; 
 
-               if (timestamp >= startLimit && timestamp <= endLimit) {
-                 allPeriods.push({
-                   startTimeMs: timestamp,
-                   durationMs: isVideo ? (isShortVideo ? 1000 : 60000) : 0,
-                   isScreenshot: file.endsWith(".png") || isShortVideo,
-                   isVideo: isVideo && !isShortVideo,
-                   isLocal: true,
-                   deviceId: deviceId,
-                   serverId: "local-storage",
-                   fileName: file,
-                   dateFolder: dateFolder,
-                   cameraName: cameraFolderName,
-                   url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&camera=${encodeURIComponent(cameraFolderName)}&file=${encodeURIComponent(file)}`,
-                 });
-                 seenLocalFiles.add(file);
-               }
-             }
-           }
-         }
-      }
-    } // End of baseDirs loop
+              let durationMs = isVideo ? (isShortVideo ? 1000 : Math.max(1000, stats.mtimeMs - timestamp)) : 0;
+              if (durationMs > 3600000) durationMs = 60000;
 
-    // 3. Final Deduplication
-    const finalPeriods: any[] = [];
-    const sortedCandidateList = [...allPeriods].sort((a, b) => {
-        // Prioritize VMS over Local for merging base (Timezone-agnostic)
-        const diff = Math.abs(a.startTimeMs - b.startTimeMs);
-        const subH = diff % 3600000;
-        const isTimeMatch = (diff < 10000) || subH < 10000 || subH > 3590000;
-
-        if (isTimeMatch) {
-           if (a.isLocal !== b.isLocal) return a.isLocal ? 1 : -1;
-        }
-
-       // Prefer screenshots over videos for same time
-       if (a.isScreenshot !== b.isScreenshot) return a.isScreenshot ? -1 : 1;
-       
-       // Sort by start time descending
-       return b.startTimeMs - a.startTimeMs;
-    });
-
-     for (const candidate of sortedCandidateList) {
-       const isDuplicate = finalPeriods.some(p => {
-          if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
- 
-          const getMinuteOffset = (ms: number) => {
-             const d = new Date(ms);
-             return (d.getMinutes() * 60000) + (d.getSeconds() * 1000);
-          };
-
-          const pNorm = getMinuteOffset(p.startTimeMs);
-          const cNorm = getMinuteOffset(candidate.startTimeMs);
-          let normDiff = Math.abs(pNorm - cNorm);
-          if (normDiff > 1800000) normDiff = 3600000 - normDiff;
-
-          if (normDiff < 300000) { // 5 minute window
-             // Merge logic: ensure we keep the VMS metadata (duration) but Local file (url)
-             const vmsRecord = !p.isLocal ? p : (!candidate.isLocal ? candidate : null);
-             const localRecord = p.isLocal ? p : (candidate.isLocal ? candidate : null);
-
-             if (vmsRecord) {
-                p.startTimeMs = vmsRecord.startTimeMs;
-                p.durationMs = vmsRecord.durationMs;
-                p.isScreenshot = vmsRecord.isScreenshot;
-             }
-             if (localRecord) {
-                p.isLocal = true;
-                p.fileName = localRecord.fileName;
-                p.dateFolder = localRecord.dateFolder;
-                p.url = localRecord.url;
-             }
-             return true; 
+              allPeriods.push({
+                startTimeMs: timestamp,
+                durationMs: durationMs,
+                isScreenshot: file.endsWith(".png") || isShortVideo,
+                isVideo: isVideo && !isShortVideo,
+                isLocal: true,
+                deviceId: fileDeviceId || deviceId,
+                serverId: "local-storage",
+                fileName: file,
+                dateFolder: dateFolder,
+                cameraName: foundCameraName || searchCameraName || "Unknown",
+                url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(file)}`,
+              });
+              seenLocalFiles.add(file);
+            }
           }
-          return false;
-       });
- 
-       if (!isDuplicate) {
-         finalPeriods.push(candidate);
-       }
-     }
+
+          // Scan Nested Structure...
+          const subFolders = fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory());
+          for (const cameraFolderName of subFolders) {
+            let isNameMatch = false;
+            let isIdMatch = false;
+            
+            if (isAllCameras) {
+              isNameMatch = true;
+            } else {
+              const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+              isNameMatch = !!safeTarget && cameraFolderName === safeTarget;
+              isIdMatch = cameraFolderName.toLowerCase() === deviceId.toLowerCase();
+            }
+            
+            if (!isNameMatch && !isIdMatch) continue;
+
+            const cameraPath = path.join(folderPath, cameraFolderName);
+            const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
+
+            for (const file of files) {
+              if (seenLocalFiles.has(file)) continue;
+              const timeMatch = file.match(/^(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
+              if (!timeMatch) continue;
+
+              const timeStr = timeMatch[1];
+              const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
+              const hour = parseInt(timeStr.substring(0, 2), 10);
+              const minute = parseInt(timeStr.substring(2, 4), 10);
+              const second = parseInt(timeStr.substring(4, 6), 10);
+              const isScheduledPng = file.endsWith(".png");
+              const displaySecond = isScheduledPng ? 0 : second;
+              const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
+              
+              const isVideo = file.endsWith(".mp4");
+              const stats = fs.statSync(path.join(cameraPath, file));
+              const isShortVideo = isVideo && stats.size < 150000;
+
+              if (timestamp >= startLimit && timestamp <= endLimit) {
+                allPeriods.push({
+                  startTimeMs: timestamp,
+                  durationMs: isVideo ? (isShortVideo ? 1000 : 60000) : 0,
+                  isScreenshot: file.endsWith(".png") || isShortVideo,
+                  isVideo: isVideo && !isShortVideo,
+                  isLocal: true,
+                  deviceId: cameraFolderName.match(/^[a-z0-9-]+$/i) ? cameraFolderName : deviceId,
+                  serverId: "local-storage",
+                  fileName: file,
+                  dateFolder: dateFolder,
+                  cameraName: cameraFolderName,
+                  url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&camera=${encodeURIComponent(cameraFolderName)}&file=${encodeURIComponent(file)}`,
+                });
+                seenLocalFiles.add(file);
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("[recordings] Failed to scan local storage folders:", err);
+    }
+
+    // 3. Final Deduplication and Sorting
+    const finalPeriods: any[] = [];
+    const sortedCandidateList = [...allPeriods].sort((a, b) => b.startTimeMs - a.startTimeMs);
+
+    for (const candidate of sortedCandidateList) {
+      const isDuplicate = finalPeriods.some(p => {
+        if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
+        
+        // Match by time (30s window) and camera
+        const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
+        const sameCamera = p.cameraName === candidate.cameraName || p.deviceId === candidate.deviceId;
+        
+        if (timeDiff < 30000 && sameCamera) {
+          // Merge metadata
+          if (!p.isLocal && candidate.isLocal) {
+            p.isLocal = true;
+            p.fileName = candidate.fileName;
+            p.dateFolder = candidate.dateFolder;
+            p.url = candidate.url;
+          }
+          return true;
+        }
+        return false;
+      });
+
+      if (!isDuplicate) finalPeriods.push(candidate);
+    }
 
     finalPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
-    allPeriods = finalPeriods;
-  } catch (err) {
-    logger.warn("[recordings] Failed to scan local storage folders:", err);
-  }
     
-    return NextResponse.json(allPeriods, {
-      headers: {
-        'Cache-Control': 'no-store, max-age=0',
-      },
+    // Save to cache
+    setCache(cacheKey, finalPeriods);
+    
+    return NextResponse.json(finalPeriods, {
+      headers: { 'X-Cache': 'MISS', 'Cache-Control': 'no-store, max-age=0' },
     });
 
   } catch (error) {
     logger.error("[recordings] Exception:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch recordings" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to fetch recordings" }, { status: 500 });
   }
 }

@@ -216,7 +216,27 @@ export async function GET(request: NextRequest) {
 
       // Wait for FFmpeg to finish
       return await new Promise<NextResponse>((resolve) => {
-        ffmpegAutoSave.on("close", (code) => {
+        const taskId = searchParams.get("taskId");
+
+        ffmpegAutoSave.on("close", async (code) => {
+          if (taskId) {
+            try {
+              const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
+              if (fs.existsSync(DATA_FILE)) {
+                const content = fs.readFileSync(DATA_FILE, "utf-8").replace(/^\uFEFF/, "");
+                const data = JSON.parse(content);
+                const task = data.schedules?.find((s: any) => s.id === taskId);
+                if (task) {
+                  task.status = code === 0 ? "completed" : "failed";
+                  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+                  console.log(`[recordings/download] Task ${taskId} status updated to: ${task.status}`);
+                }
+              }
+            } catch (err) {
+              console.error(`[recordings/download] Failed to update task ${taskId} status:`, err);
+            }
+          }
+
           if (code !== 0) {
             console.error(`[recordings/download] AUTO-SAVE FFmpeg failed with code ${code}`);
             resolve(NextResponse.json({ error: "FFmpeg failed during auto-save", code }, { status: 500 }));

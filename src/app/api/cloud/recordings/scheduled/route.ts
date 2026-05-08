@@ -185,7 +185,7 @@ const startWatchdog = () => {
       // ── CLEANUP: Reset stale tasks ─────────────────────────────────────────
       // If a task has been 'recording' or 'capturing' for more than 1 hour, reset it.
       uniqueSchedules.forEach((rec: any) => {
-        if (rec.status === "recording" || rec.status === "capturing" || rec.status === "in progress") {
+        if (rec.status === "recording" || rec.status === "capturing" || rec.status === "in progress" || rec.status === "processing") {
           const startTime = rec.startMs || (rec.date ? new Date(rec.date).getTime() : 0);
           if (startTime > 0 && (now - startTime > 3600000)) {
             rec.status = "failed";
@@ -395,7 +395,7 @@ const startWatchdog = () => {
               console.warn(`[Watchdog] Cannot stop recording for ${rec.cameraName}: missing auth or IP`);
             }
 
-            // FIX: Transition status from "completing" to final state
+            // Transition status to "processing" (FFmpeg)
             if (rec.recurrence && rec.recurrence !== "none") {
               const nextDate = calculateNextOccurrence(rec, task.sh, task.sm, task.ss || 0);
               rec.status = "pending";
@@ -404,7 +404,7 @@ const startWatchdog = () => {
               rec.startMs = nextDate.getTime();
               rec.endMs = nextDate.getTime() + (endMs - startMs);
             } else {
-              rec.status = "completed";
+              rec.status = "processing";
             }
           } catch (e) {
             rec.status = "recording";
@@ -463,7 +463,7 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
 
 function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
   const currentPort = detectCurrentPort(global._nxAppPort || "3030");
-  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true`;
+  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;

@@ -317,6 +317,11 @@ export default function CloudRecordings() {
   // ---- Enrichment state for permissions and VMS identity ----
   const [vmsEnrichedUser, setVmsEnrichedUser] = useState<UserPublic | null>(null);
 
+  // Caching and Race Condition Prevention
+  const recordingsCache = useRef<Map<string, RecentRecording[]>>(new Map());
+  const activeAbortController = useRef<AbortController | null>(null);
+  const lastRequestTime = useRef<number>(0);
+
   // Sync enriched user with localUser and fetch rights if needed
   useEffect(() => {
     if (!localUser) {
@@ -729,10 +734,16 @@ export default function CloudRecordings() {
   useEffect(() => {
     loadFromPersistence();
     fetchSettings();
-    // Poll every 5 seconds to get updates from the watchdog (like captured screenshots)
+  }, []);
+
+  // Smart polling: Only poll status from the watchdog if there are active tasks.
+  // This reduces background network traffic while ensuring the UI updates when a recording finishes.
+  useEffect(() => {
+    if (scheduledRecordings.length === 0) return;
+
     const pollId = setInterval(loadFromPersistence, 5000);
     return () => clearInterval(pollId);
-  }, []);
+  }, [scheduledRecordings.length > 0]); 
 
   useEffect(() => {
     // Guard: Do NOT save until we have loaded from disk at least once.
@@ -754,15 +765,7 @@ export default function CloudRecordings() {
     prevScheduledCount.current = scheduledRecordings.length;
   }, [scheduledRecordings.length]);
 
-  // Periodic results refresh (every 10s) to catch any background completions not detected by count changes
-  useEffect(() => {
-    const resultsPollId = setInterval(() => {
-      if (scheduledRecordings.some(r => r.status === "recording" || r.status === "in progress" || r.status === "capturing")) {
-        handleSearchRecentRecordings(undefined, undefined, undefined, true);
-      }
-    }, 10000);
-    return () => clearInterval(resultsPollId);
-  }, [scheduledRecordings]);
+  // Periodic results refresh removed. Results are fetched on action or manual refresh.
 
   // ---- Recent Recordings tab state ----
   const [recentRecordings, setRecentRecordings] = useState<RecentRecording[]>([]);
@@ -1363,119 +1366,114 @@ export default function CloudRecordings() {
     
     // Don't auto-trigger if nothing is selected yet
     if (isAutoRefresh && !targetDevice) return;
-
-    if (!targetDevice || !targetDate) { setRecentError("Please select a camera and date."); return; }
-
-    if (targetDevice === "all") {
-      setRecentLoading(true);
-      setRecentError("");
-      setRecordings([]);
-      try {
-        const startMs = new Date(targetDate).setHours(0, 0, 0, 0);
-        const endMs = new Date(targetDate).setHours(23, 59, 59, 999);
-
-        const allResults = await Promise.all(devices.map(async (device) => {
-          try {
-            const data = await fetchRecordedTimePeriods(
-              device.systemId, getOriginalDeviceId(device.id, devices), startMs, endMs, undefined
-            );
-            const periods = Array.isArray(data) ? data : data?.reply || [];
-            return periods.map((p: any) => ({ ...p, dev: device }));
-          } catch (e) { return []; }
-        }));
-
-        const flatResults = allResults.flat();
-
-        // Deduplicate: If multiple cameras (due to same name) returned the same legacy snapshot file,
-        // we should only show it once in the "All Cameras" view.
-        const seenFiles = new Set<string>();
-        const deduplicated = flatResults.filter(p => {
-          if (p.isScreenshot && p.fileName) {
-            const key = `${p.dateFolder || ""}/${p.fileName}`;
-            if (seenFiles.has(key)) return false;
-            seenFiles.add(key);
-          }
-          return true;
-        });
-
-        const mapped: RecentRecording[] = deduplicated.map((p: any, i: number) => {
-          const duration = p.durationMs || 0;
-          const isScreenshot = duration <= 5000 || p.isScreenshot;
-          return {
-            id: `recent-${i}-${p.startTimeMs}`,
-            cameraName: p.dev.name,
-            systemName: p.dev.systemName,
-            startTimeMs: p.startTimeMs || 0,
-            durationMs: duration,
-            systemId: p.dev.systemId,
-            deviceId: getOriginalDeviceId(p.dev.id, devices),
-            isScreenshot,
-            isLocal: p.isLocal,
-            fileName: p.fileName,
-            dateFolder: p.dateFolder,
-            cameraFolderName: p.cameraFolderName !== undefined ? p.cameraFolderName : p.cameraName,
-          };
-        });
-        mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
-        
-        if (isAutoRefresh && mapped.length === 0 && recentRecordings.length > 0) {
-          // Only guard if we already have records; if it's the first time or we just cleared, let it through
-          return;
-        }
-
-        setRecentRecordings(mapped);
-        if (mapped.length === 0) setRecentError("No recordings found for any camera on this date.");
-      } catch (err: any) {
-        if (!isAutoRefresh) setRecentError(err.message || "Failed to fetch all recordings.");
-      } finally {
-        setRecentLoading(false);
-      }
-      return;
+    if (!targetDevice || !targetDate) { 
+      if (!isAutoRefresh) setRecentError("Please select a camera and date."); 
+      return; 
     }
+
+    const dateStr = format(targetDate, "yyyy-MM-dd");
+    const cacheKey = `${targetSystem}:${targetDevice}:${dateStr}`;
+
+    // 1. Check cache (skip for auto-refresh to get fresh data)
+    if (!isAutoRefresh) {
+      const cached = recordingsCache.current.get(cacheKey);
+      if (cached) {
+        // console.debug(`[CloudRecordings] Using cache for ${cacheKey}`);
+        setRecentRecordings(cached);
+        setRecentError("");
+        return;
+      }
+    }
+
+    // 2. Race condition prevention: Cancel previous request
+    if (activeAbortController.current) {
+      activeAbortController.current.abort();
+    }
+    const controller = new AbortController();
+    activeAbortController.current = controller;
+    const requestTime = Date.now();
+    lastRequestTime.current = requestTime;
 
     setRecentLoading(true);
     if (!isAutoRefresh) {
        setRecentError("");
-       setRecordings([]); // Only clear specific search if manual
+       setRecordings([]); 
     }
+
     try {
       const startMs = new Date(targetDate).setHours(0, 0, 0, 0);
       const endMs = new Date(targetDate).setHours(23, 59, 59, 999);
+      const isAllCamerasSearch = targetDevice === "all";
 
+      // OPTIMIZED: Fetch all or specific device in one call
       const data = await fetchRecordedTimePeriods(
-        targetSystem, getOriginalDeviceId(targetDevice), startMs, endMs, undefined
+        targetSystem, 
+        isAllCamerasSearch ? "all" : getOriginalDeviceId(targetDevice), 
+        startMs, 
+        endMs, 
+        undefined,
+        controller.signal
       );
+      
+      // Check if this request is still the most recent one
+      if (lastRequestTime.current !== requestTime) return;
+
       const periods = Array.isArray(data) ? data : data?.reply || [];
 
-      if (isAutoRefresh && periods.length === 0) return; // VMS slow indexing, skip update
-
-      // Get camera name for display metadata
-      const dev = devices.find(d => normalizeId(d.id) === targetDevice && d.systemId === targetSystem);
+      if (isAutoRefresh && periods.length === 0 && recentRecordings.length > 0) return;
 
       const mapped: RecentRecording[] = periods.map((p: any, i: number) => {
         const duration = p.durationMs || 0;
         const isScreenshot = duration <= 5000 || p.isScreenshot;
+        
+        // Find the device info from our local list if it's an "all" search
+        let dev = devices.find(d => normalizeId(d.id) === normalizeId(p.deviceId) && d.systemId === targetSystem);
+        if (!dev && !isAllCamerasSearch) {
+           dev = devices.find(d => normalizeId(d.id) === targetDevice && d.systemId === targetSystem);
+        }
+
         return {
-          id: `recent-${i}-${p.startTimeMs}`,
-          cameraName: dev?.name || targetDevice,
+          id: `recent-${i}-${p.startTimeMs}-${p.deviceId || ""}`,
+          cameraName: dev?.name || p.cameraName || p.deviceId || "Unknown",
           systemName: dev?.systemName || targetSystem,
           startTimeMs: p.startTimeMs || 0,
           durationMs: duration,
           systemId: targetSystem,
-          deviceId: getOriginalDeviceId(targetDevice),
+          deviceId: p.deviceId || targetDevice,
           isScreenshot,
           isLocal: p.isLocal,
           fileName: p.fileName,
           dateFolder: p.dateFolder,
-          cameraFolderName: p.cameraFolderName !== undefined ? p.cameraFolderName : p.cameraName,
+          cameraFolderName: p.cameraFolderName !== undefined ? p.cameraFolderName : (dev?.name || p.cameraName),
         };
       });
+
+      // Sort by time
+      mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
+
+      // Update state and cache
       setRecentRecordings(mapped);
-      if (mapped.length === 0) setRecentError("No recordings found for this camera on the selected date.");
+      if (!isAutoRefresh) {
+        recordingsCache.current.set(cacheKey, mapped);
+        // Limit cache size
+        if (recordingsCache.current.size > 50) {
+          const firstKey = recordingsCache.current.keys().next().value;
+          if (firstKey) recordingsCache.current.delete(firstKey);
+        }
+      }
+
+      if (mapped.length === 0 && !isAutoRefresh) {
+        setRecentError(targetDevice === "all" ? "No recordings found for any camera on this date." : "No recordings found for this camera on the selected date.");
+      }
     } catch (err: any) {
-      setRecentError(err.message || "Failed to fetch recent recordings.");
+      if (err.name === 'AbortError') return;
+      if (lastRequestTime.current === requestTime && !isAutoRefresh) {
+        setRecentError(err.message || "Failed to fetch recordings.");
+      }
     } finally {
-      setRecentLoading(false);
+      if (lastRequestTime.current === requestTime) {
+        setRecentLoading(false);
+      }
     }
   };
 
@@ -1587,6 +1585,19 @@ export default function CloudRecordings() {
                       <Calendar mode="single" selected={date} onSelect={(d) => { setDate(d); if (selectedDevice && d) handleSearchRecentRecordings(selectedDevice, d); }} initialFocus />
                     </PopoverContent>
                   </Popover>
+
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => { 
+                      loadFromPersistence(); 
+                      handleSearchRecentRecordings(selectedDevice, date); 
+                    }}
+                    className="h-10 px-3 rounded-xl border-slate-200/60 bg-white/50 hover:bg-slate-100 transition-colors"
+                    title="Refresh recordings"
+                  >
+                    <RefreshCw className={cn("h-4 w-4 text-primary", recentLoading && "animate-spin")} />
+                  </Button>
 
                   {recentLoading && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground animate-pulse ml-auto bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10">
