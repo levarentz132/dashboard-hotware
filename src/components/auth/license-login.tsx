@@ -35,30 +35,44 @@ export function LicenseLogin() {
         formState: { errors, isSubmitted },
     } = useForm<LoginFormData>({
         resolver: zodResolver(loginSchema),
+        defaultValues: {
+            username: "LippoTest",
+            password: "Lippo.123",
+        },
     });
 
     const [isSaved, setIsSaved] = useState(false);
     const [hasSaved, setHasSaved] = useState(false);
 
-    // Pre-fill from environment/config/cookies on mount
+    // Pre-fill from saved cookies or config (optional override of defaults)
     useEffect(() => {
-        const savedUser = Cookies.get("license_saved_user");
-        const savedPass = Cookies.get("license_saved_pass");
-
         const fetchGlobalConfig = async () => {
+            // Priority 1: Check saved cookies
+            const savedUser = Cookies.get("license_saved_user");
+            const savedPass = Cookies.get("license_saved_pass");
+            
+            if (savedUser && savedPass) {
+                console.log("[LicenseLogin] Using saved cookies");
+                setHasSaved(true);
+                setValue("username", savedUser);
+                setValue("password", savedPass);
+                return;
+            }
+
+            // Priority 2: Fetch from server config (if available)
             try {
                 const res = await fetch("/api/config/nx");
                 const data = await res.json();
+                
                 if (data.success && data.config) {
                     const { NEXT_PUBLIC_NX_USERNAME, NEXT_PUBLIC_NX_PASSWORD } = data.config;
                     
-                    // Prioritize server config if cookies are missing or if we want global sync
                     if (NEXT_PUBLIC_NX_USERNAME && NEXT_PUBLIC_NX_PASSWORD) {
                         setHasSaved(true);
                         setValue("username", NEXT_PUBLIC_NX_USERNAME);
                         setValue("password", NEXT_PUBLIC_NX_PASSWORD);
                         
-                        // Also sync to cookies for other components that might use them
+                        // Sync to cookies for persistence
                         Cookies.set("license_saved_user", NEXT_PUBLIC_NX_USERNAME, { expires: 365, path: '/' });
                         Cookies.set("license_saved_pass", NEXT_PUBLIC_NX_PASSWORD, { expires: 365, path: '/' });
                         return;
@@ -68,23 +82,16 @@ export function LicenseLogin() {
                 console.warn("[LicenseLogin] Failed to fetch global config", e);
             }
 
-            // Fallback to existing logic if server fetch fails or returns empty
-            if (savedUser && savedPass) {
-                setHasSaved(true);
-                setValue("username", savedUser);
-                setValue("password", savedPass);
-            } else {
-                const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
-                if (extConfig) {
-                    if (extConfig.NEXT_PUBLIC_NX_USERNAME) setValue("username", extConfig.NEXT_PUBLIC_NX_USERNAME);
-                    if (extConfig.NEXT_PUBLIC_NX_PASSWORD) setValue("password", extConfig.NEXT_PUBLIC_NX_PASSWORD);
-                } else {
-                    const envUser = process.env.NEXT_PUBLIC_NX_USERNAME;
-                    const envPass = process.env.NEXT_PUBLIC_NX_PASSWORD;
-                    if (envUser) setValue("username", envUser);
-                    if (envPass) setValue("password", envPass);
+            // Priority 3: Check Electron config
+            const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+            if (extConfig) {
+                if (extConfig.NEXT_PUBLIC_NX_USERNAME && extConfig.NEXT_PUBLIC_NX_PASSWORD) {
+                    setValue("username", extConfig.NEXT_PUBLIC_NX_USERNAME);
+                    setValue("password", extConfig.NEXT_PUBLIC_NX_PASSWORD);
                 }
             }
+            
+            // Otherwise, default values from form initialization will be used
         };
 
         fetchGlobalConfig();

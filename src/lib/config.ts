@@ -189,29 +189,23 @@ export function getDynamicConfig(request?: Request | NextRequest) {
   // Fallback to disk configuration (Remote Network users or missing headers)
   const diskConfig = getServerSideConfig();
 
-  // Auto-detect local IP if host is missing (but NOT if explicitly set to localhost)
-  // DISABLED: Keep localhost as-is if explicitly configured
-  // if (diskConfig && !diskConfig.NEXT_PUBLIC_NX_SERVER_HOST) {
-  //   try {
-  //     const os = require('os');
-  //     const interfaces = os.networkInterfaces();
-  //     for (const name of Object.keys(interfaces)) {
-  //       const netIfaces = interfaces[name];
-  //       if (!netIfaces) continue;
-  //       for (const iface of netIfaces) {
-  //         if (iface.family === 'IPv4' && !iface.internal) {
-  //           diskConfig.NEXT_PUBLIC_NX_SERVER_HOST = iface.address;
-  //           break;
-  //         }
-  //       }
-  //       if (diskConfig.NEXT_PUBLIC_NX_SERVER_HOST && diskConfig.NEXT_PUBLIC_NX_SERVER_HOST !== 'localhost') break;
-  //     }
-  //   } catch (e) {
-  //     // ignore
-  //   }
-  // }
+  // Merge: Use headers if available, but fall back to disk config for empty values
+  if (headersConfig) {
+    return {
+      NEXT_PUBLIC_NX_SYSTEM_ID: headersConfig.NEXT_PUBLIC_NX_SYSTEM_ID || diskConfig.NEXT_PUBLIC_NX_SYSTEM_ID || '',
+      NEXT_PUBLIC_NX_USERNAME: headersConfig.NEXT_PUBLIC_NX_USERNAME || diskConfig.NEXT_PUBLIC_NX_USERNAME || '',
+      NEXT_PUBLIC_NX_PASSWORD: headersConfig.NEXT_PUBLIC_NX_PASSWORD || diskConfig.NEXT_PUBLIC_NX_PASSWORD || '',
+      NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED: headersConfig.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || diskConfig.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || '',
+      NEXT_PUBLIC_NX_CLOUD_USERNAME: headersConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || diskConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
+      NEXT_PUBLIC_NX_CLOUD_PASSWORD: headersConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || diskConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '',
+      NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED: headersConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || diskConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '',
+      NX_CLOUD_TOKEN: headersConfig.NX_CLOUD_TOKEN || diskConfig.NX_CLOUD_TOKEN || '',
+      NEXT_PUBLIC_NX_SERVER_HOST: headersConfig.NEXT_PUBLIC_NX_SERVER_HOST || diskConfig.NEXT_PUBLIC_NX_SERVER_HOST || '',
+      NEXT_PUBLIC_NX_SERVER_PORT: headersConfig.NEXT_PUBLIC_NX_SERVER_PORT || diskConfig.NEXT_PUBLIC_NX_SERVER_PORT || '',
+    };
+  }
 
-  return headersConfig || diskConfig;
+  return diskConfig;
 }
 
 // Nx Witness API Configuration
