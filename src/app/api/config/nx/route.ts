@@ -3,7 +3,13 @@ import { getDynamicConfig } from "@/lib/config";
 
 export async function GET(request: Request) {
   try {
-    const config = getDynamicConfig();
+    const config = getDynamicConfig(request);
+    
+    console.log("[API /config/nx] Config retrieved:", {
+      username: config?.NEXT_PUBLIC_NX_USERNAME || "empty",
+      password: config?.NEXT_PUBLIC_NX_PASSWORD ? "***" : "empty",
+      host: config?.NEXT_PUBLIC_NX_SERVER_HOST || "empty"
+    });
     
     // Check cookies for local overrides
     const cookieHeader = request.headers.get("cookie") || "";
@@ -18,7 +24,7 @@ export async function GET(request: Request) {
     const cookiePort = getC("nx_location_port");
     const nxLocationPort = cookiePort || (config?.NEXT_PUBLIC_NX_SERVER_PORT || "7001");
 
-    return NextResponse.json({
+    const response = {
       success: true,
       config: {
         NEXT_PUBLIC_NX_SERVER_HOST: nxLocationIp,
@@ -26,8 +32,16 @@ export async function GET(request: Request) {
         NEXT_PUBLIC_NX_USERNAME: config?.NEXT_PUBLIC_NX_USERNAME || "",
         NEXT_PUBLIC_NX_PASSWORD: config?.NEXT_PUBLIC_NX_PASSWORD || ""
       }
+    };
+    
+    console.log("[API /config/nx] Returning:", {
+      username: response.config.NEXT_PUBLIC_NX_USERNAME || "empty",
+      password: response.config.NEXT_PUBLIC_NX_PASSWORD ? "***" : "empty"
     });
+
+    return NextResponse.json(response);
   } catch (error) {
+    console.error("[API /config/nx] Error:", error);
     return NextResponse.json({ success: false, error: "Failed to fetch config" }, { status: 500 });
   }
 }
