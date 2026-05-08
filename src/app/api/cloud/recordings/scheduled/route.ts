@@ -230,15 +230,25 @@ const startWatchdog = () => {
 
       // ── Phase 1: Identify and Mark Tasks to Process ────────────────────────
       const tasksToExecute: any[] = [];
-      for (const rec of uniqueSchedules) {
-        if (rec.status === "completed") continue;
-
+      for (let rec of uniqueSchedules) {
         const startParts = rec.startTime.split(":").map(Number);
         const endParts = (rec.endTime || rec.startTime).split(":").map(Number);
         const sh = startParts[0], sm = startParts[1], ss = startParts[2] || 0;
         const eh = endParts[0], em = endParts[1], es = endParts[2] !== undefined ? endParts[2] : 59;
         const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, ss, 0);
         const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, es, 999);
+
+        // ── Status Sanity Check ─────────────────────────────────────────────
+        // If the task is in the future but has an active/completed status AND it's recurring, reset it.
+        // Also resets one-time future tasks that are incorrectly marked active.
+        if (now < startMs && rec.status !== "pending" && rec.status !== "failed") {
+          console.log(`[Watchdog] Future task ${rec.cameraName} (${rec.date}) had status ${rec.status}. Resetting to pending.`);
+          rec.status = "pending";
+          rec.record = false;
+          changed = true;
+        }
+
+        if (rec.status === "completed") continue;
 
         // Skip if already being processed by an active watchdog task
         if (global._nxExecutingTasks?.has(rec.id)) continue;
@@ -260,11 +270,19 @@ const startWatchdog = () => {
           // This covers the case where the client sets status to "recording" for
           // immediate tasks, but the VMS has not been patched yet.
           if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress" || (rec.status === "recording" && !rec.record))) {
-            rec.status = "recording";
-            rec.record = true;
-            changed = true;
-            global._nxExecutingTasks?.add(rec.id);
-            tasksToExecute.push({ type: "video_start", rec, startMs, endMs, sh, sm, ss, eh, em, es });
+            const isRecurring = rec.recurrence && rec.recurrence !== "none";
+            const isLate = now > (startMs + 60000); // More than 1 min late
+
+            if (isRecurring && isLate) {
+              console.log(`[Watchdog] Recurring task ${rec.cameraName} started in the past. Skipping to next occurrence.`);
+              tasksToExecute.push({ type: "expire", rec, startMs, endMs, sh, sm, ss });
+            } else {
+              rec.status = "recording";
+              rec.record = true;
+              changed = true;
+              global._nxExecutingTasks?.add(rec.id);
+              tasksToExecute.push({ type: "video_start", rec, startMs, endMs, sh, sm, ss, eh, em, es });
+            }
           }
         }
         else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress")) {
@@ -442,22 +460,41 @@ const startWatchdog = () => {
 
 // Helper functions for the refactored watchdog
 function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
-  const nextDate = new Date(rec.date);
-  if (rec.recurrence === "weekday") {
-    nextDate.setDate(nextDate.getDate() + 7);
-  } else if (rec.recurrence === "monthday") {
-    const targetDay = rec.recurrenceDay;
-    if (targetDay) {
-      let year = nextDate.getFullYear();
-      let monthIdx = nextDate.getMonth() + 1;
-      let next = new Date(year, monthIdx, targetDay);
-      while (next.getDate() !== targetDay) { monthIdx++; next = new Date(year, monthIdx, targetDay); }
-      nextDate.setTime(next.getTime());
-    } else {
-      nextDate.setMonth(nextDate.getMonth() + 1);
-    }
-  }
+  let nextDate = new Date(rec.date);
+  const now = new Date();
+  
+  // Set the time correctly for comparison
   nextDate.setHours(sh, sm, ss, 0);
+
+  // Safety loop: keep rolling forward until the date is actually in the future.
+  // This prevents 'zombie' tasks from starting if they were created with a past date.
+  let safetyCounter = 0;
+  while (nextDate <= now && safetyCounter < 100) {
+    safetyCounter++;
+    if (rec.recurrence === "weekday") {
+      nextDate.setDate(nextDate.getDate() + 7);
+    } else if (rec.recurrence === "monthday") {
+      const targetDay = rec.recurrenceDay;
+      if (targetDay) {
+        let year = nextDate.getFullYear();
+        let monthIdx = nextDate.getMonth() + 1; // Roll to next month
+        let next = new Date(year, monthIdx, targetDay);
+        // Handle months shorter than targetDay (e.g. Feb 30th)
+        while (next.getDate() !== targetDay && safetyCounter < 100) { 
+          safetyCounter++;
+          monthIdx++; 
+          next = new Date(year, monthIdx, targetDay); 
+        }
+        nextDate.setTime(next.getTime());
+      } else {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+      }
+    } else {
+      break; // non-recurring
+    }
+    // Re-ensure time is correct after date manipulation
+    nextDate.setHours(sh, sm, ss, 0);
+  }
   return nextDate;
 }
 
@@ -469,7 +506,7 @@ function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, 
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;
   if (nxPort && nxPort !== "7001") headers["x-nx-location-port"] = nxPort;
   
-  console.log(`[Watchdog] Triggering auto-save for ${rec.cameraName}: ${url}`);
+  console.log(`[Watchdog] Triggering auto-save (${rec.recurrence || 'once'}) for ${rec.cameraName}: ${new Date(rec.startMs).toLocaleString()} -> ${new Date(rec.endMs).toLocaleTimeString()}`);
   fetch(url, { headers })
     .then(res => {
       if (!res.ok) {

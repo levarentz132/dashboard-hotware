@@ -101,7 +101,7 @@ function getServerSideConfig(): Record<string, string> {
       configPath = fallbackPath;
       // console.log(`[Config] Using fallback config path: ${configPath}`);
     } else {
-      console.warn(`[Config] Fallback config path NOT found: ${fallbackPath}`);
+      // console.warn(`[Config] Fallback config path NOT found: ${fallbackPath}`);
     }
   }
 

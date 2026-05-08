@@ -15,6 +15,47 @@ const mkdir = promisify(fs.mkdir);
 // VMS uses self-signed certificates — disable strict TLS validation for server-side fetches
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+// ── FFmpeg Worker Isolation & Queueing ──────────────────────────────────────
+// FFmpeg is CPU intensive. To prevent the server from crashing or becoming 
+// unresponsive when many recordings finish at once, we limit concurrent workers.
+declare global {
+  var _ffmpegActiveCount: number | undefined;
+  var _ffmpegQueue: Array<() => void> | undefined;
+}
+
+if (global._ffmpegActiveCount === undefined) global._ffmpegActiveCount = 0;
+if (global._ffmpegQueue === undefined) global._ffmpegQueue = [];
+
+const MAX_CONCURRENT_FFMPEG = 15; // Increased to handle 700+ cameras; safe because '-c:v copy' is low-CPU
+
+/**
+ * Acquire a slot for FFmpeg processing. Returns a promise that resolves
+ * when a slot becomes available.
+ */
+async function acquireFfmpegSlot(): Promise<void> {
+  if ((global._ffmpegActiveCount || 0) < MAX_CONCURRENT_FFMPEG) {
+    global._ffmpegActiveCount = (global._ffmpegActiveCount || 0) + 1;
+    return;
+  }
+  return new Promise((resolve) => {
+    global._ffmpegQueue?.push(resolve);
+  });
+}
+
+/**
+ * Release an FFmpeg slot and signal the next waiting process.
+ */
+function releaseFfmpegSlot(): void {
+  global._ffmpegActiveCount = Math.max(0, (global._ffmpegActiveCount || 0) - 1);
+  if (global._ffmpegQueue && global._ffmpegQueue.length > 0) {
+    const next = global._ffmpegQueue.shift();
+    if (next) {
+      global._ffmpegActiveCount++;
+      next();
+    }
+  }
+}
+
 /**
  * Get the path to ffmpeg executable.
  * In packaged Electron apps, use the bundled ffmpeg.exe from resources.
@@ -56,7 +97,8 @@ export async function GET(request: NextRequest) {
     const endTime = searchParams.get("endTime");
     const stream = searchParams.get("stream");
     const preview = searchParams.get("preview"); // If 'true', serve inline for browser playback
-    const autoSave = searchParams.get("autoSave") === "true"; // If 'true', save to disk only — no streaming
+    const autoSave = searchParams.get("autoSave") === "true"; 
+    const taskId = searchParams.get("taskId");
     const isSnapshotParam = searchParams.get("isSnapshot") === "true";
 
     console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}, autoSave=${autoSave}`);
@@ -183,7 +225,9 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Auto-save fetch error", details: fetchErr.message }, { status: 500 });
       }
 
-      console.log(`[recordings/download] AUTO-SAVE encoding to: ${savePath}`);
+      console.log(`[recordings/download] AUTO-SAVE queueing for slot: ${deviceId}`);
+      await acquireFfmpegSlot();
+      console.log(`[recordings/download] AUTO-SAVE encoding started (slot acquired): ${savePath}`);
 
       const ffmpegPath = getFfmpegPath();
       const ffmpegAutoSave = spawn(ffmpegPath, [
@@ -219,6 +263,8 @@ export async function GET(request: NextRequest) {
         const taskId = searchParams.get("taskId");
 
         ffmpegAutoSave.on("close", async (code) => {
+          releaseFfmpegSlot(); // Release slot immediately when process closes
+          
           if (taskId) {
             try {
               const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
@@ -248,6 +294,7 @@ export async function GET(request: NextRequest) {
         });
 
         ffmpegAutoSave.on("error", (err) => {
+          releaseFfmpegSlot(); // Release slot on error too
           console.error("[recordings/download] AUTO-SAVE FFmpeg spawn error:", err.message);
           resolve(NextResponse.json({ error: "FFmpeg not found or failed to start", details: err.message }, { status: 500 }));
         });
@@ -508,11 +555,14 @@ export async function GET(request: NextRequest) {
         });
 
         const inputStream = Readable.fromWeb(videoResponse.body as any);
+        
+        await acquireFfmpegSlot(); // Acquire slot for manual remuxing
         inputStream.pipe(ffmpeg.stdin);
 
         // Wait for FFmpeg to finish processing the file
         return await new Promise<NextResponse>((resolve) => {
           ffmpeg.on('close', (code) => {
+            releaseFfmpegSlot(); // Release slot
             // console.log(`[recordings/download] FFmpeg finished with code ${code}`);
 
             if (code !== 0) {
@@ -556,11 +606,42 @@ export async function GET(request: NextRequest) {
               if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
 
               const savePath = path.join(saveDir, finalFileName);
+              
+              if (autoSave) {
+                fs.copyFileSync(tempPath, savePath);
+                console.log(`[recordings/download] Auto-save completed: ${savePath}`);
 
-              // Manual downloads do not save to local disk per user request.
-              // This block is only for streaming/downloading to the client.
+                // ── UPDATE TASK STATUS in scheduled_recordings.json ──
+                if (taskId) {
+                  try {
+                    const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
+                    if (fs.existsSync(DATA_FILE)) {
+                      const content = fs.readFileSync(DATA_FILE, "utf-8").replace(/^\uFEFF/, "");
+                      const data = JSON.parse(content);
+                      const task = data.schedules?.find((s: any) => s.id === taskId);
+                      if (task) {
+                        // Only set to completed/failed if it's a one-time task.
+                        // For recurring tasks, the watchdog has already rolled it over to 'pending' for the next date.
+                        const isRecurring = task.recurrence && task.recurrence !== "none";
+                        if (!isRecurring) {
+                          task.status = code === 0 ? "completed" : "failed";
+                          fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+                          console.log(`[recordings/download] Task ${taskId} status updated to ${task.status}`);
+                        } else {
+                          console.log(`[recordings/download] Task ${taskId} (recurring) finished. Skipping JSON write to preserve watchdog rollover.`);
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    console.error("[recordings/download] Failed to update task status:", e);
+                  }
+                }
+
+                resolve(NextResponse.json({ success: true, path: savePath, file: finalFileName }));
+                return;
+              }
             } catch (saveErr) {
-              // console.error("[recordings/download] Auto-save video error:", saveErr);
+              console.error("[recordings/download] Auto-save video error:", saveErr);
             }
 
             // Stream the fixed file back to the client
@@ -585,6 +666,7 @@ export async function GET(request: NextRequest) {
 
 
           ffmpeg.on('error', (err) => {
+            releaseFfmpegSlot(); // Release slot on error
             // console.error("[recordings/download] FFmpeg spawn error:", err);
             // This usually means FFmpeg is not found in the path
             resolve(NextResponse.json({
@@ -604,8 +686,7 @@ export async function GET(request: NextRequest) {
 
         const ffmpegPath = getFfmpegPath();
         const ffmpegPreview = spawn(ffmpegPath, [
-          "-fflags", "+genpts",
-          "-i", "pipe:0",
+          "-fflags", "+genpts",          "-i", "pipe:0",
 
           "-start_at_zero",
           "-avoid_negative_ts", "make_zero",

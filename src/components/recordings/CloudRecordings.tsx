@@ -100,7 +100,7 @@ interface ScheduledRecording {
   endMs: number;
   type: "video" | "screenshot";
   screenshotTime?: string;
-  status: "pending" | "recording" | "completed" | "failed" | "in progress" | "capturing";
+  status: "pending" | "recording" | "completed" | "failed" | "in progress" | "capturing" | "processing";
   startedAt?: number;
   recurrence?: "none" | "weekday" | "monthday";
   recurrenceDay?: number;
@@ -521,7 +521,9 @@ export default function CloudRecordings() {
     // Now update state ONCE for the entire batch
     setScheduledRecordings(prev => {
       const toRemove = new Set(idsToCancel);
-      return prev.filter(r => !toRemove.has(r.id));
+      const next = prev.filter(r => !toRemove.has(r.id));
+      saveToPersistence(next, originalSchedules.current);
+      return next;
     });
     
     setPendingCancelForceDelete(false);
@@ -572,7 +574,7 @@ export default function CloudRecordings() {
           const loadedScheds = data.schedules.map((s: any) => ({
             ...s,
             date: new Date(s.date)
-          })).filter((s: any) => s.status !== "completed" && s.status !== "failed");
+          }));
 
           // BREAK INFINITE LOOP: Only update state if data actually changed
           // Include 'record' flag in comparison so UI updates when watchdog processes tasks
@@ -584,8 +586,9 @@ export default function CloudRecordings() {
             // via visibleScheduledRecordings useMemo (avoids stale closure issues)
             setScheduledRecordings(loadedScheds);
             // Re-reconcile timers
+            // Re-reconcile timers for active tasks
             loadedScheds.forEach((rec: ScheduledRecording) => {
-              if (rec.status === "pending" || rec.status === "recording") {
+              if (rec.status === "pending" || rec.status === "recording" || rec.status === "in progress") {
                 reconcileTimer(rec);
               }
             });
@@ -620,23 +623,32 @@ export default function CloudRecordings() {
     const now = Date.now();
     const startMs = new Date(rec.date).setHours(sh, sm, 0, 0);
 
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
     // --- CASE 1: SCREENSHOTS (Snapshots) ---
     if (rec.type === "screenshot") {
-      const captureDelay = 3000; // Reduced to 3s for better responsiveness
-      if (now >= startMs + captureDelay) return;
+      const captureDelay = 3000;
+      const targetMs = startMs + captureDelay;
+      if (now >= targetMs) return;
 
-      const timer = setTimeout(() => {
-        console.log(`[CloudRecordings] Snapshot time reached for ${rec.cameraName}. Cleaning up UI.`);
-        if (rec.recurrence === "none") {
-          setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
-        } else {
-          loadFromPersistence();
-        }
-        // Auto-refresh results to show the new snapshot
-        setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 3000);
-      }, (startMs + captureDelay) - now);
-      
-      scheduleTimers.current.set(rec.id + "-start", timer);
+      // Only set timer if it's within the next 24 hours to avoid 32-bit setTimeout overflow (24.8 days)
+      if (targetMs - now < ONE_DAY_MS) {
+        const timer = setTimeout(() => {
+          console.log(`[CloudRecordings] Snapshot time reached for ${rec.cameraName}. Cleaning up UI.`);
+          if (rec.recurrence === "none") {
+            setScheduledRecordings(prev => {
+              const next = prev.filter(r => r.id !== rec.id);
+              saveToPersistence(next, originalSchedules.current);
+              return next;
+            });
+          } else {
+            loadFromPersistence();
+          }
+          setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 3000);
+        }, targetMs - now);
+        
+        scheduleTimers.current.set(rec.id + "-start", timer);
+      }
       return;
     }
 
@@ -649,14 +661,15 @@ export default function CloudRecordings() {
       return;
     }
 
-    if (now < startMs) {
+    // Only set timer if it's within the next 24 hours to avoid 32-bit setTimeout overflow
+    if (now < startMs && (startMs - now < ONE_DAY_MS)) {
       const timer = setTimeout(() => {
         setScheduledRecordings(prev => prev.map(r => r.id === rec.id ? { ...r, status: "recording" } : r));
       }, startMs - now);
       scheduleTimers.current.set(rec.id + "-start", timer);
     }
 
-    if (now < endMs && (rec.status === "recording" || now >= startMs)) {
+    if (now < endMs && (rec.status === "recording" || now >= startMs) && (endMs - now < ONE_DAY_MS)) {
       const timer = setTimeout(async () => {
         // IMPROVEMENT: Immediately patch the device to stop recording when the timer expires
         // This ensures the recording stops at the exact same time the notification is shown.
@@ -688,7 +701,11 @@ export default function CloudRecordings() {
         console.log(`[CloudRecordings] Recording ${rec.cameraName} finished. Server watchdog will handle auto-save.`);
 
         if (rec.recurrence === "none") {
-          setScheduledRecordings(prev => prev.filter(r => r.id !== rec.id));
+          setScheduledRecordings(prev => {
+            const next = prev.filter(r => r.id !== rec.id);
+            saveToPersistence(next, originalSchedules.current);
+            return next;
+          });
         } else {
           // For recurring: the watchdog will handle the date skip, 
           // but we can trigger a reload to stay in sync.
@@ -745,13 +762,8 @@ export default function CloudRecordings() {
     return () => clearInterval(pollId);
   }, [scheduledRecordings.length > 0]); 
 
-  useEffect(() => {
-    // Guard: Do NOT save until we have loaded from disk at least once.
-    // This prevents the initial empty state [] from overwriting saved data
-    // on page load or after re-login.
-    if (!hasLoadedFromDisk.current) return;
-    saveToPersistence(scheduledRecordings, originalSchedules.current);
-  }, [scheduledRecordings]);
+  // Removed auto-save useEffect to prevent race conditions with server watchdog.
+  // We now save explicitly on user actions (add/delete/cancel).
 
   // Auto-refresh logic: trigger when a task finishes or is removed
   const prevScheduledCount = useRef(scheduledRecordings.length);
@@ -1113,14 +1125,13 @@ export default function CloudRecordings() {
         const currentDay = now.getDay();
 
         scheduleDays.forEach(dayIndex => {
-          let targetDate: Date;
+          let targetDate = new Date(now);
+          const [lastH, lastM] = (scheduleType === "screenshot" ? scheduleScreenshotTime : scheduleTimeRanges[scheduleTimeRanges.length - 1].end).split(":").map(Number);
 
-          if (dayIndex === currentDay) {
-            // Today is the selected day
-            targetDate = new Date(now);
-          } else {
-            // Future day
-            targetDate = nextDay(now, dayIndex as Day);
+          while (true) {
+            const windowEnd = new Date(targetDate).setHours(lastH, lastM, 59, 999);
+            if (targetDate.getDay() === dayIndex && windowEnd >= now.getTime()) break;
+            targetDate.setDate(targetDate.getDate() + 1);
           }
 
           if (scheduleType === "screenshot") {
@@ -1140,10 +1151,12 @@ export default function CloudRecordings() {
         let year = now.getFullYear();
         let monthIdx = now.getMonth();
         let targetDate = new Date(year, monthIdx, targetDayNum);
+        const [lastH, lastM] = (scheduleType === "screenshot" ? scheduleScreenshotTime : scheduleTimeRanges[scheduleTimeRanges.length - 1].end).split(":").map(Number);
+        const windowEnd = new Date(targetDate).setHours(lastH, lastM, 59, 999);
 
-        // If today is the target day, include it. 
+        // If today is the target day AND the window hasn't passed, use today.
         // Otherwise find the next occurrence in the future.
-        if (targetDate.getDate() !== targetDayNum || targetDate < now) {
+        if (targetDate.getDate() !== targetDayNum || windowEnd < now.getTime()) {
           while (true) {
             monthIdx++;
             targetDate = new Date(year, monthIdx, targetDayNum);
@@ -1270,7 +1283,9 @@ export default function CloudRecordings() {
           const newKeys = new Set(newScheduledEntries.map(n => `${n.cameraId}-${n.startTime}-${n.type}-${new Date(n.date).toDateString()}`));
           filtered = prev.filter(r => !newIds.has(r.id) && !newKeys.has(`${r.cameraId}-${r.startTime}-${r.type}-${new Date(r.date).toDateString()}`));
         }
-        return [...filtered, ...newScheduledEntries];
+        const next = [...filtered, ...newScheduledEntries];
+        saveToPersistence(next, originalSchedules.current);
+        return next;
       });
 
       // Set up client-side end timers immediately for tasks that start now
@@ -1322,13 +1337,17 @@ export default function CloudRecordings() {
       const nextStartMs = new Date(nextDate).setHours(sh, sm, 0, 0);
       const nextEndMs = rec.type === "screenshot" ? nextStartMs : new Date(nextDate).setHours(eh, em, 59, 999);
 
-      setScheduledRecordings(prev => prev.map(r => r.id === id ? {
-        ...r,
-        date: nextDate,
-        status: "pending",
-        startMs: nextStartMs,
-        endMs: nextEndMs
-      } : r));
+      setScheduledRecordings(prev => {
+        const next = prev.map(r => r.id === id ? {
+          ...r,
+          date: nextDate,
+          status: "pending" as any,
+          startMs: nextStartMs,
+          endMs: nextEndMs
+        } : r);
+        saveToPersistence(next, originalSchedules.current);
+        return next;
+      });
       addPersistentNotification({ type: 'info', title: 'Skipped', message: `Skipped to ${format(nextDate, "MMM d, yyyy")}` });
       return;
     }
@@ -1355,7 +1374,11 @@ export default function CloudRecordings() {
 
     scheduleTimers.current.delete(id + "-start");
     scheduleTimers.current.delete(id + "-end");
-    setScheduledRecordings(prev => prev.filter(r => r.id !== id));
+    setScheduledRecordings(prev => {
+      const next = prev.filter(r => r.id !== id);
+      saveToPersistence(next, originalSchedules.current);
+      return next;
+    });
   };
 
   // ---- Recent Recordings ----
@@ -1778,9 +1801,15 @@ export default function CloudRecordings() {
                         .map((group, gIdx) => {
                           const first = group[0];
                           const anyRecording = group.some((r: ScheduledRecording) => r.status === "recording" || r.status === "in progress" || r.status === "capturing");
+                          const anyProcessing = group.some((r: ScheduledRecording) => r.status === "processing");
+                          const anyFailed = group.some((r: ScheduledRecording) => r.status === "failed");
+                          const allCompleted = group.every(r => r.status === "completed");
                           const isRecurring = group.some(r => r.recurrence && r.recurrence !== "none");
-                          const allCompleted = group.every(r => r.status === "completed" || r.status === "failed");
-                          const mainStatus = anyRecording ? "in progress" : "active";
+                          
+                          const mainStatus = anyRecording ? "in progress" : 
+                                           anyProcessing ? "processing" :
+                                           anyFailed ? "failed" :
+                                           allCompleted ? "completed" : "active";
 
                           const sortedDates = [...group].map(r => new Date(r.date)).sort((a, b) => a.getTime() - b.getTime());
                           const dateList = sortedDates.map(d => format(d, "MMM d"));
@@ -1792,7 +1821,10 @@ export default function CloudRecordings() {
                                 <span className={cn(
                                   "text-[12px] px-2 py-0.5 rounded-full border",
                                   mainStatus === "in progress" ? "bg-red-50 text-red-600 border-red-100 animate-pulse" :
-                                    "bg-sky-50 text-sky-600 border-sky-100"
+                                  mainStatus === "processing" ? "bg-amber-50 text-amber-600 border-amber-100 animate-pulse" :
+                                  mainStatus === "completed" ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                                  mainStatus === "failed" ? "bg-rose-50 text-rose-600 border-rose-100" :
+                                  "bg-sky-50 text-sky-600 border-sky-100"
                                 )}>
                                   {mainStatus}
                                 </span>
