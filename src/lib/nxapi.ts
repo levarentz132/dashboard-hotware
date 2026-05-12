@@ -519,6 +519,15 @@ class NxWitnessAPI {
     return await this.apiRequest<any>(`/users/${normalizedId}`);
   }
 
+  async getUserPermissions(): Promise<{ permissions: string; resourceAccessRights: Record<string, string> } | null> {
+    try {
+      return await this.apiRequest<any>("/users/-/permissions", { skipCache: true });
+    } catch (error) {
+      console.warn("[nxAPI] Failed to fetch current user permissions:", error);
+      return null;
+    }
+  }
+
   async createUser(userData: any): Promise<any> {
     const normalizedData = { ...userData };
     if (Array.isArray(normalizedData.groupIds)) {

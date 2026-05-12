@@ -51,6 +51,8 @@ export interface UserPublic {
   created_at: Date | string;
   last_login?: Date | string | null;
   resourceAccessRights?: Record<string, string>; // Mapping of camera ID to rights
+  vmsPermissions?: string; // Pipe-separated permissions from VMS
+  vmsResourceAccessRights?: Record<string, string>; // More detailed rights from VMS
 }
 
 // Payload for creating JWT tokens (exp can be string like "24h")

@@ -29,7 +29,7 @@ import { format, addDays, nextDay, Day } from "date-fns";
 import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
 import { useAuth } from "@/contexts/auth-context";
-import { isAdmin, hasCameraViewPermission, hasCameraEditPermission } from "@/lib/auth";
+import { isAdmin, isVmsAdmin, hasCameraViewPermission, hasCameraEditPermission } from "@/lib/auth";
 import {
   Dialog,
   DialogContent,
@@ -339,119 +339,28 @@ export default function CloudRecordings() {
     setVmsEnrichedUser({ ...localUser, username: localUser.username || "Verifying...", role: initialRole });
 
     // If we're in Electron/NX context, try to fetch the latest resource rights and username from the VMS
+    // Fetch VMS permissions and identity using the dedicated endpoint
     const fetchUserRights = async () => {
       try {
-        const token = await nxAPI.getAuthToken();
-        const systemId = nxAPI.getSystemId();
-        if (!token) return;
+        const vmsPerms = await nxAPI.getUserPermissions();
+        if (vmsPerms) {
+          console.log(`[CloudRecordings] VMS Permissions loaded:`, vmsPerms.permissions);
+          
+          const perms = vmsPerms.permissions.toLowerCase();
+          const isPowerOrAdmin = perms.includes("administrator") || perms.includes("poweruser");
 
-        // ── STEP 1: Get the actual NX VMS username from the current session ──
-        let nxUsername = localUser.username;
-        try {
-          const sessionResponse = await fetch("/nx/rest/v3/login/sessions/-", {
-            headers: { "x-runtime-guid": token, Accept: "application/json" },
-          });
-          if (sessionResponse.ok) {
-            const sessionData = await sessionResponse.json();
-            if (sessionData && sessionData.username) {
-              nxUsername = sessionData.username;
-              console.log(`[CloudRecordings] Resolved VMS username: ${nxUsername}`);
-              // Immediately update the username in the state so it's ready for attribution
-              setVmsEnrichedUser(prev => prev ? ({
-                ...prev,
-                username: nxUsername
-              } as UserPublic) : null);
-            }
-          }
-        } catch (e) { }
-
-        // ── STEP 2: Fetch permissions and groups for this user ──
-        const paths = [
-          "/api/nx/userGroups",
-          "/api/nx/rest/v3/users",
-          `/api/nx/users?name=${encodeURIComponent(nxUsername)}&systemId=${systemId || ""}`
-        ];
-
-        let rightsFound = false;
-        let vmsGroups: any[] = [];
-
-        for (const path of paths) {
-          if (rightsFound && vmsGroups.length > 0) break;
-
-          try {
-            const response = await fetch(path, {
-              headers: { "x-runtime-guid": token, Accept: "application/json" },
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-              
-              // Handle User Groups
-              if (path.includes("/userGroups")) {
-                vmsGroups = Array.isArray(data) ? data : (data.reply || []);
-                continue;
-              }
-
-              const users = Array.isArray(data) ? data : (data.reply || [data]);
-
-              const currentVmsUser = users.find((u: any) =>
-                u && (
-                  u.name?.toLowerCase() === nxUsername.toLowerCase() ||
-                  u.email?.toLowerCase() === localUser.email.toLowerCase() ||
-                  u.id === localUser.id?.toString()
-                )
-              );
-
-              if (currentVmsUser) {
-                const groupIds = currentVmsUser.groupIds || [];
-                const permissions = currentVmsUser.permissions || "";
-                
-                // Resolve group names
-                const userGroupNames = vmsGroups
-                  .filter(g => groupIds.includes(g.id))
-                  .map(g => g.name || "Unknown Group");
-
-                console.log(`[CloudRecordings] DEBUG: User enrichment for "${nxUsername}"`, {
-                  vmsUserId: currentVmsUser.id,
-                  groupIds: groupIds,
-                  groupNames: userGroupNames,
-                  rawPermissions: permissions
-                });
-                
-                // Check groups for "administrator", "power user", or "security admin"
-                let isPowerOrAdmin = false;
-                if (groupIds.length > 0 && vmsGroups.length > 0) {
-                  const lowerGroupNames = userGroupNames.map(n => n.toLowerCase());
-                  isPowerOrAdmin = lowerGroupNames.some(name => 
-                    name.includes("administrator") || 
-                    name.includes("power user") || 
-                    name.includes("poweruser") ||
-                    name.includes("security admin")
-                  );
-                  
-                  if (isPowerOrAdmin) {
-                    console.log(`[CloudRecordings] ACCESS GRANTED: User is in privileged group(s):`, userGroupNames);
-                  } else {
-                    console.log(`[CloudRecordings] ACCESS DENIED: User groups do not meet security requirements.`);
-                  }
-                } else {
-                  console.log(`[CloudRecordings] ACCESS DENIED: User has no assigned VMS groups.`);
-                }
-
-                setVmsEnrichedUser(prev => prev ? ({
-                  ...prev,
-                  username: currentVmsUser.name || nxUsername,
-                  resourceAccessRights: currentVmsUser.resourceAccessRights || {},
-                  // STRICT: Only grant admin role if they are in a confirmed privileged group
-                  role: isPowerOrAdmin ? "admin" : "operator"
-                } as UserPublic) : null);
-                rightsFound = true;
-              }
-            }
-          } catch (e) { }
+          setVmsEnrichedUser(prev => prev ? ({
+            ...prev,
+            vmsPermissions: vmsPerms.permissions,
+            vmsResourceAccessRights: vmsPerms.resourceAccessRights,
+            role: isPowerOrAdmin ? "admin" : "operator"
+          } as UserPublic) : null);
+        } else {
+          // Fallback if permission fetch fails but we're authenticated
+          console.warn("[CloudRecordings] VMS permission fetch returned no data.");
         }
       } catch (err) {
-        console.warn("[CloudRecordings] Failed to fetch user rights for enrichment:", err);
+        console.warn("[CloudRecordings] Failed to fetch VMS permissions:", err);
       }
     };
 
@@ -461,7 +370,8 @@ export default function CloudRecordings() {
   const effectiveUser = vmsEnrichedUser || localUser;
   const isEffectiveAdmin = React.useMemo(() => {
     if (!vmsEnrichedUser || vmsEnrichedUser.username === "Verifying...") return false;
-    return isAdmin(vmsEnrichedUser);
+    // Use strict VMS admin check for this specific button
+    return isVmsAdmin(vmsEnrichedUser);
   }, [vmsEnrichedUser]);
 
   const visibleDevices = React.useMemo(() => {

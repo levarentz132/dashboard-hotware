@@ -199,6 +199,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [state.user, state.isAuthenticated]);
 
+  // VMS Permission Watcher - Fetch VMS permissions once authenticated
+  useEffect(() => {
+    if (!state.user || !state.isAuthenticated) return;
+
+    // Only fetch if not already present to avoid loops
+    if (state.user.vmsPermissions !== undefined) return;
+
+    const fetchVmsPermissions = async () => {
+      try {
+        const vmsPerms = await nxAPI.getUserPermissions();
+        if (vmsPerms) {
+          setState(prev => {
+            if (!prev.user) return prev;
+            return {
+              ...prev,
+              user: {
+                ...prev.user,
+                vmsPermissions: vmsPerms.permissions,
+                vmsResourceAccessRights: vmsPerms.resourceAccessRights
+              }
+            };
+          });
+          console.log(`[Auth] VMS permissions loaded for ${state.user?.username}`);
+        }
+      } catch (error) {
+        console.warn("[Auth] Failed to fetch VMS permissions:", error);
+      }
+    };
+
+    fetchVmsPermissions();
+  }, [state.user, state.isAuthenticated]);
+
   // Login handler
   const login = useCallback(
     async (credentials: LoginCredentials): Promise<AuthResponse> => {

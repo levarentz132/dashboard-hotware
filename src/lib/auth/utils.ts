@@ -7,12 +7,31 @@ import { UserPublic, Role } from "./types";
 export function isAdmin(user: UserPublic | null | undefined): boolean {
     if (!user) return false;
 
+    // 1. Check VMS permissions string if available (New logic)
+    if (user.vmsPermissions) {
+        const perms = user.vmsPermissions.toLowerCase();
+        if (perms.includes('administrator') || perms.includes('poweruser')) {
+            return true;
+        }
+    }
+
     const role = user.role;
     if (!role) return false;
 
     const roleName = (typeof role === 'string' ? role : role.name).toLowerCase();
     // Both 'admin', 'security admin', and 'poweruser' are treated as administrators
     return roleName === 'admin' || roleName === 'security admin' || roleName === 'poweruser';
+}
+
+/**
+ * Check if the user is strictly an administrator in the VMS.
+ * This does NOT fall back to dashboard roles.
+ */
+export function isVmsAdmin(user: UserPublic | null | undefined): boolean {
+    if (!user || !user.vmsPermissions) return false;
+    const perms = user.vmsPermissions.toLowerCase();
+    if (perms === "none" || perms === "") return false;
+    return perms.includes('administrator') || perms.includes('poweruser');
 }
 
 /**
@@ -98,20 +117,32 @@ export function formatIndonesianDate(dateString: string | null | undefined): str
 export function hasCameraViewPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
     
-    // If the user is an admin, they see everything by default.
-    if (isAdmin(user)) return true;
-    
-    const rights = user.resourceAccessRights || {};
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
+
+    // 1. Check VMS Resource Access Rights if available
+    if (user.vmsResourceAccessRights) {
+        const rights = user.vmsResourceAccessRights[nid] || user.vmsResourceAccessRights[cameraId] || "";
+        if (rights && rights !== "none") {
+            // Must have 'view' right
+            return rights.toLowerCase().includes('view');
+        }
+        // If it's explicitly in the map but empty/none, return false
+        if (user.vmsResourceAccessRights[nid] !== undefined || user.vmsResourceAccessRights[cameraId] !== undefined) {
+            return false;
+        }
+    }
+    
+    // If the user is an admin in the dashboard, they might have legacy access
+    // but the instruction is to use resource access rights only.
+    // However, we keep the fallback to user.resourceAccessRights for backward compatibility
+    // if vmsResourceAccessRights is not yet loaded.
+    
+    const rights = user.resourceAccessRights || {};
     
     // Check for both original and normalized IDs in the rights map
     const userRights = rights[nid] || rights[cameraId] || "";
     const hasRight = userRights !== "" && userRights !== "none";
-    
-    if (!hasRight) {
-        console.warn(`[Permission] User ${user.username} denied view for camera ${cameraId}. Rights:`, rights);
-    }
     
     return hasRight;
 }
@@ -122,17 +153,25 @@ export function hasCameraViewPermission(user: UserPublic | null | undefined, cam
 export function hasCameraEditPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
     
-    // Admin bypass: admins always have edit rights unless specifically restricted
-    if (isAdmin(user)) return true;
-    
-    const rights = user.resourceAccessRights || {};
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
+
+    // 1. Check VMS Resource Access Rights if available
+    if (user.vmsResourceAccessRights) {
+        const rights = user.vmsResourceAccessRights[nid] || user.vmsResourceAccessRights[cameraId] || "";
+        if (rights && rights !== "none") {
+            // Must have 'edit' right
+            return rights.toLowerCase().includes('edit');
+        }
+        // If it's explicitly in the map but empty/none, return false
+        if (user.vmsResourceAccessRights[nid] !== undefined || user.vmsResourceAccessRights[cameraId] !== undefined) {
+            return false;
+        }
+    }
+    
+    const rights = user.resourceAccessRights || {};
     
     const userRights = (rights[nid] || rights[cameraId] || "").toLowerCase();
     const allowed = userRights !== "" && userRights !== "none";
-    if (!allowed && user) {
-        console.warn(`[Permission] User ${user.username} denied edit for camera ${cameraId}. Rights:`, rights);
-    }
     return allowed;
 }
