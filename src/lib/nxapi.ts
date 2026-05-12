@@ -519,6 +519,16 @@ class NxWitnessAPI {
     return await this.apiRequest<any>(`/users/${normalizedId}`);
   }
 
+  async getCurrentSession(): Promise<{ username: string; token: string } | null> {
+    try {
+      // Fetch the current session info
+      return await this.apiRequest<any>("/rest/v3/login/sessions/-", { skipCache: true });
+    } catch (error) {
+      console.warn("[nxAPI] Failed to fetch current session info:", error);
+      return null;
+    }
+  }
+
   async getUserPermissions(): Promise<{ permissions: string; resourceAccessRights: Record<string, string> } | null> {
     try {
       return await this.apiRequest<any>("/users/-/permissions", { skipCache: true });

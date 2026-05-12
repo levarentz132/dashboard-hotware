@@ -342,25 +342,33 @@ export default function CloudRecordings() {
     // Fetch VMS permissions and identity using the dedicated endpoint
     const fetchUserRights = async () => {
       try {
-        const vmsPerms = await nxAPI.getUserPermissions();
-        if (vmsPerms) {
-          console.log(`[CloudRecordings] VMS Permissions loaded:`, vmsPerms.permissions);
+        // Fetch both session info (identity) and permissions in parallel
+        const [sessionInfo, vmsPerms] = await Promise.all([
+          nxAPI.getCurrentSession(),
+          nxAPI.getUserPermissions()
+        ]);
+
+        if (sessionInfo || vmsPerms) {
+          const vmsUsername = sessionInfo?.username;
+          if (vmsUsername) {
+            console.log(`[CloudRecordings] Resolved VMS identity: ${vmsUsername}`);
+          }
           
-          const perms = vmsPerms.permissions.toLowerCase();
+          const perms = vmsPerms?.permissions?.toLowerCase() || "";
           const isPowerOrAdmin = perms.includes("administrator") || perms.includes("poweruser");
 
           setVmsEnrichedUser(prev => prev ? ({
             ...prev,
-            vmsPermissions: vmsPerms.permissions,
-            vmsResourceAccessRights: vmsPerms.resourceAccessRights,
+            username: vmsUsername || prev.username, // Prioritize VMS username for task attribution
+            vmsPermissions: vmsPerms?.permissions || "none",
+            vmsResourceAccessRights: vmsPerms?.resourceAccessRights || {},
             role: isPowerOrAdmin ? "admin" : "operator"
           } as UserPublic) : null);
         } else {
-          // Fallback if permission fetch fails but we're authenticated
-          console.warn("[CloudRecordings] VMS permission fetch returned no data.");
+          console.warn("[CloudRecordings] VMS identity/permission fetch returned no data.");
         }
       } catch (err) {
-        console.warn("[CloudRecordings] Failed to fetch VMS permissions:", err);
+        console.warn("[CloudRecordings] Failed to fetch VMS identity/permissions:", err);
       }
     };
 
