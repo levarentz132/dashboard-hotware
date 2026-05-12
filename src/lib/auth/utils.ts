@@ -98,15 +98,10 @@ export function formatIndonesianDate(dateString: string | null | undefined): str
 export function hasCameraViewPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
     
+    // If the user is an admin, they see everything by default.
+    if (isAdmin(user)) return true;
+    
     const rights = user.resourceAccessRights || {};
-    const hasSpecificRights = Object.keys(rights).length > 0;
-    
-    // If the user is an admin AND they don't have any specific resource restrictions, they see everything.
-    // If they HAVE specific restrictions, we must check them even if they are an admin.
-    if (isAdmin(user) && !hasSpecificRights) {
-        return true;
-    }
-    
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
     
@@ -127,12 +122,10 @@ export function hasCameraViewPermission(user: UserPublic | null | undefined, cam
 export function hasCameraEditPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
     
-    const rights = user.resourceAccessRights || {};
-    const hasSpecificRights = Object.keys(rights).length > 0;
-
-    // Admin bypass only if no specific resource restrictions are defined
-    if (isAdmin(user) && !hasSpecificRights) return true;
+    // Admin bypass: admins always have edit rights unless specifically restricted
+    if (isAdmin(user)) return true;
     
+    const rights = user.resourceAccessRights || {};
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
     

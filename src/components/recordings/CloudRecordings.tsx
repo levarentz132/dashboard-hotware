@@ -269,7 +269,11 @@ export default function CloudRecordings() {
   const { user: localUser } = useAuth();
   const isUserAdmin = isAdmin(localUser);
   const [devices, setDevices] = useState<(CloudDevice & { systemId: string; systemName: string })[]>([]);
-  const [selectedSystem, setSelectedSystem] = useState<string>("127.0.0.1");
+  const [selectedSystem, setSelectedSystem] = useState<string>(() => {
+    const envId = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_NX_SYSTEM_ID : '';
+    const cookieId = Cookies.get("nx_system_id");
+    return (cookieId || envId || "127.0.0.1").replace(/[{}]/g, "");
+  });
   const [selectedDevice, setSelectedDevice] = useState<string>("all");
   const [localSystemName, setLocalSystemName] = useState<string>("");
   const [loadingSystems, setLoadingSystems] = useState(true);
@@ -439,7 +443,7 @@ export default function CloudRecordings() {
 
   const visibleDevices = React.useMemo(() => {
     if (!effectiveUser) return [];
-    if (isEffectiveAdmin && !Object.keys(effectiveUser.resourceAccessRights || {}).length) return devices;
+    if (isEffectiveAdmin) return devices;
     return devices.filter(d => hasCameraEditPermission(effectiveUser, d.id));
   }, [devices, effectiveUser, isEffectiveAdmin]);
 
@@ -449,13 +453,10 @@ export default function CloudRecordings() {
     
     // Admin bypass: admins always see all schedules
     if (isEffectiveAdmin) {
-        console.log("[CloudRecordings] Admin showing all:", scheduledRecordings.length);
         return scheduledRecordings;
     }
     
-    const filtered = scheduledRecordings.filter(s => hasCameraEditPermission(effectiveUser, s.cameraId));
-    console.log("[CloudRecordings] Filtered count:", filtered.length, "for user:", effectiveUser.username);
-    return filtered;
+    return scheduledRecordings.filter(s => hasCameraEditPermission(effectiveUser, s.cameraId));
   }, [scheduledRecordings, effectiveUser, isEffectiveAdmin]);
 
   // ---- Settings state ----
@@ -1009,7 +1010,7 @@ export default function CloudRecordings() {
     if ((duration <= 5000 || isLegacy) && !isVideo) {
       let url = "";
       if (isLegacy && fileName && dateFolder) {
-        url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}`;
+        url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&systemId=${sysId}&deviceId=${devId}&startTimeMs=${time}`;
         if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
       } else {
         url = `/api/cloud/recordings/thumbnail?systemId=${sysId}&deviceId=${devId.replace(/[{}]/g, "")}&timestampMs=${time}`;
@@ -1042,10 +1043,18 @@ export default function CloudRecordings() {
   };
 
   const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string, isLocal?: boolean, fileName?: string, dateFolder?: string, cameraName?: string, cameraFolderName?: string, isScreenshot?: boolean) => {
-    if (isLocal && fileName && dateFolder) {
-      let url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&download=true`;
+    // Only use the local serve API for screenshots. 
+    // For videos, we always want to fetch from VMS and convert (via the download API) 
+    // instead of taking the file from the local folder.
+    if (isLocal && fileName && dateFolder && isScreenshot) {
+      let url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&systemId=${sysId}&deviceId=${devId}&startTimeMs=${startTimeMs}&download=true`;
       if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
-      window.open(url, "_blank");
+      
+      const link = document.createElement('a');
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       return;
     }
 
@@ -1060,7 +1069,13 @@ export default function CloudRecordings() {
     if (isScreenshot || durationMs === 0) params.set("isSnapshot", "true");
     // Pass camera name so the server can use it when auto-saving the video
     if (cameraName) params.set("cameraName", cameraName);
-    window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
+    
+    const downloadUrl = `/api/cloud/recordings/download?${params.toString()}`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // ---- Schedule Recording ----
@@ -1385,7 +1400,14 @@ export default function CloudRecordings() {
   const handleSearchRecentRecordings = async (overrideDevice?: string, overrideDate?: Date, overrideSystem?: string, isAutoRefresh: boolean = false) => {
     const targetDevice = overrideDevice || selectedDevice;
     const targetDate = overrideDate || date;
-    const targetSystem = overrideSystem || selectedSystem;
+    let targetSystem = overrideSystem || selectedSystem;
+
+    // Resolve system placeholder to actual system if possible
+    if (targetSystem === "127.0.0.1" || !targetSystem) {
+      const cookieId = Cookies.get("nx_system_id")?.replace(/[{}]/g, "");
+      const envId = process.env.NEXT_PUBLIC_NX_SYSTEM_ID?.replace(/[{}]/g, "");
+      targetSystem = cookieId || envId || targetSystem || "127.0.0.1";
+    }
     
     // Don't auto-trigger if nothing is selected yet
     if (isAutoRefresh && !targetDevice) return;

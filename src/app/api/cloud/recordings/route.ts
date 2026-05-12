@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
+    const headers = buildCloudHeaders(request, systemId);
 
     // Check cache
     const cacheKey = `${systemId}:${deviceId}:${startTime}:${endTime}`;
@@ -56,19 +57,43 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Build query params for recorded time periods
-    const params = new URLSearchParams();
-    if (!isAllCameras) {
-      params.set("cameraId", deviceIdRaw);
+    // 1. Fetch Device List for GUID -> Name mapping
+    const deviceNameMap = new Map<string, string>();
+    try {
+      const devicesUrl = buildCloudUrl(systemId, "/rest/v3/devices", new URLSearchParams(), request, systemName || undefined);
+      const devicesRes = await fetch(devicesUrl, { headers, cache: 'no-store' });
+      if (devicesRes.ok) {
+        const devicesData = await devicesRes.json();
+        const devicesList = Array.isArray(devicesData) ? devicesData : (devicesData.reply || []);
+        devicesList.forEach((d: any) => {
+          if (d.id) {
+            const name = (d.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+            deviceNameMap.set(d.id.replace(/[{}]/g, "").toLowerCase(), name);
+            deviceNameMap.set(d.id.toLowerCase(), name);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn(`[recordings] Failed to fetch device list for mapping:`, e);
     }
-    if (startTime) params.set("startTime", startTime);
-    if (endTime) params.set("endTime", endTime);
-    params.set("detail", "2"); // Get detailed periods
 
-    const cloudUrl = buildCloudUrl(systemId, "/ec2/recordedTimePeriods", params, request, systemName || undefined);
-    const headers = buildCloudHeaders(request, systemId);
+    // Determine the search camera name for local scan logic
+    let searchCameraName = "";
+    if (!isAllCameras) {
+      searchCameraName = deviceNameMap.get(deviceId.toLowerCase()) || deviceNameMap.get(deviceIdRaw.toLowerCase()) || "";
+    }
 
-    let responseData: any = { reply: [] };
+    // 2. Build footage query
+    const footageParams = new URLSearchParams();
+    if (startTime) footageParams.set("startTimeMs", startTime);
+    if (endTime) footageParams.set("endTimeMs", endTime);
+
+    const footageEndpoint = isAllCameras ? "/rest/v3/devices/*/footage" : `/rest/v3/devices/${deviceId}/footage`;
+    const cloudUrl = buildCloudUrl(systemId, footageEndpoint, footageParams, request, systemName || undefined);
+    
+    console.log(`[recordings] Fetching footage from NX: ${cloudUrl}`);
+
+    let allPeriods: any[] = [];
     try {
       let response = await fetch(cloudUrl, {
         method: "GET",
@@ -79,81 +104,53 @@ export async function GET(request: NextRequest) {
       if (response.status === 401 || response.status === 403) {
         const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
         if (basicAuthHeader) {
-          const retryHeaders: Record<string, string> = {
-            ...headers,
-            Authorization: basicAuthHeader,
-          };
+          const retryHeaders: Record<string, string> = { ...headers, Authorization: basicAuthHeader };
           delete retryHeaders["x-runtime-guid"];
-
-          logger.warn("[recordings] Retrying recordedTimePeriods with Basic auth");
-          response = await fetch(cloudUrl, {
-            method: "GET",
-            headers: retryHeaders,
-            cache: 'no-store'
-          });
+          response = await fetch(cloudUrl, { method: "GET", headers: retryHeaders, cache: 'no-store' });
         }
       }
 
       if (response.ok) {
-        responseData = await response.json();
+        const footageData = await response.json();
+        
+        // The REST v3 footage API returns a map: { "deviceId": [ { startTimeMs, durationMs, serverId }, ... ] }
+        // or a direct array if a specific device was requested.
+        const footageMap = isAllCameras ? footageData : { [deviceId]: footageData };
+
+        for (const [id, chunks] of Object.entries(footageMap)) {
+          if (!Array.isArray(chunks)) continue;
+          
+          const cleanId = id.replace(/[{}]/g, "").toLowerCase();
+          const cameraName = deviceNameMap.get(cleanId) || deviceNameMap.get(id.toLowerCase()) || "Unknown";
+
+          for (const chunk of chunks as any[]) {
+            const durationMs = chunk.durationMs || 0;
+            
+            // Pulse Filtering: Ignore chunks under 10 seconds as they are likely snapshot trigger pulses
+            if (durationMs > 0 && durationMs < 10000) {
+              // console.log(`[recordings] Skipping pulse chunk (${Math.round(durationMs/1000)}s) for ${cameraName}`);
+              continue;
+            }
+
+            allPeriods.push({
+              startTimeMs: chunk.startTimeMs,
+              durationMs: durationMs,
+              deviceId: id,
+              cameraName: cameraName,
+              serverId: chunk.serverId,
+              isScreenshot: durationMs > 0 && durationMs <= 5000,
+            });
+          }
+        }
+        console.log(`[recordings] NX API Success: Found ${allPeriods.length} periods for system ${systemId}`);
       } else {
         const errorText = await response.text().catch(() => "Unknown error");
-        // logger.warn(`[recordings] Nx API returned ${response.status} (likely recording disabled on NVR). Proceeding with local scan.`, errorText);
+        console.warn(`[recordings] NX API Error (${response.status}) for system ${systemId}:`, errorText);
       }
     } catch (err: any) {
-      // logger.warn("[recordings] Nx API fetch failed. Proceeding with local scan only.", err.message);
-    }
-    
-    // Use responseData instead of data
-    const data = responseData;
-    
-    // Fetch device info early to help with deduplication and naming (only if specific device)
-    let searchCameraName = "";
-    if (!isAllCameras) {
-      try {
-        const deviceUrl = buildCloudUrl(systemId, `/rest/v3/devices/${deviceId}`, new URLSearchParams(), request, systemName || undefined);
-        const devRes = await fetch(deviceUrl, { headers, buildCloudHeaders: true } as any);
-        if (devRes.ok) {
-          const devData = await devRes.json();
-          searchCameraName = (devData.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-        }
-      } catch (e) { }
+      console.error(`[recordings] NX API Exception for system ${systemId}:`, err.message);
     }
 
-    // NX API returns { reply: [{ guid: "serverId", periods: [{startTimeMs, durationMs}] }] }
-    // We need to flatten all periods from all servers
-    let allPeriods: any[] = [];
-    
-    const replyItems = Array.isArray(data) ? data : (data?.reply || []);
-    
-    for (const item of replyItems) {
-      // Each item may have a 'periods' array (per-server response) or be a period itself
-      const periods = item.periods || (item.startTimeMs ? [item] : []);
-      
-      for (const p of periods) {
-        // Parse timestamps - they come as strings from NX API
-        let startTimeMs = parseInt(p.startTimeMs || p.startTime || '0', 10);
-        let durationMs = parseInt(p.durationMs || p.duration || '0', 10);
-        
-        // If in microseconds (> year 2100 in ms), convert to ms
-        if (startTimeMs > 4102444800000) {
-          startTimeMs = Math.floor(startTimeMs / 1000);
-        }
-        if (durationMs > 86400000000) { // 1 day in usec
-          durationMs = Math.floor(durationMs / 1000);
-        }
-        
-        allPeriods.push({
-          ...p,
-          startTimeMs,
-          durationMs,
-          deviceId: p.deviceId || deviceId, // Use per-period deviceId if available (for 'all' query)
-          cameraName: searchCameraName || "Unknown",
-          isScreenshot: durationMs > 0 && durationMs <= 5000,
-          serverId: item.guid || p.guid,
-        });
-      }
-    }
     
     // 2. Fetch local files from data folders (date-based folder structure)
     try {
@@ -173,37 +170,27 @@ export async function GET(request: NextRequest) {
       const startLimit = startTime ? parseInt(startTime, 10) : 0;
       const endLimit = endTime ? parseInt(endTime, 10) : Infinity;
       
-      // Determine relevant dates to scan
-      const relevantDates = new Set<string>();
-      if (startTime && endTime) {
-        let current = new Date(startLimit);
-        const end = new Date(endLimit);
-        while (current <= end) {
-          relevantDates.add(current.getFullYear().toString() + (current.getMonth() + 1).toString().padStart(2, '0') + current.getDate().toString().padStart(2, '0'));
-          relevantDates.add(`${current.getFullYear()}-${(current.getMonth() + 1).toString().padStart(2, '0')}-${current.getDate().toString().padStart(2, '0')}`);
-          current.setDate(current.getDate() + 1);
-        }
-      }
-
       for (const screenshotsBaseDir of Array.from(baseDirs)) {
-        if (!fs.existsSync(screenshotsBaseDir)) continue;
+        if (!fs.existsSync(screenshotsBaseDir)) {
+          console.log(`[recordings] Local base directory does not exist: ${screenshotsBaseDir}`);
+          continue;
+        }
 
-        // Scan date-based folders - only those that match or if no range provided
+        console.log(`[recordings] Scanning local storage: ${screenshotsBaseDir}`);
+
+        // Scan date-based folders
         const allDateFolders = fs.readdirSync(screenshotsBaseDir).filter(f => {
           const isDateFolder = /^(\d{8}|\d{4}-\d{2}-\d{2})$/.test(f);
           if (!isDateFolder) return false;
-          
-          // Optimization: only scan if it's within our date range (if range exists)
-          if (relevantDates.size > 0 && !relevantDates.has(f)) return false;
-          
           const fullPath = path.join(screenshotsBaseDir, f);
-          try {
-            return fs.statSync(fullPath).isDirectory();
-          } catch { return false; }
+          try { return fs.statSync(fullPath).isDirectory(); } catch { return false; }
         });
 
-        for (const dateFolder of allDateFolders) {
-          const folderPath = path.join(screenshotsBaseDir, dateFolder);
+        // Add the base directory itself to the list of folders to scan (for non-structured saves)
+        const foldersToScan = [...allDateFolders, ""]; 
+
+        for (const dateFolder of foldersToScan) {
+          const folderPath = dateFolder ? path.join(screenshotsBaseDir, dateFolder) : screenshotsBaseDir;
           let folderFiles: string[] = [];
           try {
             folderFiles = fs.readdirSync(folderPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
@@ -263,22 +250,20 @@ export async function GET(request: NextRequest) {
               }
             }
 
-            // Pattern C: Legacy ID formats...
-            if (!isMatch) {
-              const idSplit = file.split("__");
-              if (idSplit.length > 1) {
-                if (isAllCameras || idSplit[0].toLowerCase() === deviceId.toLowerCase()) {
-                  isMatch = true;
-                  fileDeviceId = idSplit[0];
-                  const timeParts = file.match(/_(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
-                  if (timeParts) timeStr = timeParts[1];
-                }
-              }
-            }
-
             if (!isMatch || !timeStr) continue;
 
-            const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
+            // Resolve date from folder or file
+            let y, m, d;
+            if (dateFolder && (dateFolder.includes("-") || dateFolder.length === 8)) {
+              [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
+            } else if (legacyFormatMatch) {
+              [y, m, d] = legacyFormatMatch[2].split("-").map(Number);
+            } else {
+              // Fallback to file creation date if no folder date
+              const fDate = new Date(stats.birthtimeMs);
+              [y, m, d] = [fDate.getFullYear(), fDate.getMonth() + 1, fDate.getDate()];
+            }
+
             const hour = parseInt(timeStr.substring(0, 2), 10);
             const minute = parseInt(timeStr.substring(2, 4), 10);
             const second = parseInt(timeStr.substring(4, 6), 10);
@@ -302,86 +287,69 @@ export async function GET(request: NextRequest) {
                 deviceId: fileDeviceId || deviceId,
                 serverId: "local-storage",
                 fileName: file,
-                dateFolder: dateFolder,
+                dateFolder: dateFolder || `${y}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`,
                 cameraName: foundCameraName || searchCameraName || "Unknown",
-                url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(file)}`,
+                url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder || `${y}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`}&file=${encodeURIComponent(file)}`,
               });
               seenLocalFiles.add(file);
             }
           }
 
-          // Scan Nested Structure...
-          let subFolders: string[] = [];
-          try {
-            subFolders = fs.readdirSync(folderPath).filter(f => {
-              try { return fs.statSync(path.join(folderPath, f)).isDirectory(); } catch { return false; }
-            });
-          } catch { continue; }
-
-          for (const cameraFolderName of subFolders) {
-            let isNameMatch = false;
-            let isIdMatch = false;
-            
-            if (isAllCameras) {
-              isNameMatch = true;
-            } else {
-              const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?|*]/g, "_").trim();
-              isNameMatch = !!safeTarget && cameraFolderName === safeTarget;
-              isIdMatch = cameraFolderName.toLowerCase() === deviceId.toLowerCase();
-            }
-            
-            if (!isNameMatch && !isIdMatch) continue;
-
-            const cameraPath = path.join(folderPath, cameraFolderName);
-            let files: string[] = [];
+          // Scan Nested Camera Folders inside Date Folders
+          if (dateFolder) {
+            let subFolders: string[] = [];
             try {
-              files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
+              subFolders = fs.readdirSync(folderPath).filter(f => {
+                try { return fs.statSync(path.join(folderPath, f)).isDirectory(); } catch { return false; }
+              });
             } catch { continue; }
 
-            for (const file of files) {
-              if (seenLocalFiles.has(file)) continue;
-              const timeMatch = file.match(/^(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
-              if (!timeMatch) continue;
-
-              const timeStr = timeMatch[1];
-              const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
-              const hour = parseInt(timeStr.substring(0, 2), 10);
-              const minute = parseInt(timeStr.substring(2, 4), 10);
-              const second = parseInt(timeStr.substring(4, 6), 10);
-              const isScheduledPng = file.endsWith(".png");
-              const displaySecond = isScheduledPng ? 0 : second;
-              const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
+            for (const cameraFolderName of subFolders) {
+              const cameraPath = path.join(folderPath, cameraFolderName);
+              const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".mp4") || f.endsWith(".png"));
               
-              const isVideo = file.endsWith(".mp4");
-              let stats;
-              try {
-                stats = fs.statSync(path.join(cameraPath, file));
-              } catch { continue; }
-              const isShortVideo = isVideo && stats.size < 150000;
+              for (const file of files) {
+                const filePath = path.join(cameraPath, file);
+                const stats = fs.statSync(filePath);
+                if (seenLocalFiles.has(file)) continue;
 
-              if (timestamp >= startLimit && timestamp <= endLimit) {
-                allPeriods.push({
-                  startTimeMs: timestamp,
-                  durationMs: isVideo ? (isShortVideo ? 1000 : 60000) : 0,
-                  isScreenshot: file.endsWith(".png") || isShortVideo,
-                  isVideo: isVideo && !isShortVideo,
-                  isLocal: true,
-                  deviceId: cameraFolderName.match(/^[a-z0-9-]+$/i) ? cameraFolderName : deviceId,
-                  serverId: "local-storage",
-                  fileName: file,
-                  dateFolder: dateFolder,
-                  cameraName: cameraFolderName,
-                  url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&camera=${encodeURIComponent(cameraFolderName)}&file=${encodeURIComponent(file)}`,
-                });
-                seenLocalFiles.add(file);
+                // Simple format check for nested files
+                const timeParts = file.match(/^(\d{6})(?:_\d+)?\.(?:png|mp4)$/);
+                if (!timeParts) continue;
+
+                const [y, m, d] = dateFolder.includes("-") ? dateFolder.split("-").map(Number) : [parseInt(dateFolder.substring(0,4)), parseInt(dateFolder.substring(4,6)), parseInt(dateFolder.substring(6,8))];
+                const h = parseInt(timeParts[1].substring(0, 2), 10);
+                const mm = parseInt(timeParts[1].substring(2, 4), 10);
+                const ss = parseInt(timeParts[1].substring(4, 6), 10);
+                const timestamp = new Date(y, m - 1, d, h, mm, ss).getTime();
+
+                if (timestamp >= startLimit && timestamp <= endLimit) {
+                  const isVideo = file.endsWith(".mp4");
+                  allPeriods.push({
+                    startTimeMs: timestamp,
+                    durationMs: isVideo ? Math.max(1000, stats.mtimeMs - timestamp) : 0,
+                    isScreenshot: file.endsWith(".png"),
+                    isVideo: isVideo,
+                    isLocal: true,
+                    deviceId: deviceId,
+                    serverId: "local-storage",
+                    fileName: file,
+                    dateFolder: dateFolder,
+                    cameraFolderName: cameraFolderName,
+                    cameraName: cameraFolderName,
+                    url: `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&camera=${encodeURIComponent(cameraFolderName)}&file=${encodeURIComponent(file)}`,
+                  });
+                  seenLocalFiles.add(file);
+                }
               }
             }
           }
         }
       }
     } catch (err) {
-      logger.warn("[recordings] Failed to scan local storage folders:", err);
+      console.error("[recordings] Local scan error:", err);
     }
+
 
     // 3. Final Deduplication and Sorting
     const finalPeriods: any[] = [];

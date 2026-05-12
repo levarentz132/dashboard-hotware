@@ -59,7 +59,26 @@ export async function GET(request: NextRequest) {
     }
 
     if (!fs.existsSync(filePath)) {
-      // console.warn(`[screenshot/serve] File not found: ${filePath}`);
+      const systemId = searchParams.get("systemId");
+      const deviceId = searchParams.get("deviceId");
+      const startTimeMs = searchParams.get("startTimeMs");
+
+      if (systemId && deviceId && startTimeMs) {
+        const fallbackParams = new URLSearchParams();
+        fallbackParams.set("systemId", systemId);
+        fallbackParams.set("deviceId", deviceId);
+        fallbackParams.set("startTime", startTimeMs);
+        if (download === "true") fallbackParams.set("download", "true");
+        
+        const isVideo = fileName.toLowerCase().endsWith(".mp4");
+        const redirectPath = isVideo ? "/api/cloud/recordings/download" : "/api/cloud/recordings/thumbnail";
+        if (!isVideo) {
+          fallbackParams.set("timestampMs", startTimeMs);
+        }
+
+        return NextResponse.redirect(new URL(`${redirectPath}?${fallbackParams.toString()}`, request.url));
+      }
+
       return NextResponse.json(
         { error: "Media not found" },
         { status: 404 }

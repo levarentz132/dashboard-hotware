@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
 import { logRecordingEvent, formatAuditDate } from "@/lib/recording-logger";
+import { buildCloudUrl } from "@/lib/cloud-api";
 
 
 // ── VMS Direct API helpers ────────────────────────────────────────────────────
@@ -20,12 +21,11 @@ async function vmsRequest(
   body: any,
   authToken: string,
   nxIp: string,
-  nxPort: string
+  nxPort: string,
+  systemId?: string
 ): Promise<any> {
-  // Determine protocol: default https for everything EXCEPT non-standard ports
-  // (Standardizing on the logic in cloud-api.ts)
-  const protocol = (nxPort === '7001' || !nxPort) ? 'https' : 'http';
-  const url = `${protocol}://${nxIp}:${nxPort}${endpoint}`;
+  const params = new URLSearchParams();
+  const url = buildCloudUrl(systemId || "", endpoint, params);
   try {
     const isLocalToken = authToken.startsWith("vms-");
     const headers: Record<string, string> = {
@@ -366,7 +366,7 @@ const startWatchdog = () => {
 
             // Store original schedule
             try {
-              const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, auth, ip, port);
+              const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, auth, ip, port, rec.systemId);
               originalSchedules[rec.id] = cam?.schedule || { isEnabled: false };
               console.log(`[Watchdog] Stored original schedule for ${rec.cameraName}`);
             } catch (e) {
@@ -376,7 +376,7 @@ const startWatchdog = () => {
 
             await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
               schedule: { isEnabled: true, tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", streamQuality: "highest", fps: 0, bitrateKbps: 0, metadataTypes: "none" }] }
-            }, auth, ip, port);
+            }, auth, ip, port, rec.systemId);
             
             console.log(`[Watchdog] Recording started on VMS for ${rec.cameraName}`);
             logRecordingEvent(`recording started for camera ${rec.cameraName} at ${rec.startTime}`);
@@ -395,13 +395,13 @@ const startWatchdog = () => {
             const auth = rec.auth || globalAuth;
             console.log(`[Watchdog] Stopping recording for ${rec.cameraName} (${cleanId})`);
             if (auth && ip && ip !== "localhost") {
-              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { isEnabled: false } }, auth, ip, port);
+              await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { isEnabled: false } }, auth, ip, port, rec.systemId);
               console.log(`[Watchdog] Recording stopped on VMS for ${rec.cameraName}`);
               
               // Restore original
               const original = originalSchedules[rec.id];
               if (original) {
-                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { ...original, isEnabled: false } }, auth, ip, port);
+                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { ...original, isEnabled: false } }, auth, ip, port, rec.systemId);
                 console.log(`[Watchdog] Original schedule restored for ${rec.cameraName}`);
               }
               delete originalSchedules[rec.id];
@@ -500,7 +500,7 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
 
 function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
   const currentPort = detectCurrentPort(global._nxAppPort || "3030");
-  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}`;
+  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;

@@ -98,7 +98,12 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
       endTime: String(n.endTimeMs || (n.startTimeMs ? n.startTimeMs + (n.durationMs || 1000) : 0)),
       stream: "true",
     });
-    window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
+    const downloadUrl = `/api/cloud/recordings/download?${params.toString()}`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Toggle fullscreen
