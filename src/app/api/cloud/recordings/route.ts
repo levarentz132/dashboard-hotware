@@ -170,28 +170,53 @@ export async function GET(request: NextRequest) {
         }
       } catch (e) { }
 
-      const normalizedBaseDirs = Array.from(baseDirs).map(d => path.resolve(d));
-      const uniqueBaseDirs = new Set(normalizedBaseDirs);
+      const startLimit = startTime ? parseInt(startTime, 10) : 0;
+      const endLimit = endTime ? parseInt(endTime, 10) : Infinity;
+      
+      // Determine relevant dates to scan
+      const relevantDates = new Set<string>();
+      if (startTime && endTime) {
+        let current = new Date(startLimit);
+        const end = new Date(endLimit);
+        while (current <= end) {
+          relevantDates.add(current.getFullYear().toString() + (current.getMonth() + 1).toString().padStart(2, '0') + current.getDate().toString().padStart(2, '0'));
+          relevantDates.add(`${current.getFullYear()}-${(current.getMonth() + 1).toString().padStart(2, '0')}-${current.getDate().toString().padStart(2, '0')}`);
+          current.setDate(current.getDate() + 1);
+        }
+      }
 
-      for (const screenshotsBaseDir of Array.from(uniqueBaseDirs)) {
+      for (const screenshotsBaseDir of Array.from(baseDirs)) {
         if (!fs.existsSync(screenshotsBaseDir)) continue;
 
-        const startLimit = startTime ? parseInt(startTime, 10) : 0;
-        const endLimit = endTime ? parseInt(endTime, 10) : Infinity;
-
-        // Scan date-based folders
-        const dateFolders = fs.readdirSync(screenshotsBaseDir).filter(f => {
+        // Scan date-based folders - only those that match or if no range provided
+        const allDateFolders = fs.readdirSync(screenshotsBaseDir).filter(f => {
+          const isDateFolder = /^(\d{8}|\d{4}-\d{2}-\d{2})$/.test(f);
+          if (!isDateFolder) return false;
+          
+          // Optimization: only scan if it's within our date range (if range exists)
+          if (relevantDates.size > 0 && !relevantDates.has(f)) return false;
+          
           const fullPath = path.join(screenshotsBaseDir, f);
-          return fs.statSync(fullPath).isDirectory() && /^(\d{8}|\d{4}-\d{2}-\d{2})$/.test(f);
+          try {
+            return fs.statSync(fullPath).isDirectory();
+          } catch { return false; }
         });
 
-        for (const dateFolder of dateFolders) {
+        for (const dateFolder of allDateFolders) {
           const folderPath = path.join(screenshotsBaseDir, dateFolder);
-          const folderFiles = fs.readdirSync(folderPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
+          let folderFiles: string[] = [];
+          try {
+            folderFiles = fs.readdirSync(folderPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
+          } catch { continue; }
 
           for (const file of folderFiles) {
             const filePath = path.join(folderPath, file);
-            if (fs.statSync(filePath).isDirectory()) continue;
+            let stats;
+            try {
+              stats = fs.statSync(filePath);
+              if (stats.isDirectory()) continue;
+            } catch { continue; }
+            
             if (seenLocalFiles.has(file)) continue;
 
             let isMatch = false;
@@ -262,7 +287,6 @@ export async function GET(request: NextRequest) {
             const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
 
             if (timestamp >= startLimit && timestamp <= endLimit) {
-              const stats = fs.statSync(filePath);
               const isVideo = file.endsWith(".mp4");
               const isShortVideo = isVideo && stats.size < 150000; 
 
@@ -287,7 +311,13 @@ export async function GET(request: NextRequest) {
           }
 
           // Scan Nested Structure...
-          const subFolders = fs.readdirSync(folderPath).filter(f => fs.statSync(path.join(folderPath, f)).isDirectory());
+          let subFolders: string[] = [];
+          try {
+            subFolders = fs.readdirSync(folderPath).filter(f => {
+              try { return fs.statSync(path.join(folderPath, f)).isDirectory(); } catch { return false; }
+            });
+          } catch { continue; }
+
           for (const cameraFolderName of subFolders) {
             let isNameMatch = false;
             let isIdMatch = false;
@@ -295,7 +325,7 @@ export async function GET(request: NextRequest) {
             if (isAllCameras) {
               isNameMatch = true;
             } else {
-              const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+              const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?|*]/g, "_").trim();
               isNameMatch = !!safeTarget && cameraFolderName === safeTarget;
               isIdMatch = cameraFolderName.toLowerCase() === deviceId.toLowerCase();
             }
@@ -303,7 +333,10 @@ export async function GET(request: NextRequest) {
             if (!isNameMatch && !isIdMatch) continue;
 
             const cameraPath = path.join(folderPath, cameraFolderName);
-            const files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
+            let files: string[] = [];
+            try {
+              files = fs.readdirSync(cameraPath).filter(f => f.endsWith(".png") || f.endsWith(".mp4"));
+            } catch { continue; }
 
             for (const file of files) {
               if (seenLocalFiles.has(file)) continue;
@@ -320,7 +353,10 @@ export async function GET(request: NextRequest) {
               const timestamp = new Date(y, m - 1, d, hour, minute, displaySecond).getTime();
               
               const isVideo = file.endsWith(".mp4");
-              const stats = fs.statSync(path.join(cameraPath, file));
+              let stats;
+              try {
+                stats = fs.statSync(path.join(cameraPath, file));
+              } catch { continue; }
               const isShortVideo = isVideo && stats.size < 150000;
 
               if (timestamp >= startLimit && timestamp <= endLimit) {

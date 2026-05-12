@@ -1605,7 +1605,18 @@ export default function CloudRecordings() {
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar mode="single" selected={date} onSelect={(d) => { setDate(d); if (selectedDevice && d) handleSearchRecentRecordings(selectedDevice, d); }} initialFocus />
+                      <Calendar 
+                        mode="single" 
+                        selected={date} 
+                        onSelect={(d) => { 
+                          if (d) {
+                            setDate(d); 
+                            if (selectedDevice) handleSearchRecentRecordings(selectedDevice, d); 
+                          }
+                        }} 
+                        disabled={{ after: new Date() }}
+                        initialFocus 
+                      />
                     </PopoverContent>
                   </Popover>
 
@@ -1628,83 +1639,86 @@ export default function CloudRecordings() {
                     </div>
                   )}
                 </div>
-                <CardContent className="px-0 pt-0">
-                  {recentLoading ? (
-                    <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground">
-                      <Loader2 className="h-8 w-8 animate-spin" />
-                      <p className="text-sm">Fetching recorded segments...</p>
+                <CardContent className="px-0 pt-0 relative min-h-[400px]">
+                  {/* Persistent loading overlay to prevent jumpiness */}
+                  {recentLoading && (
+                    <div className="absolute inset-0 z-10 bg-white/60 backdrop-blur-[1px] flex flex-col items-center justify-center gap-4 transition-all duration-300">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <p className="text-sm font-medium text-slate-600">Updating recordings...</p>
                     </div>
-                  ) : (
-                    filteredRecentRecordings.length > 0 ? (
-                      <div className="border rounded-2xl bg-white overflow-hidden shadow-sm">
-                        <Table>
-                          <TableHeader className="bg-white border-b border-slate-200">
-                            <TableRow className="hover:bg-transparent">
-                              <TableHead className="w-28 text-center text-black font-normal text-xs">Type</TableHead>
-                              <TableHead className="text-black font-normal text-xs">Camera</TableHead>
-                              <TableHead className="text-black font-normal text-xs">Time</TableHead>
-                              <TableHead className="text-black font-normal text-xs">Date</TableHead>
-                              <TableHead className="text-black font-normal text-xs">Duration</TableHead>
-                              <TableHead className="text-right text-black font-normal text-xs">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredRecentRecordings.map(rec => {
-                              const startTime = new Date(rec.startTimeMs);
-                              const endTime = new Date(rec.startTimeMs + (rec.durationMs || 0));
-                              const timeStr = rec.isScreenshot
-                                ? format(startTime, "HH:mm")
-                                : `${format(startTime, "HH:mm")} - ${format(endTime, "HH:mm")}`;
+                  )}
 
-                              return (
-                                <TableRow key={rec.id} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
-                                  <TableCell className="text-center text-black text-[12px]">
-                                    {rec.isScreenshot ? "snapshot" : "video"}
-                                  </TableCell>
-                                  <TableCell className="text-black text-[12px]">{rec.cameraName}</TableCell>
-                                  <TableCell className="text-black text-[12px]">
-                                    {timeStr}
-                                  </TableCell>
-                                  <TableCell className="text-black text-[12px]">
-                                    {format(startTime, "MMM d")}
-                                  </TableCell>
-                                  <TableCell className="text-black text-[12px]">
-                                    {!rec.isScreenshot ? formatDuration(rec.durationMs) : "-"}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <div className="flex items-center justify-end gap-1">
-                                      {rec.isScreenshot && (
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          onClick={() => {
-                                            handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
-                                          }}
-                                          className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
-                                          title="View Image"
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                      )}
+                  {filteredRecentRecordings.length > 0 ? (
+                    <div className={cn("border rounded-2xl bg-white overflow-hidden shadow-sm transition-opacity duration-300", recentLoading && "opacity-40")}>
+                      <Table>
+                        <TableHeader className="bg-white border-b border-slate-200">
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead className="w-28 text-center text-black font-normal text-xs">Type</TableHead>
+                            <TableHead className="text-black font-normal text-xs">Camera</TableHead>
+                            <TableHead className="text-black font-normal text-xs">Time</TableHead>
+                            <TableHead className="text-black font-normal text-xs">Date</TableHead>
+                            <TableHead className="text-black font-normal text-xs">Duration</TableHead>
+                            <TableHead className="text-right text-black font-normal text-xs">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredRecentRecordings.map(rec => {
+                            const startTime = new Date(rec.startTimeMs);
+                            const endTime = new Date(rec.startTimeMs + (rec.durationMs || 0));
+                            const timeStr = rec.isScreenshot
+                              ? format(startTime, "HH:mm")
+                              : `${format(startTime, "HH:mm")} - ${format(endTime, "HH:mm")}`;
+
+                            return (
+                              <TableRow key={rec.id} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
+                                <TableCell className="text-center text-black text-[12px]">
+                                  {rec.isScreenshot ? "snapshot" : "video"}
+                                </TableCell>
+                                <TableCell className="text-black text-[12px]">{rec.cameraName}</TableCell>
+                                <TableCell className="text-black text-[12px]">
+                                  {timeStr}
+                                </TableCell>
+                                <TableCell className="text-black text-[12px]">
+                                  {format(startTime, "MMM d")}
+                                </TableCell>
+                                <TableCell className="text-black text-[12px]">
+                                  {!rec.isScreenshot ? formatDuration(rec.durationMs) : "-"}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {rec.isScreenshot && (
                                       <Button
                                         variant="ghost"
                                         size="icon"
-                                        onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName, rec.cameraFolderName, rec.isScreenshot)}
+                                        onClick={() => {
+                                          handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
+                                        }}
                                         className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
-                                        title={rec.isScreenshot ? "Save Image" : "Download"}
+                                        title="View Image"
                                       >
-                                        <Download className="h-4 w-4" />
+                                        <Eye className="h-4 w-4" />
                                       </Button>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground gap-4 border-2 border-dashed rounded-3xl bg-muted/20">
+                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName, rec.cameraFolderName, rec.isScreenshot)}
+                                      className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                      title={rec.isScreenshot ? "Save Image" : "Download"}
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    !recentLoading && (
+                      <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground gap-4 border-2 border-dashed rounded-3xl bg-muted/20 animate-in fade-in zoom-in-95 duration-500">
                         <div className="bg-muted p-6 rounded-full shadow-inner">
                           <Search className="h-10 w-10 opacity-40" />
                         </div>
@@ -2027,6 +2041,7 @@ export default function CloudRecordings() {
                             setScheduleDays([]);
                             setScheduleMonthDay("");
                           }}
+                          disabled={{ after: new Date() }}
                           initialFocus
                         />
                       </PopoverContent>
