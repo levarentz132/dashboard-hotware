@@ -35,6 +35,7 @@ export function LicenseLogin() {
         formState: { errors, isSubmitted },
     } = useForm<LoginFormData>({
         resolver: zodResolver(loginSchema),
+        // STATIC CREDENTIALS: Change these values to make the username and password static
         defaultValues: {
             username: "LippoTest",
             password: "Lippo.123",

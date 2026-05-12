@@ -319,8 +319,11 @@ export function NxVmsLogin() {
 
         // Priority 2: Environment / Config
         if (!username || !password) {
-            username = extConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
-            password = extConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+            // STATIC CREDENTIALS
+            // username = extConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
+            // password = extConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+            username = "LippoTest";
+            password = "Lippo.123";
         }
 
         if (!username || !password) {

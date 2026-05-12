@@ -28,7 +28,7 @@ export default function LoginPage() {
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-100/30 rounded-full blur-[120px] pointer-events-none" />
 
       {/* Floating UI Elements */}
-      <LicenseLogin />
+      {/* <LicenseLogin /> */}
       <NxLocationSettings />
 
       {/* Main Centered Card */}
