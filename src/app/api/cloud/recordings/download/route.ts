@@ -187,10 +187,15 @@ export async function GET(request: NextRequest) {
       if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
       const savePath = path.join(saveDir, finalFileName);
 
-      // DEDUPLICATION: Check if file already exists before fetching from VMS
-      if (fs.existsSync(savePath)) {
-        console.log(`[recordings/download] AUTO-SAVE: File already exists, skipping: ${savePath}`);
+      // DEDUPLICATION: Check if file already exists AND has content before fetching from VMS
+      if (fs.existsSync(savePath) && fs.statSync(savePath).size > 0) {
+        console.log(`[recordings/download] AUTO-SAVE: Valid file already exists, skipping: ${savePath}`);
         return NextResponse.json({ success: true, path: savePath, file: finalFileName, skipped: true });
+      }
+      
+      if (fs.existsSync(savePath)) {
+        console.log(`[recordings/download] AUTO-SAVE: Found 0-byte or corrupted file, overwriting: ${savePath}`);
+        try { fs.unlinkSync(savePath); } catch (e) {}
       }
 
       console.log(`[recordings/download] AUTO-SAVE triggered for ${deviceId} startTime=${startTime}, duration=${Math.round((parseInt(endTime || startTime) - parseInt(startTime))/1000)}s`);
@@ -227,12 +232,16 @@ export async function GET(request: NextRequest) {
 
       const ffmpegPath = getFfmpegPath();
       const ffmpegAutoSave = spawn(ffmpegPath, [
-        "-fflags", "+genpts",
+        "-fflags", "+genpts+igndts",
+        "-avoid_negative_ts", "make_zero",
+        "-analyze_duration", "10000000",
+        "-probesize", "10000000",
         "-i", "pipe:0",
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
+        "-max_muxing_queue_size", "1024",
         "-f", "mp4",
         "-y",
         savePath,
@@ -254,11 +263,20 @@ export async function GET(request: NextRequest) {
       const autoSaveStream = Readable.fromWeb(videoResponse.body as any);
       autoSaveStream.pipe(ffmpegAutoSave.stdin);
 
+      // Safety timeout: Kill FFmpeg if it takes more than 3 minutes
+      const ffmpegSafetyTimeout = setTimeout(() => {
+        if (ffmpegAutoSave.exitCode === null) {
+          console.warn(`[recordings/download] AUTO-SAVE: FFmpeg process timed out, killing it: ${savePath}`);
+          ffmpegAutoSave.kill("SIGKILL");
+        }
+      }, 180000);
+
       // Wait for FFmpeg to finish
       return await new Promise<NextResponse>((resolve) => {
         const taskId = searchParams.get("taskId");
 
         ffmpegAutoSave.on("close", async (code) => {
+          clearTimeout(ffmpegSafetyTimeout);
           releaseFfmpegSlot(); // Release slot immediately when process closes
           
           if (taskId) {
@@ -596,6 +614,51 @@ export async function GET(request: NextRequest) {
       };
       if (contentLengthHeader) responseHeaders["Content-Length"] = contentLengthHeader;
       if (contentRangeHeader) responseHeaders["Content-Range"] = contentRangeHeader;
+
+      // ── MANUAL DOWNLOAD REMUXING ───────────────────────────────────────────
+      // For manual downloads (stream=true, preview=false), we remux the raw VMS 
+      // stream into a stable MP4 with fixed timestamps and +faststart.
+      if (!isPreview && !effectiveIsImage && videoResponse.body) {
+        // console.log(`[recordings/download] Remuxing manual download to stable MP4 via FFmpeg`);
+        
+        await acquireFfmpegSlot();
+        const ffmpegPath = getFfmpegPath();
+        const ffmpegProcess = spawn(ffmpegPath, [
+          "-fflags", "+genpts+igndts",
+          "-avoid_negative_ts", "make_zero",
+          "-analyze_duration", "10000000",
+          "-probesize", "10000000",
+          "-i", "pipe:0",
+          "-c:v", "copy",
+          "-c:a", "aac",
+          "-b:a", "128k",
+          "-movflags", "+faststart",
+          "-max_muxing_queue_size", "1024",
+          "-f", "mp4",
+          "pipe:1"
+        ], { windowsHide: true });
+
+        ffmpegProcess.stdin.on("error", (e) => {
+          // console.error("[recordings/download] FFmpeg manual download stdin error:", e);
+        });
+        
+        ffmpegProcess.on("close", () => {
+          releaseFfmpegSlot();
+        });
+
+        const downloadInput = Readable.fromWeb(videoResponse.body as any);
+        downloadInput.pipe(ffmpegProcess.stdin);
+
+        return new NextResponse(Readable.toWeb(ffmpegProcess.stdout) as any, {
+          status: 200,
+          headers: {
+            "Content-Type": "video/mp4",
+            "Content-Disposition": disposition,
+            "Accept-Ranges": "none",
+            "Cache-Control": "no-cache, no-store",
+          },
+        });
+      }
 
       // Use 206 if upstream returned 206 or if client sent a Range header
       const responseStatus = (upstreamStatus === 206 || (rangeHeader && upstreamStatus === 200)) ? 206 : 200;

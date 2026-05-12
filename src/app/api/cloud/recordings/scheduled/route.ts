@@ -615,17 +615,42 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
       // console.warn(`[getUserResourceRights] Failed to fetch accessible devices: ${e.message}`);
     }
 
-    // ── STEP 2: Fetch direct VMS permissions for admin status ───────────────
+    // ── STEP 2: Fetch direct VMS permissions and groups for admin status ────
+    let vmsIsAdmin = false;
     try {
-      const permsData = await vmsRequest("GET", "/rest/v3/users/-/permissions", null, token, finalIp, finalPort);
+      // Parallel fetch for permissions and groups
+      const [permsData, groupsData, userData] = await Promise.all([
+        vmsRequest("GET", "/rest/v3/users/-/permissions", null, token, finalIp, finalPort).catch(() => ({})),
+        vmsRequest("GET", "/api/nx/userGroups", null, token, finalIp, finalPort).catch(() => []),
+        vmsRequest("GET", `/api/nx/users?name=${encodeURIComponent(username)}`, null, token, finalIp, finalPort).catch(() => ({}))
+      ]);
+
       const permissions = (permsData?.permissions || "").toLowerCase();
-      const vmsIsAdmin = permissions.includes("administrator");
+      const user = Array.isArray(userData) ? userData[0] : (userData.reply ? userData.reply[0] : userData);
+      const groups = Array.isArray(groupsData) ? groupsData : (groupsData.reply || []);
       
-      // console.log(`[getUserResourceRights] VMS permissions for ${username}: ${permissions} (isAdmin: ${vmsIsAdmin})`);
+      // Strict group check on server
+      if (user && user.groupIds && groups.length > 0) {
+        const userGroupNames = groups
+          .filter((g: any) => user.groupIds.includes(g.id))
+          .map((g: any) => (g.name || "").toLowerCase());
+        
+        vmsIsAdmin = userGroupNames.some((name: string) => 
+          name.includes("administrator") || 
+          name.includes("power user") || 
+          name.includes("poweruser") ||
+          name.includes("security admin")
+        );
+      }
+      
+      // Fallback only if no groups assigned (NX older versions might not use groups strictly)
+      if (!vmsIsAdmin && permissions === "administrator") {
+        vmsIsAdmin = true;
+      }
 
       return {
         rights: vmsIsAdmin ? null : accessibleRights,
-        isAdmin: isDashboardAdmin || vmsIsAdmin,
+        isAdmin: vmsIsAdmin, // Only trust VMS-derived admin status here, or remove entirely if possible
         username
       };
     } catch (e: any) {
@@ -633,7 +658,7 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
     }
 
     // console.log(`[getUserResourceRights] No direct VMS permissions found for ${username}. isDashboardAdmin=${isDashboardAdmin}. Using device-list rights.`);
-    return { rights: accessibleRights, isAdmin: isDashboardAdmin, username };
+    return { rights: accessibleRights, isAdmin: false, username };
   } catch (err) {
     return { rights: null, isAdmin: false, username: "System" };
   }

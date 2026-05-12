@@ -62,12 +62,12 @@ export interface ExternalAuthResponse {
  * Map license status to user role
  */
 export function mapLicenseToRole(licenseStatus: string): "admin" | "operator" | "viewer" {
-  // Map license types to roles - customize as needed
+  // Map license types to roles - strictly returning 'operator' for active licenses
+  // to enforce VMS-based role verification for admin status.
   switch (licenseStatus.toLowerCase()) {
     case "active":
     case "yearly":
     case "lifetime":
-      return "admin";
     case "monthly":
       return "operator";
     case "7_day":

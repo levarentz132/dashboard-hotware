@@ -23,6 +23,7 @@ import {
   Cpu,
   Video
 } from "lucide-react";
+import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { Privilege, isAdmin, getDisplayRole } from "@/lib/auth";
@@ -140,8 +141,12 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
 
   // Filter navigation items based on user privileges
   const filteredItems = navigationItems.filter(item => {
+    // Check if the user is a VMS admin (from cookies)
+    const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
+    const isVmsAdmin = nxUser?.role === 'admin' || nxUser?.role === 'poweruser';
+    
     // Admins see everything
-    if (isAdmin(user)) return true;
+    if (isVmsAdmin || isAdmin(user)) return true;
 
     // Explicitly hide sensitive management items from non-admins
     if (item.id === 'debug' || item.id === 'subaccounts') return false;
@@ -294,13 +299,22 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
                 "flex items-center gap-3 rounded-xl transition-colors hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200 cursor-pointer group w-full h-[52px] justify-start px-2"
               )}>
                 <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shrink-0 shadow-sm text-white font-bold text-sm">
-                  {user?.username?.[0]?.toUpperCase() || <User className="w-5 h-5" />}
+                  {(() => {
+                    const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
+                    const displayUsername = nxUser?.username || user?.username || "Guest";
+                    return displayUsername[0]?.toUpperCase();
+                  })()}
                 </div>
-
+ 
                 {!isCollapsed && (
                   <div className="flex-1 min-w-0 text-left">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{user?.username || "Guest User"}</p>
-                    <p className="text-xs text-gray-500 truncate capitalize">{getDisplayRole(user?.role)}</p>
+                    {(() => {
+                      const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
+                      const displayUsername = nxUser?.username || user?.username || "Guest User";
+                      return (
+                        <p className="text-sm font-semibold text-gray-900 truncate">{displayUsername}</p>
+                      );
+                    })()}
                   </div>
                 )}
               </button>
@@ -308,8 +322,13 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
             <DropdownMenuContent onClick={(e) => e.stopPropagation()} side={isCollapsed ? "right" : "top"} align={isCollapsed ? "end" : "start"} className="w-56 z-[9999] bg-white" sideOffset={10}>
               <DropdownMenuLabel className="font-normal select-none">
                 <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{user?.username || "Guest User"}</p>
-                  <p className="text-xs leading-none text-muted-foreground">{getDisplayRole(user?.role)}</p>
+                  {(() => {
+                    const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
+                    const displayUsername = nxUser?.username || user?.username || "Guest User";
+                    return (
+                      <p className="text-sm font-medium leading-none">{displayUsername}</p>
+                    );
+                  })()}
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />

@@ -11,8 +11,8 @@ export function isAdmin(user: UserPublic | null | undefined): boolean {
     if (!role) return false;
 
     const roleName = (typeof role === 'string' ? role : role.name).toLowerCase();
-    // Both 'admin' and 'security admin' are treated as administrators
-    return roleName === 'admin' || roleName === 'security admin';
+    // Both 'admin', 'security admin', and 'poweruser' are treated as administrators
+    return roleName === 'admin' || roleName === 'security admin' || roleName === 'poweruser';
 }
 
 /**
