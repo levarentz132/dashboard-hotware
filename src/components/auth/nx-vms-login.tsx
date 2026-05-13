@@ -322,8 +322,8 @@ export function NxVmsLogin() {
             // STATIC CREDENTIALS
             // username = extConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
             // password = extConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
-            username = "author";
-            password = "author123";
+            username = "LippoTest";
+            password = "Lippo.123";
         }
 
         if (!username || !password) {
