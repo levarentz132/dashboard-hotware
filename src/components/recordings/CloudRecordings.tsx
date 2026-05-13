@@ -931,7 +931,7 @@ export default function CloudRecordings() {
       const endMs = new Date(date).setHours(endHour, endMin, 59, 999);
       setSearchedRange({ startMs, endMs });
       const data = await fetchRecordedTimePeriods(
-        selectedSystem, getOriginalDeviceId(selectedDevice), startMs, endMs, undefined
+        selectedSystem, getOriginalDeviceId(selectedDevice), startMs, endMs, isEffectiveAdmin
       );
       const allPeriods = Array.isArray(data) ? data : data?.reply || [];
       // Filter results: power users/admins see all, normal users only see cameras they can edit
@@ -1397,6 +1397,7 @@ export default function CloudRecordings() {
         isAllCamerasSearch ? "all" : getOriginalDeviceId(targetDevice), 
         startMs, 
         endMs, 
+        isEffectiveAdmin,
         undefined,
         controller.signal
       );

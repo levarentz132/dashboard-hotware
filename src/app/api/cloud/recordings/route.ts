@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
     const footageEndpoint = isAllCameras ? "/rest/v3/devices/*/footage" : `/rest/v3/devices/${deviceId}/footage`;
     const cloudUrl = buildCloudUrl(systemId, footageEndpoint, footageParams, request, systemName || undefined);
     
-    console.log(`[recordings] Fetching footage from NX: ${cloudUrl}`);
+    const isAdmin = searchParams.get("isAdmin") === "true";
 
     let allPeriods: any[] = [];
     try {
@@ -149,6 +149,13 @@ export async function GET(request: NextRequest) {
       }
     } catch (err: any) {
       console.error(`[recordings] NX API Exception for system ${systemId}:`, err.message);
+    }
+
+    // Footage Template Logic: For non-admin users, if VMS returns no footage, do not show local files either.
+    // This ensures VMS remains the source of truth for visibility for non-privileged users.
+    if (!isAdmin && allPeriods.length === 0) {
+      console.log(`[recordings] Normal user search returned no NX footage. Skipping local scan for ${systemId}:${deviceId}.`);
+      return NextResponse.json([]);
     }
 
     

@@ -124,6 +124,7 @@ export async function fetchRecordedTimePeriods(
   deviceId: string,
   startTime?: number,
   endTime?: number,
+  isAdmin?: boolean,
   basicAuth?: BasicAuthCredentials,
   signal?: AbortSignal
 ): Promise<any> {
@@ -143,6 +144,7 @@ export async function fetchRecordedTimePeriods(
     params.set("deviceId", deviceId);
     if (startTime) params.set("startTime", String(startTime));
     if (endTime) params.set("endTime", String(endTime));
+    if (isAdmin !== undefined) params.set("isAdmin", String(isAdmin));
 
     const response = await fetch(`/api/cloud/recordings?${params.toString()}`, {
       method: "GET",
