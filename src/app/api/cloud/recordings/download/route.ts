@@ -101,7 +101,11 @@ export async function GET(request: NextRequest) {
     const taskId = searchParams.get("taskId");
     const isSnapshotParam = searchParams.get("isSnapshot") === "true";
 
-    console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}, autoSave=${autoSave}`);
+    if (autoSave) {
+      console.log(`[recordings/download] INTERNAL AUTO-SAVE request: deviceId=${deviceId}, startTime=${startTime}, taskId=${taskId}`);
+    } else {
+      console.log(`[recordings/download] GET request received: deviceId=${deviceId}, startTime=${startTime}, endTime=${endTime}`);
+    }
 
     if (!systemId || !deviceId || !startTime) {
       return NextResponse.json(
@@ -168,8 +172,8 @@ export async function GET(request: NextRequest) {
       const safeCameraName = (searchParams.get("cameraName") || deviceId?.substring(0, 8) || "Camera")
         .replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim();
       
-      // Use configured PNG path (storagePath) for auto-saves as requested
-      let autoSaveBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
+      // Use configured Video Storage Path, fallback to Snapshot Path, then default
+      let autoSaveBaseDir = path.join(process.cwd(), "data", "recorded_videos");
       try {
         const settingsFile = path.join(process.cwd(), "data", "settings.json");
         if (fs.existsSync(settingsFile)) {
@@ -182,8 +186,11 @@ export async function GET(request: NextRequest) {
         }
       } catch (e) { }
 
-      const finalFileName = `${safeCameraName}_${YYYY}${MM}${DD}_${HH}${mmP}00.mp4`;
+      const finalFileName = `${safeCameraName}_${HH}${mmP}00.mp4`;
       const saveDir = path.join(autoSaveBaseDir, dateFolder);
+      
+      console.log(`[recordings/download] AUTO-SAVE target: ${saveDir}${path.sep}${finalFileName}`);
+      
       if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
       const savePath = path.join(saveDir, finalFileName);
 
@@ -213,16 +220,28 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ success: true, skipped: true, reason: "pulse_filter" });
         }
 
-        videoResponse = await fetch(downloadUrl, { headers, signal: controller.signal });
+        // Build a fresh set of headers for the VMS request to avoid conflicts
+        const vmsHeaders: Record<string, string> = {
+          "Accept": "application/json",
+          "x-runtime-guid": urlToken || ""
+        };
+        // Only add Bearer if it's not a local VMS token
+        if (urlToken && !urlToken.startsWith("vms-")) {
+          vmsHeaders["Authorization"] = `Bearer ${urlToken}`;
+        }
+
+        console.log(`[recordings/download] AUTO-SAVE: Fetching from VMS: ${downloadUrl.split('?')[0]}`);
+        videoResponse = await fetch(downloadUrl, { headers: vmsHeaders, signal: controller.signal });
         clearTimeout(autoSaveTimeout);
 
         if (!videoResponse.ok || !videoResponse.body) {
           const errText = await videoResponse.text().catch(() => "");
-          console.error(`[recordings/download] AUTO-SAVE fetch failed (${videoResponse.status}):`, errText);
-          return NextResponse.json({ error: "Auto-save fetch failed", status: videoResponse.status }, { status: 500 });
+          console.error(`[recordings/download] AUTO-SAVE: VMS fetch failed (${videoResponse.status}):`, errText);
+          return NextResponse.json({ error: "Auto-save fetch failed", status: videoResponse.status, details: errText }, { status: 500 });
         }
+        console.log(`[recordings/download] AUTO-SAVE: VMS fetch successful (${videoResponse.status}), starting FFmpeg...`);
       } catch (fetchErr: any) {
-        console.error("[recordings/download] AUTO-SAVE fetch error:", fetchErr.message || fetchErr);
+        console.error("[recordings/download] AUTO-SAVE: VMS fetch error:", fetchErr.message || fetchErr);
         return NextResponse.json({ error: "Auto-save fetch error", details: fetchErr.message }, { status: 500 });
       }
 
@@ -234,8 +253,6 @@ export async function GET(request: NextRequest) {
       const ffmpegAutoSave = spawn(ffmpegPath, [
         "-fflags", "+genpts+igndts",
         "-avoid_negative_ts", "make_zero",
-        "-analyze_duration", "10000000",
-        "-probesize", "10000000",
         "-i", "pipe:0",
         "-c:v", "copy",
         "-c:a", "aac",
@@ -285,11 +302,18 @@ export async function GET(request: NextRequest) {
               if (fs.existsSync(DATA_FILE)) {
                 const content = fs.readFileSync(DATA_FILE, "utf-8").replace(/^\uFEFF/, "");
                 const data = JSON.parse(content);
-                const task = data.schedules?.find((s: any) => s.id === taskId);
-                if (task) {
-                  task.status = code === 0 ? "completed" : "failed";
+                const taskIndex = data.schedules?.findIndex((s: any) => s.id === taskId);
+                if (taskIndex !== -1) {
+                  const task = data.schedules[taskIndex];
+                  // If successful AND non-recurring, remove it from the list
+                  if (code === 0 && (!task.recurrence || task.recurrence === "none" || task.recurrence === "once")) {
+                    data.schedules.splice(taskIndex, 1);
+                    console.log(`[recordings/download] Task ${taskId} completed and REMOVED (non-recurring)`);
+                  } else {
+                    task.status = code === 0 ? "completed" : "failed";
+                    console.log(`[recordings/download] Task ${taskId} status updated to: ${task.status}`);
+                  }
                   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-                  console.log(`[recordings/download] Task ${taskId} status updated to: ${task.status}`);
                 }
               }
             } catch (err) {

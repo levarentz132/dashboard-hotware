@@ -24,10 +24,23 @@ async function vmsRequest(
   nxPort: string,
   systemId?: string
 ): Promise<any> {
-  const params = new URLSearchParams();
-  const url = buildCloudUrl(systemId || "", endpoint, params);
   try {
     const isLocalToken = authToken.startsWith("vms-");
+    
+    // Construct a dummy request object to pass the IP/Port to buildCloudUrl
+    const dummyRequest = {
+      cookies: { get: () => null },
+      headers: {
+        get: (name: string) => {
+          if (name === "x-nx-location-ip") return nxIp;
+          if (name === "x-nx-location-port") return nxPort;
+          return null;
+        }
+      }
+    } as any;
+
+    const params = new URLSearchParams();
+    const url = buildCloudUrl(systemId || "", endpoint, params, dummyRequest);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "x-runtime-guid": authToken,
@@ -87,15 +100,17 @@ if (typeof global !== "undefined" && !global._nxExecutingTasks) {
  * Useful in dev where ports can change (e.g. 3010, 3011).
  */
 function detectCurrentPort(fallback: string): string {
-  // 1. Check process arguments (e.g. next dev -p 3030)
-  const pIndex = process.argv.indexOf("-p");
-  if (pIndex !== -1 && process.argv[pIndex + 1]) return process.argv[pIndex + 1];
-
-  // 2. Check detected port from recent dashboard request
-  if (global._nxAppPort) return global._nxAppPort;
+  let port = process.env.PORT || fallback || "3030";
   
-  // 3. Fallback to env or provided fallback (usually 3030)
-  return process.env.PORT || fallback || "3030";
+  const pIndex = process.argv.indexOf("-p");
+  if (pIndex !== -1 && process.argv[pIndex + 1]) {
+    port = process.argv[pIndex + 1];
+  } else if (global._nxAppPort) {
+    port = global._nxAppPort;
+  }
+
+  // console.log(`[Watchdog] Port detection: argv=${process.argv.slice(2).join(' ')}, detected=${global._nxAppPort || 'none'} -> using ${port}`);
+  return port;
 }
 
 
@@ -337,7 +352,8 @@ const startWatchdog = () => {
                 rec.startMs = nextDate.getTime();
                 rec.endMs = nextDate.getTime() + (endMs - startMs);
               } else {
-                rec.status = "completed";
+                delete uniqueSchedules[rec.id];
+                console.log(`[Watchdog] Screenshot task ${rec.id} completed and REMOVED (non-recurring)`);
               }
             }
           } catch (e) {
@@ -394,7 +410,8 @@ const startWatchdog = () => {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const auth = rec.auth || globalAuth;
             console.log(`[Watchdog] Stopping recording for ${rec.cameraName} (${cleanId})`);
-            if (auth && ip && ip !== "localhost") {
+            // Use provided auth/IP or fallback to defaults
+            if (auth && ip) {
               await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { isEnabled: false } }, auth, ip, port, rec.systemId);
               console.log(`[Watchdog] Recording stopped on VMS for ${rec.cameraName}`);
               
@@ -424,9 +441,10 @@ const startWatchdog = () => {
             } else {
               rec.status = "processing";
             }
-          } catch (e) {
-            rec.status = "recording";
-          }
+            } catch (e: any) {
+              console.error(`[Watchdog] video_stop FAILED for ${rec.cameraName}:`, e.message);
+              rec.status = "recording";
+            }
         }
 
         if (task.type === "expire") {
@@ -500,13 +518,14 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
 
 function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
   const currentPort = detectCurrentPort(global._nxAppPort || "3030");
-  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}`;
+  const url = `http://localhost:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;
   if (nxPort && nxPort !== "7001") headers["x-nx-location-port"] = nxPort;
   
   console.log(`[Watchdog] Triggering auto-save (${rec.recurrence || 'once'}) for ${rec.cameraName}: ${new Date(rec.startMs).toLocaleString()} -> ${new Date(rec.endMs).toLocaleTimeString()}`);
+  console.log(`[Watchdog] Auto-save URL: ${url}`);
   fetch(url, { headers })
     .then(res => {
       if (!res.ok) {

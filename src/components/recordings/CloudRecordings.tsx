@@ -391,7 +391,7 @@ export default function CloudRecordings() {
   const visibleDevices = React.useMemo(() => {
     if (!effectiveUser) return [];
     if (isEffectiveAdmin) return devices;
-    return devices.filter(d => hasCameraEditPermission(effectiveUser, d.id));
+    return devices.filter(d => hasCameraViewPermission(effectiveUser, d.id));
   }, [devices, effectiveUser, isEffectiveAdmin]);
 
   // ---- Permission-filtered view of schedules (always uses current localUser/enrichedUser) ----
@@ -403,7 +403,7 @@ export default function CloudRecordings() {
         return scheduledRecordings;
     }
     
-    return scheduledRecordings.filter(s => hasCameraEditPermission(effectiveUser, s.cameraId));
+    return scheduledRecordings.filter(s => hasCameraViewPermission(effectiveUser, s.cameraId));
   }, [scheduledRecordings, effectiveUser, isEffectiveAdmin]);
 
   // ---- Settings state ----
@@ -942,7 +942,7 @@ export default function CloudRecordings() {
       );
       const allPeriods = Array.isArray(data) ? data : data?.reply || [];
       // Filter results: power users/admins see all, normal users only see cameras they can edit
-      const periods = allPeriods.filter((p: any) => hasCameraEditPermission(effectiveUser, p.deviceId));
+      const periods = allPeriods.filter((p: any) => hasCameraViewPermission(effectiveUser, p.deviceId));
       
       setRecordings(periods);
       if (periods.length === 0) setSearchError("No recordings found for the selected time range.");
@@ -1415,7 +1415,7 @@ export default function CloudRecordings() {
       const allPeriods = Array.isArray(data) ? data : data?.reply || [];
       
       // Filter results: power users/admins see all, normal users only see cameras they can edit
-      const periods = allPeriods.filter((p: any) => hasCameraEditPermission(effectiveUser, p.deviceId));
+      const periods = allPeriods.filter((p: any) => hasCameraViewPermission(effectiveUser, p.deviceId));
 
       if (isAutoRefresh && periods.length === 0 && recentRecordings.length > 0) return;
 
