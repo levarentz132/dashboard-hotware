@@ -23,7 +23,12 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X, Plus, Trash2, CalendarDays, Pencil, AlertCircle, Settings, User, LayoutGrid, LayoutList } from "lucide-react";
+import { 
+  CalendarIcon, Download, Loader2, Video, Cloud, LogIn, Camera, Clock, List, Search, 
+  Image as ImageIcon2, Eye, StopCircle, PlayCircle, RefreshCw, X, Plus, Trash2, 
+  CalendarDays, Pencil, AlertCircle, Settings, User, LayoutGrid, LayoutList, Archive, CheckCircle2
+} from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
 import { format, addDays, nextDay, Day } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -48,6 +53,7 @@ import {
   fetchCloudSystems,
   fetchCloudDevices,
   fetchRecordedTimePeriods,
+  bulkDownloadRecordings,
   CloudSystem,
   CloudDevice,
   CloudAuthError,
@@ -723,8 +729,9 @@ export default function CloudRecordings() {
   const [recentRecordings, setRecentRecordings] = useState<RecentRecording[]>([]);
   const [recentSearch, setRecentSearch] = useState<string>("");
   const [recentLoading, setRecentLoading] = useState(false);
+  const [recentError, setRecentError] = useState("");
+  const [selectedItems, setSelectedItems] = useState<RecentRecording[]>([]);
   const [recentDate, setRecentDate] = useState<Date | undefined>(new Date());
-  const [recentError, setRecentError] = useState<string>("");
   const [recentCamera, setRecentCamera] = useState<string>("");
 
   // ---- Cloud OAuth ----
@@ -1467,6 +1474,68 @@ export default function CloudRecordings() {
     }
   };
 
+  const toggleSelectItem = (item: RecentRecording) => {
+    setSelectedItems(prev => {
+      const exists = prev.find(i => i.id === item.id);
+      if (exists) {
+        return prev.filter(i => i.id !== item.id);
+      }
+      return [...prev, item];
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const currentIds = new Set(filteredRecentRecordings.map(r => r.id));
+    const allSelected = filteredRecentRecordings.every(r => selectedItems.some(s => s.id === r.id));
+
+    if (allSelected) {
+      // Unselect only those in current view
+      setSelectedItems(prev => prev.filter(s => !currentIds.has(s.id)));
+    } else {
+      // Select all in current view (plus existing selections)
+      setSelectedItems(prev => {
+        const next = [...prev];
+        filteredRecentRecordings.forEach(r => {
+          if (!next.some(s => s.id === r.id)) next.push(r);
+        });
+        return next;
+      });
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    if (selectedItems.length === 0) return;
+    try {
+      setRecentLoading(true);
+      const blob = await bulkDownloadRecordings(selectedSystem, selectedItems);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `recordings_bulk_${new Date().getTime()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      addPersistentNotification({
+        type: 'success',
+        title: 'Download Started',
+        message: `Zipping and downloading ${selectedItems.length} items.`
+      });
+      
+      // Optional: clear selection after download? Maybe not, keep for user convenience
+    } catch (err: any) {
+      console.error("[CloudRecordings] Bulk download failed:", err);
+      addPersistentNotification({
+        type: 'error',
+        title: 'Download Failed',
+        message: err.message || 'Failed to generate ZIP file.'
+      });
+    } finally {
+      setRecentLoading(false);
+    }
+  };
+
   const formatDuration = (ms: number) => {
     if (ms <= 5000) return "Snapshot";
     const seconds = Math.floor(ms / 1000);
@@ -1600,6 +1669,31 @@ export default function CloudRecordings() {
                     <RefreshCw className={cn("h-4 w-4 text-primary", recentLoading && "animate-spin")} />
                   </Button>
 
+                  {selectedItems.length > 0 && (
+                    <div className="flex items-center gap-2 ml-auto animate-in fade-in slide-in-from-right-4">
+                      <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
+                        {selectedItems.length} selected
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedItems([])}
+                        className="h-10 text-xs text-slate-500 hover:text-slate-700"
+                      >
+                        Clear
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleBulkDownload}
+                        disabled={recentLoading}
+                        className="h-10 px-4 rounded-xl font-bold bg-primary shadow-lg hover:shadow-primary/20 transition-all gap-2"
+                      >
+                        <Archive className="h-4 w-4" />
+                        Download ZIP
+                      </Button>
+                    </div>
+                  )}
+
                   {recentLoading && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground animate-pulse ml-auto bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10">
                       <Loader2 className="h-3 w-3 animate-spin text-primary" /> Synchronizing...
@@ -1620,12 +1714,20 @@ export default function CloudRecordings() {
                       <Table>
                         <TableHeader className="bg-white border-b border-slate-200">
                           <TableRow className="hover:bg-transparent">
-                            <TableHead className="w-28 text-center text-black font-normal text-xs">Type</TableHead>
-                            <TableHead className="text-black font-normal text-xs">Camera</TableHead>
-                            <TableHead className="text-black font-normal text-xs">Time</TableHead>
-                            <TableHead className="text-black font-normal text-xs">Date</TableHead>
-                            <TableHead className="text-black font-normal text-xs">Duration</TableHead>
-                            <TableHead className="text-right text-black font-normal text-xs">Actions</TableHead>
+                            <TableHead className="w-12 text-center">
+                              <Checkbox 
+                                checked={filteredRecentRecordings.length > 0 && filteredRecentRecordings.every(r => selectedItems.some(s => s.id === r.id))}
+                                onCheckedChange={toggleSelectAll}
+                                aria-label="Select all"
+                                className="translate-y-[2px]"
+                              />
+                            </TableHead>
+                            <TableHead className="w-28 text-center text-black font-normal text-xs uppercase tracking-wider">Type</TableHead>
+                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Camera</TableHead>
+                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Time</TableHead>
+                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Date</TableHead>
+                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Duration</TableHead>
+                            <TableHead className="text-right text-black font-normal text-xs uppercase tracking-wider">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1637,7 +1739,18 @@ export default function CloudRecordings() {
                               : `${format(startTime, "HH:mm")} - ${format(endTime, "HH:mm")}`;
 
                             return (
-                              <TableRow key={rec.id} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
+                              <TableRow key={rec.id} className={cn(
+                                "hover:bg-slate-50/50 transition-colors border-b border-slate-100",
+                                selectedItems.some(s => s.id === rec.id) && "bg-primary/5 hover:bg-primary/10"
+                              )}>
+                                <TableCell className="text-center">
+                                  <Checkbox 
+                                    checked={selectedItems.some(s => s.id === rec.id)}
+                                    onCheckedChange={() => toggleSelectItem(rec)}
+                                    aria-label={`Select ${rec.cameraName}`}
+                                    className="translate-y-[2px]"
+                                  />
+                                </TableCell>
                                 <TableCell className="text-center text-black text-[12px]">
                                   {rec.isScreenshot ? "snapshot" : "video"}
                                 </TableCell>

@@ -196,3 +196,26 @@ export async function getDownloadUrl(
 
   return response.json();
 }
+
+export async function bulkDownloadRecordings(
+  systemId: string,
+  items: any[]
+): Promise<Blob> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...getElectronHeaders(),
+  };
+
+  const response = await fetch("/api/cloud/recordings/bulk", {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: JSON.stringify({ systemId, items }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to generate bulk download: ${response.status}`);
+  }
+
+  return response.blob();
+}
