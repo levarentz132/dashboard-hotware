@@ -982,10 +982,8 @@ export default function CloudRecordings() {
   };
 
   const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string, isLocal?: boolean, fileName?: string, dateFolder?: string, cameraName?: string, cameraFolderName?: string, isScreenshot?: boolean) => {
-    // Only use the local serve API for screenshots. 
-    // For videos, we always want to fetch from VMS and convert (via the download API) 
-    // instead of taking the file from the local folder.
-    if (isLocal && fileName && dateFolder && isScreenshot) {
+    // If a local file is found (video or screenshot), download it directly as a copy
+    if (isLocal && fileName && dateFolder) {
       let url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&systemId=${sysId}&deviceId=${devId}&startTimeMs=${startTimeMs}&download=true`;
       if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
       
@@ -997,6 +995,7 @@ export default function CloudRecordings() {
       return;
     }
 
+    // Otherwise, fetch from VMS and convert (via the download API)
     const params = new URLSearchParams({
       systemId: sysId || selectedSystem || "127.0.0.1",
       deviceId: devId || getOriginalDeviceId(selectedDevice),
