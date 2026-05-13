@@ -835,9 +835,9 @@ export default function CloudRecordings() {
         id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
         systemId: localSystemId, systemName: "", // Hiding local system name text as requested
       }));
-      // Filter local cameras
-      const allowedLocal = mappedLocal.filter(d => hasCameraViewPermission(effectiveUser, d.id));
-      setDevices(allowedLocal);
+      // Filter local cameras - removed to allow reactive visibility based on enriched user perms
+      // const allowedLocal = mappedLocal.filter(d => hasCameraViewPermission(effectiveUser, d.id));
+      setDevices(mappedLocal);
       setDevicesReady(true);
       // Removed auto-selection of first camera to allow user to explicitly "Choose Camera" first. 
     } catch (e) {
@@ -858,11 +858,11 @@ export default function CloudRecordings() {
             id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
             systemId: system.id, systemName: system.name,
           }));
-          // Filter cloud cameras
-          const allowedCloud = cloudMapped.filter(d => hasCameraViewPermission(effectiveUser, d.id));
+          // Filter cloud cameras - removed to allow reactive visibility based on enriched user perms
+          // const allowedCloud = cloudMapped.filter(d => hasCameraViewPermission(effectiveUser, d.id));
           setDevices(prev => {
             const existingIds = new Set(prev.map(d => normalizeId(d.id)));
-            const newOnes = allowedCloud.filter(d => !existingIds.has(normalizeId(d.id)));
+            const newOnes = cloudMapped.filter(d => !existingIds.has(normalizeId(d.id)));
             return [...prev, ...newOnes];
           });
         }
@@ -933,7 +933,10 @@ export default function CloudRecordings() {
       const data = await fetchRecordedTimePeriods(
         selectedSystem, getOriginalDeviceId(selectedDevice), startMs, endMs, undefined
       );
-      const periods = Array.isArray(data) ? data : data?.reply || [];
+      const allPeriods = Array.isArray(data) ? data : data?.reply || [];
+      // Filter results: power users/admins see all, normal users only see cameras they can edit
+      const periods = allPeriods.filter((p: any) => hasCameraEditPermission(effectiveUser, p.deviceId));
+      
       setRecordings(periods);
       if (periods.length === 0) setSearchError("No recordings found for the selected time range.");
     } catch (err: any) {
@@ -1401,7 +1404,10 @@ export default function CloudRecordings() {
       // Check if this request is still the most recent one
       if (lastRequestTime.current !== requestTime) return;
 
-      const periods = Array.isArray(data) ? data : data?.reply || [];
+      const allPeriods = Array.isArray(data) ? data : data?.reply || [];
+      
+      // Filter results: power users/admins see all, normal users only see cameras they can edit
+      const periods = allPeriods.filter((p: any) => hasCameraEditPermission(effectiveUser, p.deviceId));
 
       if (isAutoRefresh && periods.length === 0 && recentRecordings.length > 0) return;
 

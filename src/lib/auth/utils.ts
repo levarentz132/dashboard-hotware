@@ -117,6 +117,9 @@ export function formatIndonesianDate(dateString: string | null | undefined): str
 export function hasCameraViewPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
     
+    // 1. Admin/Power User bypass
+    if (isAdmin(user)) return true;
+    
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
 
@@ -152,6 +155,9 @@ export function hasCameraViewPermission(user: UserPublic | null | undefined, cam
  */
 export function hasCameraEditPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
     if (!user) return false;
+    
+    // 1. Admin/Power User bypass
+    if (isAdmin(user)) return true;
     
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
