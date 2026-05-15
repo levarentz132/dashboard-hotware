@@ -254,7 +254,10 @@ export async function GET(request: NextRequest) {
         "-fflags", "+genpts+igndts",
         "-avoid_negative_ts", "make_zero",
         "-i", "pipe:0",
-        "-c:v", "copy",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
@@ -504,13 +507,15 @@ export async function GET(request: NextRequest) {
           "-fflags", "+genpts",
           "-i", "pipe:0",
 
-          "-c:v", "copy",
+          "-c:v", "libx264",
+          "-preset", "ultrafast",
+          "-crf", "23",
+          "-pix_fmt", "yuv420p",
           "-c:a", "aac",
           "-b:a", "128k",
-
-          "-movflags", "+faststart", // ✅ important
+          "-movflags", "+faststart",
           "-f", "mp4",
-          "-y",                       // overwrite if exists
+          "-y",
           tempPath
         ], { windowsHide: true });
 
@@ -653,7 +658,10 @@ export async function GET(request: NextRequest) {
           "-analyze_duration", "10000000",
           "-probesize", "10000000",
           "-i", "pipe:0",
-          "-c:v", "copy",
+          "-c:v", "libx264",
+          "-preset", "ultrafast",
+          "-crf", "23",
+          "-pix_fmt", "yuv420p",
           "-c:a", "aac",
           "-b:a", "128k",
           "-movflags", "+faststart",

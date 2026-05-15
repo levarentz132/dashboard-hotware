@@ -223,7 +223,7 @@ export async function GET(request: NextRequest) {
             if (legacyFormatMatch) {
               foundCameraName = legacyFormatMatch[1];
               timeStr = legacyFormatMatch[3];
-              const fileIdHash = legacyFormatMatch[4];
+              fileDeviceId = legacyFormatMatch[4] || "";
               
               if (isAllCameras) {
                 isMatch = true;
@@ -231,8 +231,8 @@ export async function GET(request: NextRequest) {
                 const safeTarget = (searchCameraName || "").replace(/[<>:"/\\|?*]/g, "_").trim();
                 const isNameMatch = foundCameraName.toLowerCase() === safeTarget.toLowerCase();
                 const idHash = deviceId.slice(-4).toLowerCase();
-                const isIdMatch = fileIdHash && fileIdHash === idHash;
-                if (isIdMatch || (isNameMatch && !fileIdHash)) isMatch = true;
+                const isIdMatch = fileDeviceId && fileDeviceId === idHash;
+                if (isIdMatch || (isNameMatch && !fileDeviceId)) isMatch = true;
               }
             }
 
@@ -242,7 +242,7 @@ export async function GET(request: NextRequest) {
               if (simpleMatch) {
                 foundCameraName = simpleMatch[1];
                 timeStr = simpleMatch[2];
-                const fileIdHash = simpleMatch[3];
+                fileDeviceId = simpleMatch[3] || "";
 
                 if (isAllCameras) {
                   isMatch = true;
@@ -251,8 +251,8 @@ export async function GET(request: NextRequest) {
                   const foundLower = foundCameraName.toLowerCase().replace(/_/g, " ");
                   const isNameMatch = foundLower === safeTarget || foundLower === deviceId.toLowerCase();
                   const idHash = deviceId.slice(-4).toLowerCase();
-                  const isIdMatch = fileIdHash && fileIdHash === idHash;
-                  if (isIdMatch || (isNameMatch && !fileIdHash)) isMatch = true;
+                  const isIdMatch = fileDeviceId && fileDeviceId === idHash;
+                  if (isIdMatch || (isNameMatch && !fileDeviceId)) isMatch = true;
                 }
               }
             }
@@ -292,6 +292,7 @@ export async function GET(request: NextRequest) {
                 isVideo: isVideo && !isShortVideo,
                 isLocal: true,
                 deviceId: fileDeviceId || deviceId,
+                fileIdHash: fileDeviceId,
                 serverId: "local-storage",
                 fileName: file,
                 dateFolder: dateFolder || `${y}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`,
@@ -360,30 +361,54 @@ export async function GET(request: NextRequest) {
 
     // 3. Final Deduplication and Sorting
     const finalPeriods: any[] = [];
-    const sortedCandidateList = [...allPeriods].sort((a, b) => b.startTimeMs - a.startTimeMs);
+    // Sort chronologically first to make merging easier (preferring earlier start times)
+    const sortedCandidateList = [...allPeriods].sort((a, b) => a.startTimeMs - b.startTimeMs);
 
     for (const candidate of sortedCandidateList) {
-      const isDuplicate = finalPeriods.some(p => {
+      const isDuplicate = finalPeriods.find(p => {
         if (p.fileName && candidate.fileName && p.fileName === candidate.fileName) return true;
         
         // Match by time (30s window) and camera
         const timeDiff = Math.abs(p.startTimeMs - candidate.startTimeMs);
         
-        // CRITICAL FIX: Don't treat 'all' as a matching device ID. 
-        // Only match if they have specific IDs or specific names.
+        // Normalize names for comparison (remove underscores/spaces and lowercase)
+        const normalize = (name: string) => (name || "").toLowerCase().replace(/[\s_]/g, "");
+        const nameP = normalize(p.cameraName);
+        const nameC = normalize(candidate.cameraName);
+
         const hasSpecificId = p.deviceId && candidate.deviceId && p.deviceId !== "all" && candidate.deviceId !== "all";
-        const hasSpecificName = p.cameraName && candidate.cameraName && p.cameraName !== "Unknown" && candidate.cameraName !== "Unknown";
+        const hasSpecificName = nameP && nameC && nameP !== "unknown" && nameC !== "unknown";
         
-        const sameCamera = (hasSpecificId && p.deviceId === candidate.deviceId) || 
-                           (hasSpecificName && p.cameraName === candidate.cameraName);
+        // Handle GUID vs Hash matching
+        let idMatch = hasSpecificId && p.deviceId === candidate.deviceId;
+        if (!idMatch && p.deviceId && candidate.deviceId) {
+          const pId = p.deviceId.toLowerCase().replace(/[{}]/g, "");
+          const cId = candidate.deviceId.toLowerCase().replace(/[{}]/g, "");
+          const pHash = p.fileIdHash || (pId.length === 4 ? pId : "");
+          const cHash = candidate.fileIdHash || (cId.length === 4 ? cId : "");
+          
+          if (pHash && cId.endsWith(pHash)) idMatch = true;
+          else if (cHash && pId.endsWith(cHash)) idMatch = true;
+        }
+
+        const sameCamera = idMatch || (hasSpecificName && nameP === nameC);
         
         if (timeDiff < 30000 && sameCamera) {
-          // Merge metadata
+          // Merge metadata into existing entry
+          // Prefer earlier start time if they are close (the "real" event start)
+          if (candidate.startTimeMs < p.startTimeMs) {
+            p.startTimeMs = candidate.startTimeMs;
+          }
+          
           if (!p.isLocal && candidate.isLocal) {
             p.isLocal = true;
             p.fileName = candidate.fileName;
             p.dateFolder = candidate.dateFolder;
             p.url = candidate.url;
+            p.fileIdHash = candidate.fileIdHash;
+          }
+          if (p.durationMs < candidate.durationMs) {
+            p.durationMs = candidate.durationMs;
           }
           return true;
         }
