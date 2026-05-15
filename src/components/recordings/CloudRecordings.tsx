@@ -1906,7 +1906,7 @@ export default function CloudRecordings() {
                                            allCompleted ? "completed" : "active";
 
                           const sortedDates = [...group].map(r => new Date(r.date)).sort((a, b) => a.getTime() - b.getTime());
-                          const dateList = sortedDates.map(d => format(d, "MMM d"));
+                          const dateList = Array.from(new Set(sortedDates.map(d => format(d, "MMM d"))));
                           const displayDates = dateList.length > 3 ? `${dateList.slice(0, 3).join(", ")}...` : dateList.join(", ");
 
                           return (

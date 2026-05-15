@@ -188,7 +188,8 @@ const startWatchdog = () => {
       const uniqueSchedules: any[] = [];
       const seenKeys = new Set();
       for (const s of (schedules || [])) {
-        const key = `${s.cameraId}-${s.startTime}-${s.type}-${new Date(s.date).toDateString()}`;
+        const cleanCamId = s.cameraId.replace(/[{}]/g, "").toLowerCase();
+        const key = `${cleanCamId}-${s.startTime}-${s.type}-${new Date(s.date).toDateString()}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
           uniqueSchedules.push(s);
@@ -722,7 +723,12 @@ export async function GET(request: NextRequest) {
       data.schedules = (data.schedules || []).filter((s: any) => {
         const nid = normalizeId(s.cameraId);
         const r = (rights[nid] || rights[s.cameraId] || "").toLowerCase();
-        return r !== "" && r !== "none";
+        
+        // Allow if user has explicit VMS rights OR if they are the one who created this schedule
+        const hasRights = r !== "" && r !== "none";
+        const isOwner = s.scheduledBy && username && s.scheduledBy.toLowerCase() === username.toLowerCase();
+        
+        return hasRights || isOwner;
       });
       // console.log(`[GET /scheduled] Restricted user ${username}: Filtered schedules from ${originalCount} down to ${data.schedules.length}`);
     } else {
