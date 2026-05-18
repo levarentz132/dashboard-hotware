@@ -80,6 +80,16 @@ export async function POST(request: NextRequest) {
     let { username, password, system_id, server_id } = validation.data;
     const dynamicConfig = getDynamicConfig(request);
 
+    // Secure Credentials Interceptor:
+    // If the client submits the masked password placeholder "******", resolve and swap in the actual plain-text password securely on the server!
+    if (password === "******") {
+      const serverPassword = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+      if (serverPassword) {
+        password = serverPassword;
+        console.log("[Login API] Secured Credentials Interceptor: Masked password swapped with actual password on server");
+      }
+    }
+
     // Clean brackets from IDs
     if (system_id) system_id = system_id.replace(/[{}]/g, "");
     if (server_id) server_id = server_id.replace(/[{}]/g, "");

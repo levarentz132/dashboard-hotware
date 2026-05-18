@@ -48,19 +48,7 @@ export function LicenseLogin() {
     // Pre-fill from saved cookies or config (optional override of defaults)
     useEffect(() => {
         const fetchGlobalConfig = async () => {
-            // Priority 1: Check saved cookies
-            const savedUser = Cookies.get("license_saved_user");
-            const savedPass = Cookies.get("license_saved_pass");
-            
-            if (savedUser && savedPass) {
-                console.log("[LicenseLogin] Using saved cookies");
-                setHasSaved(true);
-                setValue("username", savedUser);
-                setValue("password", savedPass);
-                return;
-            }
-
-            // Priority 2: Fetch from server config (if available)
+            // Priority 1: Fetch from server config (preferred source of truth)
             try {
                 const res = await fetch("/api/config/nx");
                 const data = await res.json();
@@ -71,16 +59,24 @@ export function LicenseLogin() {
                     if (NEXT_PUBLIC_NX_USERNAME && NEXT_PUBLIC_NX_PASSWORD) {
                         setHasSaved(true);
                         setValue("username", NEXT_PUBLIC_NX_USERNAME);
-                        setValue("password", NEXT_PUBLIC_NX_PASSWORD);
+                        setValue("password", NEXT_PUBLIC_NX_PASSWORD); // Will be "******" (masked) from secure server config
                         
-                        // Sync to cookies for persistence
+                        // Sync username to cookies for persistence
                         Cookies.set("license_saved_user", NEXT_PUBLIC_NX_USERNAME, { expires: 365, path: '/' });
-                        Cookies.set("license_saved_pass", NEXT_PUBLIC_NX_PASSWORD, { expires: 365, path: '/' });
                         return;
                     }
                 }
             } catch (e) {
                 console.warn("[LicenseLogin] Failed to fetch global config", e);
+            }
+
+            // Priority 2: Check saved cookies (username only)
+            const savedUser = Cookies.get("license_saved_user");
+            if (savedUser) {
+                console.log("[LicenseLogin] Using saved cookies");
+                setHasSaved(true);
+                setValue("username", savedUser);
+                return;
             }
 
             // Priority 3: Check Electron config
@@ -101,9 +97,8 @@ export function LicenseLogin() {
     const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
     const handleSaveCredentials = async (data: LoginFormData) => {
-        // Save locally for immediate feedback
+        // Save username locally for immediate feedback
         Cookies.set("license_saved_user", data.username, { expires: 365, path: '/' });
-        Cookies.set("license_saved_pass", data.password, { expires: 365, path: '/' });
         
         // Save to server for all network users
         try {
