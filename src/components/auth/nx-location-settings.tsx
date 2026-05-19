@@ -11,8 +11,10 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import Cookies from "js-cookie";
+import { useNxConfig } from "@/hooks/use-nx-config";
 
 export function NxLocationSettings() {
+    const { config, saveConfig } = useNxConfig();
     const [ip, setIp] = useState("localhost");
     const [port, setPort] = useState("7001");
     const [isOpen, setIsOpen] = useState(false);
@@ -25,43 +27,26 @@ export function NxLocationSettings() {
         if (savedPort) setPort(savedPort);
 
         // If not set, try to fetch server-side global settings
-        if (!savedIp) {
-            const fetchGlobalConfig = async () => {
-                try {
-                    const res = await fetch("/api/config/nx");
-                    const data = await res.json();
-                    if (data.success && data.config?.NEXT_PUBLIC_NX_SERVER_HOST) {
-                        setIp(data.config.NEXT_PUBLIC_NX_SERVER_HOST);
-                        if (data.config.NEXT_PUBLIC_NX_SERVER_PORT) {
-                            setPort(data.config.NEXT_PUBLIC_NX_SERVER_PORT);
-                        }
-                    }
-                } catch (e) {
-                    console.warn("[NxLocation] Failed to fetch global config", e);
-                }
-            };
-            fetchGlobalConfig();
+        if (!savedIp && config) {
+            if (config.NEXT_PUBLIC_NX_SERVER_HOST) {
+                setIp(config.NEXT_PUBLIC_NX_SERVER_HOST);
+            }
+            if (config.NEXT_PUBLIC_NX_SERVER_PORT) {
+                setPort(config.NEXT_PUBLIC_NX_SERVER_PORT);
+            }
         }
-    }, []);
+    }, [config]);
 
     const handleSave = async () => {
         // Save locally for immediate feedback
         Cookies.set("nx_location_ip", ip, { expires: 365, path: "/" });
         Cookies.set("nx_location_port", port, { expires: 365, path: "/" });
         
-        // Save to server for all network users
-        try {
-            await fetch("/api/config/nx", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    NEXT_PUBLIC_NX_SERVER_HOST: ip,
-                    NEXT_PUBLIC_NX_SERVER_PORT: port
-                })
-            });
-        } catch (e) {
-            console.error("Failed to sync shared server location", e);
-        }
+        // Save to server for all network users using our reusable hook
+        await saveConfig({
+            NEXT_PUBLIC_NX_SERVER_HOST: ip,
+            NEXT_PUBLIC_NX_SERVER_PORT: port
+        });
 
         setIsOpen(false);
         // Refresh page to ensure all components/routes pick up the change

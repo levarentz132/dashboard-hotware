@@ -30,7 +30,7 @@ export async function GET(request: Request) {
         NEXT_PUBLIC_NX_SERVER_HOST: nxLocationIp,
         NEXT_PUBLIC_NX_SERVER_PORT: nxLocationPort,
         NEXT_PUBLIC_NX_USERNAME: config?.NEXT_PUBLIC_NX_USERNAME || "",
-        NEXT_PUBLIC_NX_PASSWORD: config?.NEXT_PUBLIC_NX_PASSWORD || ""
+        NEXT_PUBLIC_NX_PASSWORD: config?.NEXT_PUBLIC_NX_PASSWORD ? "******" : ""
       }
     };
     
@@ -77,7 +77,9 @@ export async function POST(request: Request) {
     if (data.NEXT_PUBLIC_NX_SERVER_HOST) config.NEXT_PUBLIC_NX_SERVER_HOST = data.NEXT_PUBLIC_NX_SERVER_HOST;
     if (data.NEXT_PUBLIC_NX_SERVER_PORT) config.NEXT_PUBLIC_NX_SERVER_PORT = data.NEXT_PUBLIC_NX_SERVER_PORT;
     if (data.NEXT_PUBLIC_NX_USERNAME) config.NEXT_PUBLIC_NX_USERNAME = data.NEXT_PUBLIC_NX_USERNAME;
-    if (data.NEXT_PUBLIC_NX_PASSWORD) config.NEXT_PUBLIC_NX_PASSWORD = data.NEXT_PUBLIC_NX_PASSWORD;
+    if (data.NEXT_PUBLIC_NX_PASSWORD && data.NEXT_PUBLIC_NX_PASSWORD !== "******") {
+        config.NEXT_PUBLIC_NX_PASSWORD = data.NEXT_PUBLIC_NX_PASSWORD;
+    }
     if (data.NEXT_PUBLIC_NX_CLOUD_USERNAME) config.NEXT_PUBLIC_NX_CLOUD_USERNAME = data.NEXT_PUBLIC_NX_CLOUD_USERNAME;
     if (data.NX_CLOUD_TOKEN) config.NX_CLOUD_TOKEN = data.NX_CLOUD_TOKEN;
 

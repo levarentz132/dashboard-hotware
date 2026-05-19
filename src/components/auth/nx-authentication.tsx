@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
     Server,
     LogOut,
@@ -32,238 +32,79 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Cookies from "js-cookie";
-
-const LOCAL_NX_URL = "/nx/rest/v3/login/sessions";
-
-interface NxSession {
-    token: string;
-    username?: string;
-    expiresS?: number;
-    serverId?: string;
-}
-
-interface CloudSystem {
-    id: string;
-    name: string;
-    version: string;
-    isOnline: boolean;
-    ownerAccountEmail?: string;
-    accessRole?: string;
-}
-
-interface CloudSession {
-    accessToken: string;
-    refreshToken: string;
-    systems: CloudSystem[];
-    email?: string;
-    ownerSystemId?: string;
-}
+import { useNxVmsAuth } from "@/hooks/use-nx-vms-auth";
+import { useNxConfig } from "@/hooks/use-nx-config";
 
 export function NxAuthentication() {
-    const [session, setSession] = useState<NxSession | null>(null);
-    const [cloudSession, setCloudSession] = useState<CloudSession | null>(null);
+    const { config } = useNxConfig();
+    const {
+        session,
+        cloudSession,
+        isLoading,
+        error,
+        setSession,
+        setCloudSession,
+        loginLocal,
+        loginCloud: handleCloudLogin,
+        exchangeCloudCode,
+        logout,
+        setError
+    } = useNxVmsAuth();
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [pendingLogout, setPendingLogout] = useState<"local" | "cloud" | "all" | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [credentials, setCredentials] = useState({ username: "", password: "" });
     const [nxLocation, setNxLocation] = useState({ ip: "localhost", port: "7001" });
 
-    const CLOUD_HOST = 'https://nxvms.com';
-    const CLIENT_ID = 'api-tool';
-
-    // Check session
-    const checkSession = useCallback(async () => {
-        setIsLoading(true);
-
-        await new Promise(resolve => setTimeout(resolve, 600));
-
-        const stored = Cookies.get("local_nx_user");
-        if (stored) {
-            try {
-                const user = JSON.parse(stored);
-                setSession(user);
-            } catch (e) {
-                console.error("Failed to parse stored local nx user", e);
-                setSession(null);
-                Cookies.remove("local_nx_user");
-            }
-        } else {
-            setSession(null);
-        }
-
-        setIsLoading(false);
-    }, []);
-
-    // Check session on mount
+    // Sync NX location settings and connection defaults from configuration
     useEffect(() => {
-        const stored = Cookies.get("local_nx_user");
-        if (stored) {
-            try {
-                setSession(JSON.parse(stored));
-            } catch (e) {
-                console.error("Failed to hydrate local session", e);
-            }
+        if (!config) return;
+
+        const { NEXT_PUBLIC_NX_SERVER_HOST, NEXT_PUBLIC_NX_SERVER_PORT, NEXT_PUBLIC_NX_SYSTEM_ID, has_vms_credentials, has_cloud_token, NEXT_PUBLIC_NX_CLOUD_USERNAME } = config;
+        
+        // Update state if not already explicitly set in cookies by user
+        const currentIp = Cookies.get("nx_location_ip");
+        if (!currentIp && NEXT_PUBLIC_NX_SERVER_HOST) {
+            setNxLocation(prev => ({ ...prev, ip: NEXT_PUBLIC_NX_SERVER_HOST }));
+        }
+        const currentPort = Cookies.get("nx_location_port");
+        if (!currentPort && NEXT_PUBLIC_NX_SERVER_PORT) {
+            setNxLocation(prev => ({ ...prev, port: NEXT_PUBLIC_NX_SERVER_PORT }));
+        }
+        if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
+            Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, { expires: 365, path: '/' });
         }
 
-        checkSession();
-        
-        // Always try to fetch global server config for network clients
-        const fetchGlobalConfig = async () => {
-            try {
-                const res = await fetch("/api/config/nx");
-                const data = await res.json();
-                if (data.success && data.config) {
-                    const { NEXT_PUBLIC_NX_SERVER_HOST, NEXT_PUBLIC_NX_SERVER_PORT, NEXT_PUBLIC_NX_SYSTEM_ID } = data.config;
-                    
-                    // Update state if not already explicitly set in cookies by user (or if set to default localhost)
-                    const currentIp = Cookies.get("nx_location_ip");
-                    if (!currentIp && NEXT_PUBLIC_NX_SERVER_HOST) {
-                        setNxLocation(prev => ({ ...prev, ip: NEXT_PUBLIC_NX_SERVER_HOST }));
-                    }
-                    const currentPort = Cookies.get("nx_location_port");
-                    if (!currentPort && NEXT_PUBLIC_NX_SERVER_PORT) {
-                        setNxLocation(prev => ({ ...prev, port: NEXT_PUBLIC_NX_SERVER_PORT }));
-                    }
-                    if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
-                        Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, { expires: 365, path: '/' });
-                    }
+        // Reflect Local status if server has active credentials
+        if (has_vms_credentials && !session && !Cookies.get("local_nx_user")) {
+            setSession({
+                token: "SERVER_MANAGED",
+                username: "Admin (Shared)"
+            });
+        }
 
-                    // Also reflect Local status if server has credentials
-                    if (data.config.has_vms_credentials && !session && !Cookies.get("local_nx_user")) {
-                        setSession({
-                            token: "SERVER_MANAGED",
-                            username: "Admin (Shared)"
-                        });
-                    }
+        // Reflect Cloud status if server has a cloud account connected
+        if (has_cloud_token && NEXT_PUBLIC_NX_CLOUD_USERNAME && !cloudSession && !Cookies.get("nx_cloud_session")) {
+            setCloudSession({
+                accessToken: "SERVER_MANAGED",
+                refreshToken: "",
+                email: NEXT_PUBLIC_NX_CLOUD_USERNAME,
+                systems: []
+            });
+        }
+    }, [config, session, cloudSession, setSession, setCloudSession]);
 
-                    // Also reflect Cloud status if server is connected
-                    if (data.config.has_cloud_token && data.config.NEXT_PUBLIC_NX_CLOUD_USERNAME && !cloudSession && !Cookies.get("nx_cloud_session")) {
-                        setCloudSession({
-                            accessToken: "SERVER_MANAGED",
-                            refreshToken: "",
-                            email: data.config.NEXT_PUBLIC_NX_CLOUD_USERNAME,
-                            systems: []
-                        });
-                    }
-                }
-            } catch (e) {
-                console.warn("[NxAuth] Failed to fetch global config fallback", e);
-            }
-        };
-
-        fetchGlobalConfig();
-        
-        // Sync NX location from cookies (user preference overrides)
+    // Local user preference cookies sync
+    useEffect(() => {
         const savedIp = Cookies.get("nx_location_ip");
         const savedPort = Cookies.get("nx_location_port");
         if (savedIp) setNxLocation(prev => ({ ...prev, ip: savedIp }));
         if (savedPort) setNxLocation(prev => ({ ...prev, port: savedPort }));
-    }, [checkSession]);
+    }, []);
 
-    // Cloud OAuth
-    const handleCloudLogin = useCallback(() => {
-        const redirectUrl = new URL(window.location.origin + window.location.pathname);
-        const authUrl = new URL(`${CLOUD_HOST}/authorize`);
-        authUrl.searchParams.set('redirect_url', redirectUrl.toString());
-        authUrl.searchParams.set('client_id', CLIENT_ID);
-        window.location.href = authUrl.toString();
-    }, [CLOUD_HOST, CLIENT_ID]);
-
-    const exchangeCloudCode = useCallback(async (code: string) => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const data = {
-                code,
-                grant_type: 'authorization_code',
-                response_type: 'token'
-            };
-            const response = await fetch(`${CLOUD_HOST}/oauth/token/`, {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error_description || errData.error || "Failed to exchange code for tokens");
-            }
-
-            const tokens = await response.json();
-
-            if (tokens.access_token) {
-                const systemsResp = await fetch(`${CLOUD_HOST}/api/systems/`, {
-                    headers: { 'Authorization': `Bearer ${tokens.access_token}` }
-                });
-
-                let systemsList: CloudSystem[] = [];
-                if (systemsResp.ok) {
-                    const systems = await systemsResp.json();
-                    systemsList = Array.isArray(systems) ? systems : (systems.items || []);
-                }
-
-                // Find owner system
-                const ownerSystem = systemsList.find((s: any) =>
-                    s.accessRole?.toLowerCase() === 'owner' ||
-                    s.accessRole?.toLowerCase() === 'administrator'
-                );
-                const ownerSystemId = ownerSystem?.id || (systemsList.length > 0 ? systemsList[0].id : undefined);
-
-                if (ownerSystemId) {
-                    Cookies.set("nx_system_id", ownerSystemId, { expires: 365, path: '/' });
-                }
-
-                const firstSystem = ownerSystem || systemsList[0];
-                const email = firstSystem?.ownerAccountEmail || tokens.user_email;
-
-                const cloudData: CloudSession = {
-                    accessToken: tokens.access_token,
-                    refreshToken: tokens.refresh_token,
-                    systems: systemsList,
-                    email: email,
-                    ownerSystemId: ownerSystemId
-                };
-
-                setCloudSession(cloudData);
-
-                // IMPORTANT: Only store essential data in cookie to avoid 4KB limit
-                // Systems list can be huge, so we exclude it from the cookie.
-                const persistentData = {
-                    accessToken: tokens.access_token,
-                    refreshToken: tokens.refresh_token,
-                    email: email,
-                    ownerSystemId: ownerSystemId
-                };
-                Cookies.set("nx_cloud_session", JSON.stringify(persistentData), { expires: 365, path: '/' });
-                console.log("[NxCloud] Session saved to cookie (minimal)");
-            }
-        } catch (err: any) {
-            console.error("[NxCloud] OAuth exchange error:", err);
-            setError(err.message || "Cloud authentication failed");
-        } finally {
-            setIsLoading(false);
-        }
-    }, [CLOUD_HOST]);
-
-    // Cloud OAuth callback and hydration
+    // Handle Cloud OAuth callback code in URL parameters
     useEffect(() => {
-        // 1. Initial hydration from cookie
-        const storedCloud = Cookies.get("nx_cloud_session");
-        if (storedCloud && !cloudSession) {
-            try {
-                const parsed = JSON.parse(storedCloud);
-                setCloudSession({
-                    ...parsed,
-                    systems: parsed.systems || [] // Ensure systems exists even if empty in cookie
-                });
-            } catch (e) {
-                console.error("Failed to hydrate cloud session", e);
-            }
-        }
-
-        // 2. Handle OAuth callback code
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
         if (code) {
@@ -272,121 +113,31 @@ export function NxAuthentication() {
             url.searchParams.delete('code');
             window.history.replaceState({}, '', url.toString());
         }
-    }, [exchangeCloudCode, cloudSession]);
+    }, [exchangeCloudCode]);
 
     const handleLogin = async () => {
-        if (!credentials.username || !credentials.password) {
-            setError("Username and password are required");
-            return;
-        }
-
-        setIsLoading(true);
-        setError(null);
-        try {
-            const response = await fetch(LOCAL_NX_URL, {
-                method: "POST",
-                credentials: "include",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    username: credentials.username,
-                    password: credentials.password,
-                    setCookie: true,
-                    durationS: 2419200,
-                    setSession: true
-                }),
-            });
-
-            const responseText = await response.text();
-
-            if (response.ok) {
-                let data: any;
-                try {
-                    data = JSON.parse(responseText);
-                } catch (e) {
-                    throw new Error("Invalid session data received from proxy");
-                }
-
-
-                const user: NxSession = {
-                    token: data.token || data.id,
-                    username: data.username || credentials.username,
-                    expiresS: data.durationS || 2419200
-                };
-
-                // Fetch server id from /rest/v3/servers
-                try {
-                    const serversResp = await fetch("/nx/rest/v3/servers", {
-                        method: "GET",
-                        headers: {
-                            "Accept": "application/json",
-                            "Content-Type": "application/json",
-                            "x-runtime-guid": user.token
-                        }
-                    });
-
-                    const serversRaw = await serversResp.text();
-
-                    if (serversResp.ok) {
-                        let servers: any;
-                        try {
-                            servers = JSON.parse(serversRaw);
-                        } catch (e) {
-                            throw new Error("Invalid server list received from proxy");
-                        }
-
-
-                        const serversList = Array.isArray(servers) ? servers : (servers.items || []);
-                        if (serversList.length > 0) {
-                            const serverId = serversList[0].id;
-                            user.serverId = serverId;
-                            Cookies.set("nx_server_id", serverId, { expires: 365, path: '/' });
-                        } else {
-                        }
-                    }
-                } catch (e) {
-                }
-
-                setSession(user);
-                Cookies.set("local_nx_user", JSON.stringify(user), { expires: 28, path: '/' });
-                setIsModalOpen(false);
-                setCredentials({ username: "", password: "" });
-            } else {
-                const errorData = await response.json().catch(() => ({}));
-                setError(errorData.errorString || "Authentication failed");
-            }
-        } catch (err: any) {
-            setError(`Could not connect to local NX server: ${err.message || 'Unknown Error'}`);
-        } finally {
-            setIsLoading(false);
+        const success = await loginLocal(credentials.username, credentials.password);
+        if (success) {
+            setIsModalOpen(false);
+            setCredentials({ username: "", password: "" });
         }
     };
 
     const handleLocalLogout = (e?: React.MouseEvent) => {
         e?.stopPropagation();
-        setSession(null);
-        Cookies.remove("local_nx_user", { path: '/' });
-        Cookies.remove("nx_server_id", { path: '/' });
+        logout("local");
         setPendingLogout(null);
     };
 
     const handleCloudLogout = (e?: React.MouseEvent) => {
         e?.stopPropagation();
-        setCloudSession(null);
-        Cookies.remove("nx_cloud_session", { path: '/' });
-        Cookies.remove("nx_system_id", { path: '/' });
+        logout("cloud");
         setPendingLogout(null);
     };
 
     // Logout all
     const handleLogout = () => {
-        setSession(null);
-        setCloudSession(null);
-        Cookies.remove("local_nx_user", { path: '/' });
-        Cookies.remove("nx_cloud_session", { path: '/' });
-        Cookies.remove("nx_system_id", { path: '/' });
-        Cookies.remove("nx_server_id", { path: '/' });
+        logout("all");
         setPendingLogout(null);
     };
 

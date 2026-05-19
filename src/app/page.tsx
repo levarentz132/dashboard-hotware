@@ -5,19 +5,46 @@ import { useSearchParams } from "next/navigation";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
-import ModernDashboard from "@/components/dashboard/Dashboard";
-import CameraInventory from "@/components/cameras/CameraInventory";
-import ServerOptions from "@/components/servers/ServerOptions";
-import SystemHealth from "@/components/monitoring/SystemHealth";
-import AlarmConsole from "@/components/alarms/AlarmConsole";
-import Analytics from "@/components/analytics/Analytics";
 import NotificationSystem from "@/components/ui/NotificationSystem";
-import ConnectionTest from "@/components/debug/ConnectionTest";
-import StorageManagement from "@/components/storage/StorageManagement";
-import Automation from "@/components/automation/Automation";
-import AuditLog from "@/components/audits/AuditLog";
-import UserManagement from "@/components/users/UserManagement";
-import SubAccountManagement from "@/components/rolemanagement/RoleManagement";
+import dynamic from "next/dynamic";
+
+// Dynamically import heavy tab panels to enable route chunking and code splitting
+const ModernDashboard = dynamic(() => import("@/components/dashboard/Dashboard"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Dashboard...</div>
+});
+const CameraInventory = dynamic(() => import("@/components/cameras/CameraInventory"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Camera Inventory...</div>
+});
+const ServerOptions = dynamic(() => import("@/components/servers/ServerOptions"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Server Settings...</div>
+});
+const SystemHealth = dynamic(() => import("@/components/monitoring/SystemHealth"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading System Health...</div>
+});
+const AlarmConsole = dynamic(() => import("@/components/alarms/AlarmConsole"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Alarm Console...</div>
+});
+const Analytics = dynamic(() => import("@/components/analytics/Analytics"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Analytics...</div>
+});
+const ConnectionTest = dynamic(() => import("@/components/debug/ConnectionTest"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Connection Test...</div>
+});
+const StorageManagement = dynamic(() => import("@/components/storage/StorageManagement"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Storage Management...</div>
+});
+const Automation = dynamic(() => import("@/components/automation/Automation"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Automation...</div>
+});
+const AuditLog = dynamic(() => import("@/components/audits/AuditLog"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Audit Logs...</div>
+});
+const UserManagement = dynamic(() => import("@/components/users/UserManagement"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading User Management...</div>
+});
+const SubAccountManagement = dynamic(() => import("@/components/rolemanagement/RoleManagement"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Role Management...</div>
+});
 import Link from "next/link";
 import { ArrowRight, Camera, Eye, Shield, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
