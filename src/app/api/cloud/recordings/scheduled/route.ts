@@ -521,6 +521,8 @@ const startWatchdog = () => {
 // Helper functions for the refactored watchdog
 function doesVideoFileExist(rec: any): boolean {
   try {
+    const cleanId = rec.cameraId.replace(/[{}]/g, "");
+    const idHash = cleanId.slice(-4).toLowerCase();
     const startMs = rec.startMs || (rec.date ? new Date(rec.date).getTime() : Date.now());
     const recDate = new Date(startMs);
     const YYYY = recDate.getFullYear().toString();
@@ -545,7 +547,7 @@ function doesVideoFileExist(rec: any): boolean {
       }
     } catch (e) {}
 
-    const finalFileName = `${safeCameraName}_${HH}${mmP}00.mp4`;
+    const finalFileName = `${safeCameraName}_${HH}${mmP}00_${idHash}.mp4`;
     const savePath = path.join(autoSaveBaseDir, dateFolder, finalFileName);
     
     return fsSync.existsSync(savePath) && fsSync.statSync(savePath).size > 0;
@@ -595,7 +597,7 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
 
 function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
   const currentPort = detectCurrentPort(global._nxAppPort || "3030");
-  const url = `http://localhost:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}`;
+  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;

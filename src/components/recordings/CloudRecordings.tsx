@@ -1942,10 +1942,9 @@ export default function CloudRecordings() {
                               <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-2">
                                   {(() => {
-                                    const isOwner = first.scheduledBy === effectiveUser?.username;
+                                    const isOwner = !!(first.scheduledBy && effectiveUser?.username && first.scheduledBy.toLowerCase() === effectiveUser.username.toLowerCase());
                                     const canModify = isEffectiveAdmin || isOwner;
-                                    const hasCamEdit = hasCameraEditPermission(effectiveUser, first.cameraId);
-                                    const modifyDisabled = !canModify || !hasCamEdit;
+                                    const modifyDisabled = !canModify;
 
                                     return (
                                       <>
@@ -1984,7 +1983,7 @@ export default function CloudRecordings() {
                                             setIsScheduleOpen(true);
                                           }}
                                           className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all disabled:opacity-30"
-                                          title={!canModify ? "Only admins or the creator can edit this schedule" : !hasCamEdit ? "No edit permission for this camera" : "Edit Schedule"}
+                                          title={!canModify ? "Only admins or the creator can edit this schedule" : "Edit Schedule"}
                                         >
                                           <Pencil className="h-3.5 w-3.5" />
                                         </Button>
@@ -1994,7 +1993,7 @@ export default function CloudRecordings() {
                                           disabled={modifyDisabled}
                                           onClick={(e) => { e.stopPropagation(); requestCancel(group.map(r => r.id), true); }}
                                           className="h-8 w-8 rounded-md border border-slate-200 hover:bg-red-50 text-black hover:text-red-600 transition-all disabled:opacity-30"
-                                          title={!canModify ? "Only admins or the creator can remove this schedule" : !hasCamEdit ? "No edit permission for this camera" : "Remove Schedule"}
+                                          title={!canModify ? "Only admins or the creator can remove this schedule" : "Remove Schedule"}
                                         >
                                           <Trash2 className="h-3.5 w-3.5" />
                                         </Button>
