@@ -15,6 +15,8 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import Cookies from "js-cookie";
+import { useNxConfig } from "@/hooks/use-nx-config";
+
 
 const loginSchema = z.object({
     username: z.string().min(1, "Username is required"),
@@ -42,57 +44,43 @@ export function LicenseLogin() {
         },
     });
 
+    const { config, saveConfig } = useNxConfig();
     const [isSaved, setIsSaved] = useState(false);
     const [hasSaved, setHasSaved] = useState(false);
 
     // Pre-fill from saved cookies or config (optional override of defaults)
     useEffect(() => {
-        const fetchGlobalConfig = async () => {
-            // Priority 1: Fetch from server config (preferred source of truth)
-            try {
-                const res = await fetch("/api/config/nx");
-                const data = await res.json();
-                
-                if (data.success && data.config) {
-                    const { NEXT_PUBLIC_NX_USERNAME, NEXT_PUBLIC_NX_PASSWORD } = data.config;
-                    
-                    if (NEXT_PUBLIC_NX_USERNAME && NEXT_PUBLIC_NX_PASSWORD) {
-                        setHasSaved(true);
-                        setValue("username", NEXT_PUBLIC_NX_USERNAME);
-                        setValue("password", NEXT_PUBLIC_NX_PASSWORD); // Will be "******" (masked) from secure server config
-                        
-                        // Sync username to cookies for persistence
-                        Cookies.set("license_saved_user", NEXT_PUBLIC_NX_USERNAME, { expires: 365, path: '/' });
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.warn("[LicenseLogin] Failed to fetch global config", e);
-            }
+        if (!config) return;
 
-            // Priority 2: Check saved cookies (username only)
-            const savedUser = Cookies.get("license_saved_user");
-            if (savedUser) {
-                console.log("[LicenseLogin] Using saved cookies");
-                setHasSaved(true);
-                setValue("username", savedUser);
-                return;
-            }
-
-            // Priority 3: Check Electron config
-            const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
-            if (extConfig) {
-                if (extConfig.NEXT_PUBLIC_NX_USERNAME && extConfig.NEXT_PUBLIC_NX_PASSWORD) {
-                    setValue("username", extConfig.NEXT_PUBLIC_NX_USERNAME);
-                    setValue("password", extConfig.NEXT_PUBLIC_NX_PASSWORD);
-                }
-            }
+        const { NEXT_PUBLIC_NX_USERNAME, NEXT_PUBLIC_NX_PASSWORD } = config;
+        
+        if (NEXT_PUBLIC_NX_USERNAME && NEXT_PUBLIC_NX_PASSWORD) {
+            setHasSaved(true);
+            setValue("username", NEXT_PUBLIC_NX_USERNAME);
+            setValue("password", NEXT_PUBLIC_NX_PASSWORD); // Will be "******" (masked) from secure server config
             
-            // Otherwise, default values from form initialization will be used
-        };
+            // Sync username to cookies for persistence
+            Cookies.set("license_saved_user", NEXT_PUBLIC_NX_USERNAME, { expires: 365, path: '/' });
+            return;
+        }
 
-        fetchGlobalConfig();
-    }, [setValue]);
+        // Priority 2: Check saved cookies (username only)
+        const savedUser = Cookies.get("license_saved_user");
+        if (savedUser) {
+            setHasSaved(true);
+            setValue("username", savedUser);
+            return;
+        }
+
+        // Priority 3: Check Electron config
+        const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+        if (extConfig) {
+            if (extConfig.NEXT_PUBLIC_NX_USERNAME && extConfig.NEXT_PUBLIC_NX_PASSWORD) {
+                setValue("username", extConfig.NEXT_PUBLIC_NX_USERNAME);
+                setValue("password", extConfig.NEXT_PUBLIC_NX_PASSWORD);
+            }
+        }
+    }, [config, setValue]);
 
     const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
@@ -100,19 +88,11 @@ export function LicenseLogin() {
         // Save username locally for immediate feedback
         Cookies.set("license_saved_user", data.username, { expires: 365, path: '/' });
         
-        // Save to server for all network users
-        try {
-            await fetch("/api/config/nx", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    NEXT_PUBLIC_NX_USERNAME: data.username,
-                    NEXT_PUBLIC_NX_PASSWORD: data.password
-                })
-            });
-        } catch (e) {
-            console.error("[LicenseLogin] Failed to sync shared credentials", e);
-        }
+        // Save to server for all network users using our reusable hook
+        await saveConfig({
+            NEXT_PUBLIC_NX_USERNAME: data.username,
+            NEXT_PUBLIC_NX_PASSWORD: data.password
+        });
 
         setIsSaved(true);
         setHasSaved(true);

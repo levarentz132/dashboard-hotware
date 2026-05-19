@@ -22,210 +22,56 @@ import { Label } from "@/components/ui/label";
 import Cookies from "js-cookie";
 import { useAuth } from "@/hooks/use-auth";
 
-const LOCAL_NX_URL = "/nx/rest/v3/login/sessions";
-
-interface NxSession {
-    token: string;
-    username?: string;
-    expiresS?: number;
-    serverId?: string;
-}
-
-interface CloudSystem {
-    id: string;
-    name: string;
-    version: string;
-    isOnline: boolean;
-    ownerAccountEmail?: string;
-    accessRole?: string;
-}
-
-interface CloudSession {
-    accessToken: string;
-    refreshToken: string;
-    systems: CloudSystem[];
-    email?: string;
-    ownerSystemId?: string;
-}
+import { useNxVmsAuth } from "@/hooks/use-nx-vms-auth";
+import { useNxConfig } from "@/hooks/use-nx-config";
 
 export function NxVmsLogin() {
     const { login: licenseLogin, isLoading: isLicenseLoading } = useAuth();
-    const [session, setSession] = useState<NxSession | null>(null);
-    const [cloudSession, setCloudSession] = useState<CloudSession | null>(null);
+    const { config } = useNxConfig();
+    const {
+        session,
+        cloudSession,
+        isLoading,
+        error,
+        loginLocal,
+        loginCloud: handleCloudLogin,
+        exchangeCloudCode,
+        logout: handleLogout,
+        setError
+    } = useNxVmsAuth();
+
     const [activeTab, setActiveTab] = useState<"local" | "cloud">("local");
-    const [isLoading, setIsLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [credentials, setCredentials] = useState({ username: "", password: "" });
     const [nxLocation, setNxLocation] = useState({ ip: "localhost", port: "7001" });
 
-    const CLOUD_HOST = 'https://nxvms.com';
-    const CLIENT_ID = 'api-tool';
-
-    // Cloud Refresh Logic
-    const refreshCloudSession = useCallback(async (refreshToken: string) => {
-        setIsLoading(true);
-        try {
-            const response = await fetch(`${CLOUD_HOST}/oauth/token/`, {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    grant_type: 'refresh_token',
-                    refresh_token: refreshToken,
-                    client_id: CLIENT_ID
-                })
-            });
-
-            if (response.ok) {
-                const tokens = await response.json();
-                const storedCloud = Cookies.get("nx_cloud_session");
-                const existingData = storedCloud ? JSON.parse(storedCloud) : {};
-
-                const newSession: CloudSession = {
-                    ...existingData,
-                    accessToken: tokens.access_token,
-                    refreshToken: tokens.refresh_token || refreshToken,
-                    systems: []
-                };
-
-                setCloudSession(newSession);
-                Cookies.set("nx_cloud_session", JSON.stringify({
-                    accessToken: newSession.accessToken,
-                    refreshToken: newSession.refreshToken,
-                    email: newSession.email,
-                    ownerSystemId: newSession.ownerSystemId
-                }), { expires: 365, path: '/' });
-                console.log("[NxCloud] Session refreshed successfully");
-            } else {
-                console.warn("[NxCloud] Refresh failed, session might be invalid");
-                handleLogout("cloud");
-            }
-        } catch (e) {
-            console.error("[NxCloud] Refresh error:", e);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [CLOUD_HOST, CLIENT_ID]);
-
-    // Check session on mount & fetch config
+    // Sync NX location settings from loaded server config
     useEffect(() => {
-        const storedLocal = Cookies.get("local_nx_user");
-        if (storedLocal) {
-            try { setSession(JSON.parse(storedLocal)); } catch (e) { }
-        }
-
-        const storedCloud = Cookies.get("nx_cloud_session");
-        if (storedCloud) {
-            try {
-                const parsed = JSON.parse(storedCloud);
-                if (parsed.refreshToken && !cloudSession) {
-                    refreshCloudSession(parsed.refreshToken);
-                } else {
-                    setCloudSession({ ...parsed, systems: [] });
-                }
-            } catch (e) { }
-        }
-
-        const fetchGlobalConfig = async () => {
-            try {
-                const res = await fetch("/api/config/nx");
-                const data = await res.json();
-                if (data.success && data.config) {
-                    const { NEXT_PUBLIC_NX_SERVER_HOST, NEXT_PUBLIC_NX_SERVER_PORT, NEXT_PUBLIC_NX_SYSTEM_ID } = data.config;
-                    
-                    const currentIp = Cookies.get("nx_location_ip");
-                    if (!currentIp && NEXT_PUBLIC_NX_SERVER_HOST) {
-                        setNxLocation(prev => ({ ...prev, ip: NEXT_PUBLIC_NX_SERVER_HOST }));
-                    }
-                    const currentPort = Cookies.get("nx_location_port");
-                    if (!currentPort && NEXT_PUBLIC_NX_SERVER_PORT) {
-                        setNxLocation(prev => ({ ...prev, port: NEXT_PUBLIC_NX_SERVER_PORT }));
-                    }
-                    if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
-                        Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, { expires: 365, path: '/' });
-                    }
-                }
-            } catch (e) { }
-        };
-
-        fetchGlobalConfig();
+        if (!config) return;
+        const { NEXT_PUBLIC_NX_SERVER_HOST, NEXT_PUBLIC_NX_SERVER_PORT, NEXT_PUBLIC_NX_SYSTEM_ID } = config;
         
+        const currentIp = Cookies.get("nx_location_ip");
+        if (!currentIp && NEXT_PUBLIC_NX_SERVER_HOST) {
+            setNxLocation(prev => ({ ...prev, ip: NEXT_PUBLIC_NX_SERVER_HOST }));
+        }
+        const currentPort = Cookies.get("nx_location_port");
+        if (!currentPort && NEXT_PUBLIC_NX_SERVER_PORT) {
+            setNxLocation(prev => ({ ...prev, port: NEXT_PUBLIC_NX_SERVER_PORT }));
+        }
+        if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
+            Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, { expires: 365, path: '/' });
+        }
+    }, [config]);
+
+    // Local cookies sync
+    useEffect(() => {
         const savedIp = Cookies.get("nx_location_ip");
         const savedPort = Cookies.get("nx_location_port");
         if (savedIp) setNxLocation(prev => ({ ...prev, ip: savedIp }));
         if (savedPort) setNxLocation(prev => ({ ...prev, port: savedPort }));
     }, []);
 
-    // Cloud OAuth logic
-    const handleCloudLogin = useCallback(() => {
-        const redirectUrl = new URL(window.location.origin + window.location.pathname);
-        const authUrl = new URL(`${CLOUD_HOST}/authorize`);
-        authUrl.searchParams.set('redirect_url', redirectUrl.toString());
-        authUrl.searchParams.set('client_id', CLIENT_ID);
-        window.location.href = authUrl.toString();
-    }, [CLOUD_HOST, CLIENT_ID]);
-
-    const exchangeCloudCode = useCallback(async (code: string) => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const data = { code, grant_type: 'authorization_code', response_type: 'token' };
-            const response = await fetch(`${CLOUD_HOST}/oauth/token/`, {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error_description || errData.error || "Failed to exchange code");
-            }
-
-            const tokens = await response.json();
-
-            if (tokens.access_token) {
-                const systemsResp = await fetch(`${CLOUD_HOST}/api/systems/`, {
-                    headers: { 'Authorization': `Bearer ${tokens.access_token}` }
-                });
-
-                let systemsList: CloudSystem[] = [];
-                if (systemsResp.ok) {
-                    const systems = await systemsResp.json();
-                    systemsList = Array.isArray(systems) ? systems : (systems.items || []);
-                }
-
-                const ownerSystem = systemsList.find((s: any) =>
-                    s.accessRole?.toLowerCase() === 'owner' || s.accessRole?.toLowerCase() === 'administrator'
-                );
-                const ownerSystemId = ownerSystem?.id || (systemsList.length > 0 ? systemsList[0].id : undefined);
-
-                if (ownerSystemId) {
-                    Cookies.set("nx_system_id", ownerSystemId, { expires: 365, path: '/' });
-                }
-
-                const cloudData: CloudSession = {
-                    accessToken: tokens.access_token,
-                    refreshToken: tokens.refresh_token,
-                    systems: systemsList,
-                    email: ownerSystem?.ownerAccountEmail || tokens.user_email,
-                    ownerSystemId: ownerSystemId
-                };
-
-                setCloudSession(cloudData);
-                Cookies.set("nx_cloud_session", JSON.stringify({
-                    accessToken: tokens.access_token,
-                    refreshToken: tokens.refresh_token,
-                    email: cloudData.email,
-                    ownerSystemId: ownerSystemId
-                }), { expires: 365, path: '/' });
-            }
-        } catch (err: any) {
-            setError(err.message || "Cloud authentication failed");
-        } finally {
-            setIsLoading(false);
-        }
-    }, [CLOUD_HOST]);
-
+    // Handle OAuth redirection search parameters code exchange
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
@@ -238,90 +84,19 @@ export function NxVmsLogin() {
     }, [exchangeCloudCode]);
 
     const handleLocalLogin = async () => {
-        if (!credentials.username || !credentials.password) {
-            setError("Username and password are required");
-            return;
-        }
-
-        setIsLoading(true);
-        setError(null);
-        try {
-            const response = await fetch(LOCAL_NX_URL, {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    username: credentials.username,
-                    password: credentials.password,
-                    setCookie: true,
-                    durationS: 2419200,
-                    setSession: true
-                }),
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                const user: NxSession = {
-                    token: data.token || data.id,
-                    username: data.username || credentials.username,
-                    expiresS: data.durationS || 2419200
-                };
-
-                // Fetch server ID
-                try {
-                    const sResp = await fetch("/nx/rest/v3/servers", {
-                        headers: { "x-runtime-guid": user.token }
-                    });
-                    if (sResp.ok) {
-                        const sData = await sResp.json();
-                        const servers = Array.isArray(sData) ? sData : (sData.items || []);
-                        if (servers.length > 0 && servers[0].id) {
-                            user.serverId = servers[0].id;
-                            Cookies.set("nx_server_id", user.serverId as string, { expires: 365, path: '/' });
-                        }
-                    }
-                } catch (e) { }
-
-                setSession(user);
-                Cookies.set("local_nx_user", JSON.stringify(user), { expires: 28, path: '/' });
-                setCredentials({ username: "", password: "" });
-            } else {
-                const errorData = await response.json().catch(() => ({}));
-                setError(errorData.errorString || "Authentication failed");
-            }
-        } catch (err: any) {
-            setError(`Connection error: ${err.message}`);
-        } finally {
-            setIsLoading(false);
+        const success = await loginLocal(credentials.username, credentials.password);
+        if (success) {
+            setCredentials({ username: "", password: "" });
         }
     };
 
-    const handleLogout = (type: "local" | "cloud" | "all") => {
-        if (type === "local" || type === "all") {
-            setSession(null);
-            Cookies.remove("local_nx_user", { path: '/' });
-            Cookies.remove("nx_server_id", { path: '/' });
-        }
-        if (type === "cloud" || type === "all") {
-            setCloudSession(null);
-            Cookies.remove("nx_cloud_session", { path: '/' });
-            Cookies.remove("nx_system_id", { path: '/' });
-        }
-    };
-
-    // Final Dashboard Login (One-Click)
     const handleDashboardLogin = async () => {
-        const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
-        
         // Priority 1: User saved credentials in cookies
         let username = Cookies.get("license_saved_user");
         let password = Cookies.get("license_saved_pass");
 
-        // Priority 2: Environment / Config
+        // Priority 2: Fallback static / environment defaults
         if (!username || !password) {
-            // STATIC CREDENTIALS
-            // username = extConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
-            // password = extConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
             username = "LippoTest";
             password = "Lippo.123";
         }
@@ -331,7 +106,7 @@ export function NxVmsLogin() {
             return;
         }
 
-        // Determine session IDs
+        // Determine VMS session IDs
         let storedSystemId = Cookies.get("nx_system_id") || cloudSession?.ownerSystemId || "";
         let storedServerId = Cookies.get("nx_server_id") || session?.serverId || "";
 
