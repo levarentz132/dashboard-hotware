@@ -199,16 +199,36 @@ const startWatchdog = () => {
       }
 
       // ── CLEANUP: Reset stale tasks ─────────────────────────────────────────
-      // If a task has been 'recording' or 'capturing' for more than 1 hour, reset it.
+      // If a task has been 'recording' or 'capturing' for more than 1 hour, reset or remove it.
+      // If a non-recurring task has been 'processing' for more than 5 minutes, it's stale, remove it.
+      const cleanedSchedules: any[] = [];
       uniqueSchedules.forEach((rec: any) => {
+        const isNonRecurring = !rec.recurrence || rec.recurrence === "none" || rec.recurrence === "once";
+        const startTime = rec.startMs || (rec.date ? new Date(rec.date).getTime() : 0);
+        const elapsed = startTime > 0 ? now - startTime : 0;
+
+        if (isNonRecurring && rec.status === "processing" && elapsed > 300000) {
+          console.log(`[Watchdog] Stale non-recurring processing task ${rec.id} removed during cleanup.`);
+          changed = true;
+          return;
+        }
+
         if (rec.status === "recording" || rec.status === "capturing" || rec.status === "in progress" || rec.status === "processing") {
-          const startTime = rec.startMs || (rec.date ? new Date(rec.date).getTime() : 0);
           if (startTime > 0 && (now - startTime > 3600000)) {
-            rec.status = "failed";
-            changed = true;
+            if (isNonRecurring) {
+              console.log(`[Watchdog] Stale non-recurring task ${rec.id} (${rec.status}) removed during cleanup.`);
+              changed = true;
+              return;
+            } else {
+              rec.status = "failed";
+              changed = true;
+            }
           }
         }
+        cleanedSchedules.push(rec);
       });
+      uniqueSchedules.length = 0;
+      uniqueSchedules.push(...cleanedSchedules);
       const saveState = async (scheds: any[]) => {
         // ── CRITICAL: Re-read the file to avoid overwriting user changes (like deletions) ──
         // that happened while the watchdog was performing async work.
@@ -246,13 +266,34 @@ const startWatchdog = () => {
 
       // ── Phase 1: Identify and Mark Tasks to Process ────────────────────────
       const tasksToExecute: any[] = [];
-      for (let rec of uniqueSchedules) {
+      for (let i = 0; i < uniqueSchedules.length; i++) {
+        const rec = uniqueSchedules[i];
         const startParts = rec.startTime.split(":").map(Number);
         const endParts = (rec.endTime || rec.startTime).split(":").map(Number);
         const sh = startParts[0], sm = startParts[1], ss = startParts[2] || 0;
         const eh = endParts[0], em = endParts[1], es = endParts[2] !== undefined ? endParts[2] : 59;
         const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, ss, 0);
         const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, es, 999);
+
+        // Deduplication: if the video file already exists, complete or delete the schedule immediately
+        if (rec.type === "video" && doesVideoFileExist(rec)) {
+          console.log(`[Watchdog] AUTO-SAVE deduplication: Valid file already exists for ${rec.cameraName}, skipping trigger.`);
+          const isRecurring = rec.recurrence && rec.recurrence !== "none";
+          if (isRecurring) {
+            const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+            rec.status = "pending";
+            rec.record = false;
+            rec.date = nextDate.toISOString();
+            rec.startMs = nextDate.getTime();
+            rec.endMs = nextDate.getTime() + (endMs - startMs);
+            changed = true;
+          } else {
+            uniqueSchedules.splice(i, 1);
+            i--; // Adjust index for spliced item
+            changed = true;
+          }
+          continue;
+        }
 
         // ── Status Sanity Check ─────────────────────────────────────────────
         // If the task is in the future but has an active/completed status AND it's recurring, reset it.
@@ -478,6 +519,41 @@ const startWatchdog = () => {
 };
 
 // Helper functions for the refactored watchdog
+function doesVideoFileExist(rec: any): boolean {
+  try {
+    const startMs = rec.startMs || (rec.date ? new Date(rec.date).getTime() : Date.now());
+    const recDate = new Date(startMs);
+    const YYYY = recDate.getFullYear().toString();
+    const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
+    const DD = recDate.getDate().toString().padStart(2, "0");
+    const HH = recDate.getHours().toString().padStart(2, "0");
+    const mmP = recDate.getMinutes().toString().padStart(2, "0");
+    const dateFolder = `${YYYY}-${MM}-${DD}`;
+    const safeCameraName = (rec.cameraName || rec.cameraId?.substring(0, 8) || "Camera")
+      .replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim();
+
+    let autoSaveBaseDir = path.join(process.cwd(), "data", "recorded_videos");
+    try {
+      const settingsFile = path.join(process.cwd(), "data", "settings.json");
+      if (fsSync.existsSync(settingsFile)) {
+        const settings = JSON.parse(fsSync.readFileSync(settingsFile, "utf-8"));
+        if (settings.videoStoragePath) {
+          autoSaveBaseDir = settings.videoStoragePath;
+        } else if (settings.storagePath) {
+          autoSaveBaseDir = settings.storagePath;
+        }
+      }
+    } catch (e) {}
+
+    const finalFileName = `${safeCameraName}_${HH}${mmP}00.mp4`;
+    const savePath = path.join(autoSaveBaseDir, dateFolder, finalFileName);
+    
+    return fsSync.existsSync(savePath) && fsSync.statSync(savePath).size > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
   let nextDate = new Date(rec.date);
   const now = new Date();

@@ -96,18 +96,12 @@ async function updateTaskStatus(taskId: string, success: boolean): Promise<void>
         const task = data.schedules[taskIndex];
         const isNonRecurring = !task.recurrence || task.recurrence === "none" || task.recurrence === "once";
         
-        if (success && isNonRecurring) {
+        if (isNonRecurring) {
           data.schedules.splice(taskIndex, 1);
-          console.log(`[recordings/download] Task ${taskId} completed and REMOVED (non-recurring)`);
+          console.log(`[recordings/download] Task ${taskId} finished and REMOVED (non-recurring)`);
         } else {
-          // If non-recurring failed, set status to failed.
           // For recurring, keep the "pending" status set by the watchdog (do not overwrite it).
-          if (isNonRecurring) {
-            task.status = success ? "completed" : "failed";
-            console.log(`[recordings/download] Task ${taskId} status updated to: ${task.status}`);
-          } else {
-            console.log(`[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Keeping status: ${task.status}`);
-          }
+          console.log(`[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Keeping status: ${task.status}`);
         }
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       }
@@ -218,12 +212,16 @@ export async function GET(request: NextRequest) {
         }
       } catch (e) { }
 
-      const finalFileName = `${safeCameraName}_${HH}${mmP}00.mp4`;
+      const finalFileName = `${safeCameraName}_${HH}${mmP}00_${deviceId.slice(-4).toLowerCase()}.mp4`;
       const saveDir = path.join(autoSaveBaseDir, dateFolder);
       
       console.log(`[recordings/download] AUTO-SAVE target: ${saveDir}${path.sep}${finalFileName}`);
       
-      if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
+      try {
+        if (!fs.existsSync(saveDir)) {
+          fs.mkdirSync(saveDir, { recursive: true });
+        }
+      } catch (err) {}
       const savePath = path.join(saveDir, finalFileName);
 
       // DEDUPLICATION: Check if file already exists AND has content before fetching from VMS
@@ -298,12 +296,10 @@ export async function GET(request: NextRequest) {
         "-fflags", "+genpts+igndts",
         "-avoid_negative_ts", "make_zero",
         "-i", "pipe:0",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-map", "0:v",
+        "-c:v", "copy",
+        "-map", "0:a?",
+        "-c:a", "copy",
         "-movflags", "+faststart",
         "-max_muxing_queue_size", "1024",
         "-f", "mp4",
