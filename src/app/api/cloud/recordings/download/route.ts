@@ -85,6 +85,38 @@ function getFfmpegPath(): string {
   return "ffmpeg";
 }
 
+async function updateTaskStatus(taskId: string, success: boolean): Promise<void> {
+  try {
+    const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
+    if (fs.existsSync(DATA_FILE)) {
+      const content = fs.readFileSync(DATA_FILE, "utf-8").replace(/^\uFEFF/, "");
+      const data = JSON.parse(content);
+      const taskIndex = data.schedules?.findIndex((s: any) => s.id === taskId);
+      if (taskIndex !== -1) {
+        const task = data.schedules[taskIndex];
+        const isNonRecurring = !task.recurrence || task.recurrence === "none" || task.recurrence === "once";
+        
+        if (success && isNonRecurring) {
+          data.schedules.splice(taskIndex, 1);
+          console.log(`[recordings/download] Task ${taskId} completed and REMOVED (non-recurring)`);
+        } else {
+          // If non-recurring failed, set status to failed.
+          // For recurring, keep the "pending" status set by the watchdog (do not overwrite it).
+          if (isNonRecurring) {
+            task.status = success ? "completed" : "failed";
+            console.log(`[recordings/download] Task ${taskId} status updated to: ${task.status}`);
+          } else {
+            console.log(`[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Keeping status: ${task.status}`);
+          }
+        }
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+      }
+    }
+  } catch (err) {
+    console.error(`[recordings/download] Failed to update task ${taskId} status:`, err);
+  }
+}
+
 export async function GET(request: NextRequest) {
   // Handle HEAD requests (browser pre-flight for video range support)
   const isHead = request.method === "HEAD";
@@ -197,6 +229,9 @@ export async function GET(request: NextRequest) {
       // DEDUPLICATION: Check if file already exists AND has content before fetching from VMS
       if (fs.existsSync(savePath) && fs.statSync(savePath).size > 0) {
         console.log(`[recordings/download] AUTO-SAVE: Valid file already exists, skipping: ${savePath}`);
+        if (taskId) {
+          await updateTaskStatus(taskId, true);
+        }
         return NextResponse.json({ success: true, path: savePath, file: finalFileName, skipped: true });
       }
       
@@ -217,6 +252,9 @@ export async function GET(request: NextRequest) {
         if (durationMs > 0 && durationMs < 10000) {
           console.log(`[recordings/download] AUTO-SAVE skipped: Clip is a pulse (${Math.round(durationMs/1000)}s)`);
           clearTimeout(autoSaveTimeout);
+          if (taskId) {
+            await updateTaskStatus(taskId, true);
+          }
           return NextResponse.json({ success: true, skipped: true, reason: "pulse_filter" });
         }
 
@@ -237,11 +275,17 @@ export async function GET(request: NextRequest) {
         if (!videoResponse.ok || !videoResponse.body) {
           const errText = await videoResponse.text().catch(() => "");
           console.error(`[recordings/download] AUTO-SAVE: VMS fetch failed (${videoResponse.status}):`, errText);
+          if (taskId) {
+            await updateTaskStatus(taskId, false);
+          }
           return NextResponse.json({ error: "Auto-save fetch failed", status: videoResponse.status, details: errText }, { status: 500 });
         }
         console.log(`[recordings/download] AUTO-SAVE: VMS fetch successful (${videoResponse.status}), starting FFmpeg...`);
       } catch (fetchErr: any) {
         console.error("[recordings/download] AUTO-SAVE: VMS fetch error:", fetchErr.message || fetchErr);
+        if (taskId) {
+          await updateTaskStatus(taskId, false);
+        }
         return NextResponse.json({ error: "Auto-save fetch error", details: fetchErr.message }, { status: 500 });
       }
 
@@ -300,28 +344,7 @@ export async function GET(request: NextRequest) {
           releaseFfmpegSlot(); // Release slot immediately when process closes
           
           if (taskId) {
-            try {
-              const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
-              if (fs.existsSync(DATA_FILE)) {
-                const content = fs.readFileSync(DATA_FILE, "utf-8").replace(/^\uFEFF/, "");
-                const data = JSON.parse(content);
-                const taskIndex = data.schedules?.findIndex((s: any) => s.id === taskId);
-                if (taskIndex !== -1) {
-                  const task = data.schedules[taskIndex];
-                  // If successful AND non-recurring, remove it from the list
-                  if (code === 0 && (!task.recurrence || task.recurrence === "none" || task.recurrence === "once")) {
-                    data.schedules.splice(taskIndex, 1);
-                    console.log(`[recordings/download] Task ${taskId} completed and REMOVED (non-recurring)`);
-                  } else {
-                    task.status = code === 0 ? "completed" : "failed";
-                    console.log(`[recordings/download] Task ${taskId} status updated to: ${task.status}`);
-                  }
-                  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-                }
-              }
-            } catch (err) {
-              console.error(`[recordings/download] Failed to update task ${taskId} status:`, err);
-            }
+            await updateTaskStatus(taskId, code === 0);
           }
 
           if (code !== 0) {
