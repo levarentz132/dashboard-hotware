@@ -57,8 +57,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 1. Fetch Device List for GUID -> Name mapping
+    // 1. Fetch Device List for GUID -> Name mapping and hash resolution
     const deviceNameMap = new Map<string, string>();
+    const deviceHashToIdMap = new Map<string, string>();
     try {
       const devicesUrl = buildCloudUrl(systemId, "/rest/v3/devices", new URLSearchParams(), request, systemName || undefined);
       const devicesRes = await fetch(devicesUrl, { headers, cache: 'no-store' });
@@ -67,9 +68,13 @@ export async function GET(request: NextRequest) {
         const devicesList = Array.isArray(devicesData) ? devicesData : (devicesData.reply || []);
         devicesList.forEach((d: any) => {
           if (d.id) {
+            const cleanId = d.id.replace(/[{}]/g, "").toLowerCase();
             const name = (d.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-            deviceNameMap.set(d.id.replace(/[{}]/g, "").toLowerCase(), name);
+            deviceNameMap.set(cleanId, name);
             deviceNameMap.set(d.id.toLowerCase(), name);
+            
+            const hash = cleanId.slice(-4);
+            deviceHashToIdMap.set(hash, d.id);
           }
         });
       }
@@ -151,12 +156,10 @@ export async function GET(request: NextRequest) {
       console.error(`[recordings] NX API Exception for system ${systemId}:`, err.message);
     }
 
-    // Footage Template Logic: For non-admin users, if VMS returns no footage, do not show local files either.
-    // This ensures VMS remains the source of truth for visibility for non-privileged users.
-    if (!isAdmin && allPeriods.length === 0) {
-      console.log(`[recordings] Normal user search returned no NX footage. Skipping local scan for ${systemId}:${deviceId}.`);
-      return NextResponse.json([]);
-    }
+    // Footage Template Logic: Historically, for non-admin users, if VMS returned no footage, we skipped local scans.
+    // However, for scheduled auto-saved clips where VMS footage might be reverted, missing, or not indexed yet,
+    // we bypass this restriction and always scan local files. The frontend's strict `hasCameraViewPermission`
+    // remains the authoritative filter to ensure non-admin users cannot see unauthorized cameras.
 
     
     // 2. Fetch local files from data folders (date-based folder structure)
@@ -285,13 +288,15 @@ export async function GET(request: NextRequest) {
               let durationMs = isVideo ? (isShortVideo ? 1000 : Math.max(1000, stats.mtimeMs - timestamp)) : 0;
               if (durationMs > 3600000) durationMs = 60000;
 
+              const resolvedFullId = fileDeviceId ? deviceHashToIdMap.get(fileDeviceId.toLowerCase()) : undefined;
+
               allPeriods.push({
                 startTimeMs: timestamp,
                 durationMs: durationMs,
                 isScreenshot: file.endsWith(".png") || isShortVideo,
                 isVideo: isVideo && !isShortVideo,
                 isLocal: true,
-                deviceId: fileDeviceId || deviceId,
+                deviceId: resolvedFullId || fileDeviceId || deviceId,
                 fileIdHash: fileDeviceId,
                 serverId: "local-storage",
                 fileName: file,
