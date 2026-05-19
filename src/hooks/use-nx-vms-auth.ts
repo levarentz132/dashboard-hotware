@@ -104,7 +104,6 @@ export function useNxVmsAuth() {
                     username,
                     password,
                     setCookie: true,
-                    durationS: 2419200,
                     setSession: true
                 }),
             });
@@ -114,7 +113,7 @@ export function useNxVmsAuth() {
                 const user: NxSession = {
                     token: data.token || data.id,
                     username: data.username || username,
-                    expiresS: data.durationS || 2419200
+                    expiresS: data.durationS || 8640000   
                 };
 
                 // Fetch server ID
