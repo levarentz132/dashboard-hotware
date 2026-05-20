@@ -120,11 +120,21 @@ export class NxWitnessAPIBase {
     const cacheKey = `${options.method || "GET"}:${endpoint}:${this.systemId}`;
     const { skipCache = false, ...fetchOptions } = options;
 
+    // Invalidate cache on mutations (POST, PATCH, DELETE, PUT)
+    const isWrite = options.method && options.method !== "GET";
+    if (isWrite) {
+      this.cache.clear();
+    }
+
     // 1. Check Cache (only for GET requests)
     if (!skipCache && (options.method === "GET" || !options.method)) {
       const cached = this.cache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-        return cached.data;
+      if (cached) {
+        if (Date.now() - cached.timestamp < this.CACHE_TTL) {
+          return cached.data;
+        } else {
+          this.cache.delete(cacheKey); // Evict expired key from memory
+        }
       }
     }
 
@@ -251,6 +261,9 @@ export class NxWitnessAPIBase {
   // Logout - Delete session token
   async logout(): Promise<boolean> {
     try {
+      // Clear cache on logout
+      this.cache.clear();
+
       // First, get current session info to find the token
       const sessionsResponse = await fetch(`${this.baseURL}/login/sessions`, {
         method: "GET",
