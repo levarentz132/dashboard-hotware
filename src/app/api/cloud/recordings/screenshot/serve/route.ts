@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import { Readable } from "stream";
+import { sanitizeCameraName } from "@/lib/ffmpeg-sanitizer";
 
 /**
  * GET /api/cloud/recordings/screenshot/serve?date=YYYY-MM-DD&file=filename.png
@@ -24,10 +25,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Sanitize to prevent path traversal
+    // Sanitize to prevent path traversal and argument injection
     const safeDateFolder = dateFolder.replace(/[^0-9-]/g, "");
-    const safeCameraName = cameraName ? cameraName.replace(/[<>:"/\\|?*]/g, "_") : null;
-    const safeFileName = path.basename(fileName);
+    const safeCameraName = cameraName ? sanitizeCameraName(cameraName) : null;
+    const safeFileName = path.basename(fileName).replace(/[<>:"/\\|?*]/g, "_");
 
     // Respect custom storage path if defined
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
@@ -44,18 +45,28 @@ export async function GET(request: NextRequest) {
       }
     } catch (e) { }
 
+    const absoluteBaseDir = path.resolve(screenshotsBaseDir);
     let filePath;
+
     if (safeCameraName) {
-      filePath = path.join(screenshotsBaseDir, safeDateFolder, safeCameraName, safeFileName);
+      filePath = path.resolve(absoluteBaseDir, safeDateFolder, safeCameraName, safeFileName);
       // Fallback: If not found in subfolder, try the root date folder
       if (!fs.existsSync(filePath)) {
-        const fallbackPath = path.join(screenshotsBaseDir, safeDateFolder, safeFileName);
+        const fallbackPath = path.resolve(absoluteBaseDir, safeDateFolder, safeFileName);
         if (fs.existsSync(fallbackPath)) {
           filePath = fallbackPath;
         }
       }
     } else {
-      filePath = path.join(screenshotsBaseDir, safeDateFolder, safeFileName);
+      filePath = path.resolve(absoluteBaseDir, safeDateFolder, safeFileName);
+    }
+
+    // Path traversal verification
+    if (!filePath.startsWith(absoluteBaseDir + path.sep)) {
+      return NextResponse.json(
+        { error: "Unauthorized access: path traversal detected" },
+        { status: 403 }
+      );
     }
 
     if (!fs.existsSync(filePath)) {
