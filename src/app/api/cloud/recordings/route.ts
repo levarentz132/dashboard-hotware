@@ -283,9 +283,8 @@ export async function GET(request: NextRequest) {
 
             if (timestamp >= startLimit && timestamp <= endLimit) {
               const isVideo = file.endsWith(".mp4");
-              const isShortVideo = isVideo && stats.size < 150000; 
 
-              let durationMs = isVideo ? (isShortVideo ? 1000 : Math.max(1000, stats.mtimeMs - timestamp)) : 0;
+              let durationMs = isVideo ? Math.max(1000, stats.mtimeMs - timestamp) : 0;
               if (durationMs > 3600000) durationMs = 60000;
 
               const resolvedFullId = fileDeviceId ? deviceHashToIdMap.get(fileDeviceId.toLowerCase()) : undefined;
@@ -293,8 +292,8 @@ export async function GET(request: NextRequest) {
               allPeriods.push({
                 startTimeMs: timestamp,
                 durationMs: durationMs,
-                isScreenshot: file.endsWith(".png") || isShortVideo,
-                isVideo: isVideo && !isShortVideo,
+                isScreenshot: file.endsWith(".png"),
+                isVideo: isVideo,
                 isLocal: true,
                 deviceId: resolvedFullId || fileDeviceId || deviceId,
                 fileIdHash: fileDeviceId,

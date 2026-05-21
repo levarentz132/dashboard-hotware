@@ -496,8 +496,7 @@ export default function CloudRecordings() {
           schedules: scheds,
           originalSchedules: Object.fromEntries(originals),
           nxLocationIp,
-          nxLocationPort,
-          notificationUserKey: getNotificationUserKey()
+          nxLocationPort
         }),
       });
     } catch (e) { console.error("[Persistence] Save failed:", e); }
@@ -1421,7 +1420,7 @@ export default function CloudRecordings() {
 
       const mapped: RecentRecording[] = periods.map((p: any, i: number) => {
         const duration = p.durationMs || 0;
-        const isScreenshot = duration <= 5000 || p.isScreenshot;
+        const isScreenshot = p.isLocal ? p.isScreenshot : (duration <= 5000 || p.isScreenshot);
         
         // Find the device info from our local list if it's an "all" search
         let dev = devices.find(d => normalizeId(d.id) === normalizeId(p.deviceId) && d.systemId === targetSystem);
@@ -1449,7 +1448,28 @@ export default function CloudRecordings() {
       mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
 
       // Update state and cache
-      setRecentRecordings(mapped);
+      if (isAutoRefresh) {
+        setRecentRecordings(prev => {
+          const merged = [...prev];
+          mapped.forEach(newItem => {
+            const existingIdx = merged.findIndex(i => 
+              i.deviceId === newItem.deviceId && 
+              Math.abs(i.startTimeMs - newItem.startTimeMs) < 120000
+            );
+            if (existingIdx >= 0) {
+              if (newItem.isLocal || !merged[existingIdx].isLocal) {
+                merged[existingIdx] = newItem;
+              }
+            } else {
+              merged.push(newItem);
+            }
+          });
+          merged.sort((a, b) => b.startTimeMs - a.startTimeMs);
+          return merged;
+        });
+      } else {
+        setRecentRecordings(mapped);
+      }
       if (!isAutoRefresh) {
         recordingsCache.current.set(cacheKey, mapped);
         // Limit cache size

@@ -151,15 +151,10 @@ const startWatchdog = () => {
       const {
         schedules = [],
         originalSchedules = {},
-        globalAuthFallback = null,
         nxLocationIp = API_CONFIG.serverHost || "localhost",
         nxLocationPort = API_CONFIG.serverPort || "7001",
-        globalUserKeyFallback = null,
         appPort = process.env.NODE_ENV === "production" ? "3030" : "3010"
       } = parsed;
-
-      const globalAuth = parsed.globalAuth || globalAuthFallback;
-      const notificationUserKey = parsed.notificationUserKey || globalUserKeyFallback;
 
       // Use the persisted appPort if the global is not set yet
       if (!global._nxAppPort) {
@@ -182,6 +177,7 @@ const startWatchdog = () => {
         }
       }
       let changed = false;
+      const deletedTaskIds = new Set<string>();
       const now = Date.now();
 
       // ── DEDUPLICATION: Remove identical tasks before processing ──────────
@@ -209,6 +205,7 @@ const startWatchdog = () => {
 
         if (isNonRecurring && rec.status === "processing" && elapsed > 300000) {
           console.log(`[Watchdog] Stale non-recurring processing task ${rec.id} removed during cleanup.`);
+          deletedTaskIds.add(rec.id);
           changed = true;
           return;
         }
@@ -217,6 +214,7 @@ const startWatchdog = () => {
           if (startTime > 0 && (now - startTime > 3600000)) {
             if (isNonRecurring) {
               console.log(`[Watchdog] Stale non-recurring task ${rec.id} (${rec.status}) removed during cleanup.`);
+              deletedTaskIds.add(rec.id);
               changed = true;
               return;
             } else {
@@ -241,7 +239,9 @@ const startWatchdog = () => {
         const diskSchedules = diskData.schedules || [];
         
         // Update statuses in the disk list based on our processed list
-        const finalSchedules = diskSchedules.map((diskRec: any) => {
+        const finalSchedules = diskSchedules
+          .filter((diskRec: any) => !deletedTaskIds.has(diskRec.id))
+          .map((diskRec: any) => {
           const ourRec = scheds.find(s => s.id === diskRec.id);
           if (ourRec) {
             return { ...diskRec, status: ourRec.status, date: ourRec.date, startMs: ourRec.startMs, endMs: ourRec.endMs, record: ourRec.record };
@@ -249,16 +249,19 @@ const startWatchdog = () => {
           return diskRec;
         });
 
+        delete diskData.globalAuthFallback;
+        delete diskData.globalUserKeyFallback;
+        delete diskData.globalAuth;
+        delete diskData.notificationUserKey;
+
         await fs.writeFile(
           DATA_FILE,
           JSON.stringify({
             ...diskData,
             schedules: finalSchedules,
             originalSchedules,
-            globalAuth,
             nxLocationIp,
             nxLocationPort,
-            notificationUserKey,
             appPort: detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010")
           }, null, 2)
         );
@@ -288,6 +291,7 @@ const startWatchdog = () => {
             rec.endMs = nextDate.getTime() + (endMs - startMs);
             changed = true;
           } else {
+            deletedTaskIds.add(rec.id);
             uniqueSchedules.splice(i, 1);
             i--; // Adjust index for spliced item
             changed = true;
@@ -367,7 +371,6 @@ const startWatchdog = () => {
             const port = detectCurrentPort(appPort || "3030");
             const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
             const headers: any = { "Content-Type": "application/json" };
-            if (globalAuth) headers["x-watchdog-auth"] = globalAuth;
             if (nxLocationIp && nxLocationIp !== "localhost") headers["x-nx-location-ip"] = nxLocationIp;
             if (nxLocationPort && nxLocationPort !== "7001") headers["x-nx-location-port"] = nxLocationPort;
 
@@ -380,7 +383,7 @@ const startWatchdog = () => {
                 cameraName: rec.cameraName,
                 timestampMs: startMs,
                 scheduledStartTime: rec.startTime,
-                notificationUserKey: notificationUserKey
+                notificationUserKey: rec.scheduledBy || "admin"
               })
             });
 
@@ -394,7 +397,9 @@ const startWatchdog = () => {
                 rec.startMs = nextDate.getTime();
                 rec.endMs = nextDate.getTime() + (endMs - startMs);
               } else {
-                delete uniqueSchedules[rec.id];
+                deletedTaskIds.add(rec.id);
+                const idx = uniqueSchedules.findIndex((s: any) => s.id === rec.id);
+                if (idx !== -1) uniqueSchedules.splice(idx, 1);
                 console.log(`[Watchdog] Screenshot task ${rec.id} completed and REMOVED (non-recurring)`);
               }
             }
@@ -406,7 +411,7 @@ const startWatchdog = () => {
         if (task.type === "video_start") {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
-            const auth = rec.auth || globalAuth;
+            const auth = rec.auth;
             if (!auth || !ip ) {
               console.warn(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
               return;
@@ -450,7 +455,7 @@ const startWatchdog = () => {
         if (task.type === "video_stop") {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
-            const auth = rec.auth || globalAuth;
+            const auth = rec.auth;
             console.log(`[Watchdog] Stopping recording for ${rec.cameraName} (${cleanId})`);
             // Use provided auth/IP or fallback to defaults
             if (auth && ip) {
@@ -597,7 +602,7 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
 
 function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
   const currentPort = detectCurrentPort(global._nxAppPort || "3030");
-  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}`;
+  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}&notificationUserKey=${encodeURIComponent(rec.scheduledBy || "admin")}`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;
@@ -789,6 +794,32 @@ export async function GET(request: NextRequest) {
     // ── Multi-Tenant Filtering ──────────────────────────────────────────────
     const { rights, isAdmin: userIsAdmin, username } = await getUserResourceRights(request, data.nxLocationIp, data.nxLocationPort);
 
+    // ── Update Auth Token for Current User ──
+    let token = request.cookies.get("local_nx_user")?.value;
+    if (!token) token = request.cookies.get("nx_cloud_session")?.value;
+    if (token && token.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(token);
+        token = parsed.token || parsed.accessToken || token;
+      } catch (e) { }
+    }
+
+    if (token && username && username !== "System") {
+      let fileNeedsUpdate = false;
+      const rawSchedules = data.schedules || [];
+      rawSchedules.forEach((s: any) => {
+         if (s.scheduledBy && s.scheduledBy.toLowerCase() === username.toLowerCase()) {
+            if (s.auth !== token) {
+               s.auth = token;
+               fileNeedsUpdate = true;
+            }
+         }
+      });
+      if (fileNeedsUpdate) {
+        fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), "utf-8").catch(()=>{});
+      }
+    }
+
     // console.log(`[GET /scheduled] Found ${data.schedules?.length || 0} raw schedules on disk.`);
 
     // Admin bypass: admins always see all schedules
@@ -887,7 +918,13 @@ export async function POST(request: NextRequest) {
         const otherUsersSchedules = (existingData.schedules || []).filter((s: any) => {
           const nid = normalizeId(s.cameraId);
           const r = rights[nid] || rights[s.cameraId] || "";
-          return r === "" || r === "none";
+          
+          const hasRights = r !== "" && r !== "none";
+          const isOwner = s.scheduledBy && username && s.scheduledBy.toLowerCase() === username.toLowerCase();
+          
+          // Keep schedules that the user CANNOT manage.
+          // They CAN manage it if they have VMS rights OR if they are the owner.
+          return !hasRights && !isOwner;
         });
 
         // Combine other users' schedules with the new ones provided by the current user
@@ -925,11 +962,18 @@ export async function POST(request: NextRequest) {
             finalUsername = username || "System";
           }
           
+          const existingSchedule = (existingData.schedules || []).find((old: any) => old.id === s.id);
+          const isOwner = finalUsername && finalUsername.toLowerCase() === username.toLowerCase();
+          
+          // Auto-refresh the token if this user is the owner, otherwise preserve existing
+          const finalAuth = isOwner ? token : (existingSchedule?.auth || token);
+          const finalUserKey = isOwner ? userKey : (existingSchedule?.userKey || userKey);
+          
           return {
             ...s,
             scheduledBy: finalUsername,
-            auth: token,
-            userKey: userKey
+            auth: finalAuth,
+            userKey: finalUserKey
           };
         });
       }
@@ -955,17 +999,17 @@ export async function POST(request: NextRequest) {
     body.nxLocationIp = nxIp;
     body.nxLocationPort = nxPort;
 
-    // Clean up top-level sensitive fields before saving to file
-    delete body.globalAuth;
-    delete body.notificationUserKey;
+    // Remove redundant fields from each schedule
+    if (body.schedules) {
+      body.schedules = body.schedules.map((s: any) => {
+        delete s.userKey;
+        delete s.systemName;
+        return s;
+      });
+    }
 
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    await fs.writeFile(DATA_FILE, JSON.stringify({
-      ...body,
-      // We still store a global fallback for internal maintenance, but it's less critical now
-      globalAuthFallback: token,
-      globalUserKeyFallback: userKey
-    }, null, 2), "utf-8");
+    await fs.writeFile(DATA_FILE, JSON.stringify(body, null, 2), "utf-8");
 
     // Log the creation event only once per batch
     if (body.schedules && body.schedules.length > 0) {
