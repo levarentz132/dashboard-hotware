@@ -600,34 +600,39 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
   return nextDate;
 }
 
-function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
+async function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
   const currentPort = detectCurrentPort(global._nxAppPort || "3030");
   const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}&notificationUserKey=${encodeURIComponent(rec.scheduledBy || "admin")}`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;
   if (nxPort && nxPort !== "7001") headers["x-nx-location-port"] = nxPort;
-  
+
   console.log(`[Watchdog] Triggering auto-save (${rec.recurrence || 'once'}) for ${rec.cameraName}: ${new Date(rec.startMs).toLocaleString()} -> ${new Date(rec.endMs).toLocaleTimeString()}`);
   console.log(`[Watchdog] Auto-save URL: ${url}`);
-  fetch(url, { headers })
-    .then(res => {
-      if (!res.ok) {
-        console.error(`[Watchdog] Auto-save failed for ${rec.cameraName}: HTTP ${res.status}`);
-        return res.text().then(text => console.error(`[Watchdog] Error details: ${text}`));
-      }
-      return res.json();
-    })
-    .then(data => {
-      if (data?.success) {
-        console.log(`[Watchdog] Auto-save successful for ${rec.cameraName}: ${data.path || data.file}`);
-      } else if (data?.skipped) {
-        console.log(`[Watchdog] Auto-save skipped for ${rec.cameraName}: ${data.reason || 'already exists'}`);
-      }
-    })
-    .catch(err => {
-      console.error(`[Watchdog] Auto-save request failed for ${rec.cameraName}:`, err.message);
-    });
+
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[Watchdog] Auto-save failed for ${rec.cameraName}: HTTP ${res.status} - ${errText}`);
+      return;
+    }
+    const data = await res.json();
+    if (data?.success) {
+      console.log(`[Watchdog] Auto-save successful for ${rec.cameraName}: ${data.path || data.file}`);
+    } else if (data?.skipped) {
+      console.log(`[Watchdog] Auto-save skipped for ${rec.cameraName}: ${data.reason || 'already exists'}`);
+    } else {
+      console.warn(`[Watchdog] Auto-save unexpected response for ${rec.cameraName}:`, data);
+    }
+  } catch (err: any) {
+
+    console.error(`[Watchdog] Auto-save request error for ${rec.cameraName}:`, err.message);
+  }
+
+
+
 }
 
 // Ensure watchdog starts when this module is used
