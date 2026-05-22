@@ -6,6 +6,7 @@ import fsSync from "fs";
 import path from "path";
 import { logRecordingEvent, formatAuditDate } from "@/lib/recording-logger";
 import { buildCloudUrl } from "@/lib/cloud-api";
+import { startFFmpegWorker } from "@/lib/ffmpeg-worker";
 
 
 // ── VMS Direct API helpers ────────────────────────────────────────────────────
@@ -26,7 +27,7 @@ async function vmsRequest(
 ): Promise<any> {
   try {
     const isLocalToken = authToken.startsWith("vms-");
-    
+
     // Construct a dummy request object to pass the IP/Port to buildCloudUrl
     const dummyRequest = {
       cookies: { get: () => null },
@@ -101,7 +102,7 @@ if (typeof global !== "undefined" && !global._nxExecutingTasks) {
  */
 function detectCurrentPort(fallback: string): string {
   let port = process.env.PORT || fallback || "3030";
-  
+
   const pIndex = process.argv.indexOf("-p");
   if (pIndex !== -1 && process.argv[pIndex + 1]) {
     port = process.argv[pIndex + 1];
@@ -134,12 +135,12 @@ const startWatchdog = () => {
       const dataStr = await readDataFile(DATA_FILE).catch(() =>
         JSON.stringify({ schedules: [], originalSchedules: {}, globalAuth: null })
       );
-      
+
       if (!dataStr || dataStr.trim() === "") {
         global._nxWatchdogActive = false;
         return;
       }
-      
+
       let parsed;
       try {
         parsed = JSON.parse(dataStr);
@@ -196,21 +197,27 @@ const startWatchdog = () => {
 
       // ── CLEANUP: Reset stale tasks ─────────────────────────────────────────
       // If a task has been 'recording' or 'capturing' for more than 1 hour, reset or remove it.
-      // If a non-recurring task has been 'processing' for more than 5 minutes, it's stale, remove it.
+      // Processing tasks use time-since-end (not time-since-start) so long recordings can finish auto-save.
       const cleanedSchedules: any[] = [];
       uniqueSchedules.forEach((rec: any) => {
         const isNonRecurring = !rec.recurrence || rec.recurrence === "none" || rec.recurrence === "once";
         const startTime = rec.startMs || (rec.date ? new Date(rec.date).getTime() : 0);
-        const elapsed = startTime > 0 ? now - startTime : 0;
+        const endTime = rec.endMs || startTime;
 
-        if (isNonRecurring && rec.status === "processing" && elapsed > 300000) {
-          console.log(`[Watchdog] Stale non-recurring processing task ${rec.id} removed during cleanup.`);
-          deletedTaskIds.add(rec.id);
-          changed = true;
+        if (isNonRecurring && rec.status === "processing") {
+          const sinceEnd = endTime > 0 ? now - endTime : 0;
+          // 30-minute grace after the recording window ends for FFmpeg auto-save to complete
+          if (sinceEnd > 30 * 60 * 1000 && !doesVideoFileExist(rec)) {
+            console.log(`[Watchdog] Stale non-recurring processing task ${rec.id} removed during cleanup (auto-save timed out).`);
+            deletedTaskIds.add(rec.id);
+            changed = true;
+            return;
+          }
+          cleanedSchedules.push(rec);
           return;
         }
 
-        if (rec.status === "recording" || rec.status === "capturing" || rec.status === "in progress" || rec.status === "processing") {
+        if (rec.status === "recording" || rec.status === "capturing" || rec.status === "in progress") {
           if (startTime > 0 && (now - startTime > 3600000)) {
             if (isNonRecurring) {
               console.log(`[Watchdog] Stale non-recurring task ${rec.id} (${rec.status}) removed during cleanup.`);
@@ -234,20 +241,20 @@ const startWatchdog = () => {
         try {
           const content = await readDataFile(DATA_FILE);
           diskData = JSON.parse(content);
-        } catch (e) {}
+        } catch (e) { }
 
         const diskSchedules = diskData.schedules || [];
-        
+
         // Update statuses in the disk list based on our processed list
         const finalSchedules = diskSchedules
           .filter((diskRec: any) => !deletedTaskIds.has(diskRec.id))
           .map((diskRec: any) => {
-          const ourRec = scheds.find(s => s.id === diskRec.id);
-          if (ourRec) {
-            return { ...diskRec, status: ourRec.status, date: ourRec.date, startMs: ourRec.startMs, endMs: ourRec.endMs, record: ourRec.record };
-          }
-          return diskRec;
-        });
+            const ourRec = scheds.find(s => s.id === diskRec.id);
+            if (ourRec) {
+              return { ...diskRec, status: ourRec.status, date: ourRec.date, startMs: ourRec.startMs, endMs: ourRec.endMs, record: ourRec.record };
+            }
+            return diskRec;
+          });
 
         delete diskData.globalAuthFallback;
         delete diskData.globalUserKeyFallback;
@@ -259,7 +266,6 @@ const startWatchdog = () => {
           JSON.stringify({
             ...diskData,
             schedules: finalSchedules,
-            originalSchedules,
             nxLocationIp,
             nxLocationPort,
             appPort: detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010")
@@ -324,7 +330,7 @@ const startWatchdog = () => {
             global._nxExecutingTasks?.add(rec.id);
             tasksToExecute.push({ type: "screenshot", rec, startMs, endMs, sh, sm, ss });
           }
-        } 
+        }
         // Video logic
         else if (now >= startMs && now < endMs) {
           // FIX: Also handle status "recording" when rec.record is not yet set.
@@ -346,10 +352,30 @@ const startWatchdog = () => {
             }
           }
         }
-        else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress")) {
+        else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress" || rec.status === "completing")) {
           rec.status = "completing";
           changed = true;
           tasksToExecute.push({ type: "video_stop", rec, startMs, endMs, sh, sm, ss, eh, em, es });
+        }
+        else if (now >= endMs && rec.status === "processing" && rec.type === "video") {
+          const isNonRecurring = !rec.recurrence || rec.recurrence === "none" || rec.recurrence === "once";
+          if (doesVideoFileExist(rec)) {
+            if (isNonRecurring) {
+              deletedTaskIds.add(rec.id);
+              uniqueSchedules.splice(i, 1);
+              i--;
+              changed = true;
+            }
+          } else {
+            const cleanId = rec.cameraId.replace(/[{}]/g, "");
+            const auth = rec.auth;
+            if (auth && ip) {
+              console.log(`[Watchdog] Auto-save pending for ${rec.cameraName} (processing), triggering download queue`);
+              triggerAutoSave(rec, cleanId, auth, nxLocationIp, nxLocationPort);
+            } else {
+              console.warn(`[Watchdog] Cannot auto-save ${rec.cameraName}: missing auth or IP`);
+            }
+          }
         }
         else if (now >= endMs && rec.status === "pending") {
           // Missed task
@@ -412,7 +438,7 @@ const startWatchdog = () => {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const auth = rec.auth;
-            if (!auth || !ip ) {
+            if (!auth || !ip) {
               console.warn(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
               return;
             }
@@ -440,7 +466,7 @@ const startWatchdog = () => {
             await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, {
               schedule: { isEnabled: true, tasks: [{ startTime: startSec, endTime: endSec, dayOfWeek, recordingType: "always", streamQuality: "highest", fps: 0, bitrateKbps: 0, metadataTypes: "none" }] }
             }, auth, ip, port, rec.systemId);
-            
+
             console.log(`[Watchdog] Recording started on VMS for ${rec.cameraName}`);
             logRecordingEvent(`recording started for camera ${rec.cameraName} at ${rec.startTime}`);
             rec.status = "recording";
@@ -461,7 +487,7 @@ const startWatchdog = () => {
             if (auth && ip) {
               await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { isEnabled: false } }, auth, ip, port, rec.systemId);
               console.log(`[Watchdog] Recording stopped on VMS for ${rec.cameraName}`);
-              
+
               // Restore original
               const original = originalSchedules[rec.id];
               if (original) {
@@ -488,10 +514,10 @@ const startWatchdog = () => {
             } else {
               rec.status = "processing";
             }
-            } catch (e: any) {
-              console.error(`[Watchdog] video_stop FAILED for ${rec.cameraName}:`, e.message);
-              rec.status = "recording";
-            }
+          } catch (e: any) {
+            console.error(`[Watchdog] video_stop FAILED for ${rec.cameraName}:`, e.message);
+            rec.status = "recording";
+          }
         }
 
         if (task.type === "expire") {
@@ -550,11 +576,11 @@ function doesVideoFileExist(rec: any): boolean {
           autoSaveBaseDir = settings.storagePath;
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     const finalFileName = `${safeCameraName}_${HH}${mmP}00_${idHash}.mp4`;
     const savePath = path.join(autoSaveBaseDir, dateFolder, finalFileName);
-    
+
     return fsSync.existsSync(savePath) && fsSync.statSync(savePath).size > 0;
   } catch (e) {
     return false;
@@ -564,7 +590,7 @@ function doesVideoFileExist(rec: any): boolean {
 function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
   let nextDate = new Date(rec.date);
   const now = new Date();
-  
+
   // Set the time correctly for comparison
   nextDate.setHours(sh, sm, ss, 0);
 
@@ -582,10 +608,10 @@ function calculateNextOccurrence(rec: any, sh: number, sm: number, ss: number) {
         let monthIdx = nextDate.getMonth() + 1; // Roll to next month
         let next = new Date(year, monthIdx, targetDay);
         // Handle months shorter than targetDay (e.g. Feb 30th)
-        while (next.getDate() !== targetDay && safetyCounter < 100) { 
+        while (next.getDate() !== targetDay && safetyCounter < 100) {
           safetyCounter++;
-          monthIdx++; 
-          next = new Date(year, monthIdx, targetDay); 
+          monthIdx++;
+          next = new Date(year, monthIdx, targetDay);
         }
         nextDate.setTime(next.getTime());
       } else {
@@ -635,7 +661,8 @@ async function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: st
 
 }
 
-// Ensure watchdog starts when this module is used
+// Ensure watchdog and FFmpeg worker start when this module is used
+startFFmpegWorker();
 startWatchdog();
 
 // ── Multi-Tenant Security Helpers ──────────────────────────────────────────
@@ -668,14 +695,14 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
     } catch (e) { }
 
     // Resolve Host: Prioritize cookies -> global config -> provided IP -> localhost
-    let finalIp = request.cookies.get("nx_location_ip")?.value || 
-                  API_CONFIG.serverHost || 
-                  (nxIp && nxIp !== "localhost" && nxIp !== "null" ? nxIp : "localhost");
+    let finalIp = request.cookies.get("nx_location_ip")?.value ||
+      API_CONFIG.serverHost ||
+      (nxIp && nxIp !== "localhost" && nxIp !== "null" ? nxIp : "localhost");
 
     // Resolve Port: Prioritize cookies -> global config -> provided Port -> 7001
-    let finalPort = request.cookies.get("nx_location_port")?.value || 
-                    API_CONFIG.serverPort || 
-                    (nxPort && nxPort !== "7001" && nxPort !== "null" ? nxPort : "7001");
+    let finalPort = request.cookies.get("nx_location_port")?.value ||
+      API_CONFIG.serverPort ||
+      (nxPort && nxPort !== "7001" && nxPort !== "null" ? nxPort : "7001");
 
     if (finalIp === "localhost" || !finalIp) {
       try {
@@ -736,21 +763,14 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
       const permissions = (permsData?.permissions || "").toLowerCase();
       const user = Array.isArray(userData) ? userData[0] : (userData.reply ? userData.reply[0] : userData);
       const groups = Array.isArray(groupsData) ? groupsData : (groupsData.reply || []);
-      
-      // Strict group check on server
-      if (user && user.groupIds && groups.length > 0) {
-        const userGroupNames = groups
-          .filter((g: any) => user.groupIds.includes(g.id))
-          .map((g: any) => (g.name || "").toLowerCase());
-        
-        vmsIsAdmin = userGroupNames.some((name: string) => 
-          name.includes("administrator") || 
-          name.includes("power user") || 
-          name.includes("poweruser") ||
-          name.includes("security admin")
-        );
-      }
-      
+
+      // Determine admin status based on group names (administrator, power user, etc.)
+      const adminGroupNames = (groups || []).map((g: any) => (g.name || "").toLowerCase());
+      vmsIsAdmin = adminGroupNames.some((name: string) =>
+        name.includes("administrator") ||
+        name.includes("poweruser")
+      );
+
       // Fallback only if no groups assigned (NX older versions might not use groups strictly)
       if (!vmsIsAdmin && permissions === "administrator") {
         vmsIsAdmin = true;
@@ -813,15 +833,15 @@ export async function GET(request: NextRequest) {
       let fileNeedsUpdate = false;
       const rawSchedules = data.schedules || [];
       rawSchedules.forEach((s: any) => {
-         if (s.scheduledBy && s.scheduledBy.toLowerCase() === username.toLowerCase()) {
-            if (s.auth !== token) {
-               s.auth = token;
-               fileNeedsUpdate = true;
-            }
-         }
+        if (s.scheduledBy && s.scheduledBy.toLowerCase() === username.toLowerCase()) {
+          if (s.auth !== token) {
+            s.auth = token;
+            fileNeedsUpdate = true;
+          }
+        }
       });
       if (fileNeedsUpdate) {
-        fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), "utf-8").catch(()=>{});
+        fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), "utf-8").catch(() => { });
       }
     }
 
@@ -837,11 +857,11 @@ export async function GET(request: NextRequest) {
       data.schedules = (data.schedules || []).filter((s: any) => {
         const nid = normalizeId(s.cameraId);
         const r = (rights[nid] || rights[s.cameraId] || "").toLowerCase();
-        
+
         // Allow if user has explicit VMS rights OR if they are the one who created this schedule
         const hasRights = r !== "" && r !== "none";
         const isOwner = s.scheduledBy && username && s.scheduledBy.toLowerCase() === username.toLowerCase();
-        
+
         return hasRights || isOwner;
       });
       // console.log(`[GET /scheduled] Restricted user ${username}: Filtered schedules from ${originalCount} down to ${data.schedules.length}`);
@@ -916,41 +936,41 @@ export async function POST(request: NextRequest) {
     // 3. Smart Merge: Keep existing schedules for cameras the user CAN'T see
     // Admin users do a full replace; non-admins merge to preserve other users' schedules
     if (rights && !userIsAdmin) {
-        const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
 
-        // Filter out only the schedules for cameras the user HAS access to from the EXISTING list
-        // (as those are the ones they are providing updates for)
-        const otherUsersSchedules = (existingData.schedules || []).filter((s: any) => {
-          const nid = normalizeId(s.cameraId);
-          const r = rights[nid] || rights[s.cameraId] || "";
-          
-          const hasRights = r !== "" && r !== "none";
-          const isOwner = s.scheduledBy && username && s.scheduledBy.toLowerCase() === username.toLowerCase();
-          
-          // Keep schedules that the user CANNOT manage.
-          // They CAN manage it if they have VMS rights OR if they are the owner.
-          return !hasRights && !isOwner;
-        });
+      // Filter out only the schedules for cameras the user HAS access to from the EXISTING list
+      // (as those are the ones they are providing updates for)
+      const otherUsersSchedules = (existingData.schedules || []).filter((s: any) => {
+        const nid = normalizeId(s.cameraId);
+        const r = rights[nid] || rights[s.cameraId] || "";
 
-        // Combine other users' schedules with the new ones provided by the current user
-        body.schedules = [...otherUsersSchedules, ...(body.schedules || [])];
+        const hasRights = r !== "" && r !== "none";
+        const isOwner = s.scheduledBy && username && s.scheduledBy.toLowerCase() === username.toLowerCase();
 
-        // 4. Deduplicate to prevent redundant tasks for the same camera/time/type
-        const seen = new Set();
-        body.schedules = (body.schedules || []).filter((s: any) => {
-          const dateStr = new Date(s.date).toDateString();
-          const key = `${normalizeId(s.cameraId)}-${dateStr}-${s.startTime}-${s.type}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        // Keep schedules that the user CANNOT manage.
+        // They CAN manage it if they have VMS rights OR if they are the owner.
+        return !hasRights && !isOwner;
+      });
+
+      // Combine other users' schedules with the new ones provided by the current user
+      body.schedules = [...otherUsersSchedules, ...(body.schedules || [])];
+
+      // 4. Deduplicate to prevent redundant tasks for the same camera/time/type
+      const seen = new Set();
+      body.schedules = (body.schedules || []).filter((s: any) => {
+        const dateStr = new Date(s.date).toDateString();
+        const key = `${normalizeId(s.cameraId)}-${dateStr}-${s.startTime}-${s.type}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
 
-        // Merge originalSchedules similarly
-        body.originalSchedules = {
-          ...(existingData.originalSchedules || {}),
-          ...(body.originalSchedules || {})
-        };
+      // Merge originalSchedules similarly
+      body.originalSchedules = {
+        ...(existingData.originalSchedules || {}),
+        ...(body.originalSchedules || {})
+      };
     }
 
     // ── Update Auth & Metadata ──────────────────────────────────────────────
@@ -962,18 +982,18 @@ export async function POST(request: NextRequest) {
         // Preserve existing scheduledBy if it's already set to a real user
         body.schedules = body.schedules.map((s: any) => {
           let finalUsername = s.scheduledBy;
-          
+
           if (!finalUsername || finalUsername === "Verifying..." || finalUsername === "System") {
             finalUsername = username || "System";
           }
-          
+
           const existingSchedule = (existingData.schedules || []).find((old: any) => old.id === s.id);
           const isOwner = finalUsername && finalUsername.toLowerCase() === username.toLowerCase();
-          
+
           // Auto-refresh the token if this user is the owner, otherwise preserve existing
           const finalAuth = isOwner ? token : (existingSchedule?.auth || token);
           const finalUserKey = isOwner ? userKey : (existingSchedule?.userKey || userKey);
-          
+
           return {
             ...s,
             scheduledBy: finalUsername,

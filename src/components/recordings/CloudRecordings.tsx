@@ -602,7 +602,17 @@ export default function CloudRecordings() {
     const endMs = new Date(rec.date).setHours(eh, em, 59, 999);
 
     if (now >= endMs) {
-      if (rec.status === "recording") cancelSchedule(rec.id);
+      // Past end time: mark for server-side auto-save instead of deleting the task
+      if (rec.status === "recording" || rec.status === "in progress") {
+        lastActionTime.current = Date.now();
+        setScheduledRecordings(prev => {
+          const next = prev.map(r =>
+            r.id === rec.id ? { ...r, status: "processing" as const } : r
+          );
+          saveToPersistence(next, originalSchedules.current);
+          return next;
+        });
+      }
       return;
     }
 
@@ -642,18 +652,19 @@ export default function CloudRecordings() {
           durationMs: rec.endMs - rec.startMs
         });
 
-        // Note: Auto-save has been moved to the server-side watchdog for reliability.
-        console.log(`[CloudRecordings] Recording ${rec.cameraName} finished. Server watchdog will handle auto-save.`);
+        // Keep the task on disk as "processing" so the server watchdog can trigger FFmpeg auto-save.
+        console.log(`[CloudRecordings] Recording ${rec.cameraName} finished. Marking as processing for server auto-save.`);
+        lastActionTime.current = Date.now();
+        setScheduledRecordings(prev => {
+          const next = prev.map(r =>
+            r.id === rec.id ? { ...r, status: "processing" as const } : r
+          );
+          saveToPersistence(next, originalSchedules.current);
+          return next;
+        });
 
-        if (rec.recurrence === "none") {
-          setScheduledRecordings(prev => {
-            const next = prev.filter(r => r.id !== rec.id);
-            saveToPersistence(next, originalSchedules.current);
-            return next;
-          });
-        } else {
-          // For recurring: the watchdog will handle the date skip, 
-          // but we can trigger a reload to stay in sync.
+        if (rec.recurrence !== "none") {
+          // For recurring: the watchdog will also advance the next occurrence
           loadFromPersistence();
         }
         
@@ -2140,7 +2151,6 @@ export default function CloudRecordings() {
                             setScheduleDays([]);
                             setScheduleMonthDay("");
                           }}
-                          disabled={{ after: new Date() }}
                           initialFocus
                         />
                       </PopoverContent>
