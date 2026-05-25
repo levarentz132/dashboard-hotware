@@ -34,7 +34,7 @@ export {
   saveStoredCredentials,
   removeStoredCredentials,
   type StoredCredentials,
-} from "./camera-service";
+} from "@/services/camera-service";
 
 // Utility functions
 export { getStatusDescription, getStatusBadgeStyle, getUniqueVendors } from "./camera-utils";

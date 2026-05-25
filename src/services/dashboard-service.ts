@@ -2,7 +2,7 @@
  * Dashboard service - handles dashboard layout persistence
  */
 
-import type { DashboardWidget, DashboardLayout, ExportedLayout } from "./types";
+import type { DashboardWidget, DashboardLayout, ExportedLayout } from "@/components/dashboard/types";
 
 // ============================================
 // Layout Persistence API

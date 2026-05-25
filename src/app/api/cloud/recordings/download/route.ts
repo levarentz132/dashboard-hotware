@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
 import fs from "fs";
 import path from "path";
+import { calculateNextOccurrence } from "@/lib/schedule-utils";
 import os from "os";
 
 import { promisify } from "util";
@@ -89,7 +90,19 @@ async function updateTaskStatus(taskId: string, success: boolean): Promise<void>
           data.schedules.splice(taskIndex, 1);
           console.log(`[recordings/download] Task ${taskId} finished and REMOVED (non-recurring)`);
         } else {
-          console.log(`[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Keeping status: ${task.status}`);
+          // Recurring task: roll it forward immediately to the next occurrence
+          const startParts = (task.startTime || "00:00").split(":").map(Number);
+          const sh = startParts[0], sm = startParts[1], ss = startParts[2] || 0;
+          const duration = (task.endMs && task.startMs) ? (task.endMs - task.startMs) : 0;
+          const nextDate = calculateNextOccurrence(task, sh, sm, ss);
+          
+          task.status = "pending";
+          task.record = false;
+          task.date = nextDate.toISOString();
+          task.startMs = nextDate.getTime();
+          task.endMs = nextDate.getTime() + duration;
+          
+          console.log(`[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Rolled forward to ${task.date} and marked as pending`);
         }
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       }

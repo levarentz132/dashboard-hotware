@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getElectronHeaders, API_CONFIG } from "@/lib/config";
 import Cookies from "js-cookie";
+import { useCloudSystems } from "@/hooks/use-async-data";
 
 interface AuthSession {
   id: string;
@@ -137,7 +138,8 @@ export default function AuditLog() {
     };
   });
 
-  const [loadingSystems, setLoadingSystems] = useState(false);
+  const { data: fetchedCloudSystems, loading: loadingSystems, refetch: refetchCloudSystems } =
+    useCloudSystems();
 
   // Device name mapping
   const [deviceMap, setDeviceMap] = useState<Record<string, string>>({});
@@ -163,58 +165,25 @@ export default function AuditLog() {
   // No longer needed: Auth state removed as it is handled by the proxy
   // (requiresAuth, showLoginForm, etc.)
 
-  // Fetch cloud systems
-  const fetchCloudSystems = useCallback(async () => {
-    // We already have the local system, so we don't need to block if we have systems
-    if (cloudSystems.length <= 1) {
-      setLoadingSystems(true);
-    }
+  useEffect(() => {
+    if (fetchedCloudSystems.length === 0) return;
 
-    try {
-      const response = await fetch("/api/cloud/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...getCloudHeaders(),
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const fetchedSystems: CloudSystem[] = Array.isArray(data) ? data : (data.systems || []);
-
-        setCloudSystems(prev => {
-          // Merge: Start with fetched systems
-          let systems = [...fetchedSystems];
-
-          // Ensure local system (custom or default) is always there
-          const localEntry = prev.find(s => s.name === "Local System") || prev[0];
-          if (!systems.find(s => s.name === "Local System")) {
-            systems.unshift(localEntry);
-          }
-
-          // Sort: owner first, then online systems
-          systems.sort((a, b) => {
-            if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-            if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-            if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-            if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-            return 0;
-          });
-
-          return systems;
-        });
-      } else {
-        console.warn("Cloud systems fetch returned error. Continuing with existing systems.");
+    setCloudSystems((prev) => {
+      let systems = [...fetchedCloudSystems];
+      const localEntry = prev.find((s) => s.name === "Local System") || prev[0];
+      if (localEntry && !systems.find((s) => s.name === "Local System")) {
+        systems.unshift(localEntry);
       }
-    } catch (err) {
-      console.error("Error fetching cloud systems (ignored):", err);
-    } finally {
-      setLoadingSystems(false);
-    }
-  }, [getCloudHeaders, cloudSystems.length]);
+      systems.sort((a, b) => {
+        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
+        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
+        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
+        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
+        return 0;
+      });
+      return systems;
+    });
+  }, [fetchedCloudSystems]);
 
   // Fetch devices for name mapping
   const fetchDevices = useCallback(async (systemId: string) => {
@@ -290,11 +259,6 @@ export default function AuditLog() {
     },
     [date, getCloudHeaders],
   );
-
-  // Initial load
-  useEffect(() => {
-    fetchCloudSystems();
-  }, [fetchCloudSystems]);
 
   // Fetch logs and devices when system changes
   useEffect(() => {
@@ -430,7 +394,7 @@ export default function AuditLog() {
               if (selectedSystem) {
                 fetchAuditLogs(selectedSystem);
               } else {
-                fetchCloudSystems();
+                refetchCloudSystems();
               }
             }}
             disabled={loading || loadingSystems}

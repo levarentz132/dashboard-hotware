@@ -36,7 +36,8 @@ import {
   deleteUser as serviceDeleteUser,
   timeUnitToSeconds,
   secondsToTimeUnit,
-} from "./user-service";
+} from "@/services/user-service";
+import { useCloudSystemsWithOnline } from "@/hooks/use-cloud-systems-with-online";
 import { API_CONFIG, CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
 import Cookies from "js-cookie";
 import { performAdminLogin } from "@/lib/auth-utils";
@@ -333,8 +334,7 @@ export default function UserManagement() {
   const isUserAdmin = isAdmin(localUser);
   const canEditUsers = isUserAdmin || localUser?.privileges?.find(p => p.module === "user_management" || p.module === "users")?.can_edit === true;
   const [selectedSystemId, setSelectedSystemId] = useState<string>("");
-  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
-  const [loadingCloud, setLoadingCloud] = useState(false);
+  const { cloudSystems, loadingCloud, refetchCloudSystems } = useCloudSystemsWithOnline();
 
   // Cloud login state
   const [showLoginDialog, setShowLoginDialog] = useState(false);
@@ -429,51 +429,9 @@ export default function UserManagement() {
     }
   }, []);
 
-  // Fetch cloud systems
-  const fetchCloudSystems = useCallback(async () => {
-    setLoadingCloud(true);
-    try {
-      const response = await fetch("/api/cloud/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          ...getElectronHeaders()
-        }
-      });
-
-      if (!response.ok) {
-        setCloudSystems([]);
-        return;
-      }
-
-      const data = await response.json();
-      const systems: CloudSystem[] = (data.systems || []).map((s: CloudSystem) => ({
-        ...s,
-        isOnline: s.stateOfHealth === "online",
-      }));
-
-      // Sort: owner first, then online systems
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.isOnline && !b.isOnline) return -1;
-        if (!a.isOnline && b.isOnline) return 1;
-        return 0;
-      });
-
-      setCloudSystems(systems);
-    } catch (err) {
-      console.error("Error fetching cloud systems:", err);
-      setCloudSystems([]);
-    } finally {
-      setLoadingCloud(false);
-    }
-  }, []);
-
-  // Initial load: fetch local data immediately, cloud in background
+  // Initial load: fetch local data immediately
   useEffect(() => {
     fetchLocalUsers();
-    fetchCloudSystems();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select first online system if none selected

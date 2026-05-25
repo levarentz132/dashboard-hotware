@@ -3,7 +3,7 @@
  */
 
 import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import type { CloudSystem, Storage, StorageFormData, StorageStatusInfo } from "./types";
+import type { CloudSystem, Storage, StorageFormData, StorageStatusInfo } from "@/components/storage/types";
 
 // ============================================
 // Cloud Systems API (shared pattern)

@@ -17,7 +17,7 @@ export {
   deleteCloudStorage,
   fetchLocalStorages,
   type FetchStoragesResult,
-} from "./storage-service";
+} from "@/services/storage-service";
 
 // Utilities
 export {

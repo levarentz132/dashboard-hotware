@@ -17,7 +17,7 @@ export {
   getTemperatureChartColor,
   getHumidityChartColor,
   type TrendDirection,
-} from "./analytics-service";
+} from "@/services/analytics-service";
 
 // Components
 export { default as Analytics } from "./Analytics";

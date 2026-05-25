@@ -2,7 +2,7 @@
  * Alarm service - handles all alarm/event-related API calls and utilities
  */
 
-import type { CloudSystem, EventLog } from "./types";
+import type { CloudSystem, EventLog } from "@/components/alarms/types";
 
 // ============================================
 // Cloud Systems API (shared pattern)

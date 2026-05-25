@@ -5,7 +5,7 @@ import { getElectronHeaders } from "@/lib/config";
 import { fetchCloudSystems, sortCloudSystems } from "@/lib/api/cloud-systems";
 import { parseError } from "@/hooks/parse-error";
 import { useCloudSystemsQuery } from "@/hooks/use-cloud-systems-query";
-import type { CloudSystem } from "@/types/cloud";
+import type { CloudSystem } from "@/types/cloud-system";
 
 export type { CloudSystem };
 export { fetchCloudSystems, sortCloudSystems };

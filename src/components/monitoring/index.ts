@@ -12,7 +12,7 @@ export {
   openInGoogleMaps,
   type SystemInfoData,
   type ServerLocationData,
-} from "./monitoring-service";
+} from "@/services/monitoring-service";
 
 // Components
 export { default as ServerMap, type ServerMarkerData } from "./ServerMap";

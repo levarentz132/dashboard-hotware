@@ -14,7 +14,7 @@ export {
   getServerStatusClass,
   formatMemory,
   formatRuntime,
-} from "./server-service";
+} from "@/services/server-service";
 
 // Components
 export { default as ServerOptions } from "./ServerOptions";

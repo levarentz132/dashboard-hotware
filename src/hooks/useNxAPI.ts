@@ -1,39 +1,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { nxAPI, NxEvent } from "@/lib/nxapi";
-import { useAsyncData } from "./use-async-data";
+import { useEventsQuery, useAlarmsQuery, useModulesQuery } from "@/hooks/use-nx-queries";
 
-// Custom hook for events
+/** Backward-compatible wrapper around TanStack Query. */
 export function useEvents(limit: number = 50) {
-  const {
-    data: events,
-    loading,
-    error,
-    refetch,
-  } = useAsyncData<NxEvent[]>(() => nxAPI.getEvents(limit), [], { refreshInterval: 30000, deps: [limit] });
+  const { events, loading, error, refetch } = useEventsQuery(limit);
   return { events, loading, error, refetch };
 }
 
-// Custom hook for alarms
+/** @deprecated Prefer useAlarmsQuery — kept for backward-compatible return shape */
 export function useAlarms() {
-  const {
-    data: alarms,
-    loading,
-    error,
-    refetch,
-  } = useAsyncData<NxEvent[]>(() => nxAPI.getAlarms(), [], { refreshInterval: 10000 });
+  const { alarms, loading, error, refetch } = useAlarmsQuery();
   return { alarms, loading, error, refetch };
 }
 
-// Custom hook for real-time updates
+/** Simulated real-time connection indicator (WebSocket not implemented). */
 export function useRealTimeUpdates() {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   useEffect(() => {
-    // This would connect to WebSocket for real-time updates
-    // For now, we'll simulate with periodic updates
     const interval = setInterval(() => {
       setLastUpdate(new Date());
       setIsConnected(true);
@@ -45,22 +32,8 @@ export function useRealTimeUpdates() {
   return { isConnected, lastUpdate };
 }
 
-// Hook for module information
+/** @deprecated Prefer useModulesQuery — kept for backward-compatible return shape */
 export function useModules() {
-  const {
-    data: modules,
-    loading,
-    error,
-  } = useAsyncData<any[]>(
-    async () => {
-      const data = await nxAPI.getModuleInformation();
-      if (data && data.modules && data.modules.length > 0) {
-        return data.modules;
-      }
-      throw new Error("Server connected but no modules found. Check your Nx Witness system status.");
-    },
-    [],
-    { fetchOnMount: true }
-  );
+  const { modules, loading, error } = useModulesQuery();
   return { modules, loading, error };
 }

@@ -10,7 +10,7 @@ export type { ICamera, IDeviceType } from "./Device";
 export type { IServer } from "./Server";
 
 // Re-export cloud types
-export type { CloudSystem } from "./cloud";
+export type { CloudSystem } from "./cloud-system";
 export type {
   CloudAuthState,
   CloudServerInfo,
@@ -18,7 +18,7 @@ export type {
   CloudEvent,
   CloudStorage,
   CloudAuditLogEntry,
-} from "./Cloud";
+} from "./Cloud.d";
 
 // Re-export common types
 export type {

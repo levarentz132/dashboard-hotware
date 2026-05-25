@@ -46,6 +46,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 
 import { getElectronHeaders } from "@/lib/config";
 import Cookies from "js-cookie";
+import { useCloudSystems } from "@/hooks/use-async-data";
 
 type ViewMode = "local" | "cloud";
 
@@ -119,10 +120,8 @@ export default function StorageManagement() {
   // View mode state
   const [viewMode, setViewMode] = useState<ViewMode>("local");
 
-  // Cloud systems state
-  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
+  const { data: cloudSystems, loading: loadingSystems, refetch: refetchCloudSystems } = useCloudSystems();
   const [selectedSystem, setSelectedSystem] = useState<CloudSystem | null>(null);
-  const [loadingSystems, setLoadingSystems] = useState(false);
 
   // Storage state (for cloud)
   const [storages, setStorages] = useState<Storage[]>([]);
@@ -151,50 +150,14 @@ export default function StorageManagement() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Fetch cloud systems — non-blocking, failures are silently ignored
-  const fetchCloudSystems = useCallback(async () => {
-    setLoadingSystems(true);
-    try {
-      const response = await fetch("/api/cloud/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...getElectronHeaders(),
-        },
-      });
-
-      // Silently fail on any non-OK response (e.g. 401 when not logged into cloud)
-      if (!response.ok) {
-        return;
-      }
-
-      const data = await response.json();
-      const systems: CloudSystem[] = data.systems || [];
-
-      // Sort: owner first, then online systems
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-        if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-        return 0;
-      });
-
-      setCloudSystems(systems);
-
-      // Auto-select first online system
-      const firstOnline = systems.find((s) => s.stateOfHealth === "online");
+  useEffect(() => {
+    if (cloudSystems.length > 0 && !selectedSystem) {
+      const firstOnline = cloudSystems.find((s) => s.stateOfHealth === "online");
       if (firstOnline) {
-        setSelectedSystem(firstOnline);
+        setSelectedSystem(firstOnline as CloudSystem);
       }
-    } catch {
-      // Cloud is optional — silently ignore all errors
-    } finally {
-      setLoadingSystems(false);
     }
-  }, []);
+  }, [cloudSystems, selectedSystem]);
 
   // Auto-login function (disabled - authentication handled by Dual-Login flow)
   const attemptAutoLogin = useCallback(async (systemId: string) => {
@@ -373,10 +336,9 @@ export default function StorageManagement() {
     }
   }, []);
 
-  // Initial load - always fetch local data immediately, then cloud
+  // Initial load - always fetch local data immediately
   useEffect(() => {
     fetchLocalStorages();
-    fetchCloudSystems();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch storages when system changes (cloud mode)
@@ -706,7 +668,7 @@ export default function StorageManagement() {
           <button
             onClick={() => {
               if (viewMode === "cloud" && !selectedSystem && cloudSystems.length === 0) {
-                fetchCloudSystems();
+                refetchCloudSystems();
               } else {
                 handleRefresh();
               }

@@ -2,7 +2,7 @@
  * Dashboard types - interfaces for dashboard module
  */
 
-import type { WidgetType } from "./Dashboard";
+import type { WidgetType } from "./widget-registry";
 
 export interface LayoutItem {
   i: string;

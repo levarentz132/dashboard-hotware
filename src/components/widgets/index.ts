@@ -27,7 +27,7 @@ export {
   formatBytes,
   getStorageUsagePercentage,
   calculateStorageStats,
-} from "./widget-service";
+} from "@/services/widget-service";
 
 // Widget components
 export { default as AlarmConsoleWidget } from "./AlarmConsoleWidget";

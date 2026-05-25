@@ -20,7 +20,7 @@ export {
   getUniqueEventTypes,
   getUniqueUsers,
   type FetchAuditLogsResult,
-} from "./audit-service";
+} from "@/services/audit-service";
 
 // Components
 export { default as AuditLog } from "./AuditLog";

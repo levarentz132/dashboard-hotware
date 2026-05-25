@@ -3,7 +3,7 @@
  */
 
 import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import type { ServerInfo } from "./types";
+import type { ServerInfo } from "@/components/servers/types";
 
 // ============================================
 // Cloud Systems/Servers API

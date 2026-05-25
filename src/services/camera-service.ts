@@ -3,7 +3,7 @@
  */
 
 import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import type { CloudSystem, CloudCamera, Province, Regency, District, Village } from "./types";
+import type { CloudSystem, CloudCamera, Province, Regency, District, Village } from "@/components/cameras/types";
 
 // ============================================
 // Cloud Systems API
@@ -177,52 +177,44 @@ export async function fetchVillages(districtId: string): Promise<Village[]> {
 }
 
 // ============================================
-// Credentials Persistence
+// Session login state (no passwords persisted)
 // ============================================
-
-const CREDENTIALS_KEY = "nxSystemCredentials";
 
 export interface StoredCredentials {
   [systemId: string]: {
-    username: string;
-    password: string;
-    token?: string;
+    username?: string;
     loggedIn: boolean;
+    token?: string;
   };
 }
 
+let sessionLoginState: StoredCredentials = {};
+
 /**
- * Load credentials from localStorage
+ * Load per-system login flags for the current browser session only.
  */
 export function loadStoredCredentials(): StoredCredentials {
-  try {
-    const saved = localStorage.getItem(CREDENTIALS_KEY);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (err) {
-    console.error("Error loading saved credentials:", err);
-  }
-  return {};
+  return { ...sessionLoginState };
 }
 
 /**
- * Save credentials to localStorage
+ * Persist login flags in memory — never stores passwords.
  */
 export function saveStoredCredentials(credentials: StoredCredentials): void {
-  try {
-    if (Object.keys(credentials).length > 0) {
-      localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(credentials));
-    } else {
-      localStorage.removeItem(CREDENTIALS_KEY);
-    }
-  } catch (err) {
-    console.error("Error saving credentials to localStorage:", err);
-  }
+  sessionLoginState = Object.fromEntries(
+    Object.entries(credentials).map(([systemId, cred]) => [
+      systemId,
+      {
+        username: cred.username,
+        loggedIn: cred.loggedIn,
+        token: cred.token,
+      },
+    ]),
+  );
 }
 
 /**
- * Remove credentials for a system
+ * Clear login state for one system.
  */
 export function removeStoredCredentials(systemId: string): StoredCredentials {
   const current = loadStoredCredentials();

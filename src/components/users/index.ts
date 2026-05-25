@@ -20,7 +20,7 @@ export {
   filterUsers,
   getUserTypeBadge,
   validateUserForm,
-} from "./user-service";
+} from "@/services/user-service";
 
 // Components
 export { default as UserManagement } from "./UserManagement";

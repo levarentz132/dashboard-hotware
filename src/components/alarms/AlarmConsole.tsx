@@ -47,8 +47,9 @@ import { CLOUD_CONFIG, API_CONFIG, getCloudAuthHeader, getElectronHeaders } from
 import { performAdminLogin } from "@/lib/auth-utils";
 import { CloudLoginDialog } from "@/components/cloud/CloudLoginDialog";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
+import { useCloudSystemsWithOnline } from "@/hooks/use-cloud-systems-with-online";
 import Cookies from "js-cookie";
-import { AlarmExportDialog } from "./AlarmExportDialog";
+import { AlarmConsoleActions } from "./AlarmConsoleActions";
 import { normalizeNxEvents } from "@/lib/nx-normalization";
 
 
@@ -847,9 +848,7 @@ export default function AlarmConsole() {
     setEvents(sortedEvents);
   }, [dataBySystem]);
 
-  // Cloud systems state
-  const [cloudSystems, setCloudSystems] = useState<CloudSystem[]>([]);
-  const [loadingCloud, setLoadingCloud] = useState(false);
+  const { cloudSystems, loadingCloud, refetchCloudSystems } = useCloudSystemsWithOnline();
 
   // Cloud servers state (servers within a cloud system)
   const [cloudServers, setCloudServers] = useState<CloudServer[]>([]);
@@ -938,49 +937,6 @@ export default function AlarmConsole() {
   const [displayCount, setDisplayCount] = useState(20); // Show 20 events initially
   const LOAD_MORE_COUNT = 20; // Load 20 more each time
 
-  // Fetch cloud systems
-  const fetchCloudSystems = useCallback(async () => {
-    setLoadingCloud(true);
-    try {
-      const response = await fetch("/api/cloud/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...getElectronHeaders(),
-        },
-      });
-
-      if (!response.ok) {
-        setCloudSystems([]);
-        return;
-      }
-
-      const data = await response.json();
-      const systems: CloudSystem[] = (data.systems || []).map((s: CloudSystem) => ({
-        ...s,
-        isOnline: s.stateOfHealth === "online",
-      }));
-
-      // Sort: owner first, then online systems
-      systems.sort((a, b) => {
-        if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-        if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-        if (a.isOnline && !b.isOnline) return -1;
-        if (!a.isOnline && b.isOnline) return 1;
-        return 0;
-      });
-
-      setCloudSystems(systems);
-    } catch (err) {
-      console.error("Error fetching cloud systems:", err);
-      setCloudSystems([]);
-    } finally {
-      setLoadingCloud(false);
-    }
-  }, []);
-
   // Admin login function for cloud systems
   const attemptAdminLogin = useCallback(
     async (systemId: string, systemName: string): Promise<boolean> => {
@@ -1006,11 +962,6 @@ export default function AlarmConsole() {
     },
     [autoLoginAttempted],
   );
-
-  // Fetch cloud systems on mount
-  useEffect(() => {
-    fetchCloudSystems();
-  }, [fetchCloudSystems]);
 
   // Resource lookup map
   const resourceNameMap = useMemo(() => {
@@ -1040,7 +991,9 @@ export default function AlarmConsole() {
 
     // 4. Focused servers from currently selected system
     servers.forEach((server) => {
-      addToMap(server.id, server.name || "Unknown Server", "server");
+      const id = String(server.id ?? "");
+      const name = String(server.name ?? "Unknown Server");
+      addToMap(id, name, "server");
     });
 
     return map;
@@ -1536,63 +1489,52 @@ export default function AlarmConsole() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Semua Server</SelectItem>
-                {servers.map((server) => (
-                  <SelectItem key={server.id} value={server.id}>
+                {servers.map((server) => {
+                  const serverId = String(server.id ?? "");
+                  const serverName = String(server.name ?? serverId);
+                  const isOnline = String(server.status ?? "") === "Online";
+                  return (
+                  <SelectItem key={serverId} value={serverId}>
                     <div className="flex items-center gap-2">
                       <span
                         className={cn(
                           "w-2 h-2 rounded-full",
-                          server.status === "Online" ? "bg-green-500" : "bg-gray-400",
+                          isOnline ? "bg-green-500" : "bg-gray-400",
                         )}
                       />
-                      <span>{server.name || server.id}</span>
+                      <span>{serverName}</span>
                     </div>
                   </SelectItem>
-                ))}
+                  );
+                })}
               </SelectContent>
             </Select>
           )}
 
-          {/* Cloud Logout Button */}
-          {!isCloudEmpty && selectedCloudSystemId !== "all" && isLoggedIn.has(selectedCloudSystemId) && (
-            <Button
-              variant="ghost"
-              size="default"
-              className="h-10 text-xs text-muted-foreground hover:text-red-500 gap-1"
-              onClick={handleCloudLogout}
-              disabled={loggingOut}
-            >
-              {loggingOut ? <RefreshCw className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
-              <span className="hidden sm:inline">Logout</span>
-            </Button>
-          )}
-
-          {/* Export Button */}
-          <AlarmExportDialog
+          <AlarmConsoleActions
             events={events}
             stats={stats}
             systemName={getCurrentCloudSystemName()}
-            period={{ from: filterDateFrom, to: filterDateTo }}
-          />
-
-          {/* Refresh Button */}
-          <button
-            onClick={() => {
+            filterDateFrom={filterDateFrom}
+            filterDateTo={filterDateTo}
+            onRefresh={() => {
               refetchSync();
-              fetchCloudSystems();
+              refetchCloudSystems();
             }}
-            disabled={
+            onCloudLogout={handleCloudLogout}
+            refreshDisabled={
               syncLoading ||
               loadingCloud ||
-              (!isCloudEmpty && (!selectedCloudSystemId && dataBySystem.length === 0))
+              (!isCloudEmpty && !selectedCloudSystemId && dataBySystem.length === 0)
             }
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
-          >
-            <RefreshCw
-              className={`w-4 h-4 ${syncLoading || loadingCloud ? "animate-spin" : ""}`}
-            />
-            <span className="font-medium">Refresh</span>
-          </button>
+            refreshSpinning={syncLoading || loadingCloud}
+            showCloudLogout={
+              !isCloudEmpty &&
+              selectedCloudSystemId !== "all" &&
+              isLoggedIn.has(selectedCloudSystemId)
+            }
+            loggingOut={loggingOut}
+          />
         </div>
       </div>
 

@@ -7,7 +7,7 @@ import { API_CONFIG } from "@/lib/config";
 import { apiFetch } from "@/lib/http-client";
 import { getBrowserQueryClient } from "@/lib/query-client";
 import { queryKeys } from "@/lib/query-keys";
-import type { CloudSystem } from "@/types/cloud";
+import type { CloudSystem } from "@/types/cloud-system";
 
 const CLOUD_CACHE_TTL_MS = 5 * 60 * 1000;
 

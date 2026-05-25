@@ -3,8 +3,8 @@
  */
 
 import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import type { CloudSystem, CloudDevice, AuditLogEntry, EventTypeInfo } from "./types";
-import { EVENT_TYPE_INFO } from "./types";
+import type { CloudSystem, CloudDevice, AuditLogEntry, EventTypeInfo } from "@/components/audits/types";
+import { EVENT_TYPE_INFO } from "@/components/audits/types";
 
 // ============================================
 // Cloud Systems API

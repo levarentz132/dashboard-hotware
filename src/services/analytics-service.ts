@@ -2,7 +2,7 @@
  * Analytics service - handles IoT sensor data and utilities
  */
 
-import type { SensorStatus } from "./types";
+import type { SensorStatus } from "@/components/analytics/types";
 
 // ============================================
 // Sensor Status Utilities

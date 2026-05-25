@@ -58,7 +58,7 @@ import {
   CloudDevice,
   CloudAuthError,
   BasicAuthCredentials,
-} from "./recordings-service";
+} from "@/services/recordings-service";
 import nxAPI from "@/lib/nxapi";
 import {
   AlertDialog,

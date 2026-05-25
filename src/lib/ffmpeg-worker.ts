@@ -3,6 +3,7 @@ import path from "path";
 import { spawn } from "child_process";
 import { Readable } from "stream";
 import { loadQueue, updateJobStatus, getNextPendingJobs, FFmpegJob, cleanupStaleJobs } from "./ffmpeg-queue";
+import { calculateNextOccurrence } from "./schedule-utils";
 import { logRecordingEvent } from "./recording-logger";
 import logger from "./logger";
 
@@ -91,8 +92,19 @@ async function updateTaskStatus(taskId: string, success: boolean): Promise<void>
             logger.info(`[FFmpegWorker] Non-recurring Task ${taskId} marked as FAILED`);
           }
         } else {
-          // Keep the "pending" status set by the watchdog for recurring schedules
-          logger.info(`[FFmpegWorker] Task ${taskId} is recurring. Keeping status: ${task.status}`);
+          // Recurring task: roll it forward immediately to the next occurrence
+          const startParts = (task.startTime || "00:00").split(":").map(Number);
+          const sh = startParts[0], sm = startParts[1], ss = startParts[2] || 0;
+          const duration = (task.endMs && task.startMs) ? (task.endMs - task.startMs) : 0;
+          const nextDate = calculateNextOccurrence(task, sh, sm, ss);
+          
+          task.status = "pending";
+          task.record = false;
+          task.date = nextDate.toISOString();
+          task.startMs = nextDate.getTime();
+          task.endMs = nextDate.getTime() + duration;
+          
+          logger.info(`[FFmpegWorker] Task ${taskId} is recurring. Rolled forward to ${task.date} and marked as pending`);
         }
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       }

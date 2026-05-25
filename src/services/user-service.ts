@@ -2,7 +2,7 @@
  * User service - handles all user-related API calls and utilities
  */
 
-import type { NxUser, NxUserGroup, UserFormData, TimeUnit } from "./types";
+import type { NxUser, NxUserGroup, UserFormData, TimeUnit } from "@/components/users/types";
 import { API_CONFIG, getElectronHeaders } from "@/lib/config";
 
 // ============================================

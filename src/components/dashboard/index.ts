@@ -14,7 +14,9 @@ export {
   generateWidgetId,
   widgetsToLayout,
   updateWidgetPositions,
-} from "./dashboard-service";
+} from "@/services/dashboard-service";
+
+export { widgetRegistry, MemoizedWidget, type WidgetType } from "./widget-registry";
 
 // Components
-export { default as ModernDashboard, widgetRegistry, type WidgetType } from "./Dashboard";
+export { default as ModernDashboard } from "./Dashboard";

@@ -17,7 +17,7 @@ export {
   filterEvents,
   countEventsByLevel,
   type LevelConfig,
-} from "./alarm-service";
+} from "@/services/alarm-service";
 
 // Components
 export { default as AlarmConsole } from "./AlarmConsole";

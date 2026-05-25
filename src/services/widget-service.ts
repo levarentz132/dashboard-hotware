@@ -3,7 +3,7 @@
  */
 
 import { CLOUD_CONFIG, getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
-import type { CloudSystem, EventLog, Storage, AuditLogEntry } from "./types";
+import type { CloudSystem, EventLog, Storage, AuditLogEntry } from "@/components/widgets/types";
 
 // ============================================
 // Cloud Systems (shared across widgets)
