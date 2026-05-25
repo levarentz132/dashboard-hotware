@@ -14,6 +14,7 @@ import type {
 } from "@/lib/auth/types";
 import { AUTH_ROUTES, AUTH_CONFIG } from "@/lib/auth/constants";
 import nxAPI from "@/lib/nxapi";
+import { invalidateCloudSystems } from "@/lib/api/cloud-systems";
 
 const initialState: AuthState = {
   user: null,
@@ -250,6 +251,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const data = await response.json();
 
         if (data.success) {
+          invalidateCloudSystems();
           if (data.user?.system_id) {
             nxAPI.setSystemId(data.user.system_id);
           }
@@ -291,6 +293,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setState((prev) => ({ ...prev, isLoading: true }));
 
     try {
+      invalidateCloudSystems();
+
       const response = await fetch(AUTH_ROUTES.API_LOGOUT, {
         method: "POST",
         credentials: "include",

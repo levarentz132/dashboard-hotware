@@ -91,20 +91,19 @@ export function useInventorySync<T>(
                     const normalizeId = (id: string) => id.toLowerCase().replace(/[{}]/g, "");
                     const localId = localData ? normalizeId(localData.systemId) : null;
 
-                    // Process cloud systems
-                    systems.forEach(async (system) => {
-                        const cloudId = normalizeId(system.id);
+                    // Process cloud systems sequentially to avoid race conditions
+                    for (const system of systems) {
+                        if (!isMounted.current || currentFetchId !== fetchCount.current) return;
 
-                        // Skip if this system is the local one we already loaded
-                        if (localId && cloudId === localId) return;
-                        if (system.stateOfHealth !== "online") return;
+                        const cloudId = normalizeId(system.id);
+                        if (localId && cloudId === localId) continue;
+                        if (system.stateOfHealth !== "online") continue;
 
                         try {
                             const items = await cloudItemFetcher(system);
 
-                            if (isMounted.current && currentFetchId === fetchCount.current && items.length >= 0) {
+                            if (isMounted.current && currentFetchId === fetchCount.current) {
                                 setDataBySystem((prev) => {
-                                    // Check for duplicates with normalized IDs
                                     if (prev.find((s) => normalizeId(s.systemId) === cloudId)) return prev;
 
                                     const newData = [
@@ -123,7 +122,7 @@ export function useInventorySync<T>(
                         } catch (e) {
                             console.error(`[InventorySync] Cloud fetch failed for ${system.name}:`, e);
                         }
-                    });
+                    }
                 } catch (e) {
                     console.error("[InventorySync] Cloud systems fetch failed:", e);
                     if (!hasLocalLogin) setError("Failed to fetch cloud systems");

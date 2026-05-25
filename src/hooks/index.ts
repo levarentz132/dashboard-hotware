@@ -17,6 +17,9 @@ export {
   type CloudSystem,
 } from "./use-async-data";
 
+export { useCloudSystemsQuery } from "./use-cloud-systems-query";
+export { invalidateCloudSystems, invalidateCloudSystemsCache } from "@/lib/api/cloud-systems";
+
 // NX API hooks
 export { useEvents, useAlarms, useRealTimeUpdates, useModules } from "./useNxAPI";
 export { useCameras, useDeviceType, useDevices } from "./useNxAPI-camera";

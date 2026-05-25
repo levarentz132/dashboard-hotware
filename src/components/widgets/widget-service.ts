@@ -9,40 +9,7 @@ import type { CloudSystem, EventLog, Storage, AuditLogEntry } from "./types";
 // Cloud Systems (shared across widgets)
 // ============================================
 
-/**
- * Fetch cloud systems sorted by owner/online status
- */
-export async function fetchCloudSystems(): Promise<CloudSystem[]> {
-  try {
-    const response = await fetch("/api/cloud/systems", {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...getElectronHeaders(),
-      },
-    });
-
-    if (!response.ok) return [];
-
-    const data = await response.json();
-    const systems: CloudSystem[] = data.systems || [];
-
-    // Sort: owner first, then online
-    systems.sort((a, b) => {
-      if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-      if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-      if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-      if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-      return 0;
-    });
-
-    return systems;
-  } catch {
-    return [];
-  }
-}
+export { fetchCloudSystems } from "@/lib/api/cloud-systems";
 
 /**
  * Get first online system

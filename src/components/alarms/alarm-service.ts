@@ -2,48 +2,13 @@
  * Alarm service - handles all alarm/event-related API calls and utilities
  */
 
-import { getCloudAuthHeader } from "@/lib/config";
 import type { CloudSystem, EventLog } from "./types";
 
 // ============================================
 // Cloud Systems API (shared pattern)
 // ============================================
 
-/**
- * Fetch all cloud systems from NX Cloud
- */
-export async function fetchCloudSystems(): Promise<CloudSystem[]> {
-  try {
-    const response = await fetch("https://meta.nxvms.com/cdb/systems", {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: getCloudAuthHeader(),
-      },
-    });
-
-    if (!response.ok) return [];
-
-    const data = await response.json();
-    const systems: CloudSystem[] = data.systems || [];
-
-    // Sort: owner first, then online systems
-    systems.sort((a, b) => {
-      if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-      if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-      if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-      if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-      return 0;
-    });
-
-    return systems;
-  } catch (err) {
-    console.error("Error fetching cloud systems:", err);
-    return [];
-  }
-}
+export { fetchCloudSystems } from "@/lib/api/cloud-systems";
 
 /**
  * Fetch events from cloud system

@@ -9,39 +9,7 @@ import type { CloudSystem, Storage, StorageFormData, StorageStatusInfo } from ".
 // Cloud Systems API (shared pattern)
 // ============================================
 
-/**
- * Fetch all cloud systems from internal proxy
- */
-export async function fetchCloudSystems(): Promise<CloudSystem[]> {
-  try {
-    const response = await fetch("/api/cloud/systems", {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        ...getElectronHeaders()
-      }
-    });
-
-    if (!response.ok) return [];
-
-    const data = await response.json();
-    const systems: CloudSystem[] = data.systems || [];
-
-    // Sort: owner first, then online systems
-    systems.sort((a, b) => {
-      if (a.accessRole === "owner" && b.accessRole !== "owner") return -1;
-      if (a.accessRole !== "owner" && b.accessRole === "owner") return 1;
-      if (a.stateOfHealth === "online" && b.stateOfHealth !== "online") return -1;
-      if (a.stateOfHealth !== "online" && b.stateOfHealth === "online") return 1;
-      return 0;
-    });
-
-    return systems;
-  } catch (err) {
-    console.error("Error fetching cloud systems:", err);
-    return [];
-  }
-}
+export { fetchCloudSystems } from "@/lib/api/cloud-systems";
 
 // ============================================
 // Authentication

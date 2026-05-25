@@ -3,6 +3,7 @@
 import logger from "@/lib/logger";
 import { useEffect, useRef, useCallback } from "react";
 import { getElectronHeaders } from "@/lib/config";
+import { fetchCloudSystems } from "@/lib/api/cloud-systems";
 import { showNotification } from "@/lib/notifications";
 import { addPersistentNotification } from "@/lib/persistent-notifications";
 import nxAPI from "@/lib/nxapi";
@@ -78,30 +79,17 @@ export function GlobalDeviceMonitor() {
     }
 
     try {
-      const response = await fetch("/api/cloud/systems", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          ...getElectronHeaders(),
-        },
-      });
+      const systems = await fetchCloudSystems();
+      logger.debug(`[GlobalDeviceMonitor] Found ${systems.length} cloud systems`);
 
-      if (response.ok) {
-        const data = await response.json();
-        const systems = Array.isArray(data) ? data : data?.systems || [];
-
-        logger.debug(`[GlobalDeviceMonitor] Found ${systems.length} cloud systems`);
-
-        systems.forEach((s: any) => {
-          const cleanId = s.id.replace(/[{}]/g, "");
-          if (!allSystems.find(existing => existing.id.replace(/[{}]/g, "") === cleanId)) {
-            allSystems.push({
-              id: s.id,
-              name: s.name,
-            });
-          }
-        });
+      for (const system of systems) {
+        const cleanId = system.id.replace(/[{}]/g, "");
+        if (!allSystems.find((existing) => existing.id.replace(/[{}]/g, "") === cleanId)) {
+          allSystems.push({
+            id: system.id,
+            name: system.name,
+          });
+        }
       }
     } catch (error) {
       console.error("[GlobalDeviceMonitor] Error fetching cloud systems:", error);

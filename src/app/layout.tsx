@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { AuthProvider } from "@/contexts/auth-context";
+import { QueryProvider } from "@/providers/query-provider";
 import { FullscreenHandler } from "@/components/utils/FullscreenHandler";
 import { GlobalDeviceMonitor } from "@/components/monitoring/GlobalDeviceMonitor";
 import DisableConsoleClient from "@/components/DisableConsoleClient";
@@ -24,11 +25,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <DisableConsoleClient />
         <FullscreenHandler />
-        <AuthProvider>
-          <GlobalDeviceMonitor />
-          <NotificationSystem />
-          {children}
-        </AuthProvider>
+        <QueryProvider>
+          <AuthProvider>
+            <GlobalDeviceMonitor />
+            <NotificationSystem />
+            {children}
+          </AuthProvider>
+        </QueryProvider>
       </body>
     </html>
   );
