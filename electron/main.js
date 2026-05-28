@@ -7,6 +7,7 @@ const { spawn, fork } = require('child_process');
 const net = require('net');
 
 let nextProcess;
+let redisProcess;
 let mainWindow;
 let cloudToken = null;
 let currentPort = 3130;
@@ -482,6 +483,108 @@ ipcMain.handle('setup:save', async (event, data) => {
 
 
 
+function getProjectRoot() {
+    return isPackaged ? process.resourcesPath : path.join(__dirname, '..');
+}
+
+function getRedisDir() {
+    return path.join(getProjectRoot(), 'redis');
+}
+
+function ensureRedisPortableSync() {
+    const redisDir = getRedisDir();
+    const destExe = path.join(redisDir, 'redis-server.exe');
+    const sourceExe = path.join(getProjectRoot(), 'node-bin', 'redis-server.exe');
+
+    if (!fs.existsSync(redisDir)) {
+        fs.mkdirSync(redisDir, { recursive: true });
+    }
+    if (!fs.existsSync(path.join(redisDir, 'data'))) {
+        fs.mkdirSync(path.join(redisDir, 'data'), { recursive: true });
+    }
+
+    if (fs.existsSync(destExe)) {
+        return true;
+    }
+    if (fs.existsSync(sourceExe)) {
+        fs.copyFileSync(sourceExe, destExe);
+        logtoFile(`[Redis] Copied redis-server.exe to ${destExe}`);
+        return true;
+    }
+    return false;
+}
+
+function isRedisPortOpen() {
+    return new Promise((resolve) => {
+        const socket = net.createConnection({ port: 6379, host: '127.0.0.1' }, () => {
+            socket.end();
+            resolve(true);
+        });
+        socket.on('error', () => resolve(false));
+        socket.setTimeout(1500, () => {
+            socket.destroy();
+            resolve(false);
+        });
+    });
+}
+
+async function startRedisServer() {
+    if (await isRedisPortOpen()) {
+        logtoFile('[Redis] Already listening on 127.0.0.1:6379');
+        return true;
+    }
+
+    if (!ensureRedisPortableSync()) {
+        const redisDir = getRedisDir();
+        const exe = path.join(redisDir, 'redis-server.exe');
+        logtoFile(`[Redis] Missing ${exe} — server cache will use in-memory fallback`);
+        return false;
+    }
+
+    const redisDir = getRedisDir();
+    const exe = path.join(redisDir, 'redis-server.exe');
+
+    return new Promise((resolve) => {
+        redisProcess = spawn(exe, ['redis.conf'], {
+            cwd: redisDir,
+            stdio: 'ignore',
+            windowsHide: true,
+        });
+
+        redisProcess.on('error', (err) => {
+            logtoFile(`[Redis] Failed to start: ${err.message}`);
+            resolve(false);
+        });
+
+        (async () => {
+            for (let i = 0; i < 30; i++) {
+                await new Promise((r) => setTimeout(r, 200));
+                if (await isRedisPortOpen()) {
+                    logtoFile('[Redis] Started (redis/redis.conf, data in redis/data)');
+                    resolve(true);
+                    return;
+                }
+            }
+            logtoFile('[Redis] Timed out waiting for port 6379');
+            resolve(false);
+        })();
+    });
+}
+
+async function stopRedisServer() {
+    if (redisProcess) {
+        await killProcessTree(redisProcess.pid);
+        redisProcess = null;
+        logtoFile('[Redis] Stopped');
+    }
+}
+
+function redisEnv() {
+    return {
+        REDIS_URL: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+    };
+}
+
 let isServerStopping = false;
 let healthCheckInterval;
 let serverParams = null;
@@ -579,7 +682,8 @@ function startNextDev() {
         PORT: currentPort,
         HOSTNAME: '0.0.0.0',
         EXT_CONFIG_PATH: CONFIG_PATH,
-        NODE_OPTIONS: '--max-old-space-size=1024'
+        NODE_OPTIONS: '--max-old-space-size=1024',
+        ...redisEnv(),
     };
     launchServer('npm', ['run', 'dev'], cwd, env);
 }
@@ -720,7 +824,8 @@ function startNextProd() {
             HOSTNAME: '0.0.0.0',
             EXT_CONFIG_PATH: serverPath.includes('app.asar') ? path.join(app.getPath('userData'), '.env.local') : CONFIG_PATH,
             NODE_PATH: nodeModulesPath,
-            IS_ELECTRON: 'true'
+            IS_ELECTRON: 'true',
+            ...redisEnv(),
         };
 
         logtoFile(`[Electron] Setting NODE_PATH to: ${nodeModulesPath}`);
@@ -741,7 +846,8 @@ function startNextProd() {
             NODE_ENV: 'production',
             PORT: currentPort,
             NODE_OPTIONS: '--max-old-space-size=512',
-            IS_ELECTRON: 'true'
+            IS_ELECTRON: 'true',
+            ...redisEnv(),
         };
 
         launchServer('npm', ['run', 'start'], cwd, env);
@@ -853,6 +959,8 @@ async function waitForServer(url, timeout = 30000) {
 }
 
 app.whenReady().then(async () => {
+    await startRedisServer();
+
     // Find free port
     const startPort = parseInt(process.env.PORT || '3130', 10);
     currentPort = await findAvailablePort(startPort);
@@ -1028,6 +1136,7 @@ app.on('before-quit', async (e) => {
 
     logtoFile('[Electron] Intercepted quit for cleanup...');
     await stopNextServer();
+    await stopRedisServer();
 
     app.exit(0);
 });

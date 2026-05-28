@@ -332,6 +332,17 @@ export default function CloudRecordings() {
   const activeAbortController = useRef<AbortController | null>(null);
   const lastRequestTime = useRef<number>(0);
 
+  const selectedDeviceRef = useRef(selectedDevice);
+  const dateRef = useRef(date);
+
+  useEffect(() => {
+    selectedDeviceRef.current = selectedDevice;
+  }, [selectedDevice]);
+
+  useEffect(() => {
+    dateRef.current = date;
+  }, [date]);
+
   // Sync enriched user with localUser and fetch rights if needed
   useEffect(() => {
     if (!localUser) {
@@ -523,6 +534,18 @@ export default function CloudRecordings() {
             date: new Date(s.date)
           }));
 
+          // Detect transitions into completed or failed states
+          let hasNewCompleted = false;
+          loadedScheds.forEach((s: any) => {
+            if (s.status === "completed" || s.status === "completed-with-warnings" || s.status === "failed") {
+              const existing = scheduledRecordings.find((curr: any) => curr.id === s.id);
+              const existingStatus = existing ? (existing.status as string) : "";
+              if (existing && existingStatus !== s.status && existingStatus !== "completed" && existingStatus !== "completed-with-warnings" && existingStatus !== "failed") {
+                hasNewCompleted = true;
+              }
+            }
+          });
+
           // BREAK INFINITE LOOP: Only update state if data actually changed
           // Include 'record' flag in comparison so UI updates when watchdog processes tasks
           const currentFingerprint = scheduledRecordings.map(s => `${s.id}:${s.status}:${(s as any).record || false}`).sort().join(",");
@@ -539,6 +562,13 @@ export default function CloudRecordings() {
                 reconcileTimer(rec);
               }
             });
+
+            if (hasNewCompleted) {
+              console.log("[Persistence] Scheduled task completed! Auto-refreshing recent recordings...");
+              setTimeout(() => {
+                handleSearchRecentRecordings(selectedDeviceRef.current, dateRef.current, undefined, false, true);
+              }, 2000); // 2 second delay to allow files to finish writing and index
+            }
           }
         }
         if (data.vmsUsername) {
@@ -728,7 +758,7 @@ export default function CloudRecordings() {
       // A task finished or was removed. Refresh the list to show new recording/snapshot.
       // We also force a re-load of the persistence to ensure state is in sync with server watchdog.
       loadFromPersistence();
-      setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 3000); // Small delay to allow VMS to index
+      setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true, true), 2000); // 2 second delay, bypassing Redis cache
     }
     prevScheduledCount.current = scheduledRecordings.length;
   }, [scheduledRecordings.length]);
@@ -892,9 +922,10 @@ export default function CloudRecordings() {
   };
 
   const getOriginalDeviceId = (normalizedId: string, devList?: any[]) => {
+    const cleanNormalized = normalizedId.includes(":") ? normalizedId.split(":")[1] : normalizedId;
     const list = devList || devices;
-    const d = list.find((dev: any) => normalizeId(dev.id) === String(normalizedId));
-    return d ? String(d.id) : String(normalizedId);
+    const d = list.find((dev: any) => normalizeId(dev.id) === String(cleanNormalized));
+    return d ? String(d.id) : String(cleanNormalized);
   };
 
   useEffect(() => {
@@ -1355,7 +1386,7 @@ export default function CloudRecordings() {
   };
 
   // ---- Recent Recordings ----
-  const handleSearchRecentRecordings = async (overrideDevice?: string, overrideDate?: Date, overrideSystem?: string, isAutoRefresh: boolean = false) => {
+  const handleSearchRecentRecordings = async (overrideDevice?: string, overrideDate?: Date, overrideSystem?: string, isAutoRefresh: boolean = false, isForcedRefresh: boolean = false) => {
     const targetDevice = overrideDevice || selectedDevice;
     const targetDate = overrideDate || date;
     let targetSystem = overrideSystem || selectedSystem;
@@ -1377,8 +1408,8 @@ export default function CloudRecordings() {
     const dateStr = format(targetDate, "yyyy-MM-dd");
     const cacheKey = `${targetSystem}:${targetDevice}:${dateStr}`;
 
-    // 1. Check cache (skip for auto-refresh to get fresh data)
-    if (!isAutoRefresh) {
+    // 1. Check cache (skip for auto-refresh or forced refresh to get fresh data)
+    if (!isAutoRefresh && !isForcedRefresh) {
       const cached = recordingsCache.current.get(cacheKey);
       if (cached) {
         // console.debug(`[CloudRecordings] Using cache for ${cacheKey}`);
@@ -1416,7 +1447,8 @@ export default function CloudRecordings() {
         endMs, 
         isEffectiveAdmin,
         undefined,
-        controller.signal
+        controller.signal,
+        isForcedRefresh
       );
       
       // Check if this request is still the most recent one
@@ -1692,7 +1724,7 @@ export default function CloudRecordings() {
                     size="sm" 
                     onClick={() => { 
                       loadFromPersistence(); 
-                      handleSearchRecentRecordings(selectedDevice, date); 
+                      handleSearchRecentRecordings(selectedDevice, date, undefined, false, true); 
                     }}
                     className="h-10 px-3 rounded-xl border-slate-200/60 bg-white/50 hover:bg-slate-100 transition-colors"
                     title="Refresh recordings"

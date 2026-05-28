@@ -81,6 +81,29 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
   const [isCollapsed, setIsCollapsed] = useState(disableCollapse ? false : true);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
+  // Cookie-based NX username must not be read during render (hydration mismatch).
+  const [displayUsername, setDisplayUsername] = useState(
+    () => user?.username || "Guest User",
+  );
+
+  useEffect(() => {
+    try {
+      const nxUserStr = Cookies.get("local_nx_user");
+      if (nxUserStr) {
+        const nxUser = JSON.parse(nxUserStr) as { username?: string };
+        if (nxUser?.username) {
+          setDisplayUsername(nxUser.username);
+          return;
+        }
+      }
+    } catch {
+      /* ignore malformed cookie */
+    }
+    setDisplayUsername(user?.username || "Guest User");
+  }, [user?.username]);
+
+  const displayInitial = displayUsername[0]?.toUpperCase() || "G";
+
   // Sync collapsed state with prop
   useEffect(() => {
     if (disableCollapse) {
@@ -299,22 +322,12 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
                 "flex items-center gap-3 rounded-xl transition-colors hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200 cursor-pointer group w-full h-[52px] justify-start px-2"
               )}>
                 <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shrink-0 shadow-sm text-white font-bold text-sm">
-                  {(() => {
-                    const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
-                    const displayUsername = nxUser?.username || user?.username || "Guest";
-                    return displayUsername[0]?.toUpperCase();
-                  })()}
+                  {displayInitial}
                 </div>
- 
+
                 {!isCollapsed && (
                   <div className="flex-1 min-w-0 text-left">
-                    {(() => {
-                      const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
-                      const displayUsername = nxUser?.username || user?.username || "Guest User";
-                      return (
-                        <p className="text-sm font-semibold text-gray-900 truncate">{displayUsername}</p>
-                      );
-                    })()}
+                    <p className="text-sm font-semibold text-gray-900 truncate">{displayUsername}</p>
                   </div>
                 )}
               </button>
@@ -322,13 +335,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
             <DropdownMenuContent onClick={(e) => e.stopPropagation()} side={isCollapsed ? "right" : "top"} align={isCollapsed ? "end" : "start"} className="w-56 z-[9999] bg-white" sideOffset={10}>
               <DropdownMenuLabel className="font-normal select-none">
                 <div className="flex flex-col space-y-1">
-                  {(() => {
-                    const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
-                    const displayUsername = nxUser?.username || user?.username || "Guest User";
-                    return (
-                      <p className="text-sm font-medium leading-none">{displayUsername}</p>
-                    );
-                  })()}
+                  <p className="text-sm font-medium leading-none">{displayUsername}</p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />

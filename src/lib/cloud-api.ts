@@ -1,6 +1,18 @@
 import logger from "./logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getDynamicConfig, getCloudAuthHeader, API_CONFIG } from "./config";
+import { isCacheableNxEndpoint } from "@/lib/redis/nx-cache-policy";
+import {
+  afterCloudApiGetCached,
+  afterCloudApiMutation,
+  cloudApiGetCacheKey,
+  getAuthFingerprint,
+  readCloudApiCache,
+  singleFlightNxRequest,
+  type CloudApiCacheEntry,
+} from "@/lib/redis/nx-api-cache";
+import { readCloudSystemsList } from "@/lib/cloud-systems-store";
+import { isCloudSystemsEndpoint } from "@/lib/redis/nx-cache-policy";
 
 // Disable SSL certificate validation for local/VMS requests as they are usually self-signed
 if (process.env.NODE_ENV === "development" || process.env.ALLOW_SELF_SIGNED === "true") {
@@ -379,11 +391,46 @@ export async function fetchFromCloudApi<T>(
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    // logger.debug(`[Cloud API] Fetching GET ${cloudUrl}`);
+    const skipCache = request.headers.get("x-skip-nx-cache") === "1";
+    const authFp = getAuthFingerprint(headers, basicAuthHeader);
+    const cacheKey = cloudApiGetCacheKey(systemId, endpoint, queryParams, authFp);
+    const flightKey = `get:${cacheKey}`;
+
+    if (!skipCache && isCloudSystemsEndpoint(endpoint)) {
+      const systems = await readCloudSystemsList(authFp);
+      if (systems) {
+        return NextResponse.json(systems as T, {
+          headers: { "X-NX-Cache": "HIT", "X-NX-Cache-Source": "cloud-systems" },
+        });
+      }
+    }
+
+    if (!skipCache && isCacheableNxEndpoint(endpoint, "GET")) {
+      const cached = await readCloudApiCache(cacheKey);
+      if (cached) {
+        return NextResponse.json(cached.data as T, {
+          headers: { "X-NX-Cache": "HIT" },
+        });
+      }
+    }
+
+    return (await singleFlightNxRequest(flightKey, async () => {
+      const storedEntry: CloudApiCacheEntry | null =
+        !skipCache && isCacheableNxEndpoint(endpoint, "GET")
+          ? await readCloudApiCache(cacheKey)
+          : null;
+
+    const fetchHeaders = { ...headers };
+    if (!skipCache && storedEntry?.etag) {
+      fetchHeaders["If-None-Match"] = storedEntry.etag;
+    }
+    if (!skipCache && storedEntry?.lastModified) {
+      fetchHeaders["If-Modified-Since"] = storedEntry.lastModified;
+    }
 
     let response = await fetch(cloudUrl, {
       method: "GET",
-      headers,
+      headers: fetchHeaders,
       redirect: "manual",
     });
 
@@ -393,13 +440,19 @@ export async function fetchFromCloudApi<T>(
       if (location) {
         response = await fetch(location, {
           method: "GET",
-          headers,
+          headers: fetchHeaders,
         });
       }
     }
 
-    // Handle 304 Not Modified
+    // Handle 304 Not Modified — serve from Redis when possible
     if (response.status === 304) {
+      const cached304 = storedEntry ?? (await readCloudApiCache(cacheKey));
+      if (cached304 && !skipCache) {
+        return NextResponse.json(cached304.data as T, {
+          headers: { "X-NX-Cache": "HIT", "X-NX-Cache-Source": "304" },
+        });
+      }
       return new NextResponse(null, {
         status: 304,
         headers,
@@ -469,7 +522,14 @@ export async function fetchFromCloudApi<T>(
     if (contentType && contentType.includes("application/json")) {
       try {
         const data = await response.json();
-        return NextResponse.json(data);
+        if (!skipCache && isCacheableNxEndpoint(endpoint, "GET")) {
+          await afterCloudApiGetCached(systemId, endpoint, cacheKey, data, response.status, {
+            etag: response.headers.get("etag") ?? undefined,
+            lastModified: response.headers.get("last-modified") ?? undefined,
+            authFingerprint: authFp,
+          });
+        }
+        return NextResponse.json(data, { headers: { "X-NX-Cache": "MISS" } });
       } catch (e) {
         console.error(`[Cloud API] JSON Parse Error for ${cloudUrl}:`, e);
         const text = await response.clone().text();
@@ -481,6 +541,7 @@ export async function fetchFromCloudApi<T>(
     const text = await response.text();
     // console.warn(`[Cloud API] Non-JSON response from ${cloudUrl}:`, text.substring(0, 200));
     return NextResponse.json({ success: true, message: "Request successful (non-JSON)" } as unknown as T);
+    })) as NextResponse<T | CloudApiError>;
   } catch (error) {
     console.error(`[Cloud API] Error fetching ${endpoint} from ${systemName || systemId}:`, error);
     return createConnectionErrorResponse(systemId, systemName);
@@ -570,6 +631,13 @@ async function requestCloudApi<T>(
       // console.log(`[Cloud API DEBUG] Returning 403 - no auth and cloud-bound`);
       return createAuthErrorResponse(systemId, systemName);
     }
+
+    if (!headers["Authorization"] && !headers["x-runtime-guid"] && basicAuthHeader) {
+      headers["Authorization"] = basicAuthHeader;
+    }
+
+    const authFp = getAuthFingerprint(headers, basicAuthHeader);
+    const getCacheKey = cloudApiGetCacheKey(systemId, endpoint, queryParams, authFp);
 
     // console.log(`[Cloud API DEBUG] Auth checks passed, making ${method} request to ${cloudUrl}`);
 
@@ -676,12 +744,19 @@ async function requestCloudApi<T>(
     if (contentType && contentType.includes("application/json")) {
       try {
         const data = await response.json();
+        if (method !== "GET") {
+          await afterCloudApiMutation(systemId, endpoint, method, getCacheKey, data);
+        }
         return NextResponse.json(data);
       } catch (e) {
         const text = await response.clone().text();
         console.warn(`[Cloud API] Raw response body:`, text.substring(0, 500));
         return createFetchErrorResponse("Invalid JSON response from cloud", systemId, systemName, 502);
       }
+    }
+
+    if (method !== "GET" && response.ok) {
+      await afterCloudApiMutation(systemId, endpoint, method, getCacheKey);
     }
 
     const text = await response.text();

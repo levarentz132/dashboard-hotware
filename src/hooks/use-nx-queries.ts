@@ -5,21 +5,30 @@ import nxAPI, { type NxEvent, type NxCamera } from "@/lib/nxapi";
 import { queryKeys } from "@/lib/query-keys";
 import { parseError } from "@/hooks/parse-error";
 import type { ICamera, IDeviceType } from "@/types/Device";
+import {
+  NX_ALARMS_STALE_MS,
+  NX_DEVICES_STALE_MS,
+  NX_DEVICE_TYPES_STALE_MS,
+  NX_EVENTS_STALE_MS,
+  NX_MODULES_STALE_MS,
+  NX_SERVERS_STALE_MS,
+} from "@/lib/cache-constants";
 
-const EVENTS_REFETCH_MS = 30_000;
-const ALARMS_REFETCH_MS = 10_000;
+const EVENTS_REFETCH_MS = NX_EVENTS_STALE_MS;
+const ALARMS_REFETCH_MS = NX_ALARMS_STALE_MS;
 
 function useNxSystemQuery<T>(
   systemId: string | undefined,
   queryKey: readonly unknown[],
   queryFn: () => Promise<T>,
   empty: T,
+  staleTime = NX_DEVICES_STALE_MS,
 ) {
   const query = useQuery({
     queryKey,
     queryFn,
     enabled: !!systemId,
-    staleTime: 30_000,
+    staleTime,
   });
 
   return {
@@ -80,7 +89,7 @@ export function useModulesQuery() {
         "Server connected but no modules found. Check your Nx Witness system status.",
       );
     },
-    staleTime: 60_000,
+    staleTime: NX_MODULES_STALE_MS,
   });
 
   return {
@@ -111,6 +120,7 @@ export function useDeviceTypeQuery(systemId?: string) {
       return nxAPI.getDeviceTypes();
     },
     [],
+    NX_DEVICE_TYPES_STALE_MS,
   );
 }
 
@@ -142,6 +152,7 @@ export function useServersQuery(systemId?: string) {
       return [];
     },
     [],
+    NX_SERVERS_STALE_MS,
   );
 }
 

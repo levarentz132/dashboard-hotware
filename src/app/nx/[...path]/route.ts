@@ -3,42 +3,23 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 import { NextRequest, NextResponse } from "next/server";
 import { API_CONFIG, getDynamicConfig } from "@/lib/config";
+import {
+  cacheGetJson,
+  cacheSetJson,
+  nxProxyGetCacheKey,
+  overwriteNxProxyGetCache,
+} from "@/lib/redis/cache";
+import {
+  isCacheableNxEndpoint,
+  isDeviceMutationEndpoint,
+  isDevicesListEndpoint,
+} from "@/lib/redis/nx-cache-policy";
+import { markDevicesCachesStale, syncDevicesFromListResponse } from "@/lib/nx-devices-store";
 
-// In-memory cache for safe GET requests
 interface CacheEntry {
     data: string;
     headers: Record<string, string>;
     status: number;
-    expiresAt: number;
-}
-
-const serverCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 10000; // 10 seconds cache
-
-// Helper to determine if a route is safe to cache
-function isCacheableRoute(path: string, method: string): boolean {
-    if (method !== "GET") return false;
-    
-    const lowerPath = path.toLowerCase();
-    
-    // Only cache read-only metadata endpoints
-    const cacheablePatterns = [
-        "/rest/v3/devices",
-        "/rest/v3/servers",
-        "/rest/v3/system/info",
-        "/rest/v3/users",
-        "/rest/v3/usergroups",
-        "/servers",
-        "/system/info",
-        "/users"
-    ];
-    
-    // Exclude anything related to active streams or media playback
-    if (lowerPath.includes("media") || lowerPath.includes("video") || lowerPath.includes("hls") || lowerPath.includes("stream")) {
-        return false;
-    }
-    
-    return cacheablePatterns.some(pattern => lowerPath.includes(pattern));
 }
 
 export async function GET(request: NextRequest) {
@@ -106,17 +87,17 @@ async function handleRequest(request: NextRequest, method: string) {
             }
         }
 
-        // Construct unique cache key including method, target url, and authorization context
-        const cacheKey = `${method}:${targetUrl}:${headers['authorization'] || ''}:${request.headers.get('x-runtime-guid') || ''}`;
+        const authContext = headers['authorization'] || '';
+        const runtimeGuid = request.headers.get('x-runtime-guid') || '';
+        const redisGetKey = nxProxyGetCacheKey(targetUrl, authContext, runtimeGuid);
 
-        // Serve from Cache if valid
-        if (isCacheableRoute(path, method)) {
-            const cached = serverCache.get(cacheKey);
-            if (cached && Date.now() < cached.expiresAt) {
+        if (isCacheableNxEndpoint(path, method)) {
+            const cached = await cacheGetJson<CacheEntry>(redisGetKey);
+            if (cached) {
                 console.log(`[NX Proxy Cache] HIT: ${method} ${path}`);
                 return new NextResponse(cached.data, {
                     status: cached.status,
-                    headers: cached.headers
+                    headers: cached.headers,
                 });
             }
             console.log(`[NX Proxy Cache] MISS: ${method} ${path}`);
@@ -183,15 +164,32 @@ async function handleRequest(request: NextRequest, method: string) {
         if (contentType && (contentType.includes("json") || contentType.includes("text"))) {
             const text = await response.text();
             
-            // Cache successful GET responses
-            if (response.ok && isCacheableRoute(path, method)) {
-                serverCache.set(cacheKey, {
+            if (response.ok && isCacheableNxEndpoint(path, method)) {
+                const entry = { data: text, headers: responseHeaders, status };
+                await cacheSetJson(redisGetKey, entry);
+                const nxSystemKey = `${nxLocationIp}:${nxLocationPort}`;
+                if (isDevicesListEndpoint(path)) {
+                    try {
+                        await syncDevicesFromListResponse(nxSystemKey, JSON.parse(text));
+                    } catch {
+                        /* ignore parse errors for device index */
+                    }
+                }
+                console.log(`[NX Proxy Cache] Cached metadata response for ${path} (${text.length} bytes)`);
+            } else if (
+                response.ok &&
+                ["POST", "PUT", "PATCH", "DELETE"].includes(method)
+            ) {
+                const nxSystemKey = `${nxLocationIp}:${nxLocationPort}`;
+                if (isDeviceMutationEndpoint(path, method)) {
+                    await markDevicesCachesStale(nxSystemKey);
+                }
+                await overwriteNxProxyGetCache(targetUrl, authContext, runtimeGuid, {
                     data: text,
                     headers: responseHeaders,
-                    status: status,
-                    expiresAt: Date.now() + CACHE_TTL_MS
+                    status,
                 });
-                console.log(`[NX Proxy Cache] Cached metadata response for ${path} (${text.length} bytes)`);
+                console.log(`[NX Proxy Cache] Overwrote GET cache after ${method} ${path}`);
             }
 
             return new NextResponse(text, {

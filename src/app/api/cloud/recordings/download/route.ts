@@ -77,36 +77,41 @@ function getFfmpegPath(): string {
 
 async function updateTaskStatus(taskId: string, success: boolean): Promise<void> {
   try {
-    const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
-    if (fs.existsSync(DATA_FILE)) {
-      const content = fs.readFileSync(DATA_FILE, "utf-8").replace(/^\uFEFF/, "");
-      const data = JSON.parse(content);
-      const taskIndex = data.schedules?.findIndex((s: any) => s.id === taskId);
-      if (taskIndex !== -1) {
-        const task = data.schedules[taskIndex];
-        const isNonRecurring = !task.recurrence || task.recurrence === "none" || task.recurrence === "once";
-        
-        if (isNonRecurring) {
-          data.schedules.splice(taskIndex, 1);
-          console.log(`[recordings/download] Task ${taskId} finished and REMOVED (non-recurring)`);
-        } else {
-          // Recurring task: roll it forward immediately to the next occurrence
-          const startParts = (task.startTime || "00:00").split(":").map(Number);
-          const sh = startParts[0], sm = startParts[1], ss = startParts[2] || 0;
-          const duration = (task.endMs && task.startMs) ? (task.endMs - task.startMs) : 0;
-          const nextDate = calculateNextOccurrence(task, sh, sm, ss);
-          
-          task.status = "pending";
-          task.record = false;
-          task.date = nextDate.toISOString();
-          task.startMs = nextDate.getTime();
-          task.endMs = nextDate.getTime() + duration;
-          
-          console.log(`[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Rolled forward to ${task.date} and marked as pending`);
-        }
-        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-      }
+    const { readScheduledRecordings, writeScheduledRecordings } = await import(
+      "@/lib/scheduled-recordings-store"
+    );
+    const data = await readScheduledRecordings();
+    const taskIndex = data.schedules?.findIndex((s: any) => s.id === taskId);
+    if (taskIndex === -1) return;
+
+    const task = data.schedules[taskIndex] as Record<string, unknown>;
+    const isNonRecurring =
+      !task.recurrence || task.recurrence === "none" || task.recurrence === "once";
+
+    if (isNonRecurring) {
+      data.schedules.splice(taskIndex, 1);
+      console.log(`[recordings/download] Task ${taskId} finished and REMOVED (non-recurring)`);
+    } else {
+      const startParts = String(task.startTime || "00:00").split(":").map(Number);
+      const sh = startParts[0],
+        sm = startParts[1],
+        ss = startParts[2] || 0;
+      const duration =
+        task.endMs && task.startMs ? Number(task.endMs) - Number(task.startMs) : 0;
+      const nextDate = calculateNextOccurrence(task as any, sh, sm, ss);
+
+      task.status = "pending";
+      task.record = false;
+      task.date = nextDate.toISOString();
+      task.startMs = nextDate.getTime();
+      task.endMs = nextDate.getTime() + duration;
+
+      console.log(
+        `[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Rolled forward to ${task.date}`,
+      );
     }
+
+    await writeScheduledRecordings(data);
   } catch (err) {
     console.error(`[recordings/download] Failed to update task ${taskId} status:`, err);
   }

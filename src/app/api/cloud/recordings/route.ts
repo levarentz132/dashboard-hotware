@@ -1,32 +1,20 @@
 import logger from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
+import { cacheGetJson, cacheSetJson, recordingsCacheKey } from "@/lib/redis/cache";
+import { loadDeviceMapsForSystem } from "@/lib/nx-devices-store";
 import fs from "fs";
 import path from "path";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// Simple in-memory cache to reduce redundant disk scans and API calls
-// Keys: systemId:deviceId:startTime:endTime
-const recordingsCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL = 20000; // 20 seconds for active caching
-
-function getCache(key: string) {
-  const cached = recordingsCache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-  return null;
+async function getCache(key: string) {
+  return cacheGetJson<unknown>(recordingsCacheKey(key));
 }
 
-function setCache(key: string, data: any) {
-  recordingsCache.set(key, { data, timestamp: Date.now() });
-  // Cleanup old entries
-  if (recordingsCache.size > 200) {
-    const oldestKey = recordingsCache.keys().next().value;
-    if (oldestKey) recordingsCache.delete(oldestKey);
-  }
+async function setCache(key: string, data: unknown) {
+  await cacheSetJson(recordingsCacheKey(key), data);
 }
 
 export async function GET(request: NextRequest) {
@@ -38,6 +26,7 @@ export async function GET(request: NextRequest) {
     const deviceId = isAllCameras ? "all" : deviceIdRaw.replace(/[{}]/g, "");
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
+    const bypassCache = searchParams.get("refresh") === "true" || searchParams.get("bypassCache") === "true";
 
     if (!systemId || !deviceId) {
       return NextResponse.json(
@@ -49,37 +38,55 @@ export async function GET(request: NextRequest) {
 
     // Check cache
     const cacheKey = `${systemId}:${deviceId}:${startTime}:${endTime}`;
-    const cachedData = getCache(cacheKey);
-    if (cachedData) {
-      // logger.debug(`[recordings] Returning cached data for ${cacheKey}`);
-      return NextResponse.json(cachedData, {
-        headers: { 'X-Cache': 'HIT', 'Cache-Control': 'no-store, max-age=0' }
-      });
-    }
-
-    // 1. Fetch Device List for GUID -> Name mapping and hash resolution
-    const deviceNameMap = new Map<string, string>();
-    const deviceHashToIdMap = new Map<string, string>();
-    try {
-      const devicesUrl = buildCloudUrl(systemId, "/rest/v3/devices", new URLSearchParams(), request, systemName || undefined);
-      const devicesRes = await fetch(devicesUrl, { headers, cache: 'no-store' });
-      if (devicesRes.ok) {
-        const devicesData = await devicesRes.json();
-        const devicesList = Array.isArray(devicesData) ? devicesData : (devicesData.reply || []);
-        devicesList.forEach((d: any) => {
-          if (d.id) {
-            const cleanId = d.id.replace(/[{}]/g, "").toLowerCase();
-            const name = (d.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
-            deviceNameMap.set(cleanId, name);
-            deviceNameMap.set(d.id.toLowerCase(), name);
-            
-            const hash = cleanId.slice(-4);
-            deviceHashToIdMap.set(hash, d.id);
-          }
+    if (!bypassCache) {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        // logger.debug(`[recordings] Returning cached data for ${cacheKey}`);
+        return NextResponse.json(cachedData, {
+          headers: { 'X-Cache': 'HIT', 'Cache-Control': 'no-store, max-age=0' }
         });
       }
-    } catch (e) {
-      console.warn(`[recordings] Failed to fetch device list for mapping:`, e);
+    }
+
+    // 1. Device id → name maps (Redis index first — avoids NX fetch for 1100+ cameras)
+    const deviceNameMap = new Map<string, string>();
+    const deviceHashToIdMap = new Map<string, string>();
+    const cachedMaps = await loadDeviceMapsForSystem(systemId);
+    if (cachedMaps) {
+      cachedMaps.nameMap.forEach((v, k) => deviceNameMap.set(k, v));
+      cachedMaps.hashMap.forEach((v, k) => deviceHashToIdMap.set(k, v));
+    } else {
+      try {
+        const devicesUrl = buildCloudUrl(
+          systemId,
+          "/rest/v3/devices",
+          new URLSearchParams(),
+          request,
+          systemName || undefined,
+        );
+        const devicesRes = await fetch(devicesUrl, { headers, cache: "no-store" });
+        if (devicesRes.ok) {
+          const devicesData = await devicesRes.json();
+          const devicesList = Array.isArray(devicesData)
+            ? devicesData
+            : devicesData.reply || [];
+          devicesList.forEach((d: any) => {
+            if (d.id) {
+              const cleanId = d.id.replace(/[{}]/g, "").toLowerCase();
+              const name = (d.name || "").replace(/[<>:"/\\|?*]/g, "_").trim();
+              deviceNameMap.set(cleanId, name);
+              deviceNameMap.set(d.id.toLowerCase(), name);
+
+              const hash = cleanId.slice(-4);
+              deviceHashToIdMap.set(hash, d.id);
+            }
+          });
+          const { syncDevicesFromListResponse } = await import("@/lib/nx-devices-store");
+          await syncDevicesFromListResponse(systemId, devicesData);
+        }
+      } catch (e) {
+        console.warn(`[recordings] Failed to fetch device list for mapping:`, e);
+      }
     }
 
     // Determine the search camera name for local scan logic
@@ -425,7 +432,7 @@ export async function GET(request: NextRequest) {
     finalPeriods.sort((a, b) => b.startTimeMs - a.startTimeMs);
     
     // Save to cache
-    setCache(cacheKey, finalPeriods);
+    await setCache(cacheKey, finalPeriods);
     
     return NextResponse.json(finalPeriods, {
       headers: { 'X-Cache': 'MISS', 'Cache-Control': 'no-store, max-age=0' },

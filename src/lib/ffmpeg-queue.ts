@@ -1,86 +1,36 @@
-import fs from "fs/promises";
-import fsSync from "fs";
-import path from "path";
+import type { FFmpegJob } from "./ffmpeg-queue-types";
+import { readFfmpegQueue, writeFfmpegQueue } from "./ffmpeg-queue-store";
 
-export interface FFmpegJob {
-  id: string;
-  type: "auto-save";
-  status: "pending" | "processing" | "completed" | "failed";
-  payload: {
-    systemId: string;
-    deviceId: string;
-    cameraName: string;
-    startTime: number;
-    endTime: number;
-    savePath: string;
-    downloadUrl: string;
-    vmsHeaders: Record<string, string>;
-    taskId?: string;
-    notificationUserKey?: string;
-  };
-  attempts: number;
-  maxAttempts: number;
-  error?: string;
-  createdAt: number;
-  startedAt?: number;
-  completedAt?: number;
-}
+export type { FFmpegJob } from "./ffmpeg-queue-types";
 
-const QUEUE_FILE = path.join(process.cwd(), "data", "ffmpeg_queue.json");
-
-// Sequential promise chain to prevent concurrent file writes (race conditions)
+// Sequential promise chain to prevent concurrent read-modify-write races
 let writeChain = Promise.resolve();
 
 /**
- * Ensures directories exist.
- */
-function ensureDataDir(): void {
-  const dir = path.dirname(QUEUE_FILE);
-  if (!fsSync.existsSync(dir)) {
-    fsSync.mkdirSync(dir, { recursive: true });
-  }
-}
-
-/**
- * Loads the queue from disk. Strips BOM and handles empty/missing files gracefully.
+ * Loads the queue from Redis. Legacy JSON file is migrated on first read.
  */
 export async function loadQueue(): Promise<FFmpegJob[]> {
-  ensureDataDir();
-  if (!fsSync.existsSync(QUEUE_FILE)) {
-    return [];
-  }
-  try {
-    const raw = await fs.readFile(QUEUE_FILE, "utf-8");
-    const sanitized = raw.replace(/^\uFEFF/, "").trim();
-    if (!sanitized) return [];
-    const data = JSON.parse(sanitized);
-    return Array.isArray(data) ? data : [];
-  } catch (err) {
-    console.error("[FFmpegQueue] Failed to load queue file, returning empty array:", err);
-    return [];
-  }
+  return readFfmpegQueue();
 }
 
 /**
- * Persists the queue to disk safely using a sequential write chain.
+ * Persists the queue to Redis safely using a sequential write chain.
  */
 export async function saveQueue(jobs: FFmpegJob[]): Promise<void> {
-  ensureDataDir();
   return new Promise((resolve, reject) => {
     writeChain = writeChain
       .then(async () => {
         try {
-          const content = JSON.stringify(jobs, null, 2);
-          await fs.writeFile(QUEUE_FILE, content, "utf-8");
+          await writeFfmpegQueue(jobs);
           resolve();
         } catch (err) {
-          console.error("[FFmpegQueue] Failed to write queue file:", err);
+          console.error("[FFmpegQueue] Failed to write queue:", err);
           reject(err);
         }
       })
       .catch((err) => {
         console.error("[FFmpegQueue] Write chain error:", err);
-        resolve(); // Continue the chain even if one write fails
+        resolve();
       });
   });
 }
@@ -90,26 +40,27 @@ export async function saveQueue(jobs: FFmpegJob[]): Promise<void> {
  */
 export async function enqueueJob(
   payload: FFmpegJob["payload"],
-  maxAttempts = 3
+  maxAttempts = 3,
 ): Promise<FFmpegJob> {
   const jobs = await loadQueue();
-  
-  // Deduplicate: if an identical job is already pending or processing, don't add it again
+
   const exists = jobs.some(
     (j) =>
       j.payload.deviceId === payload.deviceId &&
       j.payload.startTime === payload.startTime &&
       j.payload.endTime === payload.endTime &&
-      (j.status === "pending" || j.status === "processing")
+      (j.status === "pending" || j.status === "processing"),
   );
-  
+
   if (exists) {
-    console.log(`[FFmpegQueue] Job already exists for device=${payload.deviceId} start=${payload.startTime}, skipping enqueue.`);
+    console.log(
+      `[FFmpegQueue] Job already exists for device=${payload.deviceId} start=${payload.startTime}, skipping enqueue.`,
+    );
     const existingJob = jobs.find(
       (j) =>
         j.payload.deviceId === payload.deviceId &&
         j.payload.startTime === payload.startTime &&
-        j.payload.endTime === payload.endTime
+        j.payload.endTime === payload.endTime,
     );
     return existingJob!;
   }
@@ -146,7 +97,7 @@ export async function getNextPendingJobs(limit = 1): Promise<FFmpegJob[]> {
 export async function updateJobStatus(
   id: string,
   status: FFmpegJob["status"],
-  updates: Partial<Omit<FFmpegJob, "id" | "status">> = {}
+  updates: Partial<Omit<FFmpegJob, "id" | "status">> = {},
 ): Promise<void> {
   const jobs = await loadQueue();
   const index = jobs.findIndex((j) => j.id === id);
@@ -157,14 +108,14 @@ export async function updateJobStatus(
 
   const job = jobs[index];
   job.status = status;
-  
+
   if (status === "processing" && !job.startedAt) {
     job.startedAt = Date.now();
   }
   if ((status === "completed" || status === "failed") && !job.completedAt) {
     job.completedAt = Date.now();
   }
-  
+
   Object.assign(job, updates);
   await saveQueue(jobs);
 }
@@ -190,8 +141,12 @@ export async function cleanupStaleJobs(): Promise<void> {
   let changed = false;
 
   for (const job of jobs) {
-    const isStaleProcessing = job.status === "processing" && job.startedAt && now - job.startedAt > oneHour;
-    const isOldCompletedOrFailed = (job.status === "completed" || job.status === "failed") && job.completedAt && now - job.completedAt > oneDay;
+    const isStaleProcessing =
+      job.status === "processing" && job.startedAt && now - job.startedAt > oneHour;
+    const isOldCompletedOrFailed =
+      (job.status === "completed" || job.status === "failed") &&
+      job.completedAt &&
+      now - job.completedAt > oneDay;
 
     if (isStaleProcessing) {
       console.log(`[FFmpegQueue] Cleaning up stale processing job ${job.id} (marking as failed)`);
@@ -201,8 +156,7 @@ export async function cleanupStaleJobs(): Promise<void> {
       activeJobs.push(job);
       changed = true;
     } else if (isOldCompletedOrFailed) {
-      // Exclude older finished jobs from the active queue array to keep the file size minimal
-      console.log(`[FFmpegQueue] Pruning old job ${job.id} from queue file`);
+      console.log(`[FFmpegQueue] Pruning old job ${job.id} from queue`);
       changed = true;
     } else {
       activeJobs.push(job);

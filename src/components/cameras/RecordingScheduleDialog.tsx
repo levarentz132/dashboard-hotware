@@ -134,9 +134,21 @@ export default function RecordingScheduleDialog({
                 setError(null);
                 try {
                     const originalSystemId = nxAPI.getSystemId();
-                    if (camera.systemId) nxAPI.setSystemId(camera.systemId);
-                    const details = await nxAPI.getCameraById(camera.id);
-                    if (camera.systemId) nxAPI.setSystemId(originalSystemId);
+                    let details: Awaited<ReturnType<typeof nxAPI.getCameraById>> = null;
+                    if (camera.systemId) {
+                        const cachedRes = await fetch(
+                            `/api/nx/cached-device?systemId=${encodeURIComponent(camera.systemId)}&deviceId=${encodeURIComponent(camera.id)}`,
+                            { credentials: "include" },
+                        );
+                        if (cachedRes.ok) {
+                            details = await cachedRes.json();
+                        }
+                    }
+                    if (!details) {
+                        if (camera.systemId) nxAPI.setSystemId(camera.systemId);
+                        details = await nxAPI.getCameraById(camera.id);
+                        if (camera.systemId) nxAPI.setSystemId(originalSystemId ?? null);
+                    }
 
                     if (details) {
                         setIsEnabled(details.schedule?.isEnabled ?? false);

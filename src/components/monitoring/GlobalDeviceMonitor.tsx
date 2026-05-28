@@ -8,6 +8,11 @@ import { showNotification } from "@/lib/notifications";
 import { addPersistentNotification } from "@/lib/persistent-notifications";
 import nxAPI from "@/lib/nxapi";
 import Cookies from "js-cookie";
+import { DEVICE_MONITOR_INTERVAL_MS } from "@/lib/cache-constants";
+import {
+  mergeStatusWithSummary,
+  type DeviceSummaryItem,
+} from "@/lib/nx-devices-utils";
 
 interface CloudSystem {
   id: string;
@@ -18,8 +23,6 @@ interface DeviceInfo {
   id: string;
   name: string;
   status: string;
-  vendor?: string;
-  model?: string;
 }
 
 interface MonitoringSnapshot {
@@ -40,7 +43,7 @@ interface MonitoringSnapshot {
 
 /**
  * Global Device Monitor
- * Continuously monitors /devices endpoint every 30 seconds across all cloud systems
+ * Monitors /devices/status (plus Redis name summary) on an interval across all cloud systems
  * Runs in the background on all pages
  * Saves changes to JSON file for comparison
  */
@@ -104,34 +107,42 @@ export function GlobalDeviceMonitor() {
    */
   const checkDevicesForSystem = useCallback(async (systemId: string, systemName: string) => {
     try {
-      const response = await fetch(
-        `/api/nx/devices?systemId=${encodeURIComponent(systemId)}&systemName=${encodeURIComponent(systemName)}`,
-        {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-            ...getElectronHeaders(),
-          },
-        }
-      );
+      const headers = {
+        Accept: "application/json",
+        ...getElectronHeaders(),
+      };
+      const base = `/api/nx/devices/status?systemId=${encodeURIComponent(systemId)}&systemName=${encodeURIComponent(systemName)}`;
 
-      if (response.ok) {
-        const devices = await response.json();
-        const deviceCount = Array.isArray(devices) ? devices.length : 0;
+      const [statusRes, summaryRes] = await Promise.all([
+        fetch(base, { method: "GET", credentials: "include", headers }),
+        fetch(
+          `/api/nx/devices-summary?systemId=${encodeURIComponent(systemId)}`,
+          { method: "GET", credentials: "include", headers },
+        ),
+      ]);
+
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        let summary: DeviceSummaryItem[] | null = null;
+        if (summaryRes.ok) {
+          const summaryPayload = await summaryRes.json();
+          summary = summaryPayload.devices ?? null;
+        }
+        const devices = mergeStatusWithSummary(statusData, summary);
+        const deviceCount = devices.length;
         logger.debug(
-          `[GlobalDeviceMonitor] ✓ ${systemName}: ${deviceCount} devices (Status: ${response.status})`
+          `[GlobalDeviceMonitor] ✓ ${systemName}: ${deviceCount} devices (status poll, cache: ${statusRes.headers.get("X-NX-Cache") ?? "?"})`,
         );
         return {
           success: true,
           deviceCount,
           systemId,
           systemName,
-          devices: devices // Include full device data for comparison
+          devices,
         };
       } else {
         console.warn(
-          `[GlobalDeviceMonitor] ✗ ${systemName}: Failed with status ${response.status}`
+          `[GlobalDeviceMonitor] ✗ ${systemName}: Failed with status ${statusRes.status}`
         );
         return { success: false, deviceCount: 0, systemId, systemName, devices: [] };
       }
@@ -556,9 +567,11 @@ export function GlobalDeviceMonitor() {
 
     intervalRef.current = setInterval(() => {
       checkAllDevices();
-    }, 30000);
+    }, DEVICE_MONITOR_INTERVAL_MS);
 
-    console.log("[GlobalDeviceMonitor] ✓ Monitoring started (30s interval)");
+    console.log(
+      `[GlobalDeviceMonitor] ✓ Monitoring started (${DEVICE_MONITOR_INTERVAL_MS / 1000}s interval)`,
+    );
   }, [loadPreviousSnapshot, fetchAllSystems, checkAllDevices]);
 
   /**

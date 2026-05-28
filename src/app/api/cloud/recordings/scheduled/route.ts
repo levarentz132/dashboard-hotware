@@ -8,6 +8,10 @@ import { logRecordingEvent, formatAuditDate } from "@/lib/recording-logger";
 import { buildCloudUrl } from "@/lib/cloud-api";
 import { startFFmpegWorker } from "@/lib/ffmpeg-worker";
 import { calculateNextOccurrence } from "@/lib/schedule-utils";
+import {
+  readScheduledRecordings,
+  writeScheduledRecordings,
+} from "@/lib/scheduled-recordings-store";
 
 
 // ── VMS Direct API helpers ────────────────────────────────────────────────────
@@ -72,17 +76,7 @@ async function vmsRequest(
   }
 }
 
-const DATA_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
 const MAX_AUTOSAVE_AGE_MS = 60 * 60 * 1000; // 1 hour grace period for auto-download
-
-/**
- * Helper to read the data file and strip Byte Order Mark (BOM) if present.
- * This prevents "Unexpected token" errors when the file is saved with BOM on Windows.
- */
-async function readDataFile(filePath: string): Promise<string> {
-  const content = await fs.readFile(filePath, "utf-8");
-  return content.replace(/^\uFEFF/, "");
-}
 
 // Background Watchdog (In-memory for the server session)
 declare global {
@@ -129,27 +123,25 @@ const startWatchdog = () => {
     global._nxWatchdogActive = true;
 
     try {
-      if (!fsSync.existsSync(DATA_FILE)) {
-        global._nxWatchdogActive = false;
-        return;
-      }
-      const dataStr = await readDataFile(DATA_FILE).catch(() =>
-        JSON.stringify({ schedules: [], originalSchedules: {}, globalAuth: null })
-      );
-
-      if (!dataStr || dataStr.trim() === "") {
-        global._nxWatchdogActive = false;
-        return;
-      }
-
       let parsed;
       try {
-        parsed = JSON.parse(dataStr);
+        parsed = await readScheduledRecordings();
       } catch (e: any) {
-        // console.error("[Watchdog] Failed to parse data file:", e.message);
         global._nxWatchdogActive = false;
         return;
       }
+
+      let queue: any[] = [];
+      try {
+        const { loadQueue } = await import("@/lib/ffmpeg-queue");
+        queue = await loadQueue();
+      } catch (e) {}
+
+      if (!parsed.schedules?.length && !parsed.nxLocationIp) {
+        global._nxWatchdogActive = false;
+        return;
+      }
+
       const {
         schedules = [],
         originalSchedules = {},
@@ -236,42 +228,38 @@ const startWatchdog = () => {
       uniqueSchedules.length = 0;
       uniqueSchedules.push(...cleanedSchedules);
       const saveState = async (scheds: any[]) => {
-        // ── CRITICAL: Re-read the file to avoid overwriting user changes (like deletions) ──
-        // that happened while the watchdog was performing async work.
-        let diskData: any = { schedules: [] };
-        try {
-          const content = await readDataFile(DATA_FILE);
-          diskData = JSON.parse(content);
-        } catch (e) { }
+        let storeData = await readScheduledRecordings();
+        const diskSchedules = storeData.schedules || [];
 
-        const diskSchedules = diskData.schedules || [];
-
-        // Update statuses in the disk list based on our processed list
         const finalSchedules = diskSchedules
           .filter((diskRec: any) => !deletedTaskIds.has(diskRec.id))
           .map((diskRec: any) => {
-            const ourRec = scheds.find(s => s.id === diskRec.id);
+            const ourRec = scheds.find((s) => s.id === diskRec.id);
             if (ourRec) {
-              return { ...diskRec, status: ourRec.status, date: ourRec.date, startMs: ourRec.startMs, endMs: ourRec.endMs, record: ourRec.record };
+              return {
+                ...diskRec,
+                status: ourRec.status,
+                date: ourRec.date,
+                startMs: ourRec.startMs,
+                endMs: ourRec.endMs,
+                record: ourRec.record,
+              };
             }
             return diskRec;
           });
 
-        delete diskData.globalAuthFallback;
-        delete diskData.globalUserKeyFallback;
-        delete diskData.globalAuth;
-        delete diskData.notificationUserKey;
+        delete storeData.globalAuthFallback;
+        delete storeData.globalUserKeyFallback;
+        delete storeData.globalAuth;
+        delete storeData.notificationUserKey;
 
-        await fs.writeFile(
-          DATA_FILE,
-          JSON.stringify({
-            ...diskData,
-            schedules: finalSchedules,
-            nxLocationIp,
-            nxLocationPort,
-            appPort: detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010")
-          }, null, 2)
-        );
+        await writeScheduledRecordings({
+          ...storeData,
+          schedules: finalSchedules,
+          nxLocationIp,
+          nxLocationPort,
+          appPort: detectCurrentPort(process.env.NODE_ENV === "production" ? "3030" : "3010"),
+        });
       };
 
       // ── Phase 1: Identify and Mark Tasks to Process ────────────────────────
@@ -378,13 +366,18 @@ const startWatchdog = () => {
               console.log(`[Watchdog] Recurring task ${rec.cameraName} auto-save completed. Rolled forward to ${nextDate.toISOString()}`);
             }
           } else {
-            const cleanId = rec.cameraId.replace(/[{}]/g, "");
-            const auth = rec.auth;
-            if (auth && ip) {
-              console.log(`[Watchdog] Auto-save pending for ${rec.cameraName} (processing), triggering download queue`);
-              triggerAutoSave(rec, cleanId, auth, nxLocationIp, nxLocationPort);
+            const isEnqueued = queue.some((job: any) => job.payload?.taskId === rec.id && (job.status === "pending" || job.status === "processing"));
+            if (isEnqueued) {
+              // Already enqueued, do not trigger again to prevent queue flooding
             } else {
-              console.warn(`[Watchdog] Cannot auto-save ${rec.cameraName}: missing auth or IP`);
+              const cleanId = rec.cameraId.replace(/[{}]/g, "");
+              const auth = rec.auth;
+              if (auth && ip) {
+                console.log(`[Watchdog] Auto-save pending for ${rec.cameraName} (processing), triggering download queue`);
+                triggerAutoSave(rec, cleanId, auth, nxLocationIp, nxLocationPort);
+              } else {
+                console.warn(`[Watchdog] Cannot auto-save ${rec.cameraName}: missing auth or IP`);
+              }
             }
           }
         }
@@ -410,6 +403,10 @@ const startWatchdog = () => {
             const headers: any = { "Content-Type": "application/json" };
             if (nxLocationIp && nxLocationIp !== "localhost") headers["x-nx-location-ip"] = nxLocationIp;
             if (nxLocationPort && nxLocationPort !== "7001") headers["x-nx-location-port"] = nxLocationPort;
+            if (rec.auth) {
+              headers["x-watchdog-auth"] = rec.auth;
+              headers["Authorization"] = `Bearer ${rec.auth}`;
+            }
 
             const res = await fetch(internalUrl, {
               method: "POST",
@@ -466,9 +463,24 @@ const startWatchdog = () => {
 
             // Store original schedule
             try {
-              const cam = await vmsRequest("GET", `/rest/v3/devices/${cleanId}`, null, auth, ip, port, rec.systemId);
+              const { getDeviceFromCache } = await import("@/lib/nx-devices-store");
+              const cachedCam =
+                (rec.systemId && (await getDeviceFromCache(rec.systemId, cleanId))) || null;
+              const cam =
+                cachedCam ??
+                (await vmsRequest(
+                  "GET",
+                  `/rest/v3/devices/${cleanId}`,
+                  null,
+                  auth,
+                  ip,
+                  port,
+                  rec.systemId,
+                ));
               originalSchedules[rec.id] = cam?.schedule || { isEnabled: false };
-              console.log(`[Watchdog] Stored original schedule for ${rec.cameraName}`);
+              console.log(
+                `[Watchdog] Stored original schedule for ${rec.cameraName}${cachedCam ? " (redis)" : ""}`,
+              );
             } catch (e) {
               originalSchedules[rec.id] = { isEnabled: false };
               console.warn(`[Watchdog] Could not fetch original schedule for ${rec.cameraName}, using default`);
@@ -777,18 +789,16 @@ export async function GET(request: NextRequest) {
     global._nxAppPort = detectedPort;
     (async () => {
       try {
-        const dataStr = await readDataFile(DATA_FILE).catch(() => "{}");
-        const data = JSON.parse(dataStr);
+        const data = await readScheduledRecordings();
         data.appPort = detectedPort;
-        await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
+        await writeScheduledRecordings(data);
       } catch (e) { }
     })();
   }
 
   startWatchdog();
   try {
-    const dataStr = await readDataFile(DATA_FILE);
-    const data = JSON.parse(dataStr);
+    const data = await readScheduledRecordings();
 
     // ── Multi-Tenant Filtering ──────────────────────────────────────────────
     const { rights, isAdmin: userIsAdmin, username } = await getUserResourceRights(request, data.nxLocationIp, data.nxLocationPort);
@@ -815,7 +825,7 @@ export async function GET(request: NextRequest) {
         }
       });
       if (fileNeedsUpdate) {
-        fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), "utf-8").catch(() => { });
+        await writeScheduledRecordings(data);
       }
     }
 
@@ -885,12 +895,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // ── Multi-Tenant Merge Strategy ─────────────────────────────────────────
-    // 1. Get existing data from disk
-    let existingData: any = { schedules: [], originalSchedules: {} };
-    try {
-      const dataStr = await readDataFile(DATA_FILE);
-      existingData = JSON.parse(dataStr);
-    } catch (e) { }
+    const existingData = await readScheduledRecordings();
 
     // 2. Identify current user and their rights
     const { rights, isAdmin: userIsAdmin, username } = await getUserResourceRights(request, body.nxLocationIp || existingData.nxLocationIp, body.nxLocationPort || existingData.nxLocationPort);
@@ -1007,8 +1012,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    await fs.writeFile(DATA_FILE, JSON.stringify(body, null, 2), "utf-8");
+    await writeScheduledRecordings(body);
 
     // Log the creation event only once per batch
     if (body.schedules && body.schedules.length > 0) {

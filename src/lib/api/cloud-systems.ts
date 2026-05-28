@@ -8,8 +8,9 @@ import { apiFetch } from "@/lib/http-client";
 import { getBrowserQueryClient } from "@/lib/query-client";
 import { queryKeys } from "@/lib/query-keys";
 import type { CloudSystem } from "@/types/cloud-system";
+import { CLOUD_SYSTEMS_STALE_MS } from "@/lib/cache-constants";
 
-const CLOUD_CACHE_TTL_MS = 5 * 60 * 1000;
+const CLOUD_CACHE_TTL_MS = CLOUD_SYSTEMS_STALE_MS;
 
 let cloudSystemsCache: { data: CloudSystem[]; timestamp: number } | null = null;
 let inFlightFetch: Promise<CloudSystem[]> | null = null;
