@@ -41,7 +41,32 @@ export async function POST(request: NextRequest) {
       .trim();
 
     const now = new Date();
-    const targetDate = body.timestampMs ? new Date(Number(body.timestampMs)) : now;
+    
+    // Fetch VMS timezone offset to adjust local timestamps to VMS server time
+    let timeOffsetMs = 0;
+    try {
+      const timeUrl = buildCloudUrl(systemId, "/api/time", undefined, request);
+      const timeHeaders = buildCloudHeaders(request, systemId);
+      let timeRes = await fetch(timeUrl, { headers: timeHeaders });
+      if (timeRes.status === 401 || timeRes.status === 403) {
+        const basic = getBasicAuthHeaderFromRequest(request);
+        if (basic) timeRes = await fetch(timeUrl, { headers: { ...timeHeaders, Authorization: basic } });
+      }
+      if (timeRes.ok) {
+        const timeData = await timeRes.json();
+        if (typeof timeData.offset === "number") {
+          const clientOffsetMs = -new Date().getTimezoneOffset() * 60 * 1000;
+          timeOffsetMs = timeData.offset - clientOffsetMs;
+        }
+      }
+    } catch (e) {
+      // fallback to 0
+    }
+
+    let targetDate = body.timestampMs ? new Date(Number(body.timestampMs)) : now;
+    if (timeOffsetMs !== 0) {
+      targetDate = new Date(targetDate.getTime() + timeOffsetMs);
+    }
     
     const YYYY = targetDate.getFullYear().toString();
     const MM = (targetDate.getMonth() + 1).toString().padStart(2, "0");
@@ -53,12 +78,22 @@ export async function POST(request: NextRequest) {
     if (body.scheduledStartTime) {
       const parts = body.scheduledStartTime.split(":");
       if (parts.length >= 2) {
-        displayHH = parts[0].padStart(2, "0");
-        displaymm = parts[1].padStart(2, "0");
+        const scheduledH = Number(parts[0]);
+        const scheduledM = Number(parts[1]);
+        const refDate = new Date();
+        refDate.setHours(scheduledH, scheduledM, 0, 0);
+        const adjustedDate = new Date(refDate.getTime() + timeOffsetMs);
+        displayHH = adjustedDate.getHours().toString().padStart(2, "0");
+        displaymm = adjustedDate.getMinutes().toString().padStart(2, "0");
       }
     }
 
-    const dateFolder = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, "0")}-${now.getDate().toString().padStart(2, "0")}`;
+    // Naming files and folders based on VMS local time
+    let adjustedNow = now;
+    if (timeOffsetMs !== 0) {
+      adjustedNow = new Date(now.getTime() + timeOffsetMs);
+    }
+    const dateFolder = `${adjustedNow.getFullYear()}-${(adjustedNow.getMonth() + 1).toString().padStart(2, "0")}-${adjustedNow.getDate().toString().padStart(2, "0")}`;
     const idHash = cleanDeviceId.slice(-4).toLowerCase();
     const timestampStr = `${displayHH}${displaymm}00`;
 

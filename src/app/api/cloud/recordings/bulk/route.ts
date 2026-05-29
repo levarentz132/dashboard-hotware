@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
               } else {
                 params.set("positionMs", String(item.startTimeMs));
                 if (item.durationMs) {
-                  params.set("endPositionMs", String(item.startTimeMs + item.durationMs));
+                  params.set("durationMs", String(item.durationMs));
                 }
                 endpoint = `/rest/v3/devices/${item.deviceId}/media`;
               }

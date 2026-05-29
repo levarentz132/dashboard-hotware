@@ -84,11 +84,60 @@ declare global {
   var _nxWatchdogActive: boolean | undefined;
   var _nxAppPort: string | undefined;
   var _nxExecutingTasks: Set<string> | undefined;
+  var _vmsTimeOffsetMs: number | undefined;
+  var _vmsTimeOffsetLastChecked: number | undefined;
 }
 
 // Initialize execution lock set
 if (typeof global !== "undefined" && !global._nxExecutingTasks) {
   global._nxExecutingTasks = new Set<string>();
+}
+
+/**
+ * Retrieves and caches the VMS timezone offset (relative to Next.js server local time)
+ */
+async function getVmsTimeOffsetMs(systemId: string, auth: string, ip: string, port: string): Promise<number> {
+  const curTime = Date.now();
+  if (global._vmsTimeOffsetMs !== undefined && global._vmsTimeOffsetLastChecked !== undefined && (curTime - global._vmsTimeOffsetLastChecked < 300000)) {
+    return global._vmsTimeOffsetMs;
+  }
+
+  try {
+    const isLocalToken = auth.startsWith("vms-");
+    const dummyRequest = {
+      cookies: { get: () => null },
+      headers: {
+        get: (name: string) => {
+          if (name === "x-nx-location-ip") return ip;
+          if (name === "x-nx-location-port") return port;
+          return null;
+        }
+      }
+    } as any;
+
+    const url = buildCloudUrl(systemId, "/api/time", undefined, dummyRequest);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-runtime-guid": auth,
+    };
+    if (!isLocalToken) {
+      headers["Authorization"] = `Bearer ${auth}`;
+    }
+
+    const res = await fetch(url, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (typeof data.offset === "number") {
+        const clientOffsetMs = -new Date().getTimezoneOffset() * 60 * 1000;
+        global._vmsTimeOffsetMs = data.offset - clientOffsetMs;
+        global._vmsTimeOffsetLastChecked = curTime;
+        return global._vmsTimeOffsetMs;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return 0;
 }
 
 /**
@@ -174,6 +223,12 @@ const startWatchdog = () => {
       const deletedTaskIds = new Set<string>();
       const now = Date.now();
 
+      // Retrieve timeOffsetMs if schedules exist to align Next.js timezone with VMS timezone
+      let timeOffsetMs = 0;
+      if (schedules.length > 0 && schedules[0].auth && ip) {
+        timeOffsetMs = await getVmsTimeOffsetMs(schedules[0].systemId || "", schedules[0].auth, ip, port);
+      }
+
       // ── DEDUPLICATION: Remove identical tasks before processing ──────────
       const uniqueSchedules: any[] = [];
       const seenKeys = new Set();
@@ -198,9 +253,15 @@ const startWatchdog = () => {
         const endTime = rec.endMs || startTime;
 
         if (isNonRecurring && rec.status === "processing") {
+          if (doesVideoFileExist(rec, timeOffsetMs)) {
+            console.log(`[Watchdog] Non-recurring processing task ${rec.id} completed. Removing.`);
+            deletedTaskIds.add(rec.id);
+            changed = true;
+            return;
+          }
           const sinceEnd = endTime > 0 ? now - endTime : 0;
           // 30-minute grace after the recording window ends for FFmpeg auto-save to complete
-          if (sinceEnd > 30 * 60 * 1000 && !doesVideoFileExist(rec)) {
+          if (sinceEnd > 30 * 60 * 1000) {
             console.log(`[Watchdog] Stale non-recurring processing task ${rec.id} removed during cleanup (auto-save timed out).`);
             deletedTaskIds.add(rec.id);
             changed = true;
@@ -270,11 +331,27 @@ const startWatchdog = () => {
         const endParts = (rec.endTime || rec.startTime).split(":").map(Number);
         const sh = startParts[0], sm = startParts[1], ss = startParts[2] || 0;
         const eh = endParts[0], em = endParts[1], es = endParts[2] !== undefined ? endParts[2] : 59;
-        const startMs = rec.startMs || new Date(rec.date).setHours(sh, sm, ss, 0);
-        const endMs = rec.endMs || new Date(rec.date).setHours(eh, em, es, 999);
+        
+        let startMs = rec.startMs;
+        let endMs = rec.endMs;
+        if (!startMs || !endMs) {
+          let startDate = new Date(rec.date);
+          startDate.setHours(sh, sm, ss, 0);
+          if (timeOffsetMs !== 0) {
+            startDate = new Date(startDate.getTime() - timeOffsetMs);
+          }
+          startMs = startDate.getTime();
+
+          let endDate = new Date(rec.date);
+          endDate.setHours(eh, em, es, 999);
+          if (timeOffsetMs !== 0) {
+            endDate = new Date(endDate.getTime() - timeOffsetMs);
+          }
+          endMs = endDate.getTime();
+        }
 
         // Deduplication: if the video file already exists, complete or delete the schedule immediately
-        if (rec.type === "video" && doesVideoFileExist(rec)) {
+        if (rec.type === "video" && doesVideoFileExist(rec, timeOffsetMs)) {
           console.log(`[Watchdog] AUTO-SAVE deduplication: Valid file already exists for ${rec.cameraName}, skipping trigger.`);
           const isRecurring = rec.recurrence && rec.recurrence !== "none";
           if (isRecurring) {
@@ -282,8 +359,8 @@ const startWatchdog = () => {
             rec.status = "pending";
             rec.record = false;
             rec.date = nextDate.toISOString();
-            rec.startMs = nextDate.getTime();
-            rec.endMs = nextDate.getTime() + (endMs - startMs);
+            rec.startMs = nextDate.getTime() - timeOffsetMs;
+            rec.endMs = rec.startMs + (endMs - startMs);
             changed = true;
           } else {
             deletedTaskIds.add(rec.id);
@@ -348,7 +425,7 @@ const startWatchdog = () => {
         }
         else if (now >= endMs && rec.status === "processing" && rec.type === "video") {
           const isNonRecurring = !rec.recurrence || rec.recurrence === "none" || rec.recurrence === "once";
-          if (doesVideoFileExist(rec)) {
+          if (doesVideoFileExist(rec, timeOffsetMs)) {
             if (isNonRecurring) {
               deletedTaskIds.add(rec.id);
               uniqueSchedules.splice(i, 1);
@@ -360,8 +437,8 @@ const startWatchdog = () => {
               rec.status = "pending";
               rec.record = false;
               rec.date = nextDate.toISOString();
-              rec.startMs = nextDate.getTime();
-              rec.endMs = nextDate.getTime() + (endMs - startMs);
+              rec.startMs = nextDate.getTime() - timeOffsetMs;
+              rec.endMs = rec.startMs + (endMs - startMs);
               changed = true;
               console.log(`[Watchdog] Recurring task ${rec.cameraName} auto-save completed. Rolled forward to ${nextDate.toISOString()}`);
             }
@@ -428,8 +505,8 @@ const startWatchdog = () => {
                 const nextDate = calculateNextOccurrence(rec, sh, sm, ss);
                 rec.status = "pending";
                 rec.date = nextDate.toISOString();
-                rec.startMs = nextDate.getTime();
-                rec.endMs = nextDate.getTime() + (endMs - startMs);
+                rec.startMs = nextDate.getTime() - timeOffsetMs;
+                rec.endMs = rec.startMs + (endMs - startMs);
               } else {
                 deletedTaskIds.add(rec.id);
                 const idx = uniqueSchedules.findIndex((s: any) => s.id === rec.id);
@@ -516,6 +593,9 @@ const startWatchdog = () => {
               if (original) {
                 await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { ...original, isEnabled: false } }, auth, ip, port, rec.systemId);
                 console.log(`[Watchdog] Original schedule restored for ${rec.cameraName}`);
+              } else {
+                await vmsRequest("PATCH", `/rest/v3/devices/${cleanId}`, { schedule: { isEnabled: false, tasks: [] } }, auth, ip, port, rec.systemId);
+                console.log(`[Watchdog] Empty schedule restored (tasks cleared) for ${rec.cameraName}`);
               }
               delete originalSchedules[rec.id];
 
@@ -532,8 +612,8 @@ const startWatchdog = () => {
               rec.status = "pending";
               rec.record = false;
               rec.date = nextDate.toISOString();
-              rec.startMs = nextDate.getTime();
-              rec.endMs = nextDate.getTime() + (endMs - startMs);
+              rec.startMs = nextDate.getTime() - timeOffsetMs;
+              rec.endMs = rec.startMs + (endMs - startMs);
             } else {
               rec.status = "processing";
             }
@@ -548,8 +628,8 @@ const startWatchdog = () => {
             const nextDate = calculateNextOccurrence(rec, sh, sm, ss);
             rec.status = "pending";
             rec.date = nextDate.toISOString();
-            rec.startMs = nextDate.getTime();
-            rec.endMs = nextDate.getTime() + (endMs - startMs);
+            rec.startMs = nextDate.getTime() - timeOffsetMs;
+            rec.endMs = rec.startMs + (endMs - startMs);
           } else {
             rec.status = "completed";
           }
@@ -573,12 +653,13 @@ const startWatchdog = () => {
 };
 
 // Helper functions for the refactored watchdog
-function doesVideoFileExist(rec: any): boolean {
+function doesVideoFileExist(rec: any, timeOffsetMs: number = 0): boolean {
   try {
     const cleanId = rec.cameraId.replace(/[{}]/g, "");
     const idHash = cleanId.slice(-4).toLowerCase();
     const startMs = rec.startMs || (rec.date ? new Date(rec.date).getTime() : Date.now());
-    const recDate = new Date(startMs);
+    const adjustedStartMs = startMs + timeOffsetMs;
+    const recDate = new Date(adjustedStartMs);
     const YYYY = recDate.getFullYear().toString();
     const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
     const DD = recDate.getDate().toString().padStart(2, "0");

@@ -61,17 +61,42 @@ function releaseFfmpegSlot(): void {
 }
 
 function getFfmpegPath(): string {
-  if (process.env.ELECTRON_RUN_AS_NODE || process.env.IS_ELECTRON) {
-    try {
-      // @ts-ignore
-      const resourcesPath = process.resourcesPath || path.join(process.cwd(), "..");
-      const bundledFfmpeg = path.join(resourcesPath, "node-bin", "ffmpeg.exe");
-      
+  try {
+    // 1. Try process.resourcesPath if available (Electron production)
+    // @ts-ignore
+    const resPath = process.resourcesPath;
+    if (resPath) {
+      const bundledFfmpeg = path.join(resPath, "node-bin", "ffmpeg.exe");
       if (fs.existsSync(bundledFfmpeg)) {
         return bundledFfmpeg;
       }
-    } catch (e) {}
-  }
+    }
+
+    // 2. Try development path or standalone parent directories
+    const cwd = process.cwd();
+    
+    // Dev mode: project root/node-bin/ffmpeg.exe
+    const devPath = path.join(cwd, "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(devPath)) {
+      return devPath;
+    }
+
+    // Standalone mode: check parents
+    const standalonePath3 = path.join(cwd, "..", "..", "..", "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(standalonePath3)) {
+      return standalonePath3;
+    }
+
+    const standalonePath2 = path.join(cwd, "..", "..", "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(standalonePath2)) {
+      return standalonePath2;
+    }
+
+    const standalonePath1 = path.join(cwd, "..", "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(standalonePath1)) {
+      return standalonePath1;
+    }
+  } catch (e) {}
   return "ffmpeg";
 }
 
@@ -158,7 +183,7 @@ export async function GET(request: NextRequest) {
     } else {
       params.set("positionMs", String(startTime));
       if (endTime) {
-        params.set("endPositionMs", String(endTime));
+        params.set("durationMs", String(endTime - startTime));
       }
       endpoint = `/rest/v3/devices/${deviceId}/media`;
     }
@@ -186,7 +211,32 @@ export async function GET(request: NextRequest) {
     // Called automatically when a scheduled recording finishes. Adds to local
     // queue and returns instantly to avoid HTTP socket blocking or timeouts.
     if (autoSave && !effectiveIsImage) {
-      const recDate = new Date(startTime);
+      // Fetch VMS timezone offset to adjust local timestamps to VMS server time
+      let timeOffsetMs = 0;
+      try {
+        const timeUrl = buildCloudUrl(systemId, "/api/time", undefined, request);
+        const timeHeaders = buildCloudHeaders(request, systemId);
+        let timeRes = await fetch(timeUrl, { headers: timeHeaders });
+        if (timeRes.status === 401 || timeRes.status === 403) {
+          const basic = getBasicAuthHeaderFromRequest(request);
+          if (basic) timeRes = await fetch(timeUrl, { headers: { ...timeHeaders, Authorization: basic } });
+        }
+        if (timeRes.ok) {
+          const timeData = await timeRes.json();
+          if (typeof timeData.offset === "number") {
+            const clientOffsetMs = -new Date().getTimezoneOffset() * 60 * 1000;
+            timeOffsetMs = timeData.offset - clientOffsetMs;
+          }
+        }
+      } catch (e) {
+        // fallback to 0
+      }
+
+      let recDate = new Date(startTime);
+      if (timeOffsetMs !== 0) {
+        recDate = new Date(recDate.getTime() + timeOffsetMs);
+      }
+
       const YYYY = recDate.getFullYear().toString();
       const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
       const DD = recDate.getDate().toString().padStart(2, "0");

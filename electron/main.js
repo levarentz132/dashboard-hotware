@@ -683,6 +683,7 @@ function startNextDev() {
         HOSTNAME: '0.0.0.0',
         EXT_CONFIG_PATH: CONFIG_PATH,
         NODE_OPTIONS: '--max-old-space-size=1024',
+        IS_ELECTRON: 'true',
         ...redisEnv(),
     };
     launchServer('npm', ['run', 'dev'], cwd, env);

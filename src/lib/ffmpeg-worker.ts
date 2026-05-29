@@ -18,17 +18,43 @@ declare global {
  * In development, use system PATH.
  */
 function getFfmpegPath(): string {
-  if (process.env.ELECTRON_RUN_AS_NODE || process.env.IS_ELECTRON) {
-    try {
-      // @ts-ignore
-      const resourcesPath = process.resourcesPath || path.join(process.cwd(), "..");
-      const bundledFfmpeg = path.join(resourcesPath, "node-bin", "ffmpeg.exe");
+  try {
+    // 1. Try process.resourcesPath if available
+    // @ts-ignore
+    const resPath = process.resourcesPath;
+    if (resPath) {
+      const bundledFfmpeg = path.join(resPath, "node-bin", "ffmpeg.exe");
       if (fs.existsSync(bundledFfmpeg)) {
         return bundledFfmpeg;
       }
-    } catch (e) {
-      logger.error("[FFmpegWorker] Error locating bundled FFmpeg:", e);
     }
+
+    // 2. Try development path or standalone parent directories
+    const cwd = process.cwd();
+    
+    // Dev mode: project root/node-bin/ffmpeg.exe
+    const devPath = path.join(cwd, "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(devPath)) {
+      return devPath;
+    }
+
+    // Standalone mode: check parents (e.g. from .next/standalone to resources)
+    const standalonePath3 = path.join(cwd, "..", "..", "..", "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(standalonePath3)) {
+      return standalonePath3;
+    }
+
+    const standalonePath2 = path.join(cwd, "..", "..", "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(standalonePath2)) {
+      return standalonePath2;
+    }
+
+    const standalonePath1 = path.join(cwd, "..", "node-bin", "ffmpeg.exe");
+    if (fs.existsSync(standalonePath1)) {
+      return standalonePath1;
+    }
+  } catch (e) {
+    logger.error("[FFmpegWorker] Error locating bundled FFmpeg:", e);
   }
   return "ffmpeg";
 }
