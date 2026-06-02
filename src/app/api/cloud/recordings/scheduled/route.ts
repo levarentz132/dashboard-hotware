@@ -337,14 +337,14 @@ const startWatchdog = () => {
         if (!startMs || !endMs) {
           let startDate = new Date(rec.date);
           startDate.setHours(sh, sm, ss, 0);
-          if (timeOffsetMs !== 0) {
+          if (timeOffsetMs !== 0 && rec.type === "video") {
             startDate = new Date(startDate.getTime() - timeOffsetMs);
           }
           startMs = startDate.getTime();
 
           let endDate = new Date(rec.date);
           endDate.setHours(eh, em, es, 999);
-          if (timeOffsetMs !== 0) {
+          if (timeOffsetMs !== 0 && rec.type === "video") {
             endDate = new Date(endDate.getTime() - timeOffsetMs);
           }
           endMs = endDate.getTime();
@@ -395,13 +395,14 @@ const startWatchdog = () => {
             changed = true;
             global._nxExecutingTasks?.add(rec.id);
             tasksToExecute.push({ type: "screenshot", rec, startMs, endMs, sh, sm, ss });
+          } else if (now >= startMs + catchUpWindowMs && (rec.status === "in progress" || rec.status === "capturing" || rec.status === "pending")) {
+            // Screenshot task expired past catch-up window — roll forward or remove
+            console.log(`[Watchdog] Screenshot task ${rec.cameraName} expired (status=${rec.status}). Cleaning up.`);
+            tasksToExecute.push({ type: "expire", rec, startMs, endMs, sh, sm, ss });
           }
         }
         // Video logic
-        else if (now >= startMs && now < endMs) {
-          // FIX: Also handle status "recording" when rec.record is not yet set.
-          // This covers the case where the client sets status to "recording" for
-          // immediate tasks, but the VMS has not been patched yet.
+        else if (rec.type === "video" && now >= startMs && now < endMs) {
           if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress" || (rec.status === "recording" && !rec.record))) {
             const isRecurring = rec.recurrence && rec.recurrence !== "none";
             const isLate = now > (startMs + 60000); // More than 1 min late
@@ -418,7 +419,7 @@ const startWatchdog = () => {
             }
           }
         }
-        else if (now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress" || rec.status === "completing")) {
+        else if (rec.type === "video" && now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress" || rec.status === "completing")) {
           rec.status = "completing";
           changed = true;
           tasksToExecute.push({ type: "video_stop", rec, startMs, endMs, sh, sm, ss, eh, em, es });
@@ -494,6 +495,7 @@ const startWatchdog = () => {
                 cameraName: rec.cameraName,
                 timestampMs: startMs,
                 scheduledStartTime: rec.startTime,
+                timeOffsetMs: timeOffsetMs,
                 notificationUserKey: rec.scheduledBy || "admin"
               })
             });
@@ -695,7 +697,8 @@ function doesVideoFileExist(rec: any, timeOffsetMs: number = 0): boolean {
 
 async function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: string, nxPort: string) {
   const currentPort = detectCurrentPort(global._nxAppPort || "3030");
-  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}&notificationUserKey=${encodeURIComponent(rec.scheduledBy || "admin")}`;
+  const timeOffsetMs = global._vmsTimeOffsetMs || 0;
+  const url = `http://127.0.0.1:${currentPort}/api/cloud/recordings/download?systemId=${rec.systemId}&deviceId=${cleanId}&startTime=${rec.startMs}&endTime=${rec.endMs}&cameraName=${encodeURIComponent(rec.cameraName)}&autoSave=true&taskId=${rec.id}&token=${auth}&notificationUserKey=${encodeURIComponent(rec.scheduledBy || "admin")}&timeOffsetMs=${timeOffsetMs}`;
   const headers: any = {};
   if (auth) headers["x-watchdog-auth"] = auth;
   if (nxIp && nxIp !== "localhost") headers["x-nx-location-ip"] = nxIp;

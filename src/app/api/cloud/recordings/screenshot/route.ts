@@ -43,24 +43,26 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     
     // Fetch VMS timezone offset to adjust local timestamps to VMS server time
-    let timeOffsetMs = 0;
-    try {
-      const timeUrl = buildCloudUrl(systemId, "/api/time", undefined, request);
-      const timeHeaders = buildCloudHeaders(request, systemId);
-      let timeRes = await fetch(timeUrl, { headers: timeHeaders });
-      if (timeRes.status === 401 || timeRes.status === 403) {
-        const basic = getBasicAuthHeaderFromRequest(request);
-        if (basic) timeRes = await fetch(timeUrl, { headers: { ...timeHeaders, Authorization: basic } });
-      }
-      if (timeRes.ok) {
-        const timeData = await timeRes.json();
-        if (typeof timeData.offset === "number") {
-          const clientOffsetMs = -new Date().getTimezoneOffset() * 60 * 1000;
-          timeOffsetMs = timeData.offset - clientOffsetMs;
+    let timeOffsetMs = typeof body.timeOffsetMs === "number" ? body.timeOffsetMs : 0;
+    if (timeOffsetMs === 0) {
+      try {
+        const timeUrl = buildCloudUrl(systemId, "/api/time", undefined, request);
+        const timeHeaders = buildCloudHeaders(request, systemId);
+        let timeRes = await fetch(timeUrl, { headers: timeHeaders });
+        if (timeRes.status === 401 || timeRes.status === 403) {
+          const basic = getBasicAuthHeaderFromRequest(request);
+          if (basic) timeRes = await fetch(timeUrl, { headers: { ...timeHeaders, Authorization: basic } });
         }
+        if (timeRes.ok) {
+          const timeData = await timeRes.json();
+          if (typeof timeData.offset === "number") {
+            const clientOffsetMs = -new Date().getTimezoneOffset() * 60 * 1000;
+            timeOffsetMs = timeData.offset - clientOffsetMs;
+          }
+        }
+      } catch (e) {
+        // fallback to 0
       }
-    } catch (e) {
-      // fallback to 0
     }
 
     let targetDate = body.timestampMs ? new Date(Number(body.timestampMs)) : now;
@@ -75,25 +77,9 @@ export async function POST(request: NextRequest) {
     const mm = targetDate.getMinutes().toString().padStart(2, "0");
 
     let displayHH = HH, displaymm = mm;
-    if (body.scheduledStartTime) {
-      const parts = body.scheduledStartTime.split(":");
-      if (parts.length >= 2) {
-        const scheduledH = Number(parts[0]);
-        const scheduledM = Number(parts[1]);
-        const refDate = new Date();
-        refDate.setHours(scheduledH, scheduledM, 0, 0);
-        const adjustedDate = new Date(refDate.getTime() + timeOffsetMs);
-        displayHH = adjustedDate.getHours().toString().padStart(2, "0");
-        displaymm = adjustedDate.getMinutes().toString().padStart(2, "0");
-      }
-    }
 
     // Naming files and folders based on VMS local time
-    let adjustedNow = now;
-    if (timeOffsetMs !== 0) {
-      adjustedNow = new Date(now.getTime() + timeOffsetMs);
-    }
-    const dateFolder = `${adjustedNow.getFullYear()}-${(adjustedNow.getMonth() + 1).toString().padStart(2, "0")}-${adjustedNow.getDate().toString().padStart(2, "0")}`;
+    const dateFolder = `${YYYY}-${MM}-${DD}`;
     const idHash = cleanDeviceId.slice(-4).toLowerCase();
     const timestampStr = `${displayHH}${displaymm}00`;
 
@@ -143,9 +129,10 @@ export async function POST(request: NextRequest) {
         const camData = await camRes.json();
         originalSchedule = camData.schedule;
         const sNow = new Date();
-        const startSec = sNow.getHours() * 3600 + sNow.getMinutes() * 60 + sNow.getSeconds();
-        const endSec = startSec + 5;
-        const dayOfWeek = sNow.getDay();
+        const adjustedNow = timeOffsetMs !== 0 ? new Date(sNow.getTime() + timeOffsetMs) : sNow;
+        const startSec = adjustedNow.getHours() * 3600 + adjustedNow.getMinutes() * 60 + adjustedNow.getSeconds();
+        const endSec = startSec + 2;
+        const dayOfWeek = adjustedNow.getDay();
         
         await fetch(vmsUrl, {
           method: "PATCH",

@@ -492,6 +492,11 @@ export default function CloudRecordings() {
   const originalSchedules = useRef<Map<string, any>>(new Map());
   const hasLoadedFromDisk = useRef(false);
   const lastActionTime = useRef(0);
+  const executingScreenshotIds = useRef<Set<string>>(new Set());
+  const refreshScheduleAndResultsRef = useRef<() => void>(() => {});
+  const runScheduledScreenshotCaptureRef = useRef<
+    (rec: ScheduledRecording) => Promise<void>
+  >(async () => {});
 
   // ---- Persistence Logic ----
   const saveToPersistence = async (scheds: ScheduledRecording[], originals: any) => {
@@ -513,11 +518,11 @@ export default function CloudRecordings() {
     } catch (e) { console.error("[Persistence] Save failed:", e); }
   };
 
-  const loadFromPersistence = async () => {
+  const loadFromPersistence = async (force: boolean = false) => {
     // RACE CONDITION PREVENTION:
     // If we recently performed an action (save/delete), skip polling for 5 seconds
     // to give the server time to finish writing the file and for the next poll to get fresh data.
-    if (Date.now() - lastActionTime.current < 5000) return;
+    if (!force && (Date.now() - lastActionTime.current < 5000)) return;
 
     try {
       const res = await fetch("/api/cloud/recordings/scheduled");
@@ -534,13 +539,17 @@ export default function CloudRecordings() {
             date: new Date(s.date)
           }));
 
-          // Detect transitions into completed or failed states
+          // Detect transitions from active (recording/processing) to completed/inactive states
           let hasNewCompleted = false;
-          loadedScheds.forEach((s: any) => {
-            if (s.status === "completed" || s.status === "completed-with-warnings" || s.status === "failed") {
-              const existing = scheduledRecordings.find((curr: any) => curr.id === s.id);
-              const existingStatus = existing ? (existing.status as string) : "";
-              if (existing && existingStatus !== s.status && existingStatus !== "completed" && existingStatus !== "completed-with-warnings" && existingStatus !== "failed") {
+          scheduledRecordings.forEach((existing: any) => {
+            const wasActive = existing.status === "recording" || existing.status === "processing" || existing.status === "in progress" || existing.status === "capturing";
+            if (wasActive) {
+              const updated = loadedScheds.find((s: any) => s.id === existing.id);
+              if (!updated) {
+                // Task is gone -> completed and deleted
+                hasNewCompleted = true;
+              } else if (updated.status === "pending" || updated.status === "completed" || updated.status === "failed") {
+                // Task status changed to inactive/pending -> completed
                 hasNewCompleted = true;
               }
             }
@@ -604,24 +613,29 @@ export default function CloudRecordings() {
     if (rec.type === "screenshot") {
       const captureDelay = 3000;
       const targetMs = startMs + captureDelay;
-      if (now >= targetMs) return;
+      const SCREENSHOT_CATCHUP_MS = 2 * 60 * 1000;
+      const canCapture =
+        rec.status === "pending" ||
+        rec.status === "in progress" ||
+        rec.status === "capturing";
+
+      // Already at/ past capture time (e.g. "schedule now") — fire immediately if still eligible
+      if (now >= targetMs) {
+        if (canCapture && now < startMs + SCREENSHOT_CATCHUP_MS) {
+          void runScheduledScreenshotCaptureRef.current(rec);
+        }
+        return;
+      }
 
       // Only set timer if it's within the next 24 hours to avoid 32-bit setTimeout overflow (24.8 days)
       if (targetMs - now < ONE_DAY_MS) {
         const timer = setTimeout(() => {
-          console.log(`[CloudRecordings] Snapshot time reached for ${rec.cameraName}. Cleaning up UI.`);
-          if (rec.recurrence === "none") {
-            setScheduledRecordings(prev => {
-              const next = prev.filter(r => r.id !== rec.id);
-              saveToPersistence(next, originalSchedules.current);
-              return next;
-            });
-          } else {
-            loadFromPersistence();
-          }
-          setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 3000);
+          console.log(
+            `[CloudRecordings] Snapshot time reached for ${rec.cameraName}. Running capture + refresh.`,
+          );
+          void runScheduledScreenshotCaptureRef.current(rec);
         }, targetMs - now);
-        
+
         scheduleTimers.current.set(rec.id + "-start", timer);
       }
       return;
@@ -683,6 +697,7 @@ export default function CloudRecordings() {
         });
 
         // Keep the task on disk as "processing" so the server watchdog can trigger FFmpeg auto-save.
+        // Keep the task on disk as "processing" so the server watchdog can trigger FFmpeg auto-save.
         console.log(`[CloudRecordings] Recording ${rec.cameraName} finished. Marking as processing for server auto-save.`);
         lastActionTime.current = Date.now();
         setScheduledRecordings(prev => {
@@ -695,12 +710,12 @@ export default function CloudRecordings() {
 
         if (rec.recurrence !== "none") {
           // For recurring: the watchdog will also advance the next occurrence
-          loadFromPersistence();
+          lastActionTime.current = 0;
+          loadFromPersistence(true);
         }
-        
-        // Auto-refresh results after recording finishes
-        // We use a larger delay for video to allow VMS to index and watchdog to auto-save
-        setTimeout(() => handleSearchRecentRecordings(undefined, undefined, undefined, true), 7000);
+
+        // Auto-refresh after recording finishes (allow auto-save to complete first)
+        setTimeout(() => refreshScheduleAndResultsRef.current(), 7000);
       }, endMs - now);
 
       scheduleTimers.current.set(rec.id + "-end", timer);
@@ -1534,6 +1549,92 @@ export default function CloudRecordings() {
       if (lastRequestTime.current === requestTime) {
         setRecentLoading(false);
       }
+    }
+  };
+
+  refreshScheduleAndResultsRef.current = () => {
+    lastActionTime.current = 0;
+    loadFromPersistence(true);
+    handleSearchRecentRecordings(
+      selectedDeviceRef.current,
+      dateRef.current,
+      undefined,
+      false,
+      true,
+    );
+  };
+
+  runScheduledScreenshotCaptureRef.current = async (rec: ScheduledRecording) => {
+    if (executingScreenshotIds.current.has(rec.id)) return;
+    executingScreenshotIds.current.add(rec.id);
+
+    const [sh, sm] = rec.startTime.split(":").map(Number);
+    const startMs = rec.startMs ?? new Date(rec.date).setHours(sh, sm, 0, 0);
+
+    console.log(`[CloudRecordings] Triggering snapshot pulse for ${rec.cameraName}`);
+    lastActionTime.current = Date.now();
+    setScheduledRecordings((prev) => {
+      const next = prev.map((r) =>
+        r.id === rec.id ? { ...r, status: "capturing" as const } : r,
+      );
+      saveToPersistence(next, originalSchedules.current);
+      return next;
+    });
+
+    try {
+      const res = await fetch("/api/cloud/recordings/screenshot", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemId: rec.systemId,
+          deviceId: rec.cameraId,
+          cameraName: rec.cameraName,
+          timestampMs: startMs,
+          scheduledStartTime: rec.startTime,
+          notificationUserKey: rec.scheduledBy || getNotificationUserKey() || "admin",
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Screenshot API returned ${res.status}`);
+      }
+
+      const isRecurring = rec.recurrence && rec.recurrence !== "none";
+      if (!isRecurring) {
+        setScheduledRecordings((prev) => {
+          const next = prev.filter((r) => r.id !== rec.id);
+          saveToPersistence(next, originalSchedules.current);
+          return next;
+        });
+      }
+
+      addPersistentNotification({
+        type: "success",
+        title: "Snapshot Captured",
+        message: `Snapshot saved for ${rec.cameraName}`,
+        systemId: rec.systemId,
+        deviceId: rec.cameraId,
+      });
+    } catch (err) {
+      console.error("[CloudRecordings] Screenshot capture failed:", err);
+      setScheduledRecordings((prev) => {
+        const next = prev.map((r) =>
+          r.id === rec.id ? { ...r, status: "failed" as const } : r,
+        );
+        saveToPersistence(next, originalSchedules.current);
+        return next;
+      });
+      addPersistentNotification({
+        type: "error",
+        title: "Snapshot Failed",
+        message: `Could not capture snapshot for ${rec.cameraName}`,
+        systemId: rec.systemId,
+        deviceId: rec.cameraId,
+      });
+    } finally {
+      executingScreenshotIds.current.delete(rec.id);
+      refreshScheduleAndResultsRef.current();
     }
   };
 

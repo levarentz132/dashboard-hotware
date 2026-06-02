@@ -73,6 +73,14 @@ copyDir(srcPublic, destPublic);
 console.log('Copying .next/static folder to standalone...');
 copyDir(srcStatic, destStatic);
 
+// Copy @img folder for native sharp library in standalone node_modules
+const srcImg = path.join(projectRoot, 'node_modules', '@img');
+const destImg = path.join(serverDir, 'node_modules', '@img');
+if (fs.existsSync(srcImg)) {
+    console.log('Copying @img folder to standalone node_modules...');
+    copyDir(srcImg, destImg);
+}
+
 // Verify chunks were copied
 const chunksPath = path.join(destStatic, 'chunks');
 if (fs.existsSync(chunksPath)) {

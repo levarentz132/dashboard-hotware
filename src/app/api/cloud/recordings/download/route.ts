@@ -170,6 +170,31 @@ export async function GET(request: NextRequest) {
     // Standardize screenshot detection: if endTime is missing OR equal to startTime OR duration is 0 OR isSnapshot flag is set
     const isImage = isSnapshotParam || !endTime || endTime === startTime || (endTime - startTime) <= 1000;
 
+    // Fetch VMS timezone offset to adjust local timestamps to VMS server time
+    const timeOffsetMsQuery = searchParams.get("timeOffsetMs");
+    let timeOffsetMs = timeOffsetMsQuery ? Number(timeOffsetMsQuery) : (global._vmsTimeOffsetMs || 0);
+    if (timeOffsetMs === 0) {
+      try {
+        const timeUrl = buildCloudUrl(systemId, "/api/time", undefined, request);
+        const timeHeaders = buildCloudHeaders(request, systemId);
+        let timeRes = await fetch(timeUrl, { headers: timeHeaders });
+        if (timeRes.status === 401 || timeRes.status === 403) {
+          const basic = getBasicAuthHeaderFromRequest(request);
+          if (basic) timeRes = await fetch(timeUrl, { headers: { ...timeHeaders, Authorization: basic } });
+        }
+        if (timeRes.ok) {
+          const timeData = await timeRes.json();
+          if (typeof timeData.offset === "number") {
+            const clientOffsetMs = -new Date().getTimezoneOffset() * 60 * 1000;
+            timeOffsetMs = timeData.offset - clientOffsetMs;
+            global._vmsTimeOffsetMs = timeOffsetMs;
+          }
+        }
+      } catch (e) {
+        // fallback to 0
+      }
+    }
+
     // Build download URL params
     const params = new URLSearchParams();
     let endpoint = "";
@@ -211,27 +236,6 @@ export async function GET(request: NextRequest) {
     // Called automatically when a scheduled recording finishes. Adds to local
     // queue and returns instantly to avoid HTTP socket blocking or timeouts.
     if (autoSave && !effectiveIsImage) {
-      // Fetch VMS timezone offset to adjust local timestamps to VMS server time
-      let timeOffsetMs = 0;
-      try {
-        const timeUrl = buildCloudUrl(systemId, "/api/time", undefined, request);
-        const timeHeaders = buildCloudHeaders(request, systemId);
-        let timeRes = await fetch(timeUrl, { headers: timeHeaders });
-        if (timeRes.status === 401 || timeRes.status === 403) {
-          const basic = getBasicAuthHeaderFromRequest(request);
-          if (basic) timeRes = await fetch(timeUrl, { headers: { ...timeHeaders, Authorization: basic } });
-        }
-        if (timeRes.ok) {
-          const timeData = await timeRes.json();
-          if (typeof timeData.offset === "number") {
-            const clientOffsetMs = -new Date().getTimezoneOffset() * 60 * 1000;
-            timeOffsetMs = timeData.offset - clientOffsetMs;
-          }
-        }
-      } catch (e) {
-        // fallback to 0
-      }
-
       let recDate = new Date(startTime);
       if (timeOffsetMs !== 0) {
         recDate = new Date(recDate.getTime() + timeOffsetMs);
@@ -377,14 +381,18 @@ export async function GET(request: NextRequest) {
       // If it's a screenshot, save a local copy using strict paths
       if (effectiveIsImage) {
         try {
-          const now = new Date();
-          const YYYY = now.getFullYear().toString();
-          const MM = (now.getMonth() + 1).toString().padStart(2, "0");
-          const DD = now.getDate().toString().padStart(2, "0");
-          const HH = now.getHours().toString().padStart(2, "0");
-          const mm = now.getMinutes().toString().padStart(2, "0");
+          let recDate = new Date(startTime);
+          if (timeOffsetMs !== 0) {
+            recDate = new Date(recDate.getTime() + timeOffsetMs);
+          }
+
+          const YYYY = recDate.getFullYear().toString();
+          const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
+          const DD = recDate.getDate().toString().padStart(2, "0");
+          const HH = recDate.getHours().toString().padStart(2, "0");
+          const mm = recDate.getMinutes().toString().padStart(2, "0");
           const SS = "00"; // Round down to :00 per user request
-          const dateFolder = `${YYYY}${MM}${DD}`;
+          const dateFolder = `${YYYY}-${MM}-${DD}`;
           
           let snapshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
           try {
