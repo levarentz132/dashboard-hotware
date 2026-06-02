@@ -6,6 +6,7 @@ import { loadQueue, updateJobStatus, getNextPendingJobs, FFmpegJob, cleanupStale
 import { calculateNextOccurrence } from "./schedule-utils";
 import { logRecordingEvent } from "./recording-logger";
 import logger from "./logger";
+import { readAppSettings } from "./server-settings";
 
 declare global {
   var _ffmpegWorkerInterval: NodeJS.Timeout | undefined;
@@ -65,16 +66,13 @@ function getFfmpegPath(): string {
  */
 function getConcurrencyLimit(): number {
   try {
-    const settingsFile = path.join(process.cwd(), "data", "settings.json");
-    if (fs.existsSync(settingsFile)) {
-      const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-      if (typeof settings.ffmpegConcurrency === "number" && settings.ffmpegConcurrency > 0) {
-        return settings.ffmpegConcurrency;
-      }
-      // Fallback: If running in restricted environment, allow server to default to 1
-      if (settings.videoStoragePath && process.platform === "win32" && osIsServer()) {
-        return 1;
-      }
+    const settings = readAppSettings();
+    if (typeof settings.ffmpegConcurrency === "number" && settings.ffmpegConcurrency > 0) {
+      return settings.ffmpegConcurrency;
+    }
+    // Fallback: If running in restricted environment, allow server to default to 1
+    if (settings.videoStoragePath && process.platform === "win32" && osIsServer()) {
+      return 1;
     }
   } catch (e) {}
   return 2; // Clean default

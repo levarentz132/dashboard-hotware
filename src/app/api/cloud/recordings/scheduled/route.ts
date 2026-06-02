@@ -12,6 +12,7 @@ import {
   readScheduledRecordings,
   writeScheduledRecordings,
 } from "@/lib/scheduled-recordings-store";
+import { readAppSettings } from "@/lib/server-settings";
 
 
 // ── VMS Direct API helpers ────────────────────────────────────────────────────
@@ -673,14 +674,11 @@ function doesVideoFileExist(rec: any, timeOffsetMs: number = 0): boolean {
 
     let autoSaveBaseDir = path.join(process.cwd(), "data", "recorded_videos");
     try {
-      const settingsFile = path.join(process.cwd(), "data", "settings.json");
-      if (fsSync.existsSync(settingsFile)) {
-        const settings = JSON.parse(fsSync.readFileSync(settingsFile, "utf-8"));
-        if (settings.videoStoragePath) {
-          autoSaveBaseDir = settings.videoStoragePath;
-        } else if (settings.storagePath) {
-          autoSaveBaseDir = settings.storagePath;
-        }
+      const settings = readAppSettings();
+      if (settings.videoStoragePath) {
+        autoSaveBaseDir = String(settings.videoStoragePath);
+      } else if (settings.storagePath) {
+        autoSaveBaseDir = String(settings.storagePath);
       }
     } catch (e) { }
 
@@ -776,13 +774,10 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
 
     if (finalIp === "localhost" || !finalIp) {
       try {
-        const settingsFile = path.join(process.cwd(), "data", "settings.json");
-        if (fsSync.existsSync(settingsFile)) {
-          const settings = JSON.parse(fsSync.readFileSync(settingsFile, "utf-8"));
-          if (settings.nxServerHost && settings.nxServerHost !== "localhost") {
-            finalIp = settings.nxServerHost;
-            if (settings.nxServerPort) finalPort = settings.nxServerPort;
-          }
+        const settings = readAppSettings();
+        if (settings.nxServerHost && settings.nxServerHost !== "localhost") {
+          finalIp = String(settings.nxServerHost);
+          if (settings.nxServerPort) finalPort = String(settings.nxServerPort);
         }
       } catch (e) { }
     }
@@ -1072,12 +1067,9 @@ export async function POST(request: NextRequest) {
 
     if (!nxIp || nxIp === "localhost") {
       try {
-        const settingsFile = path.join(process.cwd(), "data", "settings.json");
-        if (fsSync.existsSync(settingsFile)) {
-          const settings = JSON.parse(fsSync.readFileSync(settingsFile, "utf-8"));
-          if (settings.nxServerHost) nxIp = settings.nxServerHost;
-          if (settings.nxServerPort) nxPort = settings.nxServerPort;
-        }
+        const settings = readAppSettings();
+        if (settings.nxServerHost) nxIp = String(settings.nxServerHost);
+        if (settings.nxServerPort) nxPort = String(settings.nxServerPort);
       } catch (e) { }
     }
 

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-
-const SETTINGS_FILE = path.join(process.cwd(), "data", "settings.json");
+import { readAppSettings, writeAppSettings } from "@/lib/server-settings";
 
 /**
  * GET /api/cloud/recordings/settings
@@ -10,11 +7,7 @@ const SETTINGS_FILE = path.join(process.cwd(), "data", "settings.json");
  */
 export async function GET() {
   try {
-    if (!fs.existsSync(SETTINGS_FILE)) {
-      return NextResponse.json({ storagePath: "" });
-    }
-    const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
-    return NextResponse.json(JSON.parse(data));
+    return NextResponse.json(readAppSettings());
   } catch (error) {
     return NextResponse.json({ storagePath: "" });
   }
@@ -28,16 +21,11 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { storagePath, videoStoragePath } = body;
- 
-     // Ensure data directory exists
-     const dataDir = path.join(process.cwd(), "data");
-     if (!fs.existsSync(dataDir)) {
-       fs.mkdirSync(dataDir, { recursive: true });
-     }
- 
-     fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ storagePath, videoStoragePath }, null, 2));
- 
-     return NextResponse.json({ success: true, storagePath, videoStoragePath });
+
+    const current = readAppSettings();
+    writeAppSettings({ ...current, storagePath, videoStoragePath });
+
+    return NextResponse.json({ success: true, storagePath, videoStoragePath });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

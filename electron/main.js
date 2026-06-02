@@ -487,14 +487,35 @@ function getProjectRoot() {
     return isPackaged ? process.resourcesPath : path.join(__dirname, '..');
 }
 
-function getRedisDir() {
+/**
+ * Runtime Redis home is in userData so updates/reinstalls do not wipe data.
+ */
+function getRedisRuntimeDir() {
+    return path.join(app.getPath('userData'), 'redis');
+}
+
+/**
+ * Bundled Redis payload shipped with the app resources.
+ */
+function getBundledRedisDir() {
     return path.join(getProjectRoot(), 'redis');
 }
 
+function copyIfMissing(sourcePath, destinationPath) {
+    if (fs.existsSync(destinationPath)) return;
+    if (!fs.existsSync(sourcePath)) return;
+    fs.copyFileSync(sourcePath, destinationPath);
+    logtoFile(`[Redis] Copied ${path.basename(sourcePath)} to ${destinationPath}`);
+}
+
 function ensureRedisPortableSync() {
-    const redisDir = getRedisDir();
+    const redisDir = getRedisRuntimeDir();
+    const bundledRedisDir = getBundledRedisDir();
     const destExe = path.join(redisDir, 'redis-server.exe');
-    const sourceExe = path.join(getProjectRoot(), 'node-bin', 'redis-server.exe');
+    const destConf = path.join(redisDir, 'redis.conf');
+    const bundledExe = path.join(bundledRedisDir, 'redis-server.exe');
+    const bundledConf = path.join(bundledRedisDir, 'redis.conf');
+    const fallbackExe = path.join(getProjectRoot(), 'node-bin', 'redis-server.exe');
 
     if (!fs.existsSync(redisDir)) {
         fs.mkdirSync(redisDir, { recursive: true });
@@ -503,15 +524,31 @@ function ensureRedisPortableSync() {
         fs.mkdirSync(path.join(redisDir, 'data'), { recursive: true });
     }
 
-    if (fs.existsSync(destExe)) {
-        return true;
+    // Keep userData runtime files stable across app updates.
+    copyIfMissing(bundledExe, destExe);
+    copyIfMissing(fallbackExe, destExe);
+    copyIfMissing(bundledConf, destConf);
+
+    if (!fs.existsSync(destExe)) {
+        logtoFile(`[Redis] Missing redis-server.exe in ${redisDir}`);
+        return false;
     }
-    if (fs.existsSync(sourceExe)) {
-        fs.copyFileSync(sourceExe, destExe);
-        logtoFile(`[Redis] Copied redis-server.exe to ${destExe}`);
-        return true;
+
+    // Ensure redis.conf exists with a safe minimal config.
+    if (!fs.existsSync(destConf)) {
+        const defaultConf = [
+            'bind 127.0.0.1',
+            'port 6379',
+            'appendonly yes',
+            'dir ./data',
+            'protected-mode yes',
+            ''
+        ].join('\n');
+        fs.writeFileSync(destConf, defaultConf, 'utf8');
+        logtoFile(`[Redis] Created default redis.conf at ${destConf}`);
     }
-    return false;
+
+    return true;
 }
 
 function isRedisPortOpen() {
@@ -535,13 +572,13 @@ async function startRedisServer() {
     }
 
     if (!ensureRedisPortableSync()) {
-        const redisDir = getRedisDir();
+        const redisDir = getRedisRuntimeDir();
         const exe = path.join(redisDir, 'redis-server.exe');
         logtoFile(`[Redis] Missing ${exe} — server cache will use in-memory fallback`);
         return false;
     }
 
-    const redisDir = getRedisDir();
+    const redisDir = getRedisRuntimeDir();
     const exe = path.join(redisDir, 'redis-server.exe');
 
     return new Promise((resolve) => {
@@ -560,7 +597,7 @@ async function startRedisServer() {
             for (let i = 0; i < 30; i++) {
                 await new Promise((r) => setTimeout(r, 200));
                 if (await isRedisPortOpen()) {
-                    logtoFile('[Redis] Started (redis/redis.conf, data in redis/data)');
+                    logtoFile(`[Redis] Started (${redisDir}\\redis.conf, data in ${redisDir}\\data)`);
                     resolve(true);
                     return;
                 }

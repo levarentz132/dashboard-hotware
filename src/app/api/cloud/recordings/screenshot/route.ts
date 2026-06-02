@@ -3,6 +3,7 @@ import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderF
 import { API_CONFIG } from "@/lib/config";
 import fs from "fs";
 import path from "path";
+import { readAppSettings } from "@/lib/server-settings";
 
 
 /**
@@ -85,11 +86,8 @@ export async function POST(request: NextRequest) {
 
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
     try {
-      const settingsFile = path.join(process.cwd(), "data", "settings.json");
-      if (fs.existsSync(settingsFile)) {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-        if (settings.storagePath) screenshotsBaseDir = settings.storagePath;
-      }
+      const settings = readAppSettings();
+      if (settings.storagePath) screenshotsBaseDir = String(settings.storagePath);
     } catch (e) { }
 
     const screenshotsDir = path.join(screenshotsBaseDir, dateFolder);

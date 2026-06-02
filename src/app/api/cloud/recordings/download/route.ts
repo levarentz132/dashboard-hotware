@@ -18,6 +18,7 @@ import {
   sanitizeCameraName,
   validateAndGetSavePath,
 } from "@/lib/ffmpeg-sanitizer";
+import { readAppSettings } from "@/lib/server-settings";
 
 const writeFile = promisify(fs.writeFile);
 const mkdir = promisify(fs.mkdir);
@@ -252,14 +253,11 @@ export async function GET(request: NextRequest) {
       // Use configured Video Storage Path, fallback to Snapshot Path, then default
       let autoSaveBaseDir = path.join(process.cwd(), "data", "recorded_videos");
       try {
-        const settingsFile = path.join(process.cwd(), "data", "settings.json");
-        if (fs.existsSync(settingsFile)) {
-          const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-          if (settings.videoStoragePath) {
-            autoSaveBaseDir = settings.videoStoragePath;
-          } else if (settings.storagePath) {
-            autoSaveBaseDir = settings.storagePath;
-          }
+        const settings = readAppSettings();
+        if (settings.videoStoragePath) {
+          autoSaveBaseDir = String(settings.videoStoragePath);
+        } else if (settings.storagePath) {
+          autoSaveBaseDir = String(settings.storagePath);
         }
       } catch (e) { }
 
@@ -396,11 +394,8 @@ export async function GET(request: NextRequest) {
           
           let snapshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
           try {
-            const settingsFile = path.join(process.cwd(), "data", "settings.json");
-            if (fs.existsSync(settingsFile)) {
-              const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-              if (settings.storagePath) snapshotsBaseDir = settings.storagePath;
-            }
+            const settings = readAppSettings();
+            if (settings.storagePath) snapshotsBaseDir = String(settings.storagePath);
           } catch (e) { }
 
           const baseFileName = `${safeCameraName}_${HH}${mm}${SS}`;

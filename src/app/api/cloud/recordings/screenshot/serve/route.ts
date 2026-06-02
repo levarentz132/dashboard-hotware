@@ -4,6 +4,7 @@ import path from "path";
 import { spawn } from "child_process";
 import { Readable } from "stream";
 import { sanitizeCameraName } from "@/lib/ffmpeg-sanitizer";
+import { readAppSettings } from "@/lib/server-settings";
 
 /**
  * GET /api/cloud/recordings/screenshot/serve?date=YYYY-MM-DD&file=filename.png
@@ -33,15 +34,12 @@ export async function GET(request: NextRequest) {
     // Respect custom storage path if defined
     let screenshotsBaseDir = path.join(process.cwd(), "data", "recorded_screenshots");
     try {
-      const settingsFile = path.join(process.cwd(), "data", "settings.json");
-      if (fs.existsSync(settingsFile)) {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-        // If it's a video, prioritize videoStoragePath. Otherwise use storagePath.
-        if (fileName.toLowerCase().endsWith(".mp4") && settings.videoStoragePath) {
-          screenshotsBaseDir = settings.videoStoragePath;
-        } else if (settings.storagePath) {
-          screenshotsBaseDir = settings.storagePath;
-        }
+      const settings = readAppSettings();
+      // If it's a video, prioritize videoStoragePath. Otherwise use storagePath.
+      if (fileName.toLowerCase().endsWith(".mp4") && settings.videoStoragePath) {
+        screenshotsBaseDir = String(settings.videoStoragePath);
+      } else if (settings.storagePath) {
+        screenshotsBaseDir = String(settings.storagePath);
       }
     } catch (e) { }
 

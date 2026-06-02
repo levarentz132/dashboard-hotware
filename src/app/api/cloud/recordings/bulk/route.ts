@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildCloudUrl, buildCloudHeaders, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
 import fs from "fs";
 import path from "path";
+import { readAppSettings } from "@/lib/server-settings";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const archiver = require("archiver");
@@ -23,12 +24,9 @@ export async function POST(request: NextRequest) {
     let storagePath = path.join(process.cwd(), "data", "recorded_screenshots");
     let videoStoragePath = storagePath;
     try {
-      const settingsFile = path.join(process.cwd(), "data", "settings.json");
-      if (fs.existsSync(settingsFile)) {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-        if (settings.storagePath) storagePath = settings.storagePath;
-        if (settings.videoStoragePath) videoStoragePath = settings.videoStoragePath;
-      }
+      const settings = readAppSettings();
+      if (settings.storagePath) storagePath = String(settings.storagePath);
+      if (settings.videoStoragePath) videoStoragePath = String(settings.videoStoragePath);
     } catch (e) {}
 
     const archive = new archiver.ZipArchive({ zlib: { level: 9 } });

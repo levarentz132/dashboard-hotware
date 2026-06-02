@@ -5,6 +5,7 @@ import { cacheGetJson, cacheSetJson, recordingsCacheKey } from "@/lib/redis/cach
 import { loadDeviceMapsForSystem } from "@/lib/nx-devices-store";
 import fs from "fs";
 import path from "path";
+import { readAppSettings } from "@/lib/server-settings";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -176,12 +177,10 @@ export async function GET(request: NextRequest) {
       const seenLocalFiles = new Set<string>();
 
       try {
-        const settingsFile = path.join(process.cwd(), "data", "settings.json");
-        if (fs.existsSync(settingsFile)) {
-          const settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
-          if (settings.storagePath) baseDirs.add(path.resolve(settings.storagePath));
-          if (settings.videoStoragePath) baseDirs.add(path.resolve(settings.videoStoragePath));
-        }
+        const settings = readAppSettings();
+        if (settings.storagePath) baseDirs.add(path.resolve(String(settings.storagePath)));
+        if (settings.videoStoragePath)
+          baseDirs.add(path.resolve(String(settings.videoStoragePath)));
       } catch (e) { }
 
       const startLimit = startTime ? parseInt(startTime, 10) : 0;
