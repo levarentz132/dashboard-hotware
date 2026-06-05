@@ -35,6 +35,8 @@ import { cn } from "@/lib/utils";
 import Cookies from "js-cookie";
 import { useAuth } from "@/contexts/auth-context";
 import { calculateNextOccurrence } from "@/lib/schedule-utils";
+import { parseRecordingLogTimestamp } from "@/lib/recording-log-utils";
+import type { ScheduledErrorLogEntry } from "@/lib/scheduled-error-logs-store";
 import { isAdmin, isVmsAdmin, hasCameraViewPermission, hasCameraEditPermission } from "@/lib/auth";
 import {
   Dialog,
@@ -600,20 +602,9 @@ export default function CloudRecordings() {
   const [errorLogCameras, setErrorLogCameras] = useState<
     Array<{ cameraId: string; cameraName: string; systemId: string; count: number }>
   >([]);
-  const [errorLogEntries, setErrorLogEntries] = useState<
-    Array<{
-      id: string;
-      cameraId: string;
-      cameraName: string;
-      systemId: string;
-      timestamp: string;
-      message: string;
-    }>
-  >([]);
+  const [errorLogEntries, setErrorLogEntries] = useState<ScheduledErrorLogEntry[]>([]);
   const errorLogSyncDoneRef = useRef<Set<string>>(new Set());
   const errorLogLoadGenRef = useRef(0);
-  const errorLogCamerasRef = useRef(errorLogCameras);
-  errorLogCamerasRef.current = errorLogCameras;
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [expandedScheduleKeys, setExpandedScheduleKeys] = useState<Set<string>>(new Set());
   // ---- Enrichment state for permissions and VMS identity ----
@@ -1116,12 +1107,18 @@ export default function CloudRecordings() {
 
   const filteredErrorLogEntries = React.useMemo(() => {
     const q = errorsSearch.trim().toLowerCase();
-    if (!q) return errorLogEntries;
-    return errorLogEntries.filter(
-      (entry) =>
-        entry.cameraName.toLowerCase().includes(q) ||
-        entry.message.toLowerCase().includes(q),
-    );
+    const entries = !q
+      ? errorLogEntries
+      : errorLogEntries.filter(
+          (entry) =>
+            entry.cameraName.toLowerCase().includes(q) ||
+            entry.message.toLowerCase().includes(q),
+        );
+    return [...entries].sort((a, b) => {
+      const aMs = parseRecordingLogTimestamp(a.timestamp) || a.createdAtMs || 0;
+      const bMs = parseRecordingLogTimestamp(b.timestamp) || b.createdAtMs || 0;
+      return bMs - aMs;
+    });
   }, [errorLogEntries, errorsSearch]);
 
   const renderUpcomingRunRow = (run: UpcomingRunItem, compact: boolean) => (
@@ -1156,6 +1153,36 @@ export default function CloudRecordings() {
     if (!options?.silent) setIsLoadingErrorLogs(true);
 
     try {
+      let res = await fetch("/api/cloud/recordings/scheduled/error-logs?all=true");
+      let existingEntries: Array<{
+        id: string;
+        cameraId: string;
+        cameraName: string;
+        message: string;
+      }> = res.ok ? (await res.json()).entries || [] : [];
+
+      const failedSchedules = visibleScheduledRecordingsRef.current.filter(
+        (s) => s.status === "failed",
+      );
+      for (const s of failedSchedules) {
+        const key = normalizeId(s.cameraId);
+        const failMsg = `Scheduled ${s.type === "screenshot" ? "snapshot" : "video"} at ${s.startTime} failed`;
+        const alreadyLogged = existingEntries.some(
+          (e) => normalizeId(e.cameraId) === key && e.message === failMsg,
+        );
+        if (alreadyLogged) continue;
+        await fetch("/api/cloud/recordings/scheduled/error-logs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cameraId: key,
+            cameraName: s.cameraName,
+            systemId: s.systemId,
+            message: failMsg,
+          }),
+        });
+      }
+
       const camerasRes = await fetch("/api/cloud/recordings/scheduled/error-logs");
       let cameras: Array<{ cameraId: string; cameraName: string; systemId: string; count: number }> = [];
       if (camerasRes.ok) {
@@ -1169,24 +1196,6 @@ export default function CloudRecordings() {
         if (requestGen === errorLogLoadGenRef.current) {
           setErrorLogCameras(cameras);
         }
-      }
-
-      const failedSchedules = visibleScheduledRecordingsRef.current.filter(
-        (s) => s.status === "failed",
-      );
-      for (const s of failedSchedules) {
-        const key = normalizeId(s.cameraId);
-        const failMsg = `Scheduled ${s.type === "screenshot" ? "snapshot" : "video"} at ${s.startTime} failed`;
-        await fetch("/api/cloud/recordings/scheduled/error-logs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cameraId: key,
-            cameraName: s.cameraName,
-            systemId: s.systemId,
-            message: failMsg,
-          }),
-        });
       }
 
       const camerasToSync = new Map<string, string>();
@@ -1212,7 +1221,7 @@ export default function CloudRecordings() {
         errorLogSyncDoneRef.current.add(key);
       }
 
-      const res = await fetch("/api/cloud/recordings/scheduled/error-logs?all=true");
+      res = await fetch("/api/cloud/recordings/scheduled/error-logs?all=true");
       if (requestGen !== errorLogLoadGenRef.current) return;
 
       const data = res.ok ? await res.json() : { entries: [] };
@@ -1237,23 +1246,41 @@ export default function CloudRecordings() {
 
   const dismissErrorLogEntry = useCallback(
     async (entryId: string) => {
-      await fetch(`/api/cloud/recordings/scheduled/error-logs?entryId=${encodeURIComponent(entryId)}`, {
-        method: "DELETE",
-      });
-      await refreshErrorLogs({ silent: true });
+      setErrorLogEntries((prev) => prev.filter((e) => e.id !== entryId));
+      try {
+        const res = await fetch(
+          `/api/cloud/recordings/scheduled/error-logs?entryId=${encodeURIComponent(entryId)}`,
+          { method: "DELETE" },
+        );
+        const data = res.ok ? await res.json() : { success: false };
+        if (!data.success) {
+          await refreshErrorLogs({ silent: true });
+          return;
+        }
+        await refreshErrorLogs({ silent: true });
+      } catch {
+        await refreshErrorLogs({ silent: true });
+      }
     },
     [refreshErrorLogs],
   );
 
   const dismissAllErrorLogs = useCallback(async () => {
-    for (const cam of errorLogCamerasRef.current) {
-      await fetch(
-        `/api/cloud/recordings/scheduled/error-logs?cameraId=${encodeURIComponent(normalizeId(cam.cameraId))}`,
-        { method: "DELETE" },
-      );
-      errorLogSyncDoneRef.current.delete(normalizeId(cam.cameraId));
+    setErrorLogEntries([]);
+    setErrorLogCameras([]);
+    try {
+      const res = await fetch("/api/cloud/recordings/scheduled/error-logs?all=true", {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        await refreshErrorLogs({ silent: true });
+        return;
+      }
+      errorLogSyncDoneRef.current.clear();
+      await refreshErrorLogs({ silent: true });
+    } catch {
+      await refreshErrorLogs({ silent: true });
     }
-    await refreshErrorLogs({ silent: true });
   }, [refreshErrorLogs]);
 
   useEffect(() => {

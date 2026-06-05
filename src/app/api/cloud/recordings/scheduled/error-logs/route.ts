@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readRecordingLogs } from "@/lib/recording-logger";
 import {
   appendScheduledErrorLog,
+  dismissAllScheduledErrorLogs,
   dismissAllScheduledErrorLogsForCamera,
   dismissScheduledErrorLog,
   getAllScheduledErrorLogs,
@@ -73,10 +74,16 @@ export async function DELETE(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const cameraId = searchParams.get("cameraId");
     const entryId = searchParams.get("entryId");
+    const dismissAll = searchParams.get("all") === "true";
 
     if (entryId) {
       const ok = await dismissScheduledErrorLog(entryId);
       return NextResponse.json({ success: ok });
+    }
+
+    if (dismissAll) {
+      const removed = await dismissAllScheduledErrorLogs();
+      return NextResponse.json({ success: true, removed });
     }
 
     if (cameraId) {
@@ -84,7 +91,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: true, removed });
     }
 
-    return NextResponse.json({ error: "cameraId or entryId required" }, { status: 400 });
+    return NextResponse.json({ error: "entryId, cameraId, or all=true required" }, { status: 400 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
