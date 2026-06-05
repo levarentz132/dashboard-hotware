@@ -151,7 +151,7 @@ export async function GET(request: NextRequest) {
               deviceId: id,
               cameraName: cameraName,
               serverId: chunk.serverId,
-              isScreenshot: durationMs > 0 && durationMs <= 5000,
+              isScreenshot: durationMs > 0 && durationMs <= 1000,
             });
           }
         }

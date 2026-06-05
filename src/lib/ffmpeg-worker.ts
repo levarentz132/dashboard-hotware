@@ -5,6 +5,8 @@ import { Readable } from "stream";
 import { loadQueue, updateJobStatus, getNextPendingJobs, FFmpegJob, cleanupStaleJobs } from "./ffmpeg-queue";
 import { calculateNextOccurrence } from "./schedule-utils";
 import { logRecordingEvent } from "./recording-logger";
+import { logScheduledRecordingError } from "./log-scheduled-error";
+import { isValidOutputFile } from "./schedule-output-files";
 import logger from "./logger";
 import { readAppSettings } from "./server-settings";
 
@@ -195,10 +197,14 @@ async function processJob(job: FFmpegJob): Promise<void> {
     if (durationMs > 0 && durationMs < 10000) {
       logger.info(`[FFmpegWorker] Job ${id} skipped: Clip is a pulse (${Math.round(durationMs / 1000)}s)`);
       clearTimeout(fetchTimeout);
-      
-      await updateJobStatus(id, "completed");
+
       if (payload.taskId) {
-        await updateTaskStatus(payload.taskId, true);
+        await handleJobFailure(
+          job,
+          `Recording window too short (${Math.round(durationMs / 1000)}s) — no footage captured`,
+        );
+      } else {
+        await updateJobStatus(id, "completed");
       }
       return;
     }
@@ -279,17 +285,21 @@ async function processJob(job: FFmpegJob): Promise<void> {
       if (code !== 0) {
         logger.error(`[FFmpegWorker] Job ${id} FFmpeg exited with non-zero code ${code}`);
         await handleJobFailure(job, `FFmpeg process failed (exit code ${code})`);
+      } else if (!isValidOutputFile(payload.savePath, "video")) {
+        logger.error(
+          `[FFmpegWorker] Job ${id} FFmpeg exited 0 but output is missing or empty: ${payload.savePath}`,
+        );
+        await handleJobFailure(job, "Output file missing or empty after encode");
       } else {
         logger.info(`[FFmpegWorker] Job ${id} completed successfully! Path: ${payload.savePath}`);
         await updateJobStatus(id, "completed");
-        
+
         if (payload.taskId) {
           await updateTaskStatus(payload.taskId, true);
         }
-        
+
         logRecordingEvent(`Auto-saved video: ${payload.cameraName}`);
-        
-        // Notify client
+
         if (payload.notificationUserKey) {
           sendNotification(
             payload.notificationUserKey,
@@ -330,8 +340,13 @@ async function handleJobFailure(job: FFmpegJob, errorMessage: string): Promise<v
       await updateTaskStatus(payload.taskId, false);
     }
     
-    logRecordingEvent(`Failed auto-saving video for ${payload.cameraName}: ${errorMessage}`);
-    
+    await logScheduledRecordingError({
+      cameraId: payload.deviceId,
+      cameraName: payload.cameraName,
+      systemId: payload.systemId,
+      message: `Failed auto-saving video for ${payload.cameraName}: ${errorMessage}`,
+    });
+
     if (payload.notificationUserKey) {
       sendNotification(
         payload.notificationUserKey,

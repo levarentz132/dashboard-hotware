@@ -2,9 +2,9 @@ import logger from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { API_CONFIG } from "@/lib/config";
 import fs from "fs/promises";
-import fsSync from "fs";
 import path from "path";
 import { logRecordingEvent, formatAuditDate } from "@/lib/recording-logger";
+import { logScheduledRecordingError } from "@/lib/log-scheduled-error";
 import { buildCloudUrl } from "@/lib/cloud-api";
 import { startFFmpegWorker } from "@/lib/ffmpeg-worker";
 import { calculateNextOccurrence } from "@/lib/schedule-utils";
@@ -12,6 +12,10 @@ import {
   readScheduledRecordings,
   writeScheduledRecordings,
 } from "@/lib/scheduled-recordings-store";
+import {
+  doesScreenshotFileExist,
+  doesVideoFileExist,
+} from "@/lib/schedule-output-files";
 import { readAppSettings } from "@/lib/server-settings";
 
 
@@ -272,18 +276,95 @@ const startWatchdog = () => {
           return;
         }
 
-        if (rec.status === "recording" || rec.status === "capturing" || rec.status === "in progress") {
-          if (startTime > 0 && (now - startTime > 3600000)) {
+        if (
+          rec.status === "recording" ||
+          rec.status === "capturing" ||
+          rec.status === "in progress" ||
+          rec.status === "processing"
+        ) {
+          const outputExists =
+            rec.type === "screenshot"
+              ? doesScreenshotFileExist(rec, timeOffsetMs)
+              : rec.type === "video" && doesVideoFileExist(rec, timeOffsetMs);
+          if (outputExists) {
+            console.log(
+              `[Watchdog] ${rec.type} task ${rec.cameraName} has output on disk while ${rec.status}; clearing.`,
+            );
+            if (isNonRecurring) {
+              deletedTaskIds.add(rec.id);
+              changed = true;
+              return;
+            }
+            const [csh, csm, css] = rec.startTime.split(":").map(Number);
+            const nextDate = calculateNextOccurrence(rec, csh, csm, css || 0);
+            const duration = (rec.endMs || endTime) - (rec.startMs || startTime);
+            rec.status = "pending";
+            rec.record = false;
+            rec.date = nextDate.toISOString();
+            rec.startMs = nextDate.getTime() - timeOffsetMs;
+            rec.endMs = rec.startMs + Math.max(duration, 0);
+            changed = true;
+            cleanedSchedules.push(rec);
+            return;
+          }
+
+          const screenshotStaleMs = 5 * 60 * 1000;
+          const videoEndGraceMs = 2 * 60 * 1000;
+          const processingGraceMs = 35 * 60 * 1000;
+          let isStale = false;
+
+          if (rec.type === "screenshot") {
+            isStale = startTime > 0 && now - startTime > screenshotStaleMs;
+          } else if (rec.status === "processing") {
+            isStale = endTime > 0 && now - endTime > processingGraceMs;
+          } else if (rec.status === "in progress" || (rec.status === "recording" && !rec.record)) {
+            isStale = endTime > 0 && now - endTime > videoEndGraceMs;
+          } else if (rec.status === "recording" && rec.record) {
+            isStale = endTime > 0 && now - endTime > videoEndGraceMs;
+            if (isStale) {
+              rec.status = "processing";
+              changed = true;
+              cleanedSchedules.push(rec);
+              return;
+            }
+          } else {
+            isStale = startTime > 0 && now - startTime > 3600000;
+          }
+
+          if (isStale) {
             if (isNonRecurring) {
               console.log(`[Watchdog] Stale non-recurring task ${rec.id} (${rec.status}) removed during cleanup.`);
               deletedTaskIds.add(rec.id);
               changed = true;
               return;
-            } else {
-              rec.status = "failed";
-              changed = true;
             }
+            rec.status = "failed";
+            changed = true;
           }
+        }
+        if (
+          rec.status === "failed" &&
+          (rec.type === "screenshot"
+            ? doesScreenshotFileExist(rec, timeOffsetMs)
+            : rec.type === "video" && doesVideoFileExist(rec, timeOffsetMs))
+        ) {
+          console.log(
+            `[Watchdog] ${rec.type} task ${rec.cameraName} marked failed but output exists; recovering.`,
+          );
+          if (isNonRecurring) {
+            deletedTaskIds.add(rec.id);
+            changed = true;
+            return;
+          }
+          const [fsh, fsm, fss] = rec.startTime.split(":").map(Number);
+          const nextDate = calculateNextOccurrence(rec, fsh, fsm, fss || 0);
+          const duration = (rec.endMs || endTime) - (rec.startMs || startTime);
+          rec.status = "pending";
+          rec.record = false;
+          rec.date = nextDate.toISOString();
+          rec.startMs = nextDate.getTime() - timeOffsetMs;
+          rec.endMs = rec.startMs + Math.max(duration, 0);
+          changed = true;
         }
         cleanedSchedules.push(rec);
       });
@@ -351,8 +432,41 @@ const startWatchdog = () => {
           endMs = endDate.getTime();
         }
 
-        // Deduplication: if the video file already exists, complete or delete the schedule immediately
-        if (rec.type === "video" && doesVideoFileExist(rec, timeOffsetMs)) {
+        const occurrenceReached = now >= startMs;
+
+        // Screenshot already saved for this time slot — complete without re-capturing
+        if (
+          rec.type === "screenshot" &&
+          occurrenceReached &&
+          doesScreenshotFileExist(rec, timeOffsetMs)
+        ) {
+          console.log(
+            `[Watchdog] Screenshot file already exists for ${rec.cameraName}, skipping capture.`,
+          );
+          const isRecurring = rec.recurrence && rec.recurrence !== "none";
+          if (isRecurring) {
+            const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+            rec.status = "pending";
+            rec.record = false;
+            rec.date = nextDate.toISOString();
+            rec.startMs = nextDate.getTime() - timeOffsetMs;
+            rec.endMs = rec.startMs + (endMs - startMs);
+            changed = true;
+          } else {
+            deletedTaskIds.add(rec.id);
+            uniqueSchedules.splice(i, 1);
+            i--;
+            changed = true;
+          }
+          continue;
+        }
+
+        // Deduplication: if the video file for this slot already exists, complete or delete
+        if (
+          rec.type === "video" &&
+          occurrenceReached &&
+          doesVideoFileExist(rec, timeOffsetMs)
+        ) {
           console.log(`[Watchdog] AUTO-SAVE deduplication: Valid file already exists for ${rec.cameraName}, skipping trigger.`);
           const isRecurring = rec.recurrence && rec.recurrence !== "none";
           if (isRecurring) {
@@ -391,39 +505,165 @@ const startWatchdog = () => {
         if (rec.type === "screenshot") {
           const catchUpWindowMs = 2 * 60 * 1000;
           const isWithinWindow = now >= startMs && now < startMs + catchUpWindowMs;
+          const stuckActive =
+            rec.status === "in progress" ||
+            rec.status === "capturing" ||
+            rec.status === "failed";
+
+          if (stuckActive && doesScreenshotFileExist(rec, timeOffsetMs)) {
+            const isRecurring = rec.recurrence && rec.recurrence !== "none";
+            if (isRecurring) {
+              const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+              rec.status = "pending";
+              rec.date = nextDate.toISOString();
+              rec.startMs = nextDate.getTime() - timeOffsetMs;
+              rec.endMs = rec.startMs + (endMs - startMs);
+              changed = true;
+            } else {
+              deletedTaskIds.add(rec.id);
+              uniqueSchedules.splice(i, 1);
+              i--;
+              changed = true;
+            }
+            continue;
+          }
+
           if ((rec.status === "pending" || rec.status === "in progress") && isWithinWindow) {
+            if (global._nxExecutingTasks?.has(rec.id)) {
+              continue;
+            }
             rec.status = "capturing";
             changed = true;
             global._nxExecutingTasks?.add(rec.id);
             tasksToExecute.push({ type: "screenshot", rec, startMs, endMs, sh, sm, ss });
-          } else if (now >= startMs + catchUpWindowMs && (rec.status === "in progress" || rec.status === "capturing" || rec.status === "pending")) {
-            // Screenshot task expired past catch-up window — roll forward or remove
-            console.log(`[Watchdog] Screenshot task ${rec.cameraName} expired (status=${rec.status}). Cleaning up.`);
-            tasksToExecute.push({ type: "expire", rec, startMs, endMs, sh, sm, ss });
+          } else if (
+            now >= startMs + catchUpWindowMs &&
+            (rec.status === "in progress" || rec.status === "capturing" || rec.status === "pending" || rec.status === "failed")
+          ) {
+            if (doesScreenshotFileExist(rec, timeOffsetMs)) {
+              const isRecurring = rec.recurrence && rec.recurrence !== "none";
+              if (isRecurring) {
+                const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+                rec.status = "pending";
+                rec.date = nextDate.toISOString();
+                rec.startMs = nextDate.getTime() - timeOffsetMs;
+                rec.endMs = rec.startMs + (endMs - startMs);
+                changed = true;
+              } else {
+                deletedTaskIds.add(rec.id);
+                uniqueSchedules.splice(i, 1);
+                i--;
+                changed = true;
+              }
+            } else {
+              console.log(
+                `[Watchdog] Screenshot task ${rec.cameraName} expired (status=${rec.status}). Cleaning up.`,
+              );
+              tasksToExecute.push({ type: "expire", rec, startMs, endMs, sh, sm, ss });
+            }
           }
         }
         // Video logic
         else if (rec.type === "video" && now >= startMs && now < endMs) {
           if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress" || (rec.status === "recording" && !rec.record))) {
-            const isRecurring = rec.recurrence && rec.recurrence !== "none";
-            const isLate = now > (startMs + 60000); // More than 1 min late
-
-            if (isRecurring && isLate) {
-              console.log(`[Watchdog] Recurring task ${rec.cameraName} started in the past. Skipping to next occurrence.`);
-              tasksToExecute.push({ type: "expire", rec, startMs, endMs, sh, sm, ss });
-            } else {
-              rec.status = "recording";
-              rec.record = true;
-              changed = true;
-              global._nxExecutingTasks?.add(rec.id);
-              tasksToExecute.push({ type: "video_start", rec, startMs, endMs, sh, sm, ss, eh, em, es });
+            if (global._nxExecutingTasks?.has(rec.id)) {
+              continue;
             }
+            rec.status = "recording";
+            rec.record = true;
+            changed = true;
+            global._nxExecutingTasks?.add(rec.id);
+            tasksToExecute.push({ type: "video_start", rec, startMs, endMs, sh, sm, ss, eh, em, es });
           }
         }
-        else if (rec.type === "video" && now >= endMs && (rec.status === "recording" || rec.status === "failed" || rec.status === "in progress" || rec.status === "completing")) {
+        else if (
+          rec.type === "video" &&
+          now >= endMs &&
+          rec.status === "pending" &&
+          rec.recurrence &&
+          rec.recurrence !== "none"
+        ) {
+          console.log(
+            `[Watchdog] Recurring task ${rec.cameraName} window passed without starting. Skipping to next occurrence.`,
+          );
+          tasksToExecute.push({ type: "expire", rec, startMs, endMs, sh, sm, ss });
+        }
+        else if (
+          rec.type === "video" &&
+          now >= endMs &&
+          (rec.status === "recording" || rec.status === "completing") &&
+          rec.record
+        ) {
           rec.status = "completing";
           changed = true;
           tasksToExecute.push({ type: "video_stop", rec, startMs, endMs, sh, sm, ss, eh, em, es });
+        }
+        else if (
+          rec.type === "video" &&
+          now >= endMs &&
+          (rec.status === "failed" ||
+            rec.status === "in progress" ||
+            (rec.status === "recording" && !rec.record))
+        ) {
+          if (doesVideoFileExist(rec, timeOffsetMs)) {
+            const isRecurring = rec.recurrence && rec.recurrence !== "none";
+            if (isRecurring) {
+              const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+              rec.status = "pending";
+              rec.record = false;
+              rec.date = nextDate.toISOString();
+              rec.startMs = nextDate.getTime() - timeOffsetMs;
+              rec.endMs = rec.startMs + (endMs - startMs);
+              changed = true;
+            } else {
+              deletedTaskIds.add(rec.id);
+              uniqueSchedules.splice(i, 1);
+              i--;
+              changed = true;
+            }
+          } else if (rec.status !== "failed") {
+            console.log(
+              `[Watchdog] Video task ${rec.cameraName} ended without VMS recording (status=${rec.status}).`,
+            );
+            rec.status = "failed";
+            rec.record = false;
+            await logScheduledRecordingError({
+              cameraId: rec.cameraId,
+              cameraName: rec.cameraName,
+              systemId: rec.systemId,
+              message: `Video recording failed for camera ${rec.cameraName}: never started on VMS`,
+            });
+            changed = true;
+          }
+        }
+        else if (
+          rec.type === "video" &&
+          doesVideoFileExist(rec, timeOffsetMs) &&
+          (rec.status === "failed" ||
+            rec.status === "processing" ||
+            rec.status === "recording" ||
+            rec.status === "in progress" ||
+            rec.status === "completing")
+        ) {
+          const isNonRecurring = !rec.recurrence || rec.recurrence === "none" || rec.recurrence === "once";
+          if (isNonRecurring) {
+            deletedTaskIds.add(rec.id);
+            uniqueSchedules.splice(i, 1);
+            i--;
+            changed = true;
+          } else {
+            const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+            rec.status = "pending";
+            rec.record = false;
+            rec.date = nextDate.toISOString();
+            rec.startMs = nextDate.getTime() - timeOffsetMs;
+            rec.endMs = rec.startMs + (endMs - startMs);
+            changed = true;
+            console.log(
+              `[Watchdog] Video output found for ${rec.cameraName} while ${rec.status}; rolled forward.`,
+            );
+          }
+          continue;
         }
         else if (now >= endMs && rec.status === "processing" && rec.type === "video") {
           const isNonRecurring = !rec.recurrence || rec.recurrence === "none" || rec.recurrence === "once";
@@ -471,8 +711,8 @@ const startWatchdog = () => {
         await saveState(uniqueSchedules);
       }
 
-      // ── Phase 2: Execute Tasks in Parallel ─────────────────────────────────
-      await Promise.all(tasksToExecute.map(async (task) => {
+      // ── Phase 2: Execute Tasks sequentially (Queue) ────────────────────────
+      for (const task of tasksToExecute) {
         const { rec, startMs, endMs, sh, sm, ss } = task;
 
         if (task.type === "screenshot") {
@@ -502,7 +742,30 @@ const startWatchdog = () => {
             });
 
             if (!res.ok) {
-              rec.status = "failed";
+              if (doesScreenshotFileExist(rec, timeOffsetMs)) {
+                console.log(
+                  `[Watchdog] Screenshot API error for ${rec.cameraName} but file exists; treating as success.`,
+                );
+                if (rec.recurrence && rec.recurrence !== "none") {
+                  const nextDate = calculateNextOccurrence(rec, sh, sm, ss);
+                  rec.status = "pending";
+                  rec.date = nextDate.toISOString();
+                  rec.startMs = nextDate.getTime() - timeOffsetMs;
+                  rec.endMs = rec.startMs + (endMs - startMs);
+                } else {
+                  deletedTaskIds.add(rec.id);
+                  const idx = uniqueSchedules.findIndex((s: any) => s.id === rec.id);
+                  if (idx !== -1) uniqueSchedules.splice(idx, 1);
+                }
+              } else {
+                rec.status = "failed";
+                await logScheduledRecordingError({
+                  cameraId: rec.cameraId,
+                  cameraName: rec.cameraName,
+                  systemId: rec.systemId,
+                  message: `Screenshot failed for camera ${rec.cameraName}`,
+                });
+              }
             } else {
               if (rec.recurrence && rec.recurrence !== "none") {
                 const nextDate = calculateNextOccurrence(rec, sh, sm, ss);
@@ -518,7 +781,30 @@ const startWatchdog = () => {
               }
             }
           } catch (e) {
-            rec.status = "failed";
+            if (doesScreenshotFileExist(rec, timeOffsetMs)) {
+              console.log(
+                `[Watchdog] Screenshot request error for ${rec.cameraName} but file exists; treating as success.`,
+              );
+              if (rec.recurrence && rec.recurrence !== "none") {
+                const nextDate = calculateNextOccurrence(rec, sh, sm, ss);
+                rec.status = "pending";
+                rec.date = nextDate.toISOString();
+                rec.startMs = nextDate.getTime() - timeOffsetMs;
+                rec.endMs = rec.startMs + (endMs - startMs);
+              } else {
+                deletedTaskIds.add(rec.id);
+                const idx = uniqueSchedules.findIndex((s: any) => s.id === rec.id);
+                if (idx !== -1) uniqueSchedules.splice(idx, 1);
+              }
+            } else {
+              rec.status = "failed";
+              await logScheduledRecordingError({
+                cameraId: rec.cameraId,
+                cameraName: rec.cameraName,
+                systemId: rec.systemId,
+                message: `Screenshot failed for camera ${rec.cameraName}`,
+              });
+            }
           }
         }
 
@@ -528,7 +814,7 @@ const startWatchdog = () => {
             const auth = rec.auth;
             if (!auth || !ip) {
               console.warn(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
-              return;
+              continue;
             }
 
             // Patch VMS
@@ -577,11 +863,32 @@ const startWatchdog = () => {
             global._nxExecutingTasks?.add(rec.id);
           } catch (e: any) {
             console.error(`[Watchdog] video_start FAILED for ${rec.cameraName}:`, e.message);
+            await logScheduledRecordingError({
+              cameraId: rec.cameraId,
+              cameraName: rec.cameraName,
+              systemId: rec.systemId,
+              message: `Recording start failed for camera ${rec.cameraName}: ${e.message}`,
+            });
             rec.status = "failed";
           }
         }
 
         if (task.type === "video_stop") {
+          if (!rec.record) {
+            console.warn(
+              `[Watchdog] video_stop skipped for ${rec.cameraName}: recording never started on VMS`,
+            );
+            rec.status = "failed";
+            rec.record = false;
+            await logScheduledRecordingError({
+              cameraId: rec.cameraId,
+              cameraName: rec.cameraName,
+              systemId: rec.systemId,
+              message: `Video recording failed for camera ${rec.cameraName}: auto-save skipped (never recorded)`,
+            });
+            continue;
+          }
+
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const auth = rec.auth;
@@ -637,7 +944,7 @@ const startWatchdog = () => {
             rec.status = "completed";
           }
         }
-      }));
+      }
 
       // Final save to disk with updated statuses
       await saveState(uniqueSchedules);
@@ -652,44 +959,8 @@ const startWatchdog = () => {
     } finally {
       global._nxWatchdogActive = false;
     }
-  }, 2000);
+  }, 1000);
 };
-
-// Helper functions for the refactored watchdog
-function doesVideoFileExist(rec: any, timeOffsetMs: number = 0): boolean {
-  try {
-    const cleanId = rec.cameraId.replace(/[{}]/g, "");
-    const idHash = cleanId.slice(-4).toLowerCase();
-    const startMs = rec.startMs || (rec.date ? new Date(rec.date).getTime() : Date.now());
-    const adjustedStartMs = startMs + timeOffsetMs;
-    const recDate = new Date(adjustedStartMs);
-    const YYYY = recDate.getFullYear().toString();
-    const MM = (recDate.getMonth() + 1).toString().padStart(2, "0");
-    const DD = recDate.getDate().toString().padStart(2, "0");
-    const HH = recDate.getHours().toString().padStart(2, "0");
-    const mmP = recDate.getMinutes().toString().padStart(2, "0");
-    const dateFolder = `${YYYY}-${MM}-${DD}`;
-    const safeCameraName = (rec.cameraName || rec.cameraId?.substring(0, 8) || "Camera")
-      .replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim();
-
-    let autoSaveBaseDir = path.join(process.cwd(), "data", "recorded_videos");
-    try {
-      const settings = readAppSettings();
-      if (settings.videoStoragePath) {
-        autoSaveBaseDir = String(settings.videoStoragePath);
-      } else if (settings.storagePath) {
-        autoSaveBaseDir = String(settings.storagePath);
-      }
-    } catch (e) { }
-
-    const finalFileName = `${safeCameraName}_${HH}${mmP}00_${idHash}.mp4`;
-    const savePath = path.join(autoSaveBaseDir, dateFolder, finalFileName);
-
-    return fsSync.existsSync(savePath) && fsSync.statSync(savePath).size > 0;
-  } catch (e) {
-    return false;
-  }
-}
 
 // Removed local calculateNextOccurrence and imported from shared utilities instead
 
@@ -710,10 +981,18 @@ async function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: st
     if (!res.ok) {
       const errText = await res.text();
       console.error(`[Watchdog] Auto-save failed for ${rec.cameraName}: HTTP ${res.status} - ${errText}`);
+      await logScheduledRecordingError({
+        cameraId: rec.cameraId,
+        cameraName: rec.cameraName,
+        systemId: rec.systemId,
+        message: `Failed auto-saving video for ${rec.cameraName}: HTTP ${res.status}`,
+      });
       return;
     }
     const data = await res.json();
-    if (data?.success) {
+    if (data?.success && data?.enqueued) {
+      console.log(`[Watchdog] Auto-save enqueued for ${rec.cameraName}: ${data.file || ""}`);
+    } else if (data?.success) {
       console.log(`[Watchdog] Auto-save successful for ${rec.cameraName}: ${data.path || data.file}`);
     } else if (data?.skipped) {
       console.log(`[Watchdog] Auto-save skipped for ${rec.cameraName}: ${data.reason || 'already exists'}`);
@@ -721,8 +1000,13 @@ async function triggerAutoSave(rec: any, cleanId: string, auth: string, nxIp: st
       console.warn(`[Watchdog] Auto-save unexpected response for ${rec.cameraName}:`, data);
     }
   } catch (err: any) {
-
     console.error(`[Watchdog] Auto-save request error for ${rec.cameraName}:`, err.message);
+    await logScheduledRecordingError({
+      cameraId: rec.cameraId,
+      cameraName: rec.cameraName,
+      systemId: rec.systemId,
+      message: `Failed auto-saving video for ${rec.cameraName}: ${err.message}`,
+    });
   }
 
 

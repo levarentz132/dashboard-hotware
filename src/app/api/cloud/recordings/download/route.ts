@@ -19,6 +19,7 @@ import {
   validateAndGetSavePath,
 } from "@/lib/ffmpeg-sanitizer";
 import { readAppSettings } from "@/lib/server-settings";
+import { isValidOutputFile } from "@/lib/schedule-output-files";
 
 const writeFile = promisify(fs.writeFile);
 const mkdir = promisify(fs.mkdir);
@@ -266,8 +267,8 @@ export async function GET(request: NextRequest) {
       // Security: Validate target save path against path traversal!
       const savePath = validateAndGetSavePath(autoSaveBaseDir, dateFolder, finalFileName);
       
-      // DEDUPLICATION: Check if file already exists AND has content
-      if (fs.existsSync(savePath) && fs.statSync(savePath).size > 0) {
+      // DEDUPLICATION: Check if file already exists AND has valid content
+      if (isValidOutputFile(savePath, "video")) {
         console.log(`[recordings/download] AUTO-SAVE: Valid file already exists, skipping: ${savePath}`);
         if (taskId) {
           await updateTaskStatus(taskId, true);

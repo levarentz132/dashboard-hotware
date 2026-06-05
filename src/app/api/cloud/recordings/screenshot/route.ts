@@ -4,6 +4,8 @@ import { API_CONFIG } from "@/lib/config";
 import fs from "fs";
 import path from "path";
 import { readAppSettings } from "@/lib/server-settings";
+import { logRecordingEvent } from "@/lib/recording-logger";
+import { logScheduledRecordingError } from "@/lib/log-scheduled-error";
 
 
 /**
@@ -199,11 +201,23 @@ export async function POST(request: NextRequest) {
     }
 
     if (!imageResponse.ok) {
+      await logScheduledRecordingError({
+        cameraId: cleanDeviceId,
+        cameraName: safeCameraName,
+        systemId: systemId || "",
+        message: `Screenshot failed for camera ${safeCameraName}: HTTP ${imageResponse.status}`,
+      });
       return NextResponse.json({ error: `Failed to capture screenshot: ${imageResponse.status}` }, { status: imageResponse.status });
     }
 
     const buffer = Buffer.from(await imageResponse.arrayBuffer());
     if (buffer.length < 100) {
+      await logScheduledRecordingError({
+        cameraId: cleanDeviceId,
+        cameraName: safeCameraName,
+        systemId: systemId || "",
+        message: `Screenshot failed for camera ${safeCameraName}: invalid image`,
+      });
       return NextResponse.json({ error: "Captured image is too small / invalid" }, { status: 502 });
     }
 
