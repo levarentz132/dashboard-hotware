@@ -1,14 +1,16 @@
 /**
- * Persistent notifications — stored in Redis forever (SET, no TTL).
- * Legacy `data/notifications.json` is migrated once on first read.
+ * Persistent notifications — source of truth: data/notifications.json
+ * Redis holds a read-through cache (invalidated when the file mtime changes).
  */
 
-import fs from "fs";
 import path from "path";
-import { cacheGetJson, cacheSetJson } from "@/lib/redis/cache";
+import { readJsonWithCacheOrDefault, writeJsonWithCache } from "@/lib/json-store-cache";
 import { redisKeys } from "@/lib/redis/keys";
 
-export const LEGACY_NOTIFICATIONS_FILE = path.join(process.cwd(), "data", "notifications.json");
+export const NOTIFICATIONS_FILE = path.join(process.cwd(), "data", "notifications.json");
+
+/** @deprecated Use NOTIFICATIONS_FILE */
+export const LEGACY_NOTIFICATIONS_FILE = NOTIFICATIONS_FILE;
 
 export interface StoredNotification {
   id: string;
@@ -30,41 +32,21 @@ export function emptyNotifications(): NotificationsByUser {
   return {};
 }
 
-function stripBom(content: string): string {
-  return content.replace(/^\uFEFF/, "");
+function isNotificationsByUser(data: unknown): data is NotificationsByUser {
+  return typeof data === "object" && data !== null && !Array.isArray(data);
 }
 
-async function migrateFromLegacyFile(): Promise<NotificationsByUser | null> {
-  try {
-    if (!fs.existsSync(LEGACY_NOTIFICATIONS_FILE)) return null;
-    const raw = stripBom(fs.readFileSync(LEGACY_NOTIFICATIONS_FILE, "utf-8"));
-    if (!raw.trim()) return null;
-    const parsed = JSON.parse(raw) as NotificationsByUser;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    await cacheSetJson(redisKeys.notifications(), parsed);
-    return parsed;
-  } catch (err) {
-    console.warn("[notifications-store] Legacy file migration failed:", err);
-    return null;
-  }
-}
-
-/** Read all users' notifications from Redis (persistent). */
+/** Read all users' notifications (JSON file, with Redis cache). */
 export async function readNotifications(): Promise<NotificationsByUser> {
-  const cached = await cacheGetJson<NotificationsByUser>(redisKeys.notifications());
-  if (cached && typeof cached === "object" && !Array.isArray(cached)) {
-    return cached;
-  }
-
-  const migrated = await migrateFromLegacyFile();
-  if (migrated) return migrated;
-
-  return emptyNotifications();
+  return readJsonWithCacheOrDefault({
+    filePath: NOTIFICATIONS_FILE,
+    redisKey: redisKeys.notifications(),
+    validate: isNotificationsByUser,
+    defaultValue: emptyNotifications,
+  });
 }
 
-/** Write all users' notifications to Redis (overwrites prior value, no expiration). */
+/** Write all users' notifications to JSON and refresh Redis cache. */
 export async function writeNotifications(data: NotificationsByUser): Promise<void> {
-  await cacheSetJson(redisKeys.notifications(), data);
+  await writeJsonWithCache(NOTIFICATIONS_FILE, redisKeys.notifications(), data);
 }

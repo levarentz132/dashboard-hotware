@@ -1,18 +1,20 @@
 /**
- * Device monitor snapshot — persisted in Redis (SET, no TTL).
- * Legacy `data/device_monitor_history.json` migrates on first read.
+ * Device monitor snapshot — source of truth: data/device_monitor_history.json
+ * Redis holds a read-through cache (invalidated when the file mtime changes).
  */
 
-import fs from "fs";
 import path from "path";
-import { cacheGetJson, cacheSetJson } from "@/lib/redis/cache";
+import { readJsonWithCache, writeJsonWithCache } from "@/lib/json-store-cache";
 import { redisKeys } from "@/lib/redis/keys";
 
-export const LEGACY_DEVICE_MONITOR_FILE = path.join(
+export const DEVICE_MONITOR_FILE = path.join(
   process.cwd(),
   "data",
   "device_monitor_history.json",
 );
+
+/** @deprecated Use DEVICE_MONITOR_FILE */
+export const LEGACY_DEVICE_MONITOR_FILE = DEVICE_MONITOR_FILE;
 
 export interface DeviceMonitorSnapshot {
   timestamp: string;
@@ -30,33 +32,24 @@ export interface DeviceMonitorSnapshot {
   };
 }
 
-function stripBom(content: string): string {
-  return content.replace(/^\uFEFF/, "");
-}
-
-async function migrateFromLegacyFile(): Promise<DeviceMonitorSnapshot | null> {
-  try {
-    if (!fs.existsSync(LEGACY_DEVICE_MONITOR_FILE)) return null;
-    const raw = stripBom(fs.readFileSync(LEGACY_DEVICE_MONITOR_FILE, "utf-8"));
-    if (!raw.trim()) return null;
-    const parsed = JSON.parse(raw) as DeviceMonitorSnapshot;
-    await cacheSetJson(redisKeys.deviceMonitorLatest(), parsed);
-    return parsed;
-  } catch (err) {
-    console.warn("[device-monitor-store] Legacy migration failed:", err);
-    return null;
-  }
+function isDeviceMonitorSnapshot(data: unknown): data is DeviceMonitorSnapshot {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    typeof (data as DeviceMonitorSnapshot).timestamp === "string"
+  );
 }
 
 export async function readDeviceMonitorSnapshot(): Promise<DeviceMonitorSnapshot | null> {
-  const cached = await cacheGetJson<DeviceMonitorSnapshot>(redisKeys.deviceMonitorLatest());
-  if (cached?.timestamp) return cached;
-
-  return migrateFromLegacyFile();
+  return readJsonWithCache({
+    filePath: DEVICE_MONITOR_FILE,
+    redisKey: redisKeys.deviceMonitorLatest(),
+    validate: isDeviceMonitorSnapshot,
+  });
 }
 
 export async function writeDeviceMonitorSnapshot(
   snapshot: DeviceMonitorSnapshot,
 ): Promise<void> {
-  await cacheSetJson(redisKeys.deviceMonitorLatest(), snapshot);
+  await writeJsonWithCache(DEVICE_MONITOR_FILE, redisKeys.deviceMonitorLatest(), snapshot);
 }

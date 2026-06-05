@@ -1,49 +1,33 @@
 /**
- * FFmpeg job queue — persisted in Redis forever (SET, no TTL).
- * Legacy `data/ffmpeg_queue.json` is migrated once on first read.
+ * FFmpeg job queue — source of truth: data/ffmpeg_queue.json
+ * Redis holds a read-through cache (invalidated when the file mtime changes).
  */
 
-import fs from "fs";
 import path from "path";
-import { cacheGetJson, cacheSetJson } from "@/lib/redis/cache";
+import { readJsonWithCacheOrDefault, writeJsonWithCache } from "@/lib/json-store-cache";
 import { redisKeys } from "@/lib/redis/keys";
 import type { FFmpegJob } from "@/lib/ffmpeg-queue-types";
 
-export const LEGACY_FFMPEG_QUEUE_FILE = path.join(process.cwd(), "data", "ffmpeg_queue.json");
+export const FFMPEG_QUEUE_FILE = path.join(process.cwd(), "data", "ffmpeg_queue.json");
 
-function stripBom(content: string): string {
-  return content.replace(/^\uFEFF/, "");
+/** @deprecated Use FFMPEG_QUEUE_FILE */
+export const LEGACY_FFMPEG_QUEUE_FILE = FFMPEG_QUEUE_FILE;
+
+function isFfmpegJobArray(data: unknown): data is FFmpegJob[] {
+  return Array.isArray(data);
 }
 
-async function migrateFromLegacyFile(): Promise<FFmpegJob[] | null> {
-  try {
-    if (!fs.existsSync(LEGACY_FFMPEG_QUEUE_FILE)) return null;
-    const raw = stripBom(fs.readFileSync(LEGACY_FFMPEG_QUEUE_FILE, "utf-8"));
-    if (!raw.trim()) return null;
-    const parsed = JSON.parse(raw);
-    const jobs = Array.isArray(parsed) ? (parsed as FFmpegJob[]) : [];
-    await cacheSetJson(redisKeys.ffmpegQueue(), jobs);
-    return jobs;
-  } catch (err) {
-    console.warn("[ffmpeg-queue-store] Legacy file migration failed:", err);
-    return null;
-  }
-}
-
-/** Read the full queue from Redis (persistent). */
+/** Read the full queue (JSON file, with Redis cache). */
 export async function readFfmpegQueue(): Promise<FFmpegJob[]> {
-  const cached = await cacheGetJson<FFmpegJob[]>(redisKeys.ffmpegQueue());
-  if (Array.isArray(cached)) {
-    return cached;
-  }
-
-  const migrated = await migrateFromLegacyFile();
-  if (migrated) return migrated;
-
-  return [];
+  return readJsonWithCacheOrDefault({
+    filePath: FFMPEG_QUEUE_FILE,
+    redisKey: redisKeys.ffmpegQueue(),
+    validate: isFfmpegJobArray,
+    defaultValue: () => [],
+  });
 }
 
-/** Write the full queue to Redis (overwrites prior value, no expiration). */
+/** Write the full queue to JSON and refresh Redis cache. */
 export async function writeFfmpegQueue(jobs: FFmpegJob[]): Promise<void> {
-  await cacheSetJson(redisKeys.ffmpegQueue(), jobs);
+  await writeJsonWithCache(FFMPEG_QUEUE_FILE, redisKeys.ffmpegQueue(), jobs);
 }

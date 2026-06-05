@@ -7,14 +7,14 @@ export type { FFmpegJob } from "./ffmpeg-queue-types";
 let writeChain = Promise.resolve();
 
 /**
- * Loads the queue from Redis. Legacy JSON file is migrated on first read.
+ * Loads the queue from data/ffmpeg_queue.json (Redis cache when available).
  */
 export async function loadQueue(): Promise<FFmpegJob[]> {
   return readFfmpegQueue();
 }
 
 /**
- * Persists the queue to Redis safely using a sequential write chain.
+ * Persists the queue to data/ffmpeg_queue.json safely using a sequential write chain.
  */
 export async function saveQueue(jobs: FFmpegJob[]): Promise<void> {
   return new Promise((resolve, reject) => {

@@ -21,10 +21,12 @@ export const redisKeys = {
   cloudSystems: (authFingerprint: string) =>
     `${REDIS_PREFIX}:cloud_systems:${safeKeyPart(authFingerprint)}`,
   deviceMonitorLatest: () => `${REDIS_PREFIX}:device_monitor:latest` as const,
-  /** Single document — all scheduled recordings (persistent, no TTL) */
+  /** Cache mirror of data/scheduled_recordings.json */
   scheduledRecordings: () => `${REDIS_PREFIX}:scheduled_recordings` as const,
-  /** Background FFmpeg auto-save job queue (persistent, no TTL) */
+  /** Cache mirror of data/ffmpeg_queue.json */
   ffmpegQueue: () => `${REDIS_PREFIX}:ffmpeg_queue` as const,
-  /** Per-user notification inbox (persistent, no TTL) */
+  /** Cache mirror of data/notifications.json */
   notifications: () => `${REDIS_PREFIX}:notifications` as const,
+  /** Cache mirror of data/scheduled_error_logs.json */
+  scheduledErrorLogs: () => `${REDIS_PREFIX}:scheduled_error_logs` as const,
 } as const;

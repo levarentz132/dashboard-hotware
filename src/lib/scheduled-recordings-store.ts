@@ -1,14 +1,20 @@
 /**
- * Scheduled recordings — persisted in Redis forever (SET, no TTL).
- * Legacy `data/scheduled_recordings.json` is migrated once on first read.
+ * Scheduled recordings — source of truth: data/scheduled_recordings.json
+ * Redis holds a read-through cache (invalidated when the file mtime changes).
  */
 
-import fs from "fs";
 import path from "path";
-import { cacheGetJson, cacheSetJson } from "@/lib/redis/cache";
+import { readJsonWithCacheOrDefault, writeJsonWithCache } from "@/lib/json-store-cache";
 import { redisKeys } from "@/lib/redis/keys";
 
-export const LEGACY_SCHEDULED_FILE = path.join(process.cwd(), "data", "scheduled_recordings.json");
+export const SCHEDULED_RECORDINGS_FILE = path.join(
+  process.cwd(),
+  "data",
+  "scheduled_recordings.json",
+);
+
+/** @deprecated Use SCHEDULED_RECORDINGS_FILE */
+export const LEGACY_SCHEDULED_FILE = SCHEDULED_RECORDINGS_FILE;
 
 export interface ScheduledRecordingsData {
   schedules: any[];
@@ -26,47 +32,39 @@ export function emptyScheduledRecordings(): ScheduledRecordingsData {
   };
 }
 
-function stripBom(content: string): string {
-  return content.replace(/^\uFEFF/, "");
+function isScheduledRecordingsData(data: unknown): data is ScheduledRecordingsData {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    Array.isArray((data as ScheduledRecordingsData).schedules)
+  );
 }
 
-async function migrateFromLegacyFile(): Promise<ScheduledRecordingsData | null> {
-  try {
-    if (!fs.existsSync(LEGACY_SCHEDULED_FILE)) return null;
-    const raw = stripBom(fs.readFileSync(LEGACY_SCHEDULED_FILE, "utf-8"));
-    if (!raw.trim()) return null;
-    const parsed = JSON.parse(raw) as ScheduledRecordingsData;
-    await cacheSetJson(redisKeys.scheduledRecordings(), parsed);
-    return parsed;
-  } catch (err) {
-    console.warn("[scheduled-store] Legacy file migration failed:", err);
-    return null;
-  }
-}
-
-/** Read full schedule document from Redis (persistent). */
-export async function readScheduledRecordings(): Promise<ScheduledRecordingsData> {
-  const cached = await cacheGetJson<ScheduledRecordingsData>(redisKeys.scheduledRecordings());
-  if (cached && Array.isArray(cached.schedules)) {
-    return {
-      ...emptyScheduledRecordings(),
-      ...cached,
-      schedules: cached.schedules || [],
-      originalSchedules: cached.originalSchedules || {},
-    };
-  }
-
-  const migrated = await migrateFromLegacyFile();
-  if (migrated) return migrated;
-
-  return emptyScheduledRecordings();
-}
-
-/** Write full schedule document to Redis (overwrites prior value, no expiration). */
-export async function writeScheduledRecordings(data: ScheduledRecordingsData): Promise<void> {
-  await cacheSetJson(redisKeys.scheduledRecordings(), {
+function normalizeScheduledRecordings(data: ScheduledRecordingsData): ScheduledRecordingsData {
+  return {
+    ...emptyScheduledRecordings(),
     ...data,
     schedules: data.schedules || [],
     originalSchedules: data.originalSchedules || {},
+  };
+}
+
+/** Read full schedule document (JSON file, with Redis cache). */
+export async function readScheduledRecordings(): Promise<ScheduledRecordingsData> {
+  const data = await readJsonWithCacheOrDefault({
+    filePath: SCHEDULED_RECORDINGS_FILE,
+    redisKey: redisKeys.scheduledRecordings(),
+    validate: isScheduledRecordingsData,
+    defaultValue: emptyScheduledRecordings,
   });
+  return normalizeScheduledRecordings(data);
+}
+
+/** Write full schedule document to JSON and refresh Redis cache. */
+export async function writeScheduledRecordings(data: ScheduledRecordingsData): Promise<void> {
+  await writeJsonWithCache(
+    SCHEDULED_RECORDINGS_FILE,
+    redisKeys.scheduledRecordings(),
+    normalizeScheduledRecordings(data),
+  );
 }

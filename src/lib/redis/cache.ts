@@ -1,8 +1,9 @@
 /**
- * Redis-only server store (no TTL, no DEL cleanup, no in-memory fallback).
+ * Redis JSON cache helpers (read-through / write-through for `data/*.json` stores).
  *
- * Entries persist until overwritten by the same key or Redis is flushed.
- * AOF in redis.conf provides disk persistence — treat as a database, not a TTL cache.
+ * Persistent app data lives on disk under `data/`. Redis accelerates reads and
+ * can be flushed without losing state. NX proxy / device list entries are
+ * plain cache overlays on upstream API responses.
  */
 
 import { createHash } from "crypto";
@@ -31,7 +32,7 @@ export async function cacheGetJson<T>(key: string): Promise<T | null> {
   }
 }
 
-/** Persist JSON at key until overwritten (no expiration). */
+/** Write JSON to Redis cache (no TTL). App data keys are refreshed via json-store-cache after disk writes. */
 export async function cacheSetJson(key: string, value: unknown): Promise<void> {
   if (!(await isRedisAvailable())) {
     console.warn("[redis-store] SET skipped — Redis unavailable");
