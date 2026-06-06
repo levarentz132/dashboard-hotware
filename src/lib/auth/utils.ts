@@ -114,70 +114,114 @@ export function formatIndonesianDate(dateString: string | null | undefined): str
 /**
  * Check if a user has view permission for a specific camera.
  */
-export function hasCameraViewPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
-    if (!user) return false;
-    
-    // 1. Admin/Power User bypass
-    if (isAdmin(user)) return true;
-    
+export function getCameraRights(
+    user: UserPublic | null | undefined,
+    cameraId: string,
+    accessibleCameraIds?: Set<string>,
+): string {
+    if (!user) return "";
+
     const normalizeId = (id: string) => id.replace(/[{}]/g, "");
     const nid = normalizeId(cameraId);
+    const lowerId = nid.toLowerCase();
 
-    // 1. Check VMS Resource Access Rights if available
-    if (user.vmsResourceAccessRights) {
-        const rights = user.vmsResourceAccessRights[nid] || user.vmsResourceAccessRights[cameraId] || "";
-        if (rights && rights !== "none") {
-            // Must have 'view' right
-            return rights.toLowerCase().includes('view');
+    const lookupRights = (rightsMap: Record<string, string> | undefined): string => {
+        if (!rightsMap) return "";
+        if (rightsMap[nid]) return rightsMap[nid];
+        if (rightsMap[cameraId]) return rightsMap[cameraId];
+        for (const [key, value] of Object.entries(rightsMap)) {
+            if (normalizeId(key).toLowerCase() === lowerId) {
+                return value;
+            }
         }
-        // If it's explicitly in the map but empty/none, return false
-        if (user.vmsResourceAccessRights[nid] !== undefined || user.vmsResourceAccessRights[cameraId] !== undefined) {
-            return false;
+        return "";
+    };
+
+    if (user.vmsResourceAccessRights) {
+        const rights = lookupRights(user.vmsResourceAccessRights);
+        if (rights && rights !== "none") {
+            return rights;
+        }
+        const hasExplicitDeny = Object.keys(user.vmsResourceAccessRights).some(
+            (key) => normalizeId(key).toLowerCase() === lowerId,
+        );
+        if (hasExplicitDeny) {
+            return "none";
         }
     }
-    
-    // If the user is an admin in the dashboard, they might have legacy access
-    // but the instruction is to use resource access rights only.
-    // However, we keep the fallback to user.resourceAccessRights for backward compatibility
-    // if vmsResourceAccessRights is not yet loaded.
-    
-    const rights = user.resourceAccessRights || {};
-    
-    // Check for both original and normalized IDs in the rights map
-    const userRights = rights[nid] || rights[cameraId] || "";
-    const hasRight = userRights !== "" && userRights !== "none";
-    
-    return hasRight;
+
+    const legacyRights = lookupRights(user.resourceAccessRights);
+    if (legacyRights && legacyRights !== "none") {
+        return legacyRights;
+    }
+
+    if (accessibleCameraIds?.has(lowerId) || accessibleCameraIds?.has(nid)) {
+        return "view";
+    }
+
+    return "";
+}
+
+export function hasCameraViewPermission(
+    user: UserPublic | null | undefined,
+    cameraId: string,
+    accessibleCameraIds?: Set<string>,
+): boolean {
+    if (!user) return false;
+
+    // Admin/Power User bypass
+    if (isAdmin(user)) return true;
+
+    const rights = getCameraRights(user, cameraId, accessibleCameraIds).toLowerCase();
+    return rights !== "" && rights !== "none" && rights.includes("view");
+}
+
+/**
+ * Check if a user can see a schedule (any creator) on a camera they can view.
+ */
+export function canViewSchedule(
+    user: UserPublic | null | undefined,
+    schedule: { cameraId: string },
+    accessibleCameraIds?: Set<string>,
+): boolean {
+    if (!user) return false;
+    if (isVmsAdmin(user)) return true;
+    return hasCameraViewPermission(user, schedule.cameraId, accessibleCameraIds);
+}
+
+/**
+ * Check if a user can create, edit, or delete a schedule entry.
+ * VMS power users / administrators may manage any schedule; others only their own.
+ */
+export function canManageSchedule(
+    user: UserPublic | null | undefined,
+    schedule: { scheduledBy?: string }
+): boolean {
+    if (!user) return false;
+    if (isVmsAdmin(user)) return true;
+
+    const owner = schedule.scheduledBy?.trim();
+    const username = user.username?.trim();
+    if (!owner || !username || owner === "System" || owner === "Verifying...") {
+        return false;
+    }
+
+    return owner.toLowerCase() === username.toLowerCase();
 }
 
 /**
  * Check if a user has edit permission for a specific camera.
  */
-export function hasCameraEditPermission(user: UserPublic | null | undefined, cameraId: string): boolean {
+export function hasCameraEditPermission(
+    user: UserPublic | null | undefined,
+    cameraId: string,
+    accessibleCameraIds?: Set<string>,
+): boolean {
     if (!user) return false;
     
     // 1. Admin/Power User bypass
     if (isAdmin(user)) return true;
-    
-    const normalizeId = (id: string) => id.replace(/[{}]/g, "");
-    const nid = normalizeId(cameraId);
 
-    // 1. Check VMS Resource Access Rights if available
-    if (user.vmsResourceAccessRights) {
-        const rights = user.vmsResourceAccessRights[nid] || user.vmsResourceAccessRights[cameraId] || "";
-        if (rights && rights !== "none") {
-            // Must have 'edit' right
-            return rights.toLowerCase().includes('edit');
-        }
-        // If it's explicitly in the map but empty/none, return false
-        if (user.vmsResourceAccessRights[nid] !== undefined || user.vmsResourceAccessRights[cameraId] !== undefined) {
-            return false;
-        }
-    }
-    
-    const rights = user.resourceAccessRights || {};
-    
-    const userRights = (rights[nid] || rights[cameraId] || "").toLowerCase();
-    const allowed = userRights !== "" && userRights !== "none";
-    return allowed;
+    const rights = getCameraRights(user, cameraId, accessibleCameraIds).toLowerCase();
+    return rights !== "" && rights !== "none" && rights.includes("edit");
 }

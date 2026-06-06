@@ -33,13 +33,13 @@ async function vmsRequest(
   authToken: string,
   nxIp: string,
   nxPort: string,
-  systemId?: string
+  systemId?: string,
+  request?: NextRequest,
 ): Promise<any> {
   try {
     const isLocalToken = authToken.startsWith("vms-");
 
-    // Construct a dummy request object to pass the IP/Port to buildCloudUrl
-    const dummyRequest = {
+    const routingRequest = request ?? ({
       cookies: { get: () => null },
       headers: {
         get: (name: string) => {
@@ -48,10 +48,10 @@ async function vmsRequest(
           return null;
         }
       }
-    } as any;
+    } as any);
 
     const params = new URLSearchParams();
-    const url = buildCloudUrl(systemId || "", endpoint, params, dummyRequest);
+    const url = buildCloudUrl(systemId || "", endpoint, params, routingRequest);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "x-runtime-guid": authToken,
@@ -1019,30 +1019,139 @@ startWatchdog();
 
 // ── Multi-Tenant Security Helpers ──────────────────────────────────────────
 
+function normalizeCameraId(id: string): string {
+  return id.replace(/[{}]/g, "").toLowerCase();
+}
+
+function mergeResourceRights(
+  target: Record<string, string>,
+  source: Record<string, string> | undefined | null,
+) {
+  if (!source || typeof source !== "object") return;
+  Object.entries(source).forEach(([key, value]) => {
+    if (value && value !== "none") {
+      target[normalizeCameraId(key)] = value;
+    }
+  });
+}
+
+function lookupCameraRights(rights: Record<string, string>, cameraId: string): string {
+  const nid = normalizeCameraId(cameraId);
+  if (rights[nid]) return rights[nid];
+  for (const [key, value] of Object.entries(rights)) {
+    if (normalizeCameraId(key) === nid) return value;
+  }
+  return "";
+}
+
+function hasCameraAccess(rights: Record<string, string>, cameraId: string): boolean {
+  const r = lookupCameraRights(rights, cameraId).toLowerCase();
+  if (!r || r === "none") return false;
+  return r.includes("view");
+}
+
+function isUnassignedScheduleOwner(owner: string | undefined): boolean {
+  const o = owner?.trim();
+  return !o || o === "System" || o === "Verifying...";
+}
+
+function isScheduleOwner(schedule: { scheduledBy?: string }, username: string): boolean {
+  if (!username || username === "System") return false;
+  const owner = schedule.scheduledBy?.trim();
+  if (isUnassignedScheduleOwner(owner)) return false;
+  return owner!.toLowerCase() === username.toLowerCase();
+}
+
+/** Incoming saves from the UI may still carry placeholder owners before VMS identity resolves. */
+function isIncomingScheduleForUser(
+  schedule: { scheduledBy?: string },
+  username: string,
+): boolean {
+  if (!username || username === "System") return false;
+  const owner = schedule.scheduledBy?.trim();
+  if (isUnassignedScheduleOwner(owner)) return true;
+  return owner!.toLowerCase() === username.toLowerCase();
+}
+
+function normalizeScheduleOwner(
+  schedule: { scheduledBy?: string },
+  username: string,
+): string {
+  const owner = schedule.scheduledBy?.trim();
+  if (isUnassignedScheduleOwner(owner)) {
+    return username || "System";
+  }
+  return owner!;
+}
+
+function hasResolvableCameraRights(
+  rights: Record<string, string> | null,
+): rights is Record<string, string> {
+  return rights != null && Object.keys(rights).length > 0;
+}
+
+function canUserViewSchedule(
+  schedule: { cameraId: string },
+  userIsAdmin: boolean,
+  allowedCameraIds: Set<string> | undefined,
+  rights: Record<string, string> | null,
+): boolean {
+  if (userIsAdmin) return true;
+
+  const cameraId = normalizeCameraId(schedule.cameraId);
+  if (allowedCameraIds && allowedCameraIds.size > 0) {
+    return allowedCameraIds.has(cameraId);
+  }
+
+  if (hasResolvableCameraRights(rights)) {
+    return hasCameraAccess(rights, schedule.cameraId);
+  }
+
+  // Rights could not be resolved server-side; include row for client-side camera filter
+  return true;
+}
+
+function isVmsPowerUser(permissions: string, groups: any[], userGroupIds: Set<string>): boolean {
+  const perms = permissions.toLowerCase();
+  if (perms.includes("administrator") || perms.includes("poweruser")) {
+    return true;
+  }
+
+  return (groups || []).some((g: any) => {
+    const groupId = normalizeCameraId(String(g.id || ""));
+    const name = (g.name || "").toLowerCase();
+    if (!userGroupIds.has(groupId)) return false;
+    return name.includes("administrator") || name.includes("poweruser");
+  });
+}
+
 /**
  * Fetch the current user's resource access rights, role, and username from the VMS.
  */
-async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort?: string): Promise<{ rights: Record<string, string> | null, isAdmin: boolean, username: string }> {
+async function getUserResourceRights(
+  request: NextRequest,
+  nxIp?: string,
+  nxPort?: string,
+): Promise<{
+  rights: Record<string, string> | null;
+  isAdmin: boolean;
+  username: string;
+  allowedCameraIds?: Set<string>;
+}> {
   try {
     let userCookie = request.cookies.get("local_nx_user")?.value;
     if (!userCookie) userCookie = request.cookies.get("nx_cloud_session")?.value;
-    if (!userCookie) return { rights: null, isAdmin: false, username: "System" };
+    if (!userCookie) {
+      return { rights: null, isAdmin: false, username: "System", allowedCameraIds: new Set() };
+    }
 
     let token = userCookie;
     let username = "";
-    let isDashboardAdmin = false;
     try {
-      const scrubbedCookie = userCookie.startsWith("{") ? JSON.parse(userCookie) : { token: "present" };
-      if (scrubbedCookie.token) scrubbedCookie.token = "SCRUBBED";
-      if (scrubbedCookie.accessToken) scrubbedCookie.accessToken = "SCRUBBED";
-      // console.log(`[getUserResourceRights] userCookie:`, scrubbedCookie);
-
       if (userCookie.startsWith("{")) {
         const parsed = JSON.parse(userCookie);
         token = parsed.token || parsed.accessToken || token;
         username = parsed.username || parsed.name || "";
-        const role = parsed.role?.name || parsed.role || "";
-        isDashboardAdmin = role.toLowerCase() === "admin";
       }
     } catch (e) { }
 
@@ -1066,78 +1175,101 @@ async function getUserResourceRights(request: NextRequest, nxIp?: string, nxPort
       } catch (e) { }
     }
 
-    // ── Resolve Username from VMS if missing ────────────────────────────────
-    if (!username && token) {
+    if (!token) {
+      return {
+        rights: null,
+        isAdmin: false,
+        username: username || "System",
+        allowedCameraIds: new Set(),
+      };
+    }
+
+    // Resolve username from VMS session when the cookie only stores the token
+    if (!username) {
       try {
-        const sessionData = await vmsRequest("GET", "/rest/v3/login/sessions/-", null, token, finalIp, finalPort);
-        if (sessionData && sessionData.username) {
+        const sessionData = await vmsRequest("GET", "/rest/v3/login/sessions/-", null, token, finalIp, finalPort, undefined, request);
+        if (sessionData?.username) {
           username = sessionData.username;
-          // console.log(`[getUserResourceRights] Resolved username from VMS session: ${username}`);
         }
       } catch (e: any) {
-        // console.warn(`[getUserResourceRights] Failed to resolve username from VMS session: ${e.message}`);
+        // ignore
       }
     }
 
-    if (!token || !username) {
-      // console.log(`[getUserResourceRights] No token or username found. Using fallback: ${username || "System"}`);
-      return { rights: null, isAdmin: isDashboardAdmin, username: username || "System" };
-    }
-
-    // ── STEP 1: Determine accessible cameras from VMS ──────────────────────
     const accessibleRights: Record<string, string> = {};
-    try {
-      const devices = await vmsRequest("GET", "/rest/v3/devices", null, token, finalIp, finalPort);
-      if (Array.isArray(devices)) {
-        const normalizeId = (id: string) => id.replace(/[{}]/g, "");
-        devices.forEach((d: any) => {
-          if (d.id) accessibleRights[normalizeId(d.id)] = "view";
-        });
-        // console.log(`[getUserResourceRights] User ${username} can access ${devices.length} cameras.`);
-      }
-    } catch (e: any) {
-      // console.warn(`[getUserResourceRights] Failed to fetch accessible devices: ${e.message}`);
-    }
-
-    // ── STEP 2: Fetch direct VMS permissions and groups for admin status ────
     let vmsIsAdmin = false;
+
     try {
-      // Parallel fetch for permissions and groups
-      const [permsData, groupsData, userData] = await Promise.all([
-        vmsRequest("GET", "/rest/v3/users/-/permissions", null, token, finalIp, finalPort).catch(() => ({})),
-        vmsRequest("GET", "/api/nx/userGroups", null, token, finalIp, finalPort).catch(() => []),
-        vmsRequest("GET", `/api/nx/users?name=${encodeURIComponent(username)}`, null, token, finalIp, finalPort).catch(() => ({}))
+      const usersEndpoint = username
+        ? `/rest/v3/users?name=${encodeURIComponent(username)}`
+        : "/rest/v3/users";
+
+      const [permsData, groupsData, devices, usersData] = await Promise.all([
+        vmsRequest("GET", "/rest/v3/users/-/permissions", null, token, finalIp, finalPort, undefined, request).catch(() => ({})),
+        vmsRequest("GET", "/rest/v3/userGroups", null, token, finalIp, finalPort, undefined, request).catch(() => []),
+        vmsRequest("GET", "/rest/v3/devices", null, token, finalIp, finalPort, undefined, request).catch(() => []),
+        vmsRequest("GET", usersEndpoint, null, token, finalIp, finalPort, undefined, request).catch(() => []),
       ]);
 
-      const permissions = (permsData?.permissions || "").toLowerCase();
-      const user = Array.isArray(userData) ? userData[0] : (userData.reply ? userData.reply[0] : userData);
-      const groups = Array.isArray(groupsData) ? groupsData : (groupsData.reply || []);
+      // Explicit per-camera grants from User Management
+      mergeResourceRights(accessibleRights, permsData?.resourceAccessRights);
 
-      // Determine admin status based on group names (administrator, power user, etc.)
-      const adminGroupNames = (groups || []).map((g: any) => (g.name || "").toLowerCase());
-      vmsIsAdmin = adminGroupNames.some((name: string) =>
-        name.includes("administrator") ||
-        name.includes("poweruser")
+      // Devices returned by VMS are already filtered to what this user can access
+      if (Array.isArray(devices)) {
+        devices.forEach((d: any) => {
+          if (d.id) {
+            const nid = normalizeCameraId(d.id);
+            if (!accessibleRights[nid]) {
+              accessibleRights[nid] = "view";
+            }
+          }
+        });
+      }
+
+      const permissions = (permsData?.permissions || "").toLowerCase();
+      const groups = Array.isArray(groupsData) ? groupsData : (groupsData?.reply || []);
+      const users = Array.isArray(usersData) ? usersData : (usersData?.reply || []);
+      const currentUser = users[0];
+      const userGroupIds = new Set<string>(
+        (currentUser?.groupIds || []).map((id: string) => normalizeCameraId(String(id))),
       );
 
-      // Fallback only if no groups assigned (NX older versions might not use groups strictly)
-      if (!vmsIsAdmin && permissions === "administrator") {
-        vmsIsAdmin = true;
-      }
+      vmsIsAdmin = isVmsPowerUser(permissions, groups, userGroupIds);
+
+      const allowedCameraIds = new Set<string>();
+      Object.entries(accessibleRights).forEach(([id, right]) => {
+        const r = (right || "").toLowerCase();
+        if (r && r !== "none" && r.includes("view")) {
+          allowedCameraIds.add(normalizeCameraId(id));
+        }
+      });
 
       return {
         rights: vmsIsAdmin ? null : accessibleRights,
-        isAdmin: vmsIsAdmin, // Only trust VMS-derived admin status here, or remove entirely if possible
-        username
+        isAdmin: vmsIsAdmin,
+        username: username || currentUser?.name || "System",
+        allowedCameraIds: vmsIsAdmin ? undefined : allowedCameraIds,
       };
     } catch (e: any) {
       // console.warn(`[getUserResourceRights] Failed to fetch VMS permissions: ${e.message}`);
     }
 
-    // console.log(`[getUserResourceRights] No direct VMS permissions found for ${username}. isDashboardAdmin=${isDashboardAdmin}. Using device-list rights.`);
-    return { rights: accessibleRights, isAdmin: false, username };
+    const allowedCameraIds = new Set<string>();
+    Object.entries(accessibleRights).forEach(([id, right]) => {
+      const r = (right || "").toLowerCase();
+      if (r && r !== "none" && r.includes("view")) {
+        allowedCameraIds.add(normalizeCameraId(id));
+      }
+    });
+
+    return {
+      rights: accessibleRights,
+      isAdmin: false,
+      username: username || "System",
+      allowedCameraIds,
+    };
   } catch (err) {
-    return { rights: null, isAdmin: false, username: "System" };
+    return { rights: null, isAdmin: false, username: "System", allowedCameraIds: new Set() };
   }
 }
 
@@ -1164,7 +1296,8 @@ export async function GET(request: NextRequest) {
     const data = await readScheduledRecordings();
 
     // ── Multi-Tenant Filtering ──────────────────────────────────────────────
-    const { rights, isAdmin: userIsAdmin, username } = await getUserResourceRights(request, data.nxLocationIp, data.nxLocationPort);
+    const { rights, isAdmin: userIsAdmin, username, allowedCameraIds } =
+      await getUserResourceRights(request, data.nxLocationIp, data.nxLocationPort);
 
     // ── Update Auth Token for Current User ──
     let token = request.cookies.get("local_nx_user")?.value;
@@ -1185,6 +1318,9 @@ export async function GET(request: NextRequest) {
             s.auth = token;
             fileNeedsUpdate = true;
           }
+        } else if (s.auth === token && !isScheduleOwner(s, username)) {
+          s.scheduledBy = username;
+          fileNeedsUpdate = true;
         }
       });
       if (fileNeedsUpdate) {
@@ -1194,28 +1330,12 @@ export async function GET(request: NextRequest) {
 
     // console.log(`[GET /scheduled] Found ${data.schedules?.length || 0} raw schedules on disk.`);
 
-    // Admin bypass: admins always see all schedules
-    if (userIsAdmin) {
-      // console.log(`[GET /scheduled] Admin user ${username}: Showing all ${data.schedules?.length || 0} schedules.`);
-    } else if (rights) {
-      // Non-admin with rights: filter by accessible cameras
-      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
-      const originalCount = (data.schedules || []).length;
-      data.schedules = (data.schedules || []).filter((s: any) => {
-        const nid = normalizeId(s.cameraId);
-        const r = (rights[nid] || rights[s.cameraId] || "").toLowerCase();
-
-        // Allow if user has explicit VMS rights OR if they are the one who created this schedule
-        const hasRights = r !== "" && r !== "none";
-        const isOwner = s.scheduledBy && username && s.scheduledBy.toLowerCase() === username.toLowerCase();
-
-        return hasRights || isOwner;
-      });
-      // console.log(`[GET /scheduled] Restricted user ${username}: Filtered schedules from ${originalCount} down to ${data.schedules.length}`);
-    } else {
-      // Could not verify rights and user is not admin -> show nothing
-      // console.log(`[GET /scheduled] Restricted user ${username} (No rights found): Showing 0 schedules.`);
-      data.schedules = [];
+    // Visibility: any user sees schedules on cameras they can view (any creator).
+    // Edit/delete is enforced in the UI and on POST merge (owner or VMS admin/power user only).
+    if (!userIsAdmin) {
+      data.schedules = (data.schedules || []).filter((s: any) =>
+        canUserViewSchedule(s, userIsAdmin, allowedCameraIds, rights),
+      );
     }
 
     // ── Security Scrubbing ──────────────────────────────────────────────────
@@ -1261,7 +1381,12 @@ export async function POST(request: NextRequest) {
     const existingData = await readScheduledRecordings();
 
     // 2. Identify current user and their rights
-    const { rights, isAdmin: userIsAdmin, username } = await getUserResourceRights(request, body.nxLocationIp || existingData.nxLocationIp, body.nxLocationPort || existingData.nxLocationPort);
+    const { rights, isAdmin: userIsAdmin, username, allowedCameraIds } =
+      await getUserResourceRights(
+        request,
+        body.nxLocationIp || existingData.nxLocationIp,
+        body.nxLocationPort || existingData.nxLocationPort,
+      );
 
     logRecordingEvent(`logged in as: ${username}(admin:${userIsAdmin})`);
 
@@ -1275,33 +1400,50 @@ export async function POST(request: NextRequest) {
       } catch (e) { }
     }
 
-    // 3. Smart Merge: Keep existing schedules for cameras the user CAN'T see
-    // Admin users do a full replace; non-admins merge to preserve other users' schedules
-    if (rights && !userIsAdmin) {
-      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+    // Normalize placeholder owners before merge so saves are attributed to the VMS user.
+    if (Array.isArray(body.schedules) && username && username !== "System") {
+      body.schedules = body.schedules.map((s: any) => ({
+        ...s,
+        scheduledBy: normalizeScheduleOwner(s, username),
+      }));
+    }
 
-      // Filter out only the schedules for cameras the user HAS access to from the EXISTING list
-      // (as those are the ones they are providing updates for)
-      const otherUsersSchedules = (existingData.schedules || []).filter((s: any) => {
-        const nid = normalizeId(s.cameraId);
-        const r = rights[nid] || rights[s.cameraId] || "";
+    // 3. Smart Merge: non-admins may only add/update/delete their own schedules.
+    // Admin users do a full replace; others merge to preserve other users' schedules.
+    if (!userIsAdmin) {
+      const existingById = new Map(
+        (existingData.schedules || []).map((s: any) => [s.id, s]),
+      );
 
-        const hasRights = r !== "" && r !== "none";
-        const isOwner = s.scheduledBy && username && s.scheduledBy.toLowerCase() === username.toLowerCase();
+      // Always preserve schedules created by other users.
+      const otherUsersSchedules = (existingData.schedules || []).filter(
+        (s: any) => !isScheduleOwner(s, username)
+      );
 
-        // Keep schedules that the user CANNOT manage.
-        // They CAN manage it if they have VMS rights OR if they are the owner.
-        return !hasRights && !isOwner;
+      // Accept incoming schedules for the current user (including UI placeholders).
+      const ownIncomingSchedules = (body.schedules || []).filter((s: any) => {
+        const existing = existingById.get(s.id);
+        const ownedViaAuth =
+          !!token && !!existing?.auth && existing.auth === token;
+
+        if (!isIncomingScheduleForUser(s, username) && !ownedViaAuth) {
+          return false;
+        }
+
+        if (ownedViaAuth) {
+          s.scheduledBy = username;
+        }
+
+        return canUserViewSchedule(s, userIsAdmin, allowedCameraIds, rights);
       });
 
-      // Combine other users' schedules with the new ones provided by the current user
-      body.schedules = [...otherUsersSchedules, ...(body.schedules || [])];
+      body.schedules = [...otherUsersSchedules, ...ownIncomingSchedules];
 
       // 4. Deduplicate to prevent redundant tasks for the same camera/time/type
       const seen = new Set();
       body.schedules = (body.schedules || []).filter((s: any) => {
         const dateStr = new Date(s.date).toDateString();
-        const key = `${normalizeId(s.cameraId)}-${dateStr}-${s.startTime}-${s.type}`;
+        const key = `${normalizeCameraId(s.cameraId)}-${dateStr}-${s.startTime}-${s.type}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -1321,13 +1463,8 @@ export async function POST(request: NextRequest) {
     if (token) {
       if (Array.isArray(body.schedules)) {
         // Assign VMS-verified username and specific auth token to EACH schedule
-        // Preserve existing scheduledBy if it's already set to a real user
         body.schedules = body.schedules.map((s: any) => {
-          let finalUsername = s.scheduledBy;
-
-          if (!finalUsername || finalUsername === "Verifying..." || finalUsername === "System") {
-            finalUsername = username || "System";
-          }
+          const finalUsername = normalizeScheduleOwner(s, username);
 
           const existingSchedule = (existingData.schedules || []).find((old: any) => old.id === s.id);
           const isOwner = finalUsername && finalUsername.toLowerCase() === username.toLowerCase();

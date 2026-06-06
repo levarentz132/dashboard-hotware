@@ -37,7 +37,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { calculateNextOccurrence } from "@/lib/schedule-utils";
 import { parseRecordingLogTimestamp } from "@/lib/recording-log-utils";
 import type { ScheduledErrorLogEntry } from "@/lib/scheduled-error-logs-store";
-import { isAdmin, isVmsAdmin, hasCameraViewPermission, hasCameraEditPermission } from "@/lib/auth";
+import { isAdmin, isVmsAdmin, hasCameraViewPermission, hasCameraEditPermission, canManageSchedule, canViewSchedule } from "@/lib/auth";
 import {
   Dialog,
   DialogContent,
@@ -609,6 +609,7 @@ export default function CloudRecordings() {
   const [expandedScheduleKeys, setExpandedScheduleKeys] = useState<Set<string>>(new Set());
   // ---- Enrichment state for permissions and VMS identity ----
   const [vmsEnrichedUser, setVmsEnrichedUser] = useState<UserPublic | null>(null);
+  const [serverScheduleAdmin, setServerScheduleAdmin] = useState(false);
 
   // Caching and Race Condition Prevention
   const recordingsCache = useRef<Map<string, RecentRecording[]>>(new Map());
@@ -678,29 +679,39 @@ export default function CloudRecordings() {
   }, [localUser]);
 
   const effectiveUser = vmsEnrichedUser || localUser;
+
+  const resolveScheduleOwnerUsername = useCallback((): string | null => {
+    const u = effectiveUser?.username?.trim();
+    if (!u || u === "Verifying..." || u === "System") return null;
+    return u;
+  }, [effectiveUser?.username]);
+
   const isEffectiveAdmin = React.useMemo(() => {
+    if (serverScheduleAdmin) return true;
     if (!vmsEnrichedUser || vmsEnrichedUser.username === "Verifying...") return false;
-    // Use strict VMS admin check for this specific button
     return isVmsAdmin(vmsEnrichedUser);
-  }, [vmsEnrichedUser]);
+  }, [vmsEnrichedUser, serverScheduleAdmin]);
+
+  // VMS /rest/v3/devices already returns only cameras this user can access
+  const accessibleDeviceIds = React.useMemo(
+    () => new Set(devices.map((d) => normalizeId(d.id))),
+    [devices],
+  );
 
   const visibleDevices = React.useMemo(() => {
     if (!effectiveUser) return [];
     if (isEffectiveAdmin) return devices;
-    return devices.filter(d => hasCameraViewPermission(effectiveUser, d.id));
-  }, [devices, effectiveUser, isEffectiveAdmin]);
+    return devices.filter((d) => hasCameraViewPermission(effectiveUser, d.id, accessibleDeviceIds));
+  }, [devices, effectiveUser, isEffectiveAdmin, accessibleDeviceIds]);
 
-  // ---- Permission-filtered view of schedules (always uses current localUser/enrichedUser) ----
+  // Match server visibility: all schedules on cameras this user can view (any creator).
   const visibleScheduledRecordings = React.useMemo(() => {
     if (!effectiveUser) return [];
-
-    // Admin bypass: admins always see all schedules
-    if (isEffectiveAdmin) {
-      return scheduledRecordings;
-    }
-
-    return scheduledRecordings.filter(s => hasCameraViewPermission(effectiveUser, s.cameraId));
-  }, [scheduledRecordings, effectiveUser, isEffectiveAdmin]);
+    if (isEffectiveAdmin) return scheduledRecordings;
+    return scheduledRecordings.filter((rec) =>
+      canViewSchedule(effectiveUser, rec, accessibleDeviceIds),
+    );
+  }, [scheduledRecordings, effectiveUser, isEffectiveAdmin, accessibleDeviceIds]);
 
   const visibleScheduledRecordingsRef = useRef(visibleScheduledRecordings);
   visibleScheduledRecordingsRef.current = visibleScheduledRecordings;
@@ -1374,9 +1385,18 @@ export default function CloudRecordings() {
     // Record action time to prevent polling race condition
     lastActionTime.current = Date.now();
 
-    const idsToCancel = [...pendingCancelIds];
+    const idsToCancel = pendingCancelIds.filter((id) => {
+      const rec = scheduledRecordings.find((r) => r.id === id);
+      return rec && canManageSchedule(effectiveUser, rec);
+    });
+
     setIsCancelConfirmOpen(false);
     setPendingCancelIds([]);
+
+    if (idsToCancel.length === 0) {
+      setPendingCancelForceDelete(false);
+      return;
+    }
 
     // To avoid multiple rapid state updates and saves, we process VMS stops first 
     // and then perform a single state update at the end.
@@ -1546,10 +1566,17 @@ export default function CloudRecordings() {
             }
           }
         }
-        if (data.vmsUsername) {
+        if (typeof data.isAdmin === "boolean") {
+          setServerScheduleAdmin(data.isAdmin);
+        }
+        if (data.vmsUsername || data.resourceAccessRights) {
           setVmsEnrichedUser(prev => prev ? ({
             ...prev,
-            username: data.vmsUsername || prev.username
+            username: data.vmsUsername || prev.username,
+            vmsResourceAccessRights: {
+              ...(prev.vmsResourceAccessRights || {}),
+              ...(data.resourceAccessRights || {}),
+            },
           } as UserPublic) : null);
         }
         // Mark as loaded so saveToPersistence knows it's safe to write
@@ -2153,6 +2180,12 @@ export default function CloudRecordings() {
       return;
     }
 
+    const scheduleOwner = resolveScheduleOwnerUsername();
+    if (!scheduleOwner && !isEffectiveAdmin) {
+      setScheduleError("Your VMS user identity is still loading. Please wait a moment and try again.");
+      return;
+    }
+
     if (scheduleType === "screenshot" && !storagePath) {
       addPersistentNotification({ type: 'warning', title: 'Storage Required', message: 'Please configure a storage path in Settings before adding a snapshot task.' });
       setIsScheduleOpen(false);
@@ -2319,7 +2352,7 @@ export default function CloudRecordings() {
           status: entryStatus,
           recurrence: scheduleDays.length > 0 ? "weekday" : (scheduleMonthDay !== "" ? "monthday" : "none"),
           recurrenceDay: scheduleDays.length > 0 ? undefined : (scheduleMonthDay !== "" ? Number(scheduleMonthDay) : undefined),
-          scheduledBy: effectiveUser?.username || "System",
+          scheduledBy: scheduleOwner || effectiveUser?.username || "System",
           batchId,
         };
         if (scheduleType === "screenshot") {
@@ -3185,9 +3218,9 @@ export default function CloudRecordings() {
                     (() => {
                       const selectedCam = schedulesByCamera.find(c => c.cameraId === selectedScheduledCameraId)!;
                       return (
-                        <div className="p-6 flex flex-col h-full space-y-6">
+                        <div className="p-6 flex flex-col min-h-[520px] max-h-[min(720px,70vh)]">
                           {/* Header */}
-                          <div className="flex items-start justify-between border-b pb-4">
+                          <div className="flex items-start justify-between border-b pb-4 shrink-0">
                             <div className="space-y-1">
                               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                                 <Camera className="h-5 w-5 text-blue-600" />
@@ -3225,8 +3258,8 @@ export default function CloudRecordings() {
                           </div>
 
                           {/* Groups List */}
-                          <div className="flex-grow overflow-y-auto space-y-4 max-h-[350px] pr-2 custom-scrollbar">
-                            {groupedSchedulesForSelectedCamera.map((group, groupIdx) => {
+                          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 pr-2 custom-scrollbar">
+                            {groupedSchedulesForSelectedCamera.map((group) => {
                               const recurrenceText = getRecurrenceText(group);
                               const first = group.records[0];
                               const uniqueTimes = Array.from(
@@ -3250,8 +3283,7 @@ export default function CloudRecordings() {
                                 isScheduleRunningNow(rec, isGroupInactive),
                               );
                               const uniqueCreators = Array.from(new Set(group.records.map(r => r.scheduledBy).filter(Boolean)));
-                              const isOwner = !!(first.scheduledBy && effectiveUser?.username && first.scheduledBy.toLowerCase() === effectiveUser.username.toLowerCase());
-                              const canModify = isEffectiveAdmin || isOwner;
+                              const canModify = isEffectiveAdmin || group.records.every((rec) => canManageSchedule(effectiveUser, rec));
 
                               const formatNextRunStr = (d: Date | null) => {
                                 if (isExplicitlyInactive) {
@@ -3266,6 +3298,7 @@ export default function CloudRecordings() {
 
                               const handleActivateGroup = (e: React.MouseEvent) => {
                                 e.stopPropagation();
+                                if (!canModify) return;
                                 setScheduledRecordings(prev => {
                                   const updated = prev.map(rec => {
                                     const recGroupKey = rec.recurrence === "weekday"
@@ -3294,6 +3327,7 @@ export default function CloudRecordings() {
 
                               const handleDeactivateGroup = (e: React.MouseEvent) => {
                                 e.stopPropagation();
+                                if (!canModify) return;
                                 setScheduledRecordings(prev => {
                                   const updated = prev.map(rec => {
                                     const recGroupKey = rec.recurrence === "weekday"
@@ -3318,7 +3352,7 @@ export default function CloudRecordings() {
                               };
 
                               return (
-                                <div key={groupIdx} className={cn(
+                                <div key={group.key} className={cn(
                                   "p-4 rounded-xl border transition-all space-y-0.5",
                                   isGroupInactive 
                                     ? "bg-slate-100/50 border-slate-200/80 opacity-65 text-slate-500 hover:bg-slate-100" 
@@ -3387,49 +3421,15 @@ export default function CloudRecordings() {
                                   </div>
 
                                   {!isCollapsed && (
-                                    <div className="pl-6 pt-3 mt-3 border-t border-slate-100 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
-                                      {group.type === "screenshot" && (
-                                        <div className="space-y-1.5">
-                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Scheduled Times</span>
-                                          <div className="flex flex-wrap gap-2">
-                                            {uniqueTimes.map((time, idx) => (
-                                              <div key={idx} className="bg-white border border-slate-200/80 text-slate-700 px-2.5 py-0.5 rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm">
-                                                <Clock className="h-3 w-3 text-slate-400" />
-                                                {time}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      <div className="flex flex-col gap-1 text-xs text-slate-500 font-medium">
-                                        <div>
-                                          {groupRunningSchedule ? (
-                                            <>
-                                              <span className="font-semibold text-green-700">Status:</span>{" "}
-                                              <span className="text-green-600 font-semibold animate-pulse">
-                                                {getRunningNowLabel(groupRunningSchedule)}
-                                              </span>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <span className="font-semibold text-slate-700">Next Run:</span>{" "}
-                                              {formatNextRunStr(groupNextRun)}
-                                            </>
-                                          )}
-                                        </div>
-                                        <div>
-                                          <span className="font-semibold text-slate-700">Created by:</span> {uniqueCreators.join(", ") || "System"}
-                                        </div>
-                                      </div>
-
-                                      <div className="flex items-center gap-2 pt-1">
+                                    <>
+                                      <div className="flex flex-wrap items-center gap-2 pt-3 mt-2 border-t border-slate-100">
                                         {!isGroupInactive ? (
                                           <Button
                                             variant="outline"
                                             size="sm"
+                                            disabled={!canModify}
                                             onClick={handleDeactivateGroup}
-                                            className="h-8 px-3 text-xs gap-1.5 font-bold border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-700 animate-in fade-in"
+                                            className="h-8 px-3 text-xs gap-1.5 font-bold border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-700"
                                           >
                                             <AlertCircle className="h-3.5 w-3.5 text-slate-400" /> Disable
                                           </Button>
@@ -3437,8 +3437,9 @@ export default function CloudRecordings() {
                                           <Button
                                             variant="outline"
                                             size="sm"
+                                            disabled={!canModify}
                                             onClick={handleActivateGroup}
-                                            className="h-8 px-3 text-xs gap-1.5 font-bold border-green-200 bg-green-50 text-green-700 hover:bg-green-100 animate-in fade-in"
+                                            className="h-8 px-3 text-xs gap-1.5 font-bold border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
                                           >
                                             <CheckCircle2 className="h-3.5 w-3.5" /> Enable
                                           </Button>
@@ -3496,7 +3497,44 @@ export default function CloudRecordings() {
                                           <Trash2 className="h-3 w-3" /> Delete
                                         </Button>
                                       </div>
-                                    </div>
+
+                                      <div className="pl-6 pt-3 space-y-3">
+                                      {group.type === "screenshot" && (
+                                        <div className="space-y-1.5">
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Scheduled Times</span>
+                                          <div className="flex flex-wrap gap-2">
+                                            {uniqueTimes.map((time, idx) => (
+                                              <div key={idx} className="bg-white border border-slate-200/80 text-slate-700 px-2.5 py-0.5 rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm">
+                                                <Clock className="h-3 w-3 text-slate-400" />
+                                                {time}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      <div className="flex flex-col gap-1 text-xs text-slate-500 font-medium">
+                                        <div>
+                                          {groupRunningSchedule ? (
+                                            <>
+                                              <span className="font-semibold text-green-700">Status:</span>{" "}
+                                              <span className="text-green-600 font-semibold animate-pulse">
+                                                {getRunningNowLabel(groupRunningSchedule)}
+                                              </span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <span className="font-semibold text-slate-700">Next Run:</span>{" "}
+                                              {formatNextRunStr(groupNextRun)}
+                                            </>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <span className="font-semibold text-slate-700">Created by:</span> {uniqueCreators.join(", ") || "System"}
+                                        </div>
+                                      </div>
+                                      </div>
+                                    </>
                                   )}
                                 </div>
                               );
@@ -3505,7 +3543,7 @@ export default function CloudRecordings() {
 
                           {/* Upcoming runs */}
                           {upcomingRunsForSelectedCamera.length > 0 && (
-                            <div className="border-t pt-4 mt-auto">
+                            <div className="border-t pt-4 shrink-0">
                               <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
                                 <CalendarIcon className="h-3.5 w-3.5 text-slate-400" /> Upcoming Runs
                               </h4>
