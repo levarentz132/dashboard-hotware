@@ -6,6 +6,7 @@ import { getElectronHeaders } from "@/lib/config";
 import { fetchCloudSystems } from "@/lib/api/cloud-systems";
 import { showNotification } from "@/lib/notifications";
 import { addPersistentNotification } from "@/lib/persistent-notifications";
+import { pushCameraAlarmDebug } from "@/lib/camera-alarm-debug";
 import nxAPI from "@/lib/nxapi";
 import Cookies from "js-cookie";
 import { DEVICE_MONITOR_INTERVAL_MS } from "@/lib/cache-constants";
@@ -165,6 +166,16 @@ export function GlobalDeviceMonitor() {
         : `Camera '${cameraName}' has lost connection to the server. Please verify the camera's network connection.`;
 
       // Call our dedicated create-event endpoint
+      pushCameraAlarmDebug({
+        event: "request-start",
+        reason: `Camera ${status} event requested`,
+        cameraName,
+        cameraId,
+        systemId,
+        systemName,
+        status,
+      });
+
       const response = await fetch("/api/nx/create-event", {
         method: "POST",
         headers: {
@@ -183,12 +194,44 @@ export function GlobalDeviceMonitor() {
       });
 
       if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
         console.error(`[GlobalDeviceMonitor] Failed to trigger camera event: ${response.status}`);
+        pushCameraAlarmDebug({
+          event: "request-failure",
+          reason: "create-event response not ok",
+          cameraName,
+          cameraId,
+          systemId,
+          systemName,
+          status,
+          responseStatus: response.status,
+          details: errorText,
+        });
       } else {
         console.log(`[GlobalDeviceMonitor] Triggered event: ${caption} for ${cameraName}`);
+        pushCameraAlarmDebug({
+          event: "request-success",
+          reason: "create-event response ok",
+          cameraName,
+          cameraId,
+          systemId,
+          systemName,
+          status,
+          responseStatus: response.status,
+        });
       }
     } catch (error) {
       console.error(`[GlobalDeviceMonitor] ❌ Error triggering status event:`, error);
+      pushCameraAlarmDebug({
+        event: "request-error",
+        reason: "create-event threw",
+        cameraName,
+        cameraId,
+        systemId,
+        systemName,
+        status,
+        details: error,
+      });
     }
   }, []);
 
@@ -373,13 +416,32 @@ export function GlobalDeviceMonitor() {
           const isNowOffline = isStatusOffline(currentStatus);
           const wasOffline = isStatusOffline(previousStatus);
 
-         
+          pushCameraAlarmDebug({
+            event: "status-change",
+            reason: "camera status transition inspected",
+            cameraName: currentDevice.name || currentDevice.id,
+            cameraId: currentDevice.id,
+            systemId: currentSystem.systemId,
+            systemName: currentSystem.systemName,
+            previousStatus: previousStatus,
+            currentStatus: currentStatus,
+          });
 
           const deviceKey = `${currentSystem.systemId}:${currentDevice.id}`;
           const lastNotified = lastNotifiedStatusRef.current[deviceKey];
 
           if (!isFirstRun && !wasOnline && isNowOnline && lastNotified !== 'online') {
             // Device came online
+            pushCameraAlarmDebug({
+              event: "status-change",
+              reason: "online transition matched",
+              cameraName: currentDevice.name || currentDevice.id,
+              cameraId: currentDevice.id,
+              systemId: currentSystem.systemId,
+              systemName: currentSystem.systemName,
+              previousStatus: previousStatus,
+              currentStatus: currentStatus,
+            });
 
             await triggerCameraEvent(
               currentDevice.name || currentDevice.id,
@@ -400,6 +462,16 @@ export function GlobalDeviceMonitor() {
             lastNotifiedStatusRef.current[deviceKey] = 'online';
           } else if (!isFirstRun && !wasOffline && isNowOffline && lastNotified !== 'offline') {
             // Device went offline
+            pushCameraAlarmDebug({
+              event: "status-change",
+              reason: "offline transition matched",
+              cameraName: currentDevice.name || currentDevice.id,
+              cameraId: currentDevice.id,
+              systemId: currentSystem.systemId,
+              systemName: currentSystem.systemName,
+              previousStatus: previousStatus,
+              currentStatus: currentStatus,
+            });
             
             await triggerCameraEvent(
               currentDevice.name || currentDevice.id,

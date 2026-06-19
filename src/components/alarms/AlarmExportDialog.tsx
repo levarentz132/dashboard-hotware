@@ -111,6 +111,27 @@ interface AlarmExportDialogProps {
     userName?: string;
 }
 
+const normalizeTimestampMs = (value: string | number | undefined | null): number | null => {
+    if (value === undefined || value === null || value === "") return null;
+
+    const raw = typeof value === "string" ? Number(value) : value;
+    if (!Number.isFinite(raw)) return null;
+
+    const abs = Math.abs(raw);
+
+    if (abs >= 1e15) return raw / 1000;
+    if (abs >= 1e12) return raw;
+    if (abs >= 1e9) return raw * 1000;
+
+    return null;
+};
+
+const getEventTimestampMs = (event: EventLog | null | undefined): number | null => {
+    if (!event) return null;
+    return normalizeTimestampMs(event.actionData?.timestamp || event.eventData?.timestamp) ??
+        normalizeTimestampMs(event.timestampMs);
+};
+
 const COLUMNS = [
     { id: "incidentId", label: "Incident ID" },
     { id: "failureTime", label: "Failure Time" },
@@ -299,7 +320,8 @@ export function AlarmExportDialog({
         let filtered = [...events];
         if (exportPeriod.from || exportPeriod.to) {
             filtered = filtered.filter(event => {
-                const eventTime = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0") / 1000;
+                const eventTime = getEventTimestampMs(event);
+                if (eventTime === null) return false;
                 if (exportPeriod.from) {
                     const fromTime = new Date(exportPeriod.from).getTime();
                     if (eventTime < fromTime) return false;
@@ -313,7 +335,11 @@ export function AlarmExportDialog({
         }
 
         // 2. Sort by Timestamp ASC for pairing logic
-        filtered.sort((a, b) => parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0") - parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0"));
+        filtered.sort((a, b) => {
+            const timeA = getEventTimestampMs(a) ?? 0;
+            const timeB = getEventTimestampMs(b) ?? 0;
+            return timeA - timeB;
+        });
 
         const incidents: Incident[] = [];
 
@@ -406,9 +432,11 @@ export function AlarmExportDialog({
                         incident.recoveryEvent = event;
                         incident.status = "Closed";
 
-                        const failTime = parseInt(incident.failureEvent.actionData?.timestamp || incident.failureEvent.eventData?.timestamp || "0") / 1000;
-                        const recTime = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0") / 1000;
-                        const diffSeconds = Math.floor((recTime - failTime) / 1000);
+                        const failTime = getEventTimestampMs(incident.failureEvent);
+                        const recTime = getEventTimestampMs(event);
+                        const diffSeconds = failTime !== null && recTime !== null
+                            ? Math.max(0, Math.floor((recTime - failTime) / 1000))
+                            : 0;
 
                         if (diffSeconds < 60) incident.downtime = `${diffSeconds} sec`;
                         else if (diffSeconds < 3600) incident.downtime = `${Math.floor(diffSeconds / 60)}m ${diffSeconds % 60}s`;
@@ -451,9 +479,17 @@ export function AlarmExportDialog({
 
         // 5. Apply Final Sorting
         if (sortBy === "newest") {
-            result.sort((a, b) => parseInt(b.failureEvent.actionData?.timestamp || b.failureEvent.eventData?.timestamp || "0") - parseInt(a.failureEvent.actionData?.timestamp || a.failureEvent.eventData?.timestamp || "0"));
+            result.sort((a, b) => {
+                const timeA = getEventTimestampMs(a.failureEvent) ?? 0;
+                const timeB = getEventTimestampMs(b.failureEvent) ?? 0;
+                return timeB - timeA;
+            });
         } else if (sortBy === "oldest") {
-            result.sort((a, b) => parseInt(a.failureEvent.actionData?.timestamp || a.failureEvent.eventData?.timestamp || "0") - parseInt(b.failureEvent.actionData?.timestamp || b.failureEvent.eventData?.timestamp || "0"));
+            result.sort((a, b) => {
+                const timeA = getEventTimestampMs(a.failureEvent) ?? 0;
+                const timeB = getEventTimestampMs(b.failureEvent) ?? 0;
+                return timeA - timeB;
+            });
         } else if (sortBy === "severity") {
             const priority: Record<string, number> = { critical: 0, error: 1, warning: 2, info: 3 };
             result.sort((a, b) => (priority[a.failureEvent.actionData?.level?.toLowerCase()] ?? 4) - (priority[b.failureEvent.actionData?.level?.toLowerCase()] ?? 4));
@@ -511,31 +547,24 @@ export function AlarmExportDialog({
     };
 
     const formatDateTime = (ts: number | string | undefined, fallbackTsMs?: number) => {
-        if (!ts || ts === 0) {
-            if (fallbackTsMs && fallbackTsMs !== 0) return formatDateTime(fallbackTsMs);
-            return "N/A";
-        }
-        // Nx Witness usually provides microseconds (16 digits)
-        // JavaScript Date expects milliseconds (13 digits)
-        let ms = typeof ts === "string" ? parseInt(ts) : ts;
+        const normalizedTs = normalizeTimestampMs(ts) ?? normalizeTimestampMs(fallbackTsMs);
+        if (normalizedTs === null) return "N/A";
 
-        // If it's a huge number (microseconds), convert to milliseconds
-        if (ms > 10000000000000) ms = ms / 1000;
-        // If it's a small number (seconds), convert to milliseconds
-        else if (ms < 10000000000) ms = ms * 1000;
-
-        const d = new Date(ms);
-        const day = d.getDate().toString().padStart(2, '0');
-        const month = (d.getMonth() + 1).toString().padStart(2, '0');
-        const year = d.getFullYear();
-        const datePart = `${day}/${month}/${year}`;
-
-        const timePart = d.toLocaleTimeString('en-US', {
+        const d = new Date(normalizedTs);
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Jakarta',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit',
-            hour12: false
+            hour12: false,
         });
+        const parts = formatter.formatToParts(d);
+        const map = Object.fromEntries(parts.map(part => [part.type, part.value]));
+        const datePart = `${map.day}/${map.month}/${map.year}`;
+        const timePart = `${map.hour}:${map.minute}:${map.second}`;
         return `${datePart},\n${timePart}`;
     };
 
@@ -694,7 +723,6 @@ export function AlarmExportDialog({
 
         const tableData = processedIncidents.map(inc => {
             const row: string[] = [];
-            const timestamp = parseInt(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp || "0") / 1000;
             const eventType = inc.failureEvent.eventData?.type || "Unknown";
 
             orderedSelectedColumns.forEach(id => {
@@ -769,7 +797,6 @@ export function AlarmExportDialog({
         const orderedSelectedColumns = columnOrder.filter(id => selectedColumns.includes(id));
         const data = processedIncidents.map(inc => {
             const obj: any = {};
-            const timestamp = parseInt(inc.failureEvent.actionData?.timestamp || inc.failureEvent.eventData?.timestamp || "0") / 1000;
             const eventType = inc.failureEvent.eventData?.type || "Unknown";
 
             orderedSelectedColumns.forEach(id => {

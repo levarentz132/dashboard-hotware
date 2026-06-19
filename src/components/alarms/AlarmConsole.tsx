@@ -133,25 +133,65 @@ interface EventLog {
 // HELPER FUNCTIONS
 // ============================================
 
-const formatTimestamp = (timestampUsec: string): string => {
-  if (!timestampUsec) return "N/A";
-  const ms = parseInt(timestampUsec) / 1000;
-  if (isNaN(ms)) return timestampUsec;
+const normalizeEpochMs = (value: string | number): number | null => {
+  if (value === undefined || value === null || value === "") return null;
+
+  const raw = typeof value === "string" ? Number(value) : value;
+  if (Number.isFinite(raw)) {
+    const abs = Math.abs(raw);
+
+    if (abs >= 1e15) return raw / 1000;
+    if (abs >= 1e12) return raw;
+    if (abs >= 1e9) return raw * 1000;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) {
+      const date = new Date(parsed);
+      const year = date.getFullYear();
+      // Reject obviously malformed date strings such as "Sep 10, 58434, ..."
+      if (year >= 1970 && year <= 2100) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+};
+
+const getEventTimestampMs = (event: EventLog | null | undefined): number | null => {
+  if (!event) return null;
+
+  return (
+    normalizeEpochMs(event.timestampMs) ??
+    normalizeEpochMs(event.actionData?.timestamp || event.eventData?.timestamp) ??
+    null
+  );
+};
+
+const formatTimestamp = (timestampValue: string | number): string => {
+  if (timestampValue === undefined || timestampValue === null || timestampValue === "") return "N/A";
+  const ms = normalizeEpochMs(timestampValue);
+  if (ms === null) return String(timestampValue);
+
   const date = new Date(ms);
-  return date.toLocaleString("en-US", {
-    year: "numeric",
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    day: "2-digit",
     month: "short",
-    day: "numeric",
+    year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  });
+    hour12: false,
+  }).format(date);
 };
 
-const formatRelativeTime = (timestampUsec: string): string => {
-  if (!timestampUsec) return "";
-  const ms = parseInt(timestampUsec) / 1000;
-  if (isNaN(ms)) return "";
+const formatRelativeTime = (timestampValue: string | number): string => {
+  if (timestampValue === undefined || timestampValue === null || timestampValue === "") return "";
+  const ms = normalizeEpochMs(timestampValue);
+  if (ms === null) return "";
 
   const now = Date.now();
   const diff = now - ms;
@@ -160,7 +200,7 @@ const formatRelativeTime = (timestampUsec: string): string => {
   if (diff < 3600000) return `${Math.floor(diff / 60000)} minutes ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)} hours ago`;
   if (diff < 604800000) return `${Math.floor(diff / 86400000)} days ago`;
-  return formatTimestamp(timestampUsec);
+  return formatTimestamp(timestampValue);
 };
 
 const getEventTypeLabel = (eventType: string, caption?: string): string => {
@@ -768,11 +808,12 @@ export default function AlarmConsole() {
 
         // Custom Severity Rules
         if (type === "cameraDisconnectEvent") {
-          const timestamp = parseInt(item.actionData?.timestamp || item.eventData?.timestamp || "0");
-          const now = Date.now() * 1000;
-          const ageHours = (now - timestamp) / (1000000 * 3600);
-          // Flag transient disconnections (< 24h) as Info, otherwise Critical
-          effectiveLevel = ageHours > 24 ? "critical" : "info";
+          const timestamp = getEventTimestampMs(item);
+          if (timestamp !== null) {
+            const ageHours = (Date.now() - timestamp) / (1000 * 60 * 60);
+            // Flag transient disconnections (< 24h) as Info, otherwise Critical
+            effectiveLevel = ageHours > 24 ? "critical" : "info";
+          }
         } else if (type === "serverFailureEvent" || type === "serverFailure") {
           effectiveLevel = "critical";
         } else if (type === "serverConflictEvent" || type === "serverConflict") {
@@ -787,28 +828,28 @@ export default function AlarmConsole() {
 
     // 1. Sort by timestamp (EARLIEST first) to find the first occurrence of an event
     const sortedByTimeAsc = [...allEvents].sort((a, b) => {
-      const timeA = parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0");
-      const timeB = parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0");
+      const timeA = getEventTimestampMs(a) ?? 0;
+      const timeB = getEventTimestampMs(b) ?? 0;
       return timeA - timeB;
     });
 
     // 2. Proximity-based deduplication for camera disconnections
     // This handles the case where multiple events are fired for the same "incident" (e.g. generic vs native)
     const processedEvents: EventLog[] = [];
-    const recentDisconnections = new Map<string, number>(); // deviceId -> microsecond timestamp
+    const recentDisconnections = new Map<string, number>(); // deviceId -> timestamp in ms
 
     sortedByTimeAsc.forEach(event => {
-      const timestamp = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0");
+      const timestamp = getEventTimestampMs(event);
       const type = event.eventData?.type || "unknown";
       const isDisconnection = type === "cameraDisconnectEvent" || type === "deviceDisconnected";
 
-      if (isDisconnection) {
+      if (isDisconnection && timestamp !== null) {
         const deviceId = event.actionData?.deviceIds?.[0];
         if (deviceId) {
           const lastTime = recentDisconnections.get(deviceId);
           // If we saw a disconnection for this device recently (within 60s), skip this one
           // Since we process in chronological order, the first one we encountered is the earliest.
-          if (lastTime !== undefined && (timestamp - lastTime) < 60000000) {
+          if (lastTime !== undefined && (timestamp - lastTime) < 60 * 1000) {
             return;
           }
           recentDisconnections.set(deviceId, timestamp);
@@ -849,8 +890,8 @@ export default function AlarmConsole() {
 
     // Sort all events by timestamp (newest first)
     const sortedEvents = deduplicatedEvents.sort((a, b) => {
-      const timeA = parseInt(a.actionData?.timestamp || a.eventData?.timestamp || "0");
-      const timeB = parseInt(b.actionData?.timestamp || b.eventData?.timestamp || "0");
+      const timeA = getEventTimestampMs(a) ?? 0;
+      const timeB = getEventTimestampMs(b) ?? 0;
       return timeB - timeA;
     });
 
@@ -1273,14 +1314,18 @@ export default function AlarmConsole() {
       // Date range filter
       let matchesDateRange = true;
       if (filterDateFrom || filterDateTo) {
-        const eventTime = parseInt(event.actionData?.timestamp || event.eventData?.timestamp || "0") / 1000;
-        if (filterDateFrom) {
-          const fromDate = new Date(filterDateFrom).getTime();
-          if (eventTime < fromDate) matchesDateRange = false;
-        }
-        if (filterDateTo) {
-          const toDate = new Date(filterDateTo).getTime() + 86400000; // End of day
-          if (eventTime > toDate) matchesDateRange = false;
+        const eventTime = getEventTimestampMs(event);
+        if (eventTime !== null) {
+          if (filterDateFrom) {
+            const fromDate = new Date(filterDateFrom).getTime();
+            if (eventTime < fromDate) matchesDateRange = false;
+          }
+          if (filterDateTo) {
+            const toDate = new Date(filterDateTo).getTime() + 86400000; // End of day
+            if (eventTime > toDate) matchesDateRange = false;
+          }
+        } else {
+          matchesDateRange = false;
         }
       }
 

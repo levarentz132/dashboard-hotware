@@ -59,28 +59,57 @@ export async function fetchCloudEvents(
 /**
  * Format timestamp from microseconds
  */
-export function formatTimestamp(timestampUsec: string): string {
-  if (!timestampUsec) return "N/A";
-  const ms = parseInt(timestampUsec) / 1000;
-  if (isNaN(ms)) return timestampUsec;
+function normalizeEpochMs(value: string | number): number | null {
+  if (value === undefined || value === null || value === "") return null;
+
+  const raw = typeof value === "string" ? Number(value) : value;
+  if (Number.isFinite(raw)) {
+    const abs = Math.abs(raw);
+
+    if (abs >= 1e15) return raw / 1000;
+    if (abs >= 1e12) return raw;
+    if (abs >= 1e9) return raw * 1000;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) {
+      const date = new Date(parsed);
+      const year = date.getFullYear();
+      if (year >= 1970 && year <= 2100) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function formatTimestamp(timestampValue: string | number): string {
+  if (timestampValue === undefined || timestampValue === null || timestampValue === "") return "N/A";
+  const ms = normalizeEpochMs(timestampValue);
+  if (ms === null) return String(timestampValue);
+
   const date = new Date(ms);
-  return date.toLocaleString("en-US", {
-    year: "numeric",
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    day: "2-digit",
     month: "short",
-    day: "numeric",
+    year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  });
+    hour12: false,
+  }).format(date);
 }
 
 /**
  * Format relative time
  */
-export function formatRelativeTime(timestampUsec: string): string {
-  if (!timestampUsec) return "";
-  const ms = parseInt(timestampUsec) / 1000;
-  if (isNaN(ms)) return "";
+export function formatRelativeTime(timestampValue: string | number): string {
+  if (timestampValue === undefined || timestampValue === null || timestampValue === "") return "";
+  const ms = normalizeEpochMs(timestampValue);
+  if (ms === null) return "";
 
   const now = Date.now();
   const diff = now - ms;
@@ -89,7 +118,7 @@ export function formatRelativeTime(timestampUsec: string): string {
   if (diff < 3600000) return `${Math.floor(diff / 60000)} minutes ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)} hours ago`;
   if (diff < 604800000) return `${Math.floor(diff / 86400000)} days ago`;
-  return formatTimestamp(timestampUsec);
+  return formatTimestamp(timestampValue);
 }
 
 // ============================================

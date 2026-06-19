@@ -14,22 +14,53 @@ export interface PersistentNotification {
     read: boolean;
 }
 
+function normalizeNotificationUsername(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') {
+            if (typeof parsed.username === 'string' && parsed.username.trim()) {
+                return parsed.username.trim();
+            }
+            if (typeof parsed.email === 'string' && parsed.email.trim()) {
+                return parsed.email.trim();
+            }
+            if (typeof parsed.userName === 'string' && parsed.userName.trim()) {
+                return parsed.userName.trim();
+            }
+            if (parsed.user && typeof parsed.user === 'object') {
+                if (typeof parsed.user.username === 'string' && parsed.user.username.trim()) {
+                    return parsed.user.username.trim();
+                }
+                if (typeof parsed.user.email === 'string' && parsed.user.email.trim()) {
+                    return parsed.user.email.trim();
+                }
+            }
+        }
+    } catch {
+        // Fall back to the raw string below.
+    }
+
+    return trimmed;
+}
+
 /**
  * Get the current username to use as a key for notifications
  */
 export function getNotificationUserKey(): string | null {
     // 1. Check for logged in cloud session email/username
     const cloudSession = Cookies.get("nx_cloud_session");
-    if (cloudSession) {
-        try {
-            const parsed = JSON.parse(cloudSession);
-            if (parsed.email) return parsed.email;
-        } catch (e) {}
-    }
+    const normalizedCloudSession = normalizeNotificationUsername(cloudSession);
+    if (normalizedCloudSession) return normalizedCloudSession;
 
-    // 2. Check for local user cookie
+    // 2. Check for local user cookie (stored as JSON, not plain username)
     const localUser = Cookies.get("local_nx_user");
-    if (localUser) return localUser;
+    const normalizedLocalUser = normalizeNotificationUsername(localUser);
+    if (normalizedLocalUser) return normalizedLocalUser;
 
     // 3. Last resort - check process.env for static config in Electron
     // @ts-ignore
