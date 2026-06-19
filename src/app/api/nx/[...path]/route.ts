@@ -29,7 +29,9 @@ async function handleRequest(request: NextRequest, method: string) {
   const path = url.pathname.replace("/api/nx", "");
 
   let endpoint = path;
-  if (!path.startsWith("/rest/v3") && !path.startsWith("/rest/v4") && !path.startsWith("/api/")) {
+  if (path === "/devices/status" || path === "/rest/v3/devices/status" || path === "/rest/v4/devices/status") {
+    endpoint = "/rest/v3/devices";
+  } else if (!path.startsWith("/rest/v3") && !path.startsWith("/rest/v4") && !path.startsWith("/api/")) {
     endpoint = `/rest/v3${path}`;
   }
   endpoint = endpoint.replace(/[{}]/g, "");

@@ -13,6 +13,8 @@ import {
 } from "@/lib/redis/nx-api-cache";
 import { readCloudSystemsList } from "@/lib/cloud-systems-store";
 import { isCloudSystemsEndpoint } from "@/lib/redis/nx-cache-policy";
+import { getVmsSessionToken, invalidateVmsSessionToken } from "@/lib/vms-auth";
+
 
 // Disable SSL certificate validation for local/VMS requests as they are usually self-signed
 if (process.env.NODE_ENV === "development" || process.env.ALLOW_SELF_SIGNED === "true") {
@@ -368,9 +370,32 @@ export async function fetchFromCloudApi<T>(
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
     const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
 
-    // Allow per-source basic auth to drive requests when cloud/GUID tokens are unavailable.
-    if (!headers["Authorization"] && !headers["x-runtime-guid"] && basicAuthHeader) {
-      headers["Authorization"] = basicAuthHeader;
+    // Allow per-source session token or basic auth to drive requests when cloud/GUID tokens are unavailable.
+    if (!headers["Authorization"] && !headers["x-runtime-guid"]) {
+      const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
+      if (!isCloudBound && request) {
+        const { username, password } = getCloudCredentials(request);
+        if (username) {
+          try {
+            const parsedUrl = new URL(cloudUrl);
+            const host = parsedUrl.hostname;
+            const port = parsedUrl.port || "7001";
+            const token = await getVmsSessionToken(host, port, username, password);
+            if (token) {
+              headers["Authorization"] = `Bearer ${token}`;
+              headers["x-runtime-guid"] = token;
+            } else if (basicAuthHeader) {
+              headers["Authorization"] = basicAuthHeader;
+            }
+          } catch (e) {
+            if (basicAuthHeader) headers["Authorization"] = basicAuthHeader;
+          }
+        } else if (basicAuthHeader) {
+          headers["Authorization"] = basicAuthHeader;
+        }
+      } else if (basicAuthHeader) {
+        headers["Authorization"] = basicAuthHeader;
+      }
     }
 
     // Stop calling if there's no auth material for a cloud request
@@ -467,31 +492,63 @@ export async function fetchFromCloudApi<T>(
     // We retry for relay connections or local direct connections (non-cloud bound)
     const isLocalOrRelay = isRelay || !isCloudBound || (systemName?.toLowerCase().includes("local server"));
 
-    // Retry once with Basic auth when session token is rejected
+    // Retry once when session token is rejected (401/403)
     if ((response.status === 401 || response.status === 403) && (isNxEndpoint || isLocalOrRelay)) {
-      if (basicAuthHeader) {
+      const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
+      if (!isCloudBound) {
+        const { username, password } = getCloudCredentials(request);
+        if (username) {
+          try {
+            const parsedUrl = new URL(cloudUrl);
+            const host = parsedUrl.hostname;
+            const port = parsedUrl.port || "7001";
+            console.log(`[Cloud API] Auth failed (401/403). Invalidating cached token for ${username} at ${host}:${port} and retrying with fresh token...`);
+            await invalidateVmsSessionToken(host, port, username);
+            const freshToken = await getVmsSessionToken(host, port, username, password);
+            if (freshToken) {
+              const retryHeaders = { ...headers };
+              retryHeaders["Authorization"] = `Bearer ${freshToken}`;
+              retryHeaders["x-runtime-guid"] = freshToken;
+              delete retryHeaders["x-nx-session"];
+              delete retryHeaders["x-runtime-session-guid"];
+              
+              response = await fetch(cloudUrl, {
+                method: "GET",
+                headers: retryHeaders,
+                redirect: "manual",
+              });
+            } else if (basicAuthHeader) {
+              const retryHeaders = { ...headers, Authorization: basicAuthHeader };
+              delete retryHeaders["x-runtime-guid"];
+              delete retryHeaders["x-nx-session"];
+              delete retryHeaders["x-runtime-session-guid"];
+              response = await fetch(cloudUrl, {
+                method: "GET",
+                headers: retryHeaders,
+                redirect: "manual",
+              });
+            }
+          } catch (e) {
+            // fallback if URL parsing or network fails
+          }
+        }
+      } else if (basicAuthHeader) {
         const retryHeaders: Record<string, string> = {
           ...headers,
           Authorization: basicAuthHeader,
         };
-        // Remove potentially conflicting session headers
         delete retryHeaders["x-runtime-guid"];
         delete retryHeaders["x-nx-session"];
         delete retryHeaders["x-runtime-session-guid"];
 
-        logger.debug(`[Cloud API] Session rejected. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
         response = await fetch(cloudUrl, {
           method: "GET",
           headers: retryHeaders,
           redirect: "manual",
         });
-
-        // If still 401/403 after retry, then return the auth error
-        if (response.status === 401 || response.status === 403) {
-          return createAuthErrorResponse(systemId, systemName);
-        }
-      } else {
-        // logger.debug(`[Cloud API] Auth failed for ${systemId} (no Basic credentials). Expected if not using NX Cloud.`);
+      }
+      
+      if (response.status === 401 || response.status === 403) {
         return createAuthErrorResponse(systemId, systemName);
       }
     } else if (response.status === 401 || response.status === 403) {
@@ -632,8 +689,32 @@ async function requestCloudApi<T>(
       return createAuthErrorResponse(systemId, systemName);
     }
 
-    if (!headers["Authorization"] && !headers["x-runtime-guid"] && basicAuthHeader) {
-      headers["Authorization"] = basicAuthHeader;
+    // Allow per-source session token or basic auth to drive requests when cloud/GUID tokens are unavailable.
+    if (!headers["Authorization"] && !headers["x-runtime-guid"]) {
+      const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
+      if (!isCloudBound && request) {
+        const { username, password } = getCloudCredentials(request);
+        if (username) {
+          try {
+            const parsedUrl = new URL(cloudUrl);
+            const host = parsedUrl.hostname;
+            const port = parsedUrl.port || "7001";
+            const token = await getVmsSessionToken(host, port, username, password);
+            if (token) {
+              headers["Authorization"] = `Bearer ${token}`;
+              headers["x-runtime-guid"] = token;
+            } else if (basicAuthHeader) {
+              headers["Authorization"] = basicAuthHeader;
+            }
+          } catch (e) {
+            if (basicAuthHeader) headers["Authorization"] = basicAuthHeader;
+          }
+        } else if (basicAuthHeader) {
+          headers["Authorization"] = basicAuthHeader;
+        }
+      } else if (basicAuthHeader) {
+        headers["Authorization"] = basicAuthHeader;
+      }
     }
 
     const authFp = getAuthFingerprint(headers, basicAuthHeader);
@@ -678,37 +759,66 @@ async function requestCloudApi<T>(
     const isRelay = cloudUrl.includes(".relay.vmsproxy.com");
     const isLocalOrRelay = isRelay || !isCloudBound || (systemName?.toLowerCase().includes("local server"));
 
-    // Retry once with Basic auth when session token is rejected
+    // Retry once when session token is rejected (401/403)
     if ((response.status === 401 || response.status === 403) && (isNxEndpoint || isLocalOrRelay)) {
-      if (basicAuthHeader) {
-        // console.log(`[Cloud API DEBUG] Got ${response.status}, retrying with Basic auth`);
+      const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
+      if (!isCloudBound) {
+        const { username, password } = getCloudCredentials(request);
+        if (username) {
+          try {
+            const parsedUrl = new URL(cloudUrl);
+            const host = parsedUrl.hostname;
+            const port = parsedUrl.port || "7001";
+            console.log(`[Cloud API] Auth failed (401/403). Invalidating cached token for ${username} at ${host}:${port} and retrying with fresh token...`);
+            await invalidateVmsSessionToken(host, port, username);
+            const freshToken = await getVmsSessionToken(host, port, username, password);
+            if (freshToken) {
+              const retryHeaders = { ...headers };
+              retryHeaders["Authorization"] = `Bearer ${freshToken}`;
+              retryHeaders["x-runtime-guid"] = freshToken;
+              delete retryHeaders["x-nx-session"];
+              delete retryHeaders["x-runtime-session-guid"];
+              
+              response = await fetch(cloudUrl, {
+                method,
+                headers: retryHeaders,
+                body: body ? JSON.stringify(body) : undefined,
+                redirect: "manual",
+              });
+            } else if (basicAuthHeader) {
+              const retryHeaders = { ...headers, Authorization: basicAuthHeader };
+              delete retryHeaders["x-runtime-guid"];
+              delete retryHeaders["x-nx-session"];
+              delete retryHeaders["x-runtime-session-guid"];
+              response = await fetch(cloudUrl, {
+                method,
+                headers: retryHeaders,
+                body: body ? JSON.stringify(body) : undefined,
+                redirect: "manual",
+              });
+            }
+          } catch (e) {
+            // fallback if URL parsing or network fails
+          }
+        }
+      } else if (basicAuthHeader) {
         const retryHeaders: Record<string, string> = {
           ...headers,
           Authorization: basicAuthHeader,
         };
-        // Remove potentially conflicting session headers
         delete retryHeaders["x-runtime-guid"];
         delete retryHeaders["x-nx-session"];
         delete retryHeaders["x-runtime-session-guid"];
 
-        // logger.debug(`[Cloud API] Session rejected for ${method}. Retrying with Basic auth for ${systemName || systemId} (${endpoint})`);
         response = await fetch(cloudUrl, {
           method,
           headers: retryHeaders,
           body: body ? JSON.stringify(body) : undefined,
           redirect: "manual",
         });
-
-        // console.log(`[Cloud API DEBUG] Retry response status: ${response.status}`);
-        
-        // If still 401/403 after retry, then return the auth error
-        if (response.status === 401 || response.status === 403) {
-          // const errorText = await response.clone().text();
-          // console.log(`[Cloud API DEBUG] Still ${response.status} after retry, response:`, errorText.substring(0, 500));
-          return createAuthErrorResponse(systemId, systemName);
-        }
-      } else {
-        // console.log(`[Cloud API DEBUG] Got ${response.status} but no Basic auth available`);
+      }
+      
+      if (response.status === 401 || response.status === 403) {
         return createAuthErrorResponse(systemId, systemName);
       }
     } else if (response.status === 401 || response.status === 403) {

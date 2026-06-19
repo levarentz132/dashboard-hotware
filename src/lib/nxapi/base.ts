@@ -176,13 +176,18 @@ export class NxWitnessAPIBase {
         url.pathname = `${this.baseURL}${path}`;
       }
 
+      const configHeaders: any = {
+        ...this.getHeaders(),
+        ...fetchOptions.headers,
+      };
+      if (skipCache) {
+        configHeaders["x-skip-nx-cache"] = "1";
+      }
+
       const config: RequestInit = {
         credentials: "include",
         ...fetchOptions,
-        headers: {
-          ...this.getHeaders(),
-          ...fetchOptions.headers,
-        },
+        headers: configHeaders,
       };
 
       // 4. Stop calling if it's a cloud request and we have no auth material

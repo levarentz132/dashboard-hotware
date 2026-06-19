@@ -678,7 +678,7 @@ export default function AlarmConsole() {
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
 
   // Use the new sync hook for local-first strategy
-  const fetchLocalAlarms = useCallback(async (): Promise<SyncData<EventLog> | null> => {
+  const fetchLocalAlarms = useCallback(async (options?: { skipCache?: boolean }): Promise<SyncData<EventLog> | null> => {
     const localUserStr = Cookies.get("local_nx_user");
     if (!localUserStr) return null;
 
@@ -686,13 +686,18 @@ export default function AlarmConsole() {
       const localUser = JSON.parse(localUserStr);
       const sid = Cookies.get("nx_server_id") || localUser.serverId || "local";
 
+      const headers: Record<string, string> = {
+        "Accept": "application/json",
+        ...getElectronHeaders()
+      };
+      if (options?.skipCache) {
+        headers["x-skip-nx-cache"] = "1";
+      }
+
       // Use the centralized cloud events endpoint even for local
       // This automatically handles v4/v3 fallback and uses unified auth logic
       const response = await fetch(`/api/cloud/events?systemId=${encodeURIComponent(sid)}`, {
-        headers: {
-          "Accept": "application/json",
-          ...getElectronHeaders()
-        }
+        headers
       });
 
       if (response.ok) {
@@ -712,13 +717,17 @@ export default function AlarmConsole() {
     }
   }, []);
 
-  const fetchCloudAlarmsForSystem = useCallback(async (system: CloudSystem): Promise<EventLog[]> => {
+  const fetchCloudAlarmsForSystem = useCallback(async (system: CloudSystem, options?: { skipCache?: boolean }): Promise<EventLog[]> => {
     try {
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        ...getElectronHeaders(),
+      };
+      if (options?.skipCache) {
+        headers["x-skip-nx-cache"] = "1";
+      }
       const response = await fetch(`/api/cloud/events?systemId=${encodeURIComponent(system.id)}`, {
-        headers: {
-          Accept: "application/json",
-          ...getElectronHeaders(),
-        },
+        headers,
       });
 
       if (!response.ok) {
@@ -1518,7 +1527,7 @@ export default function AlarmConsole() {
             filterDateFrom={filterDateFrom}
             filterDateTo={filterDateTo}
             onRefresh={() => {
-              refetchSync();
+              refetchSync({ skipCache: true });
               refetchCloudSystems();
             }}
             onCloudLogout={handleCloudLogout}

@@ -6,8 +6,8 @@ import { NxCamera } from "./types";
 
 export class NxCameraService extends NxWitnessAPIBase {
   // Camera methods
-  async getCameras(): Promise<NxCamera[]> {
-    const cameras = await this.apiRequest<NxCamera[]>(API_ENDPOINTS.devices);
+  async getCameras(options?: { skipCache?: boolean }): Promise<NxCamera[]> {
+    const cameras = await this.apiRequest<NxCamera[]>(API_ENDPOINTS.devices, options);
     if (cameras === null || !Array.isArray(cameras)) {
       return []; // Return empty array when server unavailable
     }
@@ -24,8 +24,8 @@ export class NxCameraService extends NxWitnessAPIBase {
     return status === null ? {} : status;
   }
 
-  async getDevices(): Promise<ICamera[]> {
-    const devices = await this.apiRequest<ICamera[]>(API_ENDPOINTS.devices);
+  async getDevices(options?: { skipCache?: boolean }): Promise<ICamera[]> {
+    const devices = await this.apiRequest<ICamera[]>(API_ENDPOINTS.devices, options);
     return devices === null ? [] : devices;
   }
 

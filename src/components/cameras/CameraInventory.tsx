@@ -124,7 +124,7 @@ export default function CameraInventory() {
   };
 
   // Fetching Logic
-  const fetchLocalCameras = useCallback(async () => {
+  const fetchLocalCameras = useCallback(async (options?: { skipCache?: boolean }) => {
     const localUserStr = Cookies.get("local_nx_user");
     const localServerId = Cookies.get("nx_server_id");
     if (!localUserStr) return null;
@@ -136,8 +136,12 @@ export default function CameraInventory() {
       // Try to get actual server name
       let actualServerName = "";
       try {
+        const headers: Record<string, string> = { "x-runtime-guid": localUser.token };
+        if (options?.skipCache) {
+          headers["x-skip-nx-cache"] = "1";
+        }
         const infoResp = await fetch("/nx/rest/v3/servers/this", {
-          headers: { "x-runtime-guid": localUser.token }
+          headers
         });
         if (infoResp.ok) {
           const info = await infoResp.json();
@@ -147,12 +151,17 @@ export default function CameraInventory() {
 
       const displayName = actualServerName ? `Local Server (${actualServerName})` : "Local Server";
 
+      const headers: Record<string, string> = {
+        "Accept": "application/json",
+        "x-runtime-guid": localUser.token
+      };
+      if (options?.skipCache) {
+        headers["x-skip-nx-cache"] = "1";
+      }
+
       const response = await fetch("/nx/rest/v3/devices", {
         method: "GET",
-        headers: {
-          "Accept": "application/json",
-          "x-runtime-guid": localUser.token
-        }
+        headers
       });
 
       if (response.status >= 400) return null;
@@ -175,17 +184,21 @@ export default function CameraInventory() {
     }
   }, []);
 
-  const fetchCloudCamerasForSystem = useCallback(async (system: CloudSystem) => {
+  const fetchCloudCamerasForSystem = useCallback(async (system: CloudSystem, options?: { skipCache?: boolean }) => {
     try {
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        ...getElectronHeaders(),
+      };
+      if (options?.skipCache) {
+        headers["x-skip-nx-cache"] = "1";
+      }
       const response = await fetch(
         `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
         {
           method: "GET",
           credentials: "include",
-          headers: {
-            Accept: "application/json",
-            ...getElectronHeaders(),
-          },
+          headers,
         },
       );
 
@@ -219,16 +232,7 @@ export default function CameraInventory() {
     syncOptions
   );
 
-  // Listen for background status changes from GlobalDeviceMonitor
-  useEffect(() => {
-    const handleStatusChange = () => {
-      console.log("[CameraInventory] 🔄 Device status changed in background, refetching...");
-      refetchSync();
-    };
-
-    window.addEventListener('nx:device-status-changed' as any, handleStatusChange);
-    return () => window.removeEventListener('nx:device-status-changed' as any, handleStatusChange);
-  }, [refetchSync]);
+  // Status changes are now handled in real-time inside the useInventorySync hook directly
 
   // Consolidate expansion logic into computed state during render
 
@@ -383,7 +387,7 @@ export default function CameraInventory() {
           <button
             onClick={() => {
               if (viewMode === "cloud") {
-                refetchSync();
+                refetchSync({ skipCache: true });
               } else {
                 refetchSingle();
               }

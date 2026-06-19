@@ -32,8 +32,12 @@ export async function cacheGetJson<T>(key: string): Promise<T | null> {
   }
 }
 
-/** Write JSON to Redis cache (no TTL). App data keys are refreshed via json-store-cache after disk writes. */
-export async function cacheSetJson(key: string, value: unknown): Promise<void> {
+/** Write JSON to Redis cache (with optional TTL). App data keys are refreshed via json-store-cache after disk writes. */
+export async function cacheSetJson(
+  key: string,
+  value: unknown,
+  ttlSeconds?: number,
+): Promise<void> {
   if (!(await isRedisAvailable())) {
     console.warn("[redis-store] SET skipped — Redis unavailable");
     return;
@@ -43,7 +47,11 @@ export async function cacheSetJson(key: string, value: unknown): Promise<void> {
   if (!redis) return;
 
   try {
-    await redis.set(key, JSON.stringify(value));
+    if (ttlSeconds && ttlSeconds > 0) {
+      await redis.set(key, JSON.stringify(value), "EX", ttlSeconds);
+    } else {
+      await redis.set(key, JSON.stringify(value));
+    }
   } catch (err) {
     console.warn("[redis-store] SET failed:", err);
   }

@@ -91,15 +91,19 @@ export async function writeCloudApiCache(
   cacheKey: string,
   data: unknown,
   status = 200,
-  meta?: { etag?: string; lastModified?: string },
+  meta?: { etag?: string; lastModified?: string; ttlSeconds?: number },
 ): Promise<void> {
-  await cacheSetJson(cacheKey, {
-    data,
-    status,
-    cachedAt: Date.now(),
-    etag: meta?.etag,
-    lastModified: meta?.lastModified,
-  } satisfies CloudApiCacheEntry);
+  await cacheSetJson(
+    cacheKey,
+    {
+      data,
+      status,
+      cachedAt: Date.now(),
+      etag: meta?.etag,
+      lastModified: meta?.lastModified,
+    } satisfies CloudApiCacheEntry,
+    meta?.ttlSeconds,
+  );
 }
 
 /** After GET: persist response and refresh shared device documents when applicable. */
@@ -111,7 +115,19 @@ export async function afterCloudApiGetCached(
   status: number,
   meta?: { etag?: string; lastModified?: string; authFingerprint?: string },
 ): Promise<void> {
-  await writeCloudApiCache(cacheKey, data, status, meta);
+  let ttlSeconds: number | undefined;
+
+  if (endpoint.includes("/devices/status")) {
+    ttlSeconds = 5; // 5 seconds cache for status updates
+  } else if (endpoint.includes("/devices")) {
+    ttlSeconds = 10; // 10 seconds cache for full devices inventory list
+  } else if (endpoint.includes("/api/getEvents") || endpoint.includes("/system/metrics/alarms")) {
+    ttlSeconds = 10; // 10 seconds cache for events and alarms
+  } else {
+    ttlSeconds = 60; // 60 seconds cache for other endpoints
+  }
+
+  await writeCloudApiCache(cacheKey, data, status, { ...meta, ttlSeconds });
 
   if (meta?.authFingerprint && isCloudSystemsEndpoint(endpoint)) {
     await syncCloudSystemsFromApiResponse(meta.authFingerprint, data);

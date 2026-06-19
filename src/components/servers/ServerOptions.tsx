@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Server, Cpu, HardDrive, Network, RefreshCw, AlertTriangle } from "lucide-react";
-import { getCloudAuthHeader, getElectronHeaders } from "@/lib/config";
+import { Server, Cpu, HardDrive, Network, RefreshCw, AlertTriangle, Bell, Loader2, Check } from "lucide-react";
+import { getElectronHeaders } from "@/lib/config";
+import { showNotification } from "@/lib/notifications";
 
 interface ServerInfo {
   id: string;
@@ -32,6 +33,7 @@ export default function ServerOptions() {
   const [servers, setServers] = useState<ServerInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [configuringId, setConfiguringId] = useState<string | null>(null);
 
   const fetchServers = async () => {
     try {
@@ -71,6 +73,52 @@ export default function ServerOptions() {
       setError(err instanceof Error ? err.message : "Failed to fetch servers");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSetupAlarm = async (systemId: string, systemName: string) => {
+    try {
+      setConfiguringId(systemId);
+      
+      const response = await fetch(`/api/nx/setup-alarm?systemId=${encodeURIComponent(systemId)}&systemName=${encodeURIComponent(systemName)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getElectronHeaders()
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        if (data.alreadyConfigured) {
+          showNotification({
+            type: "info",
+            title: "Already Configured",
+            message: data.message || "Desktop alarm rule already exists on this server."
+          });
+        } else {
+          showNotification({
+            type: "success",
+            title: "Alarm Configured",
+            message: data.message || "Successfully configured camera disconnect alarm rule."
+          });
+        }
+      } else {
+        showNotification({
+          type: "error",
+          title: "Setup Failed",
+          message: data.details || data.error || "Failed to configure alarm rule."
+        });
+      }
+    } catch (err: any) {
+      showNotification({
+        type: "error",
+        title: "Setup Error",
+        message: err.message || "An unexpected error occurred during setup."
+      });
+    } finally {
+      setConfiguringId(null);
     }
   };
 
@@ -208,6 +256,29 @@ export default function ServerOptions() {
                     </div>
                   </div>
                 </div>
+
+                {/* Actions Section */}
+                {isOnline && (
+                  <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
+                    <button
+                      onClick={() => handleSetupAlarm(server.id, server.name)}
+                      disabled={configuringId === server.id}
+                      className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50"
+                    >
+                      {configuringId === server.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Configuring...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bell className="w-3.5 h-3.5" />
+                          <span>Setup Disconnect Alarm</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}

@@ -27,8 +27,8 @@ interface UseInventorySyncOptions<T> {
  * 4. Handle login scenarios (local-only, cloud-only, both).
  */
 export function useInventorySync<T>(
-    localFetcher: () => Promise<SyncData<T> | null>,
-    cloudItemFetcher: (system: CloudSystem) => Promise<T[]>,
+    localFetcher: (options?: { skipCache?: boolean }) => Promise<SyncData<T> | null>,
+    cloudItemFetcher: (system: CloudSystem, options?: { skipCache?: boolean }) => Promise<T[]>,
     options: UseInventorySyncOptions<T> = {}
 ) {
     const { localSystemName = "Local Server" } = options;
@@ -46,8 +46,9 @@ export function useInventorySync<T>(
         return () => { isMounted.current = false; };
     }, []);
 
-    const sync = useCallback(async () => {
+    const sync = useCallback(async (syncOptions?: { skipCache?: boolean }) => {
         const currentFetchId = ++fetchCount.current;
+        const skipCache = !!syncOptions?.skipCache;
 
         try {
             setLoading(true);
@@ -65,7 +66,7 @@ export function useInventorySync<T>(
             // 1. Prioritize Local if available
             if (hasLocalLogin) {
                 try {
-                    localData = await localFetcher();
+                    localData = await localFetcher({ skipCache });
                     if (localData && isMounted.current && currentFetchId === fetchCount.current) {
                         console.log("[InventorySync] Local data loaded:", localData.systemName, localData.items.length, "cameras");
                         setDataBySystem([localData]);
@@ -100,7 +101,7 @@ export function useInventorySync<T>(
                         if (system.stateOfHealth !== "online") continue;
 
                         try {
-                            const items = await cloudItemFetcher(system);
+                            const items = await cloudItemFetcher(system, { skipCache });
 
                             if (isMounted.current && currentFetchId === fetchCount.current) {
                                 setDataBySystem((prev) => {
@@ -148,6 +149,45 @@ export function useInventorySync<T>(
     useEffect(() => {
         sync();
     }, []); // Run once on mount
+
+    // Listen for real-time status changes from GlobalDeviceMonitor
+    useEffect(() => {
+        const handleDeviceStatusChange = (event: Event) => {
+            const customEvent = event as CustomEvent<{
+                deviceId: string;
+                systemId: string;
+                status: string;
+            }>;
+            if (!customEvent?.detail) return;
+            const { deviceId, systemId, status } = customEvent.detail;
+
+            const normalizeId = (id: string) => id.toLowerCase().replace(/[{}]/g, "");
+            const targetSystemId = normalizeId(systemId);
+            const targetDeviceId = normalizeId(deviceId);
+
+            setDataBySystem((prev) => {
+                return prev.map((systemData) => {
+                    if (normalizeId(systemData.systemId) !== targetSystemId) {
+                        return systemData;
+                    }
+                    const updatedItems = systemData.items.map((item: any) => {
+                        const itemId = normalizeId(item?.id || "");
+                        if (itemId !== targetDeviceId) {
+                            return item;
+                        }
+                        console.log(`[InventorySync] Live-updating camera ${item.name || item.id} status to ${status}`);
+                        return { ...item, status };
+                    });
+                    return { ...systemData, items: updatedItems };
+                });
+            });
+        };
+
+        window.addEventListener("nx:device-status-changed", handleDeviceStatusChange);
+        return () => {
+            window.removeEventListener("nx:device-status-changed", handleDeviceStatusChange);
+        };
+    }, []);
 
     return {
         dataBySystem,

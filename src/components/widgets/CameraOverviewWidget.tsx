@@ -16,7 +16,7 @@ import Cookies from "js-cookie";
 
 export default function CameraOverviewWidget({ systemId: propSystemId }: { systemId?: string }) {
   // 1. Define Fetchers to match CameraInventory logic
-  const fetchLocalCameras = useCallback(async () => {
+  const fetchLocalCameras = useCallback(async (options?: { skipCache?: boolean }) => {
     const localUserStr = Cookies.get("local_nx_user");
     if (!localUserStr) return null;
 
@@ -27,8 +27,12 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
       // Try to get actual server name
       let actualServerName = "";
       try {
+        const headers: Record<string, string> = { "x-runtime-guid": localUser.token };
+        if (options?.skipCache) {
+          headers["x-skip-nx-cache"] = "1";
+        }
         const infoResp = await fetch("/nx/rest/v3/servers/this", {
-          headers: { "x-runtime-guid": localUser.token }
+          headers
         });
         if (infoResp.ok) {
           const info = await infoResp.json();
@@ -38,12 +42,17 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
 
       const displayName = actualServerName ? `Local Server (${actualServerName})` : "Local Server";
 
+      const headers: Record<string, string> = {
+        "Accept": "application/json",
+        "x-runtime-guid": localUser.token
+      };
+      if (options?.skipCache) {
+        headers["x-skip-nx-cache"] = "1";
+      }
+
       const response = await fetch("/nx/rest/v3/devices", {
         method: "GET",
-        headers: {
-          "Accept": "application/json",
-          "x-runtime-guid": localUser.token
-        }
+        headers
       });
 
       if (response.status >= 400) return null;
@@ -65,16 +74,20 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
     }
   }, []);
 
-  const fetchCloudCamerasForSystem = useCallback(async (system: { id: string, name: string }) => {
+  const fetchCloudCamerasForSystem = useCallback(async (system: { id: string, name: string }, options?: { skipCache?: boolean }) => {
     try {
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        ...getElectronHeaders(),
+      };
+      if (options?.skipCache) {
+        headers["x-skip-nx-cache"] = "1";
+      }
       const response = await fetch(
         `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
         {
           method: "GET",
-          headers: {
-            Accept: "application/json",
-            ...getElectronHeaders(),
-          },
+          headers,
         },
       );
 
@@ -191,7 +204,7 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
           </div>
         </div>
         <button
-          onClick={() => refetch()}
+          onClick={() => refetch({ skipCache: true })}
           disabled={loading}
           className="p-1.5 hover:bg-muted rounded-md transition-colors disabled:opacity-50"
           title="Refresh Cameras"

@@ -15,6 +15,8 @@ import {
   isDevicesListEndpoint,
 } from "@/lib/redis/nx-cache-policy";
 import { markDevicesCachesStale, syncDevicesFromListResponse } from "@/lib/nx-devices-store";
+import { getVmsSessionToken, invalidateVmsSessionToken } from "@/lib/vms-auth";
+
 
 interface CacheEntry {
     data: string;
@@ -51,6 +53,11 @@ async function handleRequest(request: NextRequest, method: string) {
         path = '/' + path;
     }
 
+    const originalPath = path;
+    if (path === "/devices/status" || path === "/rest/v3/devices/status" || path === "/rest/v4/devices/status") {
+        path = "/rest/v3/devices";
+    }
+
     const cookieIp = request.cookies.get("nx_location_ip")?.value;
     const nxLocationIp = cookieIp || (API_CONFIG.serverHost || "localhost");
     
@@ -75,23 +82,34 @@ async function handleRequest(request: NextRequest, method: string) {
             }
         });
         
-        // Add shared Basic auth if no authorization is provided by the client
+        // Add shared Token auth if no authorization is provided by the client
         if (!existingAuth) {
             const dynamicConfig = getDynamicConfig(request);
             const username = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
             const password = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
             
-            if (username && password) {
-                const basicAuth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-                headers['Authorization'] = basicAuth;
+            if (username) {
+                const token = await getVmsSessionToken(nxLocationIp, nxLocationPort, username, password);
+                if (token) {
+                    headers['authorization'] = `Bearer ${token}`;
+                    headers['Authorization'] = `Bearer ${token}`;
+                    headers['x-runtime-guid'] = token;
+                } else if (password) {
+                    const basicAuth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+                    headers['authorization'] = basicAuth;
+                    headers['Authorization'] = basicAuth;
+                }
             }
         }
 
         const authContext = headers['authorization'] || '';
         const runtimeGuid = request.headers.get('x-runtime-guid') || '';
         const redisGetKey = nxProxyGetCacheKey(targetUrl, authContext, runtimeGuid);
+        const skipCache = request.headers.get("x-skip-nx-cache") === "1" || 
+                          request.headers.get("cache-control")?.includes("no-cache") ||
+                          request.headers.get("pragma")?.includes("no-cache");
 
-        if (isCacheableNxEndpoint(path, method)) {
+        if (isCacheableNxEndpoint(path, method) && !skipCache) {
             const cached = await cacheGetJson<CacheEntry>(redisGetKey);
             if (cached) {
                 console.log(`[NX Proxy Cache] HIT: ${method} ${path}`);
@@ -120,16 +138,34 @@ async function handleRequest(request: NextRequest, method: string) {
 
         let response = await fetch(targetUrl, fetchOptions);
 
-        // Retry with Basic Auth if 401/403 and we didn't use it already or session token failed
-        if (response.status === 401 || response.status === 403) {
+        // Retry with a fresh session token if 401/403 and we fell back to a cached token
+        if ((response.status === 401 || response.status === 403) && !existingAuth) {
             const dynamicConfig = getDynamicConfig(request);
             const username = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
             const password = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
             
             if (username && password) {
-                const basicAuth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-                if (headers['Authorization'] !== basicAuth) {
-                    const retryHeaders: Record<string, string> = { ...headers, 'Authorization': basicAuth };
+                console.log(`[NX Proxy] Auth failed (401/403). Invalidating cached token for ${username} at ${nxLocationIp}:${nxLocationPort} and retrying with fresh token...`);
+                await invalidateVmsSessionToken(nxLocationIp, nxLocationPort, username);
+                const freshToken = await getVmsSessionToken(nxLocationIp, nxLocationPort, username, password);
+                
+                if (freshToken) {
+                    const retryHeaders = { ...headers };
+                    retryHeaders['authorization'] = `Bearer ${freshToken}`;
+                    retryHeaders['Authorization'] = `Bearer ${freshToken}`;
+                    retryHeaders['x-runtime-guid'] = freshToken;
+                    delete retryHeaders['x-nx-session'];
+                    
+                    response = await fetch(targetUrl, {
+                        ...fetchOptions,
+                        headers: retryHeaders
+                    });
+                } else {
+                    // Final fallback to Basic Auth if token acquisition failed
+                    const basicAuth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+                    const retryHeaders = { ...headers };
+                    retryHeaders['authorization'] = basicAuth;
+                    retryHeaders['Authorization'] = basicAuth;
                     delete retryHeaders['x-runtime-guid'];
                     delete retryHeaders['x-nx-session'];
                     
@@ -166,7 +202,17 @@ async function handleRequest(request: NextRequest, method: string) {
             
             if (response.ok && isCacheableNxEndpoint(path, method)) {
                 const entry = { data: text, headers: responseHeaders, status };
-                await cacheSetJson(redisGetKey, entry);
+                
+                let ttlSeconds = 60;
+                if (originalPath.includes("/devices/status")) {
+                    ttlSeconds = 5;
+                } else if (path.includes("/devices")) {
+                    ttlSeconds = 10;
+                } else if (path.includes("/api/getEvents") || path.includes("/system/metrics/alarms")) {
+                    ttlSeconds = 10;
+                }
+                
+                await cacheSetJson(redisGetKey, entry, ttlSeconds);
                 const nxSystemKey = `${nxLocationIp}:${nxLocationPort}`;
                 if (isDevicesListEndpoint(path)) {
                     try {

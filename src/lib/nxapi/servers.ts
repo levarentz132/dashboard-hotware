@@ -5,9 +5,9 @@ import { NxSystemInfo } from "./types";
 
 export class NxServerService extends NxCameraService {
   // System methods
-  async getSystemInfo(): Promise<NxSystemInfo | null> {
+  async getSystemInfo(options?: { skipCache?: boolean }): Promise<NxSystemInfo | null> {
     try {
-      const info = await this.apiRequest<NxSystemInfo>("/system/info");
+      const info = await this.apiRequest<NxSystemInfo>("/system/info", options);
       return info;
     } catch (error) {
       return null; // Return null when API is unavailable
@@ -15,9 +15,9 @@ export class NxServerService extends NxCameraService {
   }
 
   // Server methods (REST v3)
-  async getServers(): Promise<any> {
+  async getServers(options?: { skipCache?: boolean }): Promise<any> {
     try {
-      const servers = await this.apiRequest<any>("/servers");
+      const servers = await this.apiRequest<any>("/servers", options);
 
       if (Array.isArray(servers)) {
         return servers;

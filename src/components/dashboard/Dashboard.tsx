@@ -26,10 +26,14 @@ import {
   Minus,
   Square,
   Menu,
+  Bell,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { showNotification } from "@/lib/notifications";
+import { getElectronHeaders } from "@/lib/config";
 
 // shadcn/UI components
 import { Button } from "@/components/ui/button";
@@ -98,6 +102,66 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     setSelectedSystemId,
     loadingCloud,
   } = useOwnerCloudSystems();
+
+  const [isConfiguringAlarm, setIsConfiguringAlarm] = useState(false);
+
+  const handleSetupVmsAlarm = async () => {
+    if (!selectedSystemId) {
+      showNotification({
+        type: "warning",
+        title: "No System Selected",
+        message: "Please select a VMS system first."
+      });
+      return;
+    }
+
+    const selectedSystem = cloudSystems.find(s => s.id === selectedSystemId);
+    const systemName = selectedSystem ? selectedSystem.name : "Local Server";
+
+    try {
+      setIsConfiguringAlarm(true);
+      
+      const response = await fetch(`/api/nx/setup-alarm?systemId=${encodeURIComponent(selectedSystemId)}&systemName=${encodeURIComponent(systemName)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getElectronHeaders()
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        if (data.alreadyConfigured) {
+          showNotification({
+            type: "info",
+            title: "Already Configured",
+            message: data.message || "Desktop alarm rule already exists on this server."
+          });
+        } else {
+          showNotification({
+            type: "success",
+            title: "Alarm Configured",
+            message: data.message || "Successfully configured camera disconnect alarm rule."
+          });
+        }
+      } else {
+        showNotification({
+          type: "error",
+          title: "Setup Failed",
+          message: data.details || data.error || "Failed to configure alarm rule."
+        });
+      }
+    } catch (err: any) {
+      showNotification({
+        type: "error",
+        title: "Setup Error",
+        message: err.message || "An unexpected error occurred during setup."
+      });
+    } finally {
+      setIsConfiguringAlarm(false);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -431,10 +495,46 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
                   </Badge>
                 )}
               </div>
+
+              {/* VMS System Picker */}
+              {!loadingCloud && cloudSystems.length > 0 && (
+                <div className="flex items-center gap-2 ml-2 sm:ml-4">
+                  <span className="text-xs text-gray-500 font-medium hidden md:inline">VMS:</span>
+                  <Select value={selectedSystemId} onValueChange={setSelectedSystemId}>
+                    <SelectTrigger className="h-9 w-[180px] bg-slate-50 border-slate-200 hover:bg-slate-100 rounded-lg text-xs font-semibold text-slate-700">
+                      <SelectValue placeholder="Select VMS Server" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cloudSystems.map((sys) => (
+                        <SelectItem key={sys.id} value={sys.id} className="text-xs font-medium">
+                          {sys.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
             {/* Right side - Actions (replaces notifications/system status area on mobile) */}
             <div className="flex items-center gap-2 sm:gap-3 ml-auto">
+              {/* Setup Disconnect Alarm button */}
+              {!isEditing && selectedSystemId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSetupVmsAlarm}
+                  disabled={isConfiguringAlarm}
+                  className="hidden sm:inline-flex gap-2 px-3 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-800 rounded-xl"
+                >
+                  {isConfiguringAlarm ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                  ) : (
+                    <Bell className="w-3.5 h-3.5 text-indigo-600" />
+                  )}
+                  <span className="text-xs font-semibold">Setup VMS Alarm</span>
+                </Button>
+              )}
               {isEditing && (
                 <>
                   {/* Desktop buttons with labels - hidden on mobile */}

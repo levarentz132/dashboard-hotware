@@ -109,6 +109,7 @@ export function GlobalDeviceMonitor() {
     try {
       const headers = {
         Accept: "application/json",
+        "x-skip-nx-cache": "1",
         ...getElectronHeaders(),
       };
       const base = `/api/nx/devices/status?systemId=${encodeURIComponent(systemId)}&systemName=${encodeURIComponent(systemName)}`;
@@ -163,23 +164,29 @@ export function GlobalDeviceMonitor() {
         ? `Camera '${cameraName}' has been reconnected and is back online.`
         : `Camera '${cameraName}' has lost connection to the server. Please verify the camera's network connection.`;
 
-
-      // Temporarily set systemId to target system for the API call
-      const originalSystemId = nxAPI.getSystemId();
-      nxAPI.setSystemId(systemId);
-
-      await nxAPI.createGenericEvent({
-        source: systemName || "VMS Server",
-        caption: caption,
-        description: description,
-        deviceIds: [cameraId],
-        level: isOnline ? "info" : "warning",
-        state: "instant"
+      // Call our dedicated create-event endpoint
+      const response = await fetch("/api/nx/create-event", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getElectronHeaders()
+        },
+        body: JSON.stringify({
+          timestamp: (Date.now() * 1000).toString(),
+          caption: `${caption}: ${cameraName}`,
+          description: description,
+          source: systemName || "VMS Server",
+          cameraId: cameraId,
+          systemId,
+          systemName
+        })
       });
 
-      // Restore original systemId
-      if (originalSystemId) nxAPI.setSystemId(originalSystemId);
-
+      if (!response.ok) {
+        console.error(`[GlobalDeviceMonitor] Failed to trigger camera event: ${response.status}`);
+      } else {
+        console.log(`[GlobalDeviceMonitor] Triggered event: ${caption} for ${cameraName}`);
+      }
     } catch (error) {
       console.error(`[GlobalDeviceMonitor] ❌ Error triggering status event:`, error);
     }
@@ -190,22 +197,30 @@ export function GlobalDeviceMonitor() {
    */
   const triggerStorageEvent = useCallback(async (storageName: string, storagePath: string, systemId: string, systemName: string, message: string) => {
     try {
-
-      // Temporarily set systemId to target system for the API call
-      const originalSystemId = nxAPI.getSystemId();
-      nxAPI.setSystemId(systemId);
-
-      await nxAPI.createGenericEvent({
-        source: systemName || "VMS Server",
-        caption: "Low Disk Space",
-        description: `You are running out of disk space on ${storageName || storagePath} (${systemName}). ${message}.`,
-        level: "warning",
-        state: "instant"
+      const caption = `Low Disk Space: ${storageName || storagePath}`;
+      const description = `You are running out of disk space on ${storageName || storagePath} (${systemName}). ${message}.`;
+      
+      const response = await fetch("/api/nx/create-event", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getElectronHeaders()
+        },
+        body: JSON.stringify({
+          timestamp: (Date.now() * 1000).toString(),
+          caption: caption,
+          description: description,
+          source: systemName || "VMS Server",
+          systemId,
+          systemName
+        })
       });
 
-      // Restore original systemId
-      if (originalSystemId) nxAPI.setSystemId(originalSystemId);
-
+      if (!response.ok) {
+        console.error(`[GlobalDeviceMonitor] Failed to trigger storage event: ${response.status}`);
+      } else {
+        console.log(`[GlobalDeviceMonitor] Triggered event: ${caption} for ${systemName}`);
+      }
     } catch (error) {
       // Silently ignore 404/501 errors - server doesn't support generic events API
       const errorMsg = String(error);
@@ -386,6 +401,14 @@ export function GlobalDeviceMonitor() {
           } else if (!isFirstRun && !wasOffline && isNowOffline && lastNotified !== 'offline') {
             // Device went offline
             
+            await triggerCameraEvent(
+              currentDevice.name || currentDevice.id,
+              currentDevice.id,
+              currentSystem.systemId,
+              currentSystem.systemName,
+              'offline'
+            );
+
             addPersistentNotification({
               type: 'error',
               title: '🔴 Camera Offline',
