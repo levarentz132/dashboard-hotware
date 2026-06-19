@@ -11,6 +11,7 @@ import { getVmsSessionToken } from "@/lib/vms-auth";
 export async function POST(request: NextRequest) {
   try {
     const { timestamp, caption, description, source, cameraId, metadata, systemId, systemName } = await request.json();
+    const serverTimestamp = Date.now().toString();
 
     if (!caption) {
       return NextResponse.json(
@@ -57,11 +58,8 @@ export async function POST(request: NextRequest) {
           caption,
           description: description || caption,
           source: source || systemName,
+          timestamp: serverTimestamp,
         };
-        
-        if (timestamp) {
-          restPayload.timestamp = timestamp;
-        }
         
         if (metadata) {
           restPayload.metadata = metadata;
@@ -96,7 +94,7 @@ export async function POST(request: NextRequest) {
     // 2. Fallback to legacy API using Digest Auth
     if (!restSuccess) {
       const queryParams = new URLSearchParams();
-      queryParams.set("timestamp", timestamp || (Date.now() * 1000).toString());
+      queryParams.set("timestamp", serverTimestamp);
       queryParams.set("caption", caption);
       if (description) queryParams.set("description", description);
       if (source) queryParams.set("source", source);

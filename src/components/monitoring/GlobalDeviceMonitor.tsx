@@ -183,7 +183,7 @@ export function GlobalDeviceMonitor() {
           ...getElectronHeaders()
         },
         body: JSON.stringify({
-          timestamp: (Date.now() * 1000).toString(),
+          timestamp: Date.now().toString(),
           caption: `${caption}: ${cameraName}`,
           description: description,
           source: systemName || "VMS Server",
@@ -250,7 +250,7 @@ export function GlobalDeviceMonitor() {
           ...getElectronHeaders()
         },
         body: JSON.stringify({
-          timestamp: (Date.now() * 1000).toString(),
+          timestamp: Date.now().toString(),
           caption: caption,
           description: description,
           source: systemName || "VMS Server",

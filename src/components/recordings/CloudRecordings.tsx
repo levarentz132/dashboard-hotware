@@ -76,6 +76,7 @@ import {
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { showNotification } from "@/lib/notifications";
 import { addPersistentNotification, getNotificationUserKey } from "@/lib/persistent-notifications";
+import { ScheduleExportDialog } from "./ScheduleExportDialog";
 
 const NoOverlayAlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
@@ -3119,7 +3120,13 @@ export default function CloudRecordings() {
                     Total Schedules: <span className="text-slate-900 font-extrabold">{visibleScheduledRecordings.length}</span>
                   </div>
                 </div>
-                <div>
+                <div className="flex items-center gap-2">
+                  {visibleScheduledRecordings.length > 0 && (
+                    <ScheduleExportDialog
+                      schedules={visibleScheduledRecordings}
+                      systemName={localSystemName || "All Systems"}
+                    />
+                  )}
                   {isEffectiveAdmin && visibleScheduledRecordings.length > 0 && (
                     <Button
                       variant="ghost"
