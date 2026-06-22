@@ -518,7 +518,7 @@ export async function fetchFromCloudApi<T>(
                 redirect: "manual",
               });
             } else if (basicAuthHeader) {
-              const retryHeaders = { ...headers, Authorization: basicAuthHeader };
+              const retryHeaders: Record<string, string> = { ...headers, Authorization: basicAuthHeader };
               delete retryHeaders["x-runtime-guid"];
               delete retryHeaders["x-nx-session"];
               delete retryHeaders["x-runtime-session-guid"];
@@ -786,7 +786,7 @@ async function requestCloudApi<T>(
                 redirect: "manual",
               });
             } else if (basicAuthHeader) {
-              const retryHeaders = { ...headers, Authorization: basicAuthHeader };
+              const retryHeaders: Record<string, string> = { ...headers, Authorization: basicAuthHeader };
               delete retryHeaders["x-runtime-guid"];
               delete retryHeaders["x-nx-session"];
               delete retryHeaders["x-runtime-session-guid"];

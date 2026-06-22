@@ -105,6 +105,14 @@ function getServerSideConfig(): Record<string, string> {
     }
   }
 
+  // If no Electron config file exists, fallback to standard project .env in current workspace directory!
+  if (!configPath || !fs.existsSync(configPath)) {
+    const projectEnvPath = path.join(process.cwd(), '.env');
+    if (fs.existsSync(projectEnvPath)) {
+      configPath = projectEnvPath;
+    }
+  }
+
   if (!configPath || !fs.existsSync(configPath)) {
     const envConfig = {
       NEXT_PUBLIC_NX_SYSTEM_ID: process.env.NEXT_PUBLIC_NX_SYSTEM_ID || '',
