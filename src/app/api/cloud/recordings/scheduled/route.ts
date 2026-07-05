@@ -432,6 +432,29 @@ const startWatchdog = () => {
           endMs = endDate.getTime();
         }
 
+        // Check if the task is processing, and if its queue job has failed definitively
+        if (rec.status === "processing" && rec.type === "video") {
+          const job = queue.find((j: any) => j.payload?.taskId === rec.id);
+          if (job && (job.status === "failed" || job.attempts >= job.maxAttempts)) {
+            console.log(`[Watchdog] Queue job for task ${rec.cameraName} (${rec.id}) failed. Marking schedule as failed/rolling forward.`);
+            const isRecurring = rec.recurrence && rec.recurrence !== "none";
+            if (isRecurring) {
+              const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+              rec.status = "pending";
+              rec.record = false;
+              rec.date = nextDate.toISOString();
+              rec.startMs = nextDate.getTime() - timeOffsetMs;
+              rec.endMs = rec.startMs + (endMs - startMs);
+              changed = true;
+            } else {
+              rec.status = "failed";
+              rec.record = false;
+              changed = true;
+            }
+            continue;
+          }
+        }
+
         const occurrenceReached = now >= startMs;
 
         // Screenshot already saved for this time slot — complete without re-capturing
@@ -565,7 +588,7 @@ const startWatchdog = () => {
         }
         // Video logic
         else if (rec.type === "video" && now >= startMs && now < endMs) {
-          if ((rec.status === "pending" || rec.status === "failed" || rec.status === "in progress" || (rec.status === "recording" && !rec.record))) {
+          if ((rec.status === "pending" || rec.status === "in progress" || (rec.status === "recording" && !rec.record))) {
             if (global._nxExecutingTasks?.has(rec.id)) {
               continue;
             }
@@ -605,8 +628,8 @@ const startWatchdog = () => {
             rec.status === "in progress" ||
             (rec.status === "recording" && !rec.record))
         ) {
+          const isRecurring = rec.recurrence && rec.recurrence !== "none";
           if (doesVideoFileExist(rec, timeOffsetMs)) {
-            const isRecurring = rec.recurrence && rec.recurrence !== "none";
             if (isRecurring) {
               const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
               rec.status = "pending";
@@ -621,19 +644,31 @@ const startWatchdog = () => {
               i--;
               changed = true;
             }
-          } else if (rec.status !== "failed") {
-            console.log(
-              `[Watchdog] Video task ${rec.cameraName} ended without VMS recording (status=${rec.status}).`,
-            );
-            rec.status = "failed";
-            rec.record = false;
-            await logScheduledRecordingError({
-              cameraId: rec.cameraId,
-              cameraName: rec.cameraName,
-              systemId: rec.systemId,
-              message: `Video recording failed for camera ${rec.cameraName}: never started on VMS`,
-            });
-            changed = true;
+          } else {
+            // Video file does not exist, and task failed or ended
+            if (isRecurring) {
+              const nextDate = calculateNextOccurrence(rec, sh, sm, ss || 0);
+              rec.status = "pending";
+              rec.record = false;
+              rec.date = nextDate.toISOString();
+              rec.startMs = nextDate.getTime() - timeOffsetMs;
+              rec.endMs = rec.startMs + (endMs - startMs);
+              changed = true;
+              console.log(`[Watchdog] Recurring task ${rec.cameraName} failed/ended without video file. Rolled forward to ${nextDate.toISOString()}`);
+            } else if (rec.status !== "failed") {
+              console.log(
+                `[Watchdog] Video task ${rec.cameraName} ended without VMS recording (status=${rec.status}).`,
+              );
+              rec.status = "failed";
+              rec.record = false;
+              await logScheduledRecordingError({
+                cameraId: rec.cameraId,
+                cameraName: rec.cameraName,
+                systemId: rec.systemId,
+                message: `Video recording failed for camera ${rec.cameraName}: never started on VMS`,
+              });
+              changed = true;
+            }
           }
         }
         else if (
@@ -685,7 +720,7 @@ const startWatchdog = () => {
               console.log(`[Watchdog] Recurring task ${rec.cameraName} auto-save completed. Rolled forward to ${nextDate.toISOString()}`);
             }
           } else {
-            const isEnqueued = queue.some((job: any) => job.payload?.taskId === rec.id && (job.status === "pending" || job.status === "processing"));
+            const isEnqueued = queue.some((job: any) => job.payload?.taskId === rec.id);
             if (isEnqueued) {
               // Already enqueued, do not trigger again to prevent queue flooding
             } else {

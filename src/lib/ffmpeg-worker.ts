@@ -98,7 +98,7 @@ function osIsServer(): boolean {
 /**
  * Updates the VMS scheduled task entry status once a download attempt is done.
  */
-async function updateTaskStatus(taskId: string, success: boolean): Promise<void> {
+async function updateTaskStatus(taskId: string, success: boolean, timeOffsetMs = 0): Promise<void> {
   try {
     const { readScheduledRecordings, writeScheduledRecordings } = await import(
       "@/lib/scheduled-recordings-store"
@@ -107,7 +107,7 @@ async function updateTaskStatus(taskId: string, success: boolean): Promise<void>
     const taskIndex = data.schedules?.findIndex((s: any) => s.id === taskId);
     if (taskIndex === -1) return;
 
-    const task = data.schedules[taskIndex] as Record<string, unknown>;
+    const task = data.schedules[taskIndex] as any;
     const isNonRecurring =
       !task.recurrence || task.recurrence === "none" || task.recurrence === "once";
 
@@ -131,8 +131,8 @@ async function updateTaskStatus(taskId: string, success: boolean): Promise<void>
       task.status = "pending";
       task.record = false;
       task.date = nextDate.toISOString();
-      task.startMs = nextDate.getTime();
-      task.endMs = nextDate.getTime() + duration;
+      task.startMs = nextDate.getTime() - timeOffsetMs;
+      task.endMs = task.startMs + duration;
 
       logger.info(
         `[FFmpegWorker] Task ${taskId} is recurring. Rolled forward to ${task.date} and marked as pending`,
@@ -182,6 +182,7 @@ async function sendNotification(
 async function processJob(job: FFmpegJob): Promise<void> {
   const { id, payload, attempts } = job;
   const nextAttempt = attempts + 1;
+  job.attempts = nextAttempt;
   
   logger.info(`[FFmpegWorker] Starting job ${id} (Attempt ${nextAttempt}/${job.maxAttempts}) for camera=${payload.cameraName}`);
   
@@ -295,7 +296,7 @@ async function processJob(job: FFmpegJob): Promise<void> {
         await updateJobStatus(id, "completed");
 
         if (payload.taskId) {
-          await updateTaskStatus(payload.taskId, true);
+          await updateTaskStatus(payload.taskId, true, payload.timeOffsetMs || 0);
         }
 
         logRecordingEvent(`Auto-saved video: ${payload.cameraName}`);
@@ -337,7 +338,7 @@ async function handleJobFailure(job: FFmpegJob, errorMessage: string): Promise<v
     await updateJobStatus(id, "failed", { error: errorMessage });
     
     if (payload.taskId) {
-      await updateTaskStatus(payload.taskId, false);
+      await updateTaskStatus(payload.taskId, false, payload.timeOffsetMs || 0);
     }
     
     await logScheduledRecordingError({

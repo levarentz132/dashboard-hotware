@@ -597,6 +597,8 @@ export default function CloudRecordings() {
   const [scheduledSearch, setScheduledSearch] = useState("");
   const [scheduleFrequencyTab, setScheduleFrequencyTab] = useState("weekly");
   const [selectedScheduledCameraId, setSelectedScheduledCameraId] = useState<string>("");
+  const [selectedScheduledCameraRecentResults, setSelectedScheduledCameraRecentResults] = useState<RecentRecording[]>([]);
+  const [loadingSelectedScheduledCameraResults, setLoadingSelectedScheduledCameraResults] = useState(false);
   const [showAllUpcomingRuns, setShowAllUpcomingRuns] = useState(false);
   const [errorsSearch, setErrorsSearch] = useState("");
   const [isLoadingErrorLogs, setIsLoadingErrorLogs] = useState(false);
@@ -979,6 +981,18 @@ export default function CloudRecordings() {
 
   const schedulesByCamera = React.useMemo(() => {
     const map: Record<string, { cameraId: string; cameraName: string; systemId: string; schedules: ScheduledRecording[] }> = {};
+    
+    // Initialize with all devices to ensure all cameras show up on the schedule list
+    devices.forEach(dev => {
+      const key = normalizeId(dev.id);
+      map[key] = {
+        cameraId: key,
+        cameraName: dev.name,
+        systemId: dev.systemId,
+        schedules: []
+      };
+    });
+
     visibleScheduledRecordings.forEach(rec => {
       const key = normalizeId(rec.cameraId);
       if (!map[key]) {
@@ -994,17 +1008,29 @@ export default function CloudRecordings() {
 
     const list = Object.values(map);
 
-    // Sort by next run time ascending
+    // Sort by:
+    // 1. Having active schedules first, sorted by next run time ascending.
+    // 2. Then cameras with no active schedules, sorted alphabetically by name.
     return list.sort((a, b) => {
-      const nextA = getCameraMinNextRun(a.schedules);
-      const nextB = getCameraMinNextRun(b.schedules);
+      const hasSchedA = a.schedules.length > 0;
+      const hasSchedB = b.schedules.length > 0;
+      
+      if (hasSchedA && !hasSchedB) return -1;
+      if (!hasSchedA && hasSchedB) return 1;
 
-      if (!nextA && !nextB) return a.cameraName.localeCompare(b.cameraName);
-      if (!nextA) return 1; // Put cameras with no upcoming runs at the end
-      if (!nextB) return -1;
-      return (nextA as Date).getTime() - (nextB as Date).getTime();
+      if (hasSchedA && hasSchedB) {
+        const nextA = getCameraMinNextRun(a.schedules);
+        const nextB = getCameraMinNextRun(b.schedules);
+
+        if (!nextA && !nextB) return (a.cameraName || "").localeCompare(b.cameraName || "");
+        if (!nextA) return 1;
+        if (!nextB) return -1;
+        return (nextA as Date).getTime() - (nextB as Date).getTime();
+      }
+
+      return (a.cameraName || "").localeCompare(b.cameraName || "");
     });
-  }, [visibleScheduledRecordings, getCameraMinNextRun]);
+  }, [devices, visibleScheduledRecordings, getCameraMinNextRun]);
 
   // Set default selection when schedules load or change
   useEffect(() => {
@@ -1111,6 +1137,12 @@ export default function CloudRecordings() {
   };
 
   const UPCOMING_RUNS_PREVIEW = 4;
+
+  const errorLogsForSelectedCamera = React.useMemo(() => {
+    if (!selectedScheduledCameraId) return [];
+    const key = normalizeId(selectedScheduledCameraId);
+    return errorLogEntries.filter((entry) => normalizeId(entry.cameraId) === key);
+  }, [selectedScheduledCameraId, errorLogEntries]);
 
   const totalErrorLogCount = React.useMemo(
     () => errorLogEntries.length || errorLogCameras.reduce((sum, cam) => sum + cam.count, 0),
@@ -1806,6 +1838,63 @@ export default function CloudRecordings() {
     loadFromPersistence();
     fetchSettings();
   }, []);
+
+  const fetchRecentResultsForScheduledCamera = useCallback(async (cameraId: string) => {
+    if (!cameraId) return;
+    setLoadingSelectedScheduledCameraResults(true);
+    try {
+      const now = new Date();
+      const targetSystem = selectedSystem || "127.0.0.1";
+      const startMs = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).setHours(0, 0, 0, 0);
+      const endMs = now.getTime();
+
+      const data = await fetchRecordedTimePeriods(
+        targetSystem,
+        getOriginalDeviceId(cameraId),
+        startMs,
+        endMs,
+        isEffectiveAdmin
+      );
+
+      const allPeriods = Array.isArray(data) ? data : data?.reply || [];
+      const periods = allPeriods.filter((p: any) => hasCameraViewPermission(effectiveUser, p.deviceId));
+
+      const mapped: RecentRecording[] = periods.map((p: any, i: number) => {
+        const duration = p.durationMs || 0;
+        const isScreenshot = p.isLocal ? p.isScreenshot : (duration <= 5000 || p.isScreenshot);
+        let dev = devices.find(d => normalizeId(d.id) === normalizeId(p.deviceId) && d.systemId === targetSystem);
+        return {
+          id: `recent-sched-${i}-${p.startTimeMs}-${p.deviceId || ""}`,
+          cameraName: dev?.name || p.cameraName || p.deviceId || "Unknown",
+          systemName: dev?.systemName || targetSystem,
+          startTimeMs: p.startTimeMs || 0,
+          durationMs: duration,
+          systemId: targetSystem,
+          deviceId: p.deviceId || "",
+          isScreenshot,
+          isLocal: p.isLocal,
+          fileName: p.fileName,
+          dateFolder: p.dateFolder,
+          cameraFolderName: p.cameraFolderName
+        };
+      });
+
+      mapped.sort((a, b) => b.startTimeMs - a.startTimeMs);
+      setSelectedScheduledCameraRecentResults(mapped);
+    } catch (e) {
+      console.warn("[CloudRecordings] Failed to fetch scheduled camera results:", e);
+    } finally {
+      setLoadingSelectedScheduledCameraResults(false);
+    }
+  }, [selectedSystem, devices, isEffectiveAdmin, effectiveUser]);
+
+  useEffect(() => {
+    if (selectedScheduledCameraId) {
+      fetchRecentResultsForScheduledCamera(selectedScheduledCameraId);
+    } else {
+      setSelectedScheduledCameraRecentResults([]);
+    }
+  }, [selectedScheduledCameraId, fetchRecentResultsForScheduledCamera]);
 
   // Clear messages when schedule dialog opens
   useEffect(() => {
@@ -3142,9 +3231,9 @@ export default function CloudRecordings() {
               </div>
 
               {/* Master-Detail Split Layout */}
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 min-h-[600px]">
+              <div className="grid grid-cols-12 gap-6 min-h-[600px]" style={{ display: 'grid', gridTemplateColumns: '5fr 7fr', gap: '24px' }}>
                 {/* Left Side: Cameras List (5 columns) */}
-                <div className="md:col-span-5 bg-white border rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                <div className="col-span-5 bg-white border rounded-2xl shadow-sm flex flex-col overflow-hidden" style={{ gridColumn: 'span 1' }}>
                   <div className="p-4 border-b space-y-3">
                     <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Cameras</h3>
                     <div className="relative">
@@ -3160,7 +3249,7 @@ export default function CloudRecordings() {
 
                   <div className="flex-1 overflow-y-auto max-h-[500px] divide-y divide-slate-100">
                     {schedulesByCamera
-                      .filter(cam => !scheduledSearch || cam.cameraName.toLowerCase().includes(scheduledSearch.toLowerCase()))
+                      .filter(cam => !scheduledSearch || (cam.cameraName || "").toLowerCase().includes(scheduledSearch.toLowerCase()))
                       .map(cam => {
                         const isSelected = selectedScheduledCameraId === cam.cameraId;
                         const runningSchedule = getCameraRunningSchedule(cam.schedules);
@@ -3212,15 +3301,15 @@ export default function CloudRecordings() {
 
                     {schedulesByCamera.length === 0 && (
                       <div className="p-8 text-center text-muted-foreground flex flex-col items-center justify-center h-full">
-                        <Clock className="h-8 w-8 opacity-40 mb-2" />
-                        <p className="font-bold text-sm">No active tasks</p>
+                        <Camera className="h-8 w-8 opacity-40 mb-2" />
+                        <p className="font-bold text-sm">No cameras available</p>
                       </div>
                     )}
                   </div>
                 </div>
 
                 {/* Right Side: Schedules Details (7 columns) */}
-                <div className="md:col-span-7 bg-white border rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                <div className="col-span-7 bg-white border rounded-2xl shadow-sm flex flex-col overflow-hidden" style={{ gridColumn: 'span 1' }}>
                   {selectedScheduledCameraId && schedulesByCamera.some(c => c.cameraId === selectedScheduledCameraId) ? (
                     (() => {
                       const selectedCam = schedulesByCamera.find(c => c.cameraId === selectedScheduledCameraId)!;
@@ -3266,7 +3355,18 @@ export default function CloudRecordings() {
 
                           {/* Groups List */}
                           <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 pr-2 custom-scrollbar">
-                            {groupedSchedulesForSelectedCamera.map((group) => {
+                            {groupedSchedulesForSelectedCamera.length === 0 ? (
+                              <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500 bg-slate-50/30 rounded-2xl border border-dashed border-slate-200/80">
+                                <div className="bg-slate-100/80 p-4 rounded-full mb-3">
+                                  <CalendarIcon className="h-6 w-6 text-slate-400" />
+                                </div>
+                                <p className="font-bold text-slate-700 text-sm">No Active Schedules</p>
+                                <p className="text-xs text-slate-400 max-w-xs mt-1 px-4">
+                                  There are no recording or snapshot schedules configured for this camera. Click "Add Schedule" above to create one.
+                                </p>
+                              </div>
+                            ) : (
+                              groupedSchedulesForSelectedCamera.map((group) => {
                               const recurrenceText = getRecurrenceText(group);
                               const first = group.records[0];
                               const uniqueTimes = Array.from(
@@ -3545,7 +3645,90 @@ export default function CloudRecordings() {
                                   )}
                                 </div>
                               );
-                            })}
+                            })
+                          )}
+
+                          {/* Recent Results (Last 3 Days) */}
+                          {selectedScheduledCameraRecentResults.length > 0 && (
+                            <div className="pt-6 border-t border-slate-100 mt-6 space-y-4">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                <Video className="h-3.5 w-3.5 text-slate-400" /> Recent Results (Last 3 Days)
+                              </h4>
+                              <div className="space-y-2">
+                                {selectedScheduledCameraRecentResults.map((result) => (
+                                  <div
+                                    key={result.id}
+                                    className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/30 text-xs font-semibold"
+                                  >
+                                    <div className="flex flex-col gap-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-slate-700">
+                                          {format(new Date(result.startTimeMs), "EEE MMM d, HH:mm")}
+                                        </span>
+                                        <span className="text-slate-400 font-medium">
+                                          ({formatDuration(result.durationMs)})
+                                        </span>
+                                      </div>
+                                      {result.isLocal && result.fileName && (
+                                        <span className="text-[10px] text-slate-400 truncate max-w-[280px]">
+                                          File: {result.fileName}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handlePreview(result.startTimeMs, result.durationMs, result.systemId, result.deviceId, result.isLocal, result.fileName, result.dateFolder, result.cameraFolderName)}
+                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                        title="Preview"
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleDownload(result.startTimeMs, result.durationMs, result.systemId, result.deviceId, result.isLocal, result.fileName, result.dateFolder, result.cameraName, result.cameraFolderName, result.isScreenshot)}
+                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                        title="Download"
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Recent Errors */}
+                          {errorLogsForSelectedCamera.length > 0 && (
+                            <div className="pt-6 border-t border-slate-100 mt-6 space-y-4">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-red-500 flex items-center gap-1.5">
+                                <AlertCircle className="h-3.5 w-3.5 text-red-500" /> Failed Runs / Errors
+                              </h4>
+                              <div className="space-y-2">
+                                {errorLogsForSelectedCamera.slice(0, 5).map((log) => (
+                                  <div
+                                    key={log.id}
+                                    className="p-3 rounded-xl border border-red-100 bg-red-50/20 text-xs font-semibold text-slate-700 flex flex-col gap-1"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] text-red-600 font-bold uppercase tracking-wider">
+                                        Failed
+                                      </span>
+                                      <span className="text-[10px] text-slate-400 font-medium">
+                                        {log.timestamp || (log.createdAtMs ? new Date(log.createdAtMs).toLocaleString() : "")}
+                                      </span>
+                                    </div>
+                                    <p className="text-slate-600 font-medium leading-relaxed">
+                                      {log.message}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           </div>
 
                           {/* Upcoming runs */}

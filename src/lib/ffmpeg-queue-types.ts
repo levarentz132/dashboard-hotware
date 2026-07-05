@@ -13,6 +13,7 @@ export interface FFmpegJob {
     vmsHeaders: Record<string, string>;
     taskId?: string;
     notificationUserKey?: string;
+    timeOffsetMs?: number;
   };
   attempts: number;
   maxAttempts: number;
@@ -20,4 +21,6 @@ export interface FFmpegJob {
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
+  disabled?: boolean;
 }
+

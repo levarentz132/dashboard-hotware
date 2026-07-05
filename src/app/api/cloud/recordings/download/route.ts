@@ -102,7 +102,7 @@ function getFfmpegPath(): string {
   return "ffmpeg";
 }
 
-async function updateTaskStatus(taskId: string, success: boolean): Promise<void> {
+async function updateTaskStatus(taskId: string, success: boolean, timeOffsetMs = 0): Promise<void> {
   try {
     const { readScheduledRecordings, writeScheduledRecordings } = await import(
       "@/lib/scheduled-recordings-store"
@@ -111,7 +111,7 @@ async function updateTaskStatus(taskId: string, success: boolean): Promise<void>
     const taskIndex = data.schedules?.findIndex((s: any) => s.id === taskId);
     if (taskIndex === -1) return;
 
-    const task = data.schedules[taskIndex] as Record<string, unknown>;
+    const task = data.schedules[taskIndex] as any;
     const isNonRecurring =
       !task.recurrence || task.recurrence === "none" || task.recurrence === "once";
 
@@ -130,8 +130,8 @@ async function updateTaskStatus(taskId: string, success: boolean): Promise<void>
       task.status = "pending";
       task.record = false;
       task.date = nextDate.toISOString();
-      task.startMs = nextDate.getTime();
-      task.endMs = nextDate.getTime() + duration;
+      task.startMs = nextDate.getTime() - timeOffsetMs;
+      task.endMs = task.startMs + duration;
 
       console.log(
         `[recordings/download] Task ${taskId} is recurring (recurrence=${task.recurrence}). Rolled forward to ${task.date}`,
@@ -271,7 +271,7 @@ export async function GET(request: NextRequest) {
       if (isValidOutputFile(savePath, "video")) {
         console.log(`[recordings/download] AUTO-SAVE: Valid file already exists, skipping: ${savePath}`);
         if (taskId) {
-          await updateTaskStatus(taskId, true);
+          await updateTaskStatus(taskId, true, timeOffsetMs);
         }
         return NextResponse.json({ success: true, path: savePath, file: finalFileName, skipped: true });
       }
@@ -301,6 +301,7 @@ export async function GET(request: NextRequest) {
         vmsHeaders,
         taskId: taskId || undefined,
         notificationUserKey: searchParams.get("notificationUserKey") || "admin",
+        timeOffsetMs,
       };
 
       await enqueueJob(payload);
