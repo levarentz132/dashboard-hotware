@@ -8,6 +8,8 @@ export interface NxConfig {
     NEXT_PUBLIC_NX_SYSTEM_ID?: string;
     NEXT_PUBLIC_NX_USERNAME?: string;
     NEXT_PUBLIC_NX_PASSWORD?: string;
+    NEXT_PUBLIC_LICENSE_USERNAME?: string;
+    NEXT_PUBLIC_LICENSE_PASSWORD?: string;
     NEXT_PUBLIC_NX_CLOUD_USERNAME?: string;
     has_vms_credentials?: boolean;
     has_cloud_token?: boolean;

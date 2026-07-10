@@ -30,13 +30,16 @@ export async function GET(request: Request) {
         NEXT_PUBLIC_NX_SERVER_HOST: nxLocationIp,
         NEXT_PUBLIC_NX_SERVER_PORT: nxLocationPort,
         NEXT_PUBLIC_NX_USERNAME: config?.NEXT_PUBLIC_NX_USERNAME || "",
-        NEXT_PUBLIC_NX_PASSWORD: config?.NEXT_PUBLIC_NX_PASSWORD ? "******" : ""
+        NEXT_PUBLIC_NX_PASSWORD: config?.NEXT_PUBLIC_NX_PASSWORD ? "******" : "",
+        NEXT_PUBLIC_LICENSE_USERNAME: config?.NEXT_PUBLIC_LICENSE_USERNAME || "",
+        NEXT_PUBLIC_LICENSE_PASSWORD: config?.NEXT_PUBLIC_LICENSE_PASSWORD ? "******" : ""
       }
     };
     
     console.log("[API /config/nx] Returning:", {
       username: response.config.NEXT_PUBLIC_NX_USERNAME || "empty",
-      password: response.config.NEXT_PUBLIC_NX_PASSWORD ? "***" : "empty"
+      password: response.config.NEXT_PUBLIC_NX_PASSWORD ? "***" : "empty",
+      licenseUsername: response.config.NEXT_PUBLIC_LICENSE_USERNAME || "empty"
     });
 
     return NextResponse.json(response);
@@ -82,6 +85,10 @@ export async function POST(request: Request) {
     }
     if (data.NEXT_PUBLIC_NX_CLOUD_USERNAME) config.NEXT_PUBLIC_NX_CLOUD_USERNAME = data.NEXT_PUBLIC_NX_CLOUD_USERNAME;
     if (data.NX_CLOUD_TOKEN) config.NX_CLOUD_TOKEN = data.NX_CLOUD_TOKEN;
+    if (data.NEXT_PUBLIC_LICENSE_USERNAME) config.NEXT_PUBLIC_LICENSE_USERNAME = data.NEXT_PUBLIC_LICENSE_USERNAME;
+    if (data.NEXT_PUBLIC_LICENSE_PASSWORD && data.NEXT_PUBLIC_LICENSE_PASSWORD !== "******") {
+        config.NEXT_PUBLIC_LICENSE_PASSWORD = data.NEXT_PUBLIC_LICENSE_PASSWORD;
+    }
 
     const newContent = Object.entries(config)
         .map(([k, v]) => `${k}=${v}`)

@@ -37,10 +37,9 @@ export function LicenseLogin() {
         formState: { errors, isSubmitted },
     } = useForm<LoginFormData>({
         resolver: zodResolver(loginSchema),
-        // STATIC CREDENTIALS: Change these values to make the username and password static
         defaultValues: {
-            username: "LippoTest",
-            password: "Lippo.123",
+            username: process.env.NEXT_PUBLIC_LICENSE_USERNAME || "",
+            password: process.env.NEXT_PUBLIC_LICENSE_PASSWORD || "",
         },
     });
 
@@ -52,15 +51,15 @@ export function LicenseLogin() {
     useEffect(() => {
         if (!config) return;
 
-        const { NEXT_PUBLIC_NX_USERNAME, NEXT_PUBLIC_NX_PASSWORD } = config;
+        const { NEXT_PUBLIC_LICENSE_USERNAME, NEXT_PUBLIC_LICENSE_PASSWORD } = config;
         
-        if (NEXT_PUBLIC_NX_USERNAME && NEXT_PUBLIC_NX_PASSWORD) {
+        if (NEXT_PUBLIC_LICENSE_USERNAME && NEXT_PUBLIC_LICENSE_PASSWORD) {
             setHasSaved(true);
-            setValue("username", NEXT_PUBLIC_NX_USERNAME);
-            setValue("password", NEXT_PUBLIC_NX_PASSWORD); // Will be "******" (masked) from secure server config
+            setValue("username", NEXT_PUBLIC_LICENSE_USERNAME);
+            setValue("password", NEXT_PUBLIC_LICENSE_PASSWORD); // Will be "******" (masked) from secure server config
             
             // Sync username to cookies for persistence
-            Cookies.set("license_saved_user", NEXT_PUBLIC_NX_USERNAME, { expires: 365, path: '/' });
+            Cookies.set("license_saved_user", NEXT_PUBLIC_LICENSE_USERNAME, { expires: 365, path: '/' });
             return;
         }
 
@@ -75,9 +74,9 @@ export function LicenseLogin() {
         // Priority 3: Check Electron config
         const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
         if (extConfig) {
-            if (extConfig.NEXT_PUBLIC_NX_USERNAME && extConfig.NEXT_PUBLIC_NX_PASSWORD) {
-                setValue("username", extConfig.NEXT_PUBLIC_NX_USERNAME);
-                setValue("password", extConfig.NEXT_PUBLIC_NX_PASSWORD);
+            if (extConfig.NEXT_PUBLIC_LICENSE_USERNAME && extConfig.NEXT_PUBLIC_LICENSE_PASSWORD) {
+                setValue("username", extConfig.NEXT_PUBLIC_LICENSE_USERNAME);
+                setValue("password", extConfig.NEXT_PUBLIC_LICENSE_PASSWORD);
             }
         }
     }, [config, setValue]);
@@ -90,8 +89,8 @@ export function LicenseLogin() {
         
         // Save to server for all network users using our reusable hook
         await saveConfig({
-            NEXT_PUBLIC_NX_USERNAME: data.username,
-            NEXT_PUBLIC_NX_PASSWORD: data.password
+            NEXT_PUBLIC_LICENSE_USERNAME: data.username,
+            NEXT_PUBLIC_LICENSE_PASSWORD: data.password
         });
 
         setIsSaved(true);

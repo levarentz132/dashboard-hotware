@@ -26,7 +26,7 @@ import { useNxVmsAuth } from "@/hooks/use-nx-vms-auth";
 import { useNxConfig } from "@/hooks/use-nx-config";
 
 export function NxVmsLogin() {
-    const { login: licenseLogin, isLoading: isLicenseLoading } = useAuth();
+    const { login: licenseLogin, isLoading: isLicenseLoading, error: licenseError, clearError: clearLicenseError } = useAuth();
     const { config } = useNxConfig();
     const {
         session,
@@ -84,6 +84,7 @@ export function NxVmsLogin() {
     }, [exchangeCloudCode]);
 
     const handleLocalLogin = async () => {
+        clearLicenseError?.();
         const success = await loginLocal(credentials.username, credentials.password);
         if (success) {
             setCredentials({ username: "", password: "" });
@@ -91,14 +92,15 @@ export function NxVmsLogin() {
     };
 
     const handleDashboardLogin = async () => {
+        clearLicenseError?.();
         // Priority 1: User saved credentials in cookies
         let username = Cookies.get("license_saved_user");
         let password = Cookies.get("license_saved_pass");
 
         // Priority 2: Fallback static / environment defaults
         if (!username || !password) {
-            username = "LippoTest";
-            password = "Lippo.123";
+            username = (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME || process.env.NEXT_PUBLIC_LICENSE_USERNAME || "";
+            password = (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD || process.env.NEXT_PUBLIC_LICENSE_PASSWORD || "";
         }
 
         if (!username || !password) {
@@ -113,15 +115,33 @@ export function NxVmsLogin() {
         await licenseLogin({
             username,
             password,
-            system_id: cloudSession ? storedSystemId : "",
+            system_id: cloudSession ? storedSystemId : (storedSystemId || storedServerId),
             server_id: cloudSession ? "" : (storedServerId || storedSystemId)
         });
     };
 
+    useEffect(() => {
+        if (licenseError) {
+            console.log("[NxVmsLogin] Detected licenseError in hook:", licenseError);
+            window.alert("[License Error Alert] " + licenseError);
+        }
+    }, [licenseError]);
+
     const isConnected = !!session || !!cloudSession;
+
+    console.log("[NxVmsLogin] Render states:", { 
+        vmsError: error, 
+        licenseError: licenseError, 
+        isConnected, 
+        isLicenseLoading 
+    });
 
     return (
         <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden transition-all duration-500 animate-in fade-in slide-in-from-bottom-8">
+            {/* Debug Info Banner */}
+            <div className="p-2 bg-yellow-100 border-b border-yellow-200 text-[10px] font-mono text-yellow-800 text-center">
+                VMS Error: {error || "none"} | License Error: {licenseError || "none"}
+            </div>
             {/* Header */}
             <div className="p-8 bg-gradient-to-br from-slate-900 to-blue-900 text-white relative flex flex-col items-center gap-3">
                 {/* <h2 className="text-xl font-black tracking-tight uppercase">Hotware Dashboard</h2> */}
@@ -129,10 +149,10 @@ export function NxVmsLogin() {
 
             {/* Content */}
             <div className="p-8 space-y-8">
-                {error && (
+                {(error || licenseError) && (
                     <div className="flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-100 text-red-700 animate-in fade-in slide-in-from-top-2">
                         <XCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
-                        <span className="text-xs font-bold leading-tight">{error}</span>
+                        <span className="text-xs font-bold leading-tight">{error || licenseError}</span>
                     </div>
                 )}
 

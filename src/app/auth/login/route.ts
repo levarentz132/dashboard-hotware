@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     // Secure Credentials Interceptor:
     // If the client submits the masked password placeholder "******", resolve and swap in the actual plain-text password securely on the server!
     if (password === "******") {
-      const serverPassword = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+      const serverPassword = dynamicConfig?.NEXT_PUBLIC_LICENSE_PASSWORD || process.env.NEXT_PUBLIC_LICENSE_PASSWORD || dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
       if (serverPassword) {
         password = serverPassword;
         console.log("[Login API] Secured Credentials Interceptor: Masked password swapped with actual password on server");
@@ -167,8 +167,8 @@ export async function POST(request: NextRequest) {
       if (externalData.error_code === "LICENSE_EXPIRED") {
         message = externalData.message || "Lisensi Anda telah berakhir";
         status = 403;
-      } else if (externalData.error_code === "LICENSE_MISMATCH" || externalData.error_code === "SYSTEM_ID_MISMATCH") {
-        message = AUTH_MESSAGES.LICENSE_MISMATCH;
+      } else if (externalData.error_code === "LICENSE_MISMATCH" || externalData.error_code === "SYSTEM_ID_MISMATCH" || externalData.error_code === "SERVER_ID_MISMATCH") {
+        message = externalData.message || AUTH_MESSAGES.LICENSE_MISMATCH;
         status = 403;
       } else if (externalData.error_code === "USER_NOT_FOUND" || externalData.error_code === "INVALID_PASSWORD") {
         // Obfuscate specific credential errors for security

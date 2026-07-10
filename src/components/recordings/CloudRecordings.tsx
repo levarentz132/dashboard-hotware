@@ -430,6 +430,25 @@ const SearchableCameraMultiSelect = ({
     onValueChange(nextVals.join(","));
   };
 
+  const selectableFilteredDevices = filteredDevices.filter(device => {
+    const isDisabled = canEdit ? !canEdit(device.id) : false;
+    return !isDisabled;
+  });
+
+  const selectableKeys = selectableFilteredDevices.map(d => `${d.systemId}:${normalizeId(d.id)}`);
+  const isAllSelected = selectableKeys.length > 0 && selectableKeys.every(k => selectedVals.includes(k));
+
+  const toggleSelectAll = () => {
+    let nextVals: string[];
+    if (isAllSelected) {
+      nextVals = selectedVals.filter(v => !selectableKeys.includes(v));
+    } else {
+      const uniqueNewKeys = selectableKeys.filter(k => !selectedVals.includes(k));
+      nextVals = [...selectedVals, ...uniqueNewKeys];
+    }
+    onValueChange(nextVals.join(","));
+  };
+
   return (
     <div className="w-full space-y-2">
       <Label>Cameras</Label>
@@ -475,6 +494,19 @@ const SearchableCameraMultiSelect = ({
               )}
             </div>
 
+            {selectableFilteredDevices.length > 0 && (
+              <div className="flex items-center gap-3 px-3 py-2 border-b bg-slate-50/50 hover:bg-slate-100/50 transition-colors cursor-pointer select-none" onClick={toggleSelectAll}>
+                <Checkbox
+                  checked={isAllSelected}
+                  onCheckedChange={toggleSelectAll}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">
+                  {isAllSelected ? "Deselect All" : "Select All"}
+                </span>
+              </div>
+            )}
+
             <div className="max-h-[300px] overflow-y-auto p-1 custom-scrollbar space-y-0.5">
               {filteredDevices.length > 0 ? (
                 filteredDevices.map((device: any) => {
@@ -489,20 +521,20 @@ const SearchableCameraMultiSelect = ({
                     <div
                       key={key}
                       onClick={() => {
-                        if (!isOffline && !isDisabled) {
+                        if (!isDisabled) {
                           toggleDevice(key);
                         }
                       }}
                       className={cn(
                         "flex items-center gap-4 rounded-lg px-2.5 py-2 transition-colors",
-                        (isOffline || isDisabled)
+                        isDisabled
                           ? "opacity-40 grayscale-[0.5] cursor-not-allowed bg-slate-50/50"
                           : "hover:bg-blue-50/50 cursor-pointer"
                       )}
                     >
                       <Checkbox
                         checked={isSelected}
-                        disabled={isOffline || isDisabled}
+                        disabled={isDisabled}
                         onCheckedChange={() => toggleDevice(key)}
                         onClick={(e) => e.stopPropagation()}
                       />
