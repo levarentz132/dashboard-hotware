@@ -119,6 +119,30 @@ interface ScheduledRecording {
   scheduledBy?: string;
   inactive?: boolean;
   isExplicitlyActive?: boolean;
+  policyId?: string;
+}
+
+interface Policy {
+  id: string;
+  name: string;
+  type: "video" | "screenshot";
+  recurrence: "none" | "weekday" | "monthday";
+  recurrenceDay?: number;
+  weekdays?: number[];
+  monthDay?: number;
+  dates?: string[];
+  startTime?: string;
+  endTime?: string;
+  date?: string;
+  timeRanges?: { start: string; end: string }[];
+  cameras: {
+    id: string;
+    name: string;
+    systemId: string;
+    systemName: string;
+  }[];
+  inactive?: boolean;
+  createdBy?: string;
 }
 
 interface RecentRecording {
@@ -610,6 +634,8 @@ export default function CloudRecordings() {
   const [previewSnapshot, setPreviewSnapshot] = useState<{ url: string; title: string } | null>(null);
 
   // ---- Schedule state ----
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [policyName, setPolicyName] = useState<string>("");
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduleType, setScheduleType] = useState<"video" | "screenshot">("video");
   const [scheduleDates, setScheduleDates] = useState<Date[]>([]);
@@ -624,11 +650,15 @@ export default function CloudRecordings() {
   const [scheduleSystem, setScheduleSystem] = useState<string>("");
   const [scheduleBatchId, setScheduleBatchId] = useState<string | null>(null);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
+  const [isDeletePolicyConfirmOpen, setIsDeletePolicyConfirmOpen] = useState(false);
+  const [policyIdToDelete, setPolicyIdToDelete] = useState<string | null>(null);
   const [pendingCancelIds, setPendingCancelIds] = useState<string[]>([]);
   const [pendingCancelForceDelete, setPendingCancelForceDelete] = useState(false);
   const [scheduledSearch, setScheduledSearch] = useState("");
+  const [assignedCameraSearch, setAssignedCameraSearch] = useState("");
   const [scheduleFrequencyTab, setScheduleFrequencyTab] = useState("weekly");
   const [selectedScheduledCameraId, setSelectedScheduledCameraId] = useState<string>("");
+  const [selectedPolicyId, setSelectedPolicyId] = useState<string>("");
   const [selectedScheduledCameraRecentResults, setSelectedScheduledCameraRecentResults] = useState<RecentRecording[]>([]);
   const [loadingSelectedScheduledCameraResults, setLoadingSelectedScheduledCameraResults] = useState(false);
   const [showAllUpcomingRuns, setShowAllUpcomingRuns] = useState(false);
@@ -1484,7 +1514,7 @@ export default function CloudRecordings() {
     setScheduledRecordings(prev => {
       const toRemove = new Set(idsToCancel);
       const next = prev.filter(r => !toRemove.has(r.id));
-      saveToPersistence(next, originalSchedules.current);
+      saveToPersistence({ schedules: next }, originalSchedules.current);
       return next;
     });
 
@@ -1504,7 +1534,13 @@ export default function CloudRecordings() {
   >(async () => { });
 
   // ---- Persistence Logic ----
-  const saveToPersistence = async (scheds: ScheduledRecording[], originals: any) => {
+  const saveToPersistence = async (
+    params: {
+      policies?: Policy[];
+      schedules?: ScheduledRecording[];
+    },
+    originalVmsSchedules?: any
+  ) => {
     try {
       // Capture the VMS location to store it in the data file for the watchdog
       const nxLocationIp = Cookies.get("nx_location_ip") || (typeof window !== 'undefined' ? (window as any).electronConfig?.NEXT_PUBLIC_NX_SERVER_HOST : undefined);
@@ -1514,8 +1550,8 @@ export default function CloudRecordings() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          schedules: scheds,
-          originalSchedules: Object.fromEntries(originals),
+          policies: params.policies,
+          schedules: params.schedules,
           nxLocationIp,
           nxLocationPort
         }),
@@ -1530,9 +1566,12 @@ export default function CloudRecordings() {
     if (!force && (Date.now() - lastActionTime.current < 5000)) return;
 
     try {
-      const res = await fetch("/api/cloud/recordings/scheduled");
+      const res = await fetch(`/api/cloud/recordings/scheduled?t=${Date.now()}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
+        if (data.policies) {
+          setPolicies(data.policies);
+        }
         if (data.originalSchedules) {
           Object.entries(data.originalSchedules).forEach(([id, sched]) => {
             originalSchedules.current.set(id, sched);
@@ -1548,7 +1587,6 @@ export default function CloudRecordings() {
           const reconciledScheds = staleReconcile.schedules;
           if (staleReconcile.changed) {
             console.log("[Persistence] Reconciled stale in-progress schedules");
-            void saveToPersistence(reconciledScheds, originalSchedules.current);
           }
 
           // Automatically clean up non-recurring schedules whose date/time has passed
@@ -1660,7 +1698,7 @@ export default function CloudRecordings() {
         const next = prev.map((r) =>
           r.id === rec.id ? { ...r, status: "failed" as const, record: false } : r,
         );
-        void saveToPersistence(next, originalSchedules.current);
+        void saveToPersistence({ schedules: next }, originalSchedules.current);
         return next;
       });
       const message = `Scheduled ${rec.type === "screenshot" ? "snapshot" : "video"} for ${rec.cameraName} failed: ${reason}`;
@@ -1755,7 +1793,7 @@ export default function CloudRecordings() {
           const next = prev.map((r) =>
             r.id === rec.id ? { ...r, status: "processing" as const } : r,
           );
-          saveToPersistence(next, originalSchedules.current);
+          saveToPersistence({ schedules: next }, originalSchedules.current);
           return next;
         });
       } else if (
@@ -1821,7 +1859,7 @@ export default function CloudRecordings() {
           const next = prev.map(r =>
             r.id === rec.id ? { ...r, status: "processing" as const } : r
           );
-          saveToPersistence(next, originalSchedules.current);
+          saveToPersistence({ schedules: next }, originalSchedules.current);
           return next;
         });
 
@@ -2271,40 +2309,40 @@ export default function CloudRecordings() {
     next[index][key] = val;
     setScheduleTimeRanges(next);
   };
-
   const toggleScheduleDay = (day: number) => {
     setScheduleDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
   };
 
   const handleScheduleRecording = async () => {
-    console.log("[CloudRecordings] handleScheduleRecording triggered", { scheduleCamera, scheduleType, scheduleDays, scheduleMonthDay, scheduleDates });
+    console.log("[CloudRecordings] handleScheduleRecording (Policy model) triggered", { scheduleCamera, scheduleType, scheduleDays, scheduleMonthDay, scheduleDates });
     setScheduleError("");
     setScheduleSuccess("");
     if (!scheduleCamera) {
-      console.warn("[CloudRecordings] No camera selected");
-      setScheduleError("Please select a camera.");
+      setScheduleError("Please select at least one camera.");
       return;
     }
 
-    // GUARD: Never allow "all" cameras for scheduling
     if (scheduleCamera === "all") {
       setScheduleError("Please select a specific camera. Scheduling all cameras at once is not supported.");
       return;
     }
 
-    const batchId = scheduleBatchId || `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    if (!policyName.trim()) {
+      setScheduleError("Please enter a name for the policy.");
+      return;
+    }
 
     const selectedCameraIds = scheduleCamera.split(",");
     const camerasToSchedule = devices.filter(d => selectedCameraIds.includes(`${d.systemId}:${normalizeId(d.id)}`));
 
     if (camerasToSchedule.length === 0) {
-      setScheduleError("No cameras found to schedule.");
+      setScheduleError("No cameras found to assign to the policy.");
       return;
     }
 
     const scheduleOwner = resolveScheduleOwnerUsername();
     if (!scheduleOwner && !isEffectiveAdmin) {
-      setScheduleError("Your VMS user identity is still loading. Please wait a moment and try again.");
+      setScheduleError("Your VMS user identity is still loading. Please wait a moment.");
       return;
     }
 
@@ -2315,211 +2353,111 @@ export default function CloudRecordings() {
       return;
     }
 
-    let totalTasksScheduled = 0;
-    const newScheduledEntries: ScheduledRecording[] = [];
+    // Map recurrence type
+    let recurrence: "none" | "weekday" | "monthday" = "none";
+    if (scheduleFrequencyTab === "weekly") {
+      recurrence = "weekday";
+    } else if (scheduleFrequencyTab === "monthly") {
+      recurrence = "monthday";
+    }
 
-    camerasToSchedule.forEach(device => {
-      const cameraDeviceId = getOriginalDeviceId(device.id, devices);
-      const systemId = device.systemId;
+    const policyId = scheduleBatchId || `policy-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    
+    // Construct target cameras array
+    const cameras = camerasToSchedule.map(device => ({
+      id: device.id,
+      name: device.name,
+      systemId: device.systemId,
+      systemName: device.systemName || "Local System"
+    }));
 
-      // List of targets (dates and ranges) for this specific camera
-      const scheduleTargets: { date: Date; start: string; end: string }[] = [];
+    // Construct timeRanges
+    const timeRanges = scheduleTimeRanges.map(range => ({
+      start: range.start,
+      end: scheduleType === "screenshot" ? range.start : range.end
+    })).filter(r => r.start);
 
-      if (scheduleDays.length > 0) {
-        // Recurring days
-        const now = new Date();
-        const currentDay = now.getDay();
+    // Format specific dates if selected
+    const dates = scheduleDates.map(d => d.toISOString());
 
-        scheduleDays.forEach(dayIndex => {
-          let targetDate = new Date(now);
-          const lastTime = scheduleType === "screenshot" ? scheduleTimeRanges[scheduleTimeRanges.length - 1].start : scheduleTimeRanges[scheduleTimeRanges.length - 1].end;
-          const [lastH, lastM] = lastTime.split(":").map(Number);
+    const newPolicy: Policy = {
+      id: policyId,
+      name: policyName.trim(),
+      type: scheduleType,
+      recurrence,
+      weekdays: recurrence === "weekday" ? scheduleDays : [],
+      monthDay: recurrence === "monthday" ? (Number(scheduleMonthDay) || undefined) : undefined,
+      dates: recurrence === "none" ? dates : [],
+      timeRanges,
+      cameras,
+      inactive: false,
+      createdBy: scheduleOwner || "System"
+    };
 
-          while (true) {
-            const windowEnd = new Date(targetDate).setHours(lastH, lastM, 59, 999);
-            if (targetDate.getDay() === dayIndex && windowEnd >= now.getTime()) break;
-            targetDate.setDate(targetDate.getDate() + 1);
-          }
-
-          if (scheduleType === "screenshot") {
-            scheduleTimeRanges.forEach(range => {
-              if (range.start) {
-                scheduleTargets.push({ date: targetDate, start: range.start, end: range.start });
-              }
-            });
-          } else {
-            scheduleTimeRanges.forEach(range => {
-              if (range.start && range.end) {
-                scheduleTargets.push({ date: targetDate, start: range.start, end: range.end });
-              }
-            });
-          }
-        });
-      } else if (scheduleMonthDay !== "" && scheduleMonthDay > 0 && scheduleMonthDay <= 31) {
-        // Monthly recurrence
-        const now = new Date();
-        const targetDayNum = Number(scheduleMonthDay);
-        let year = now.getFullYear();
-        let monthIdx = now.getMonth();
-        let targetDate = new Date(year, monthIdx, targetDayNum);
-        const lastTime = scheduleType === "screenshot" ? scheduleTimeRanges[scheduleTimeRanges.length - 1].start : scheduleTimeRanges[scheduleTimeRanges.length - 1].end;
-        const [lastH, lastM] = lastTime.split(":").map(Number);
-        const windowEnd = new Date(targetDate).setHours(lastH, lastM, 59, 999);
-
-        // If today is the target day AND the window hasn't passed, use today.
-        // Otherwise find the next occurrence in the future.
-        if (targetDate.getDate() !== targetDayNum || windowEnd < now.getTime()) {
-          while (true) {
-            monthIdx++;
-            targetDate = new Date(year, monthIdx, targetDayNum);
-            if (targetDate.getDate() === targetDayNum) break;
-          }
-        }
-
-        if (scheduleType === "screenshot") {
-          scheduleTimeRanges.forEach(range => {
-            if (range.start) {
-              scheduleTargets.push({ date: new Date(targetDate), start: range.start, end: range.start });
-            }
-          });
-        } else {
-          scheduleTimeRanges.forEach(range => {
-            scheduleTargets.push({ date: new Date(targetDate), start: range.start, end: range.end });
-          });
-        }
+    try {
+      let nextPolicies = [...policies];
+      const existingIdx = nextPolicies.findIndex(p => p.id === policyId);
+      if (existingIdx !== -1) {
+        nextPolicies[existingIdx] = newPolicy;
       } else {
-        // Multiple specific dates
-        if (scheduleDates.length === 0) return;
-        scheduleDates.forEach(tDate => {
-          if (scheduleType === "screenshot") {
-            scheduleTimeRanges.forEach(range => {
-              if (range.start) {
-                scheduleTargets.push({ date: tDate, start: range.start, end: range.start });
-              }
-            });
-          } else {
-            scheduleTimeRanges.forEach(range => {
-              scheduleTargets.push({ date: tDate, start: range.start, end: range.end });
-            });
-          }
-        });
+        nextPolicies.push(newPolicy);
       }
 
-      if (scheduleTargets.length === 0) {
-        console.warn("[CloudRecordings] No valid schedule targets generated");
-        return;
-      }
-
-      scheduleTargets.forEach(target => {
-        const { date: tDate, start: tStart, end: tEnd } = target;
-        let finalTDate = new Date(tDate);
-        let [startH, startM] = tStart.split(":").map(Number);
-        let [endH, endM_val] = tEnd.split(":").map(Number);
-
-        let startMs = new Date(finalTDate).setHours(startH, startM, 0, 0);
-        let endMs = scheduleType === "screenshot" ? startMs : new Date(finalTDate).setHours(endH, endM_val, 59, 999);
-        const nowMs = Date.now();
-
-        const isRecurring = scheduleDays.length > 0 || (scheduleMonthDay !== "" && scheduleMonthDay > 0);
-
-        // Recurring: only roll forward when the full window has already passed
-        if (isRecurring && endMs < nowMs) {
-          if (scheduleDays.length > 0) {
-            finalTDate.setDate(finalTDate.getDate() + 7);
-          } else {
-            const dayNum = Number(scheduleMonthDay);
-            let y = finalTDate.getFullYear();
-            let mIdx = finalTDate.getMonth();
-            while (true) {
-              mIdx++;
-              const next = new Date(y, mIdx, dayNum);
-              if (next.getDate() === dayNum) { finalTDate = next; break; }
-            }
-          }
-          startMs = new Date(finalTDate).setHours(startH, startM, 0, 0);
-          endMs = scheduleType === "screenshot" ? startMs : new Date(finalTDate).setHours(endH, endM_val, 59, 999);
-        }
-
-        // ── NEW LOGIC: Notify if time has passed for one-time tasks ──
-        if (!isRecurring && endMs < nowMs) {
-          addPersistentNotification({
-            type: 'warning',
-            title: 'Invalid Schedule',
-            message: `Recording for ${device.name} cannot be set because the time range has already passed.`
-          });
-          return;
-        }
-
-        if (endMs < startMs) return;
-
-        const entryId = `sched-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-        const [sh, sm] = tStart.split(":").map(Number);
-
-
-        // ── CASE: FUTURE TASKS (Delegated to Watchdog) ──────────────────────
-        const entryStatus = startMs > nowMs ? "pending" : (scheduleType === "screenshot" ? "in progress" : "recording");
-        const newEntry: ScheduledRecording = {
-          id: entryId,
-          cameraId: normalizeId(cameraDeviceId),
-          cameraName: device?.name || "Sensor",
-          systemId: systemId,
-          systemName: device?.systemName || "",
-          date: finalTDate,
-          startTime: tStart, // Always use the original intended time string
-
-          endTime: tEnd,
-          startMs: startMs,
-          endMs: endMs,
-          type: scheduleType,
-          status: entryStatus,
-          recurrence: scheduleDays.length > 0 ? "weekday" : (scheduleMonthDay !== "" ? "monthday" : "none"),
-          recurrenceDay: scheduleDays.length > 0 ? undefined : (scheduleMonthDay !== "" ? Number(scheduleMonthDay) : undefined),
-          scheduledBy: scheduleOwner || effectiveUser?.username || "System",
-          batchId,
-        };
-        if (scheduleType === "screenshot") {
-          newEntry.screenshotTime = tStart;
-        }
-
-        newScheduledEntries.push(newEntry);
-        totalTasksScheduled++;
-      });
-    });
-
-    if (totalTasksScheduled > 0) {
+      setScheduleSuccess(scheduleBatchId ? "Policy updated successfully!" : "Policy created successfully!");
+      setPolicies(nextPolicies);
       lastActionTime.current = Date.now();
       
-      const nextSchedules = (() => {
-        let filtered = scheduledRecordings;
-        if (scheduleBatchId) {
-          filtered = scheduledRecordings.filter(r => r.batchId !== scheduleBatchId);
-        } else {
-          // Remove existing matches for same camera/time/type
-          const newIds = new Set(newScheduledEntries.map(n => n.id));
-          const newKeys = new Set(newScheduledEntries.map(n => `${n.cameraId}-${n.startTime}-${n.type}-${new Date(n.date).toDateString()}`));
-          filtered = scheduledRecordings.filter(r => !newIds.has(r.id) && !newKeys.has(`${r.cameraId}-${r.startTime}-${r.type}-${new Date(r.date).toDateString()}`));
-        }
-        return [...filtered, ...newScheduledEntries];
-      })();
+      await saveToPersistence({ policies: nextPolicies });
+      
+      // Reset form fields
+      setPolicyName("");
+      setScheduleCamera("");
+      setScheduleDays([]);
+      setScheduleMonthDay("");
+      setScheduleDates([]);
+      setScheduleTimeRanges([{ start: "09:00", end: "10:00" }]);
+      setScheduleBatchId(null);
 
-      setScheduledRecordings(nextSchedules);
-      await saveToPersistence(nextSchedules, originalSchedules.current);
+      setTimeout(() => {
+        setIsScheduleOpen(false);
+        setScheduleSuccess("");
+        void loadFromPersistence(true);
+      }, 1500);
 
-      const firstCamKey = normalizeId(newScheduledEntries[0]?.cameraId);
-      if (firstCamKey) {
-        setSelectedScheduledCameraId(firstCamKey);
-      }
-
-      // Set up client-side end timers immediately for tasks that start now
-      newScheduledEntries.forEach(entry => {
-        reconcileTimer(entry, nextSchedules);
-      });
-
-      setScheduleSuccess(`Successfully ${scheduleBatchId ? "updated" : "scheduled"} ${totalTasksScheduled} task(s).`);
-      setTimeout(() => setIsScheduleOpen(false), 1500);
-    } else {
-      setScheduleError("No valid times or date selections provided.");
+    } catch (e: any) {
+      setScheduleError(e.message || "Failed to save policy.");
     }
+  };
+
+  const requestDeletePolicy = (policyId: string) => {
+    setPolicyIdToDelete(policyId);
+    setIsDeletePolicyConfirmOpen(true);
+  };
+
+  const confirmDeletePolicy = async () => {
+    if (!policyIdToDelete) return;
+    const policyId = policyIdToDelete;
+    setIsDeletePolicyConfirmOpen(false);
+    setPolicyIdToDelete(null);
+
+    const nextPolicies = policies.filter(p => p.id !== policyId);
+    setPolicies(nextPolicies);
+    lastActionTime.current = Date.now();
+    await saveToPersistence({ policies: nextPolicies });
+    void loadFromPersistence(true);
+  };
+
+  const togglePolicyActive = async (policyId: string) => {
+    const nextPolicies = policies.map(p => {
+      if (p.id === policyId) {
+        return { ...p, inactive: !p.inactive };
+      }
+      return p;
+    });
+    setPolicies(nextPolicies);
+    lastActionTime.current = Date.now();
+    await saveToPersistence({ policies: nextPolicies });
+    void loadFromPersistence(true);
   };
 
   const cancelSchedule = async (id: string, isBatch: boolean = false) => {
@@ -2566,7 +2504,7 @@ export default function CloudRecordings() {
           startMs: nextStartMs,
           endMs: nextEndMs
         } : r);
-        saveToPersistence(next, originalSchedules.current);
+        saveToPersistence({ schedules: next }, originalSchedules.current);
         return next;
       });
       addPersistentNotification({ type: 'info', title: 'Skipped', message: `Skipped to ${format(nextDate, "MMM d, yyyy")}` });
@@ -2597,7 +2535,7 @@ export default function CloudRecordings() {
     scheduleTimers.current.delete(id + "-end");
     setScheduledRecordings(prev => {
       const next = prev.filter(r => r.id !== id);
-      saveToPersistence(next, originalSchedules.current);
+      saveToPersistence({ schedules: next }, originalSchedules.current);
       return next;
     });
   };
@@ -2771,7 +2709,7 @@ export default function CloudRecordings() {
     if (!isRecurring) {
       setScheduledRecordings((prev) => {
         const next = prev.filter((r) => r.id !== rec.id);
-        saveToPersistence(next, originalSchedules.current);
+        saveToPersistence({ schedules: next }, originalSchedules.current);
         return next;
       });
     } else {
@@ -2801,7 +2739,7 @@ export default function CloudRecordings() {
       const next = prev.map((r) =>
         r.id === rec.id ? { ...r, status: "capturing" as const } : r,
       );
-      saveToPersistence(next, originalSchedules.current);
+      saveToPersistence({ schedules: next }, originalSchedules.current);
       return next;
     });
 
@@ -2863,7 +2801,7 @@ export default function CloudRecordings() {
           const next = prev.map((r) =>
             r.id === rec.id ? { ...r, status: "failed" as const } : r,
           );
-          saveToPersistence(next, originalSchedules.current);
+          saveToPersistence({ schedules: next }, originalSchedules.current);
           return next;
         });
         addPersistentNotification({
@@ -3233,45 +3171,44 @@ export default function CloudRecordings() {
               <div className="col-span-full flex items-center justify-between bg-muted/20 p-3 rounded-2xl border">
                 <div className="flex flex-wrap items-center gap-4 px-2 text-xs font-bold uppercase tracking-wider text-slate-500">
                   <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-slate-400" />
-                    <span>Scheduled Cameras: <span className="text-slate-900 font-extrabold">{schedulesByCamera.length}</span></span>
+                    <List className="h-4 w-4 text-slate-400" />
+                    <span>Total Policies: <span className="text-slate-900 font-extrabold">{policies.length}</span></span>
                   </div>
                   <span className="text-slate-300 hidden sm:inline">•</span>
                   <div>
-                    Total Schedules: <span className="text-slate-900 font-extrabold">{visibleScheduledRecordings.length}</span>
+                    Active Runs: <span className="text-slate-900 font-extrabold">{scheduledRecordings.length}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {visibleScheduledRecordings.length > 0 && (
-                    <ScheduleExportDialog
-                      schedules={visibleScheduledRecordings}
-                      systemName={localSystemName || "All Systems"}
-                    />
-                  )}
-                  {isEffectiveAdmin && visibleScheduledRecordings.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => requestCancel(visibleScheduledRecordings.map(r => r.id), true)}
-                      className="h-8 text-[10px] uppercase font-black tracking-widest text-destructive hover:bg-destructive/10 rounded-lg"
-                    >
-                      <Trash2 className="h-3.5 w-3.5 mr-2" />
-                      Cancel All
-                    </Button>
-                  )}
+                  <Button
+                    onClick={() => {
+                      setPolicyName("");
+                      setScheduleCamera("");
+                      setScheduleDays([]);
+                      setScheduleMonthDay("");
+                      setScheduleDates([]);
+                      setScheduleTimeRanges([{ start: "09:00", end: "10:00" }]);
+                      setScheduleBatchId(null);
+                      setIsScheduleOpen(true);
+                    }}
+                    className="h-8 text-[10px] uppercase font-black tracking-widest bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Create Policy
+                  </Button>
                 </div>
               </div>
 
               {/* Master-Detail Split Layout */}
               <div className="grid grid-cols-12 gap-6 min-h-[600px]" style={{ display: 'grid', gridTemplateColumns: '5fr 7fr', gap: '24px' }}>
-                {/* Left Side: Cameras List (5 columns) */}
+                {/* Left Side: Policies List (5 columns) */}
                 <div className="col-span-5 bg-white border rounded-2xl shadow-sm flex flex-col overflow-hidden" style={{ gridColumn: 'span 1' }}>
                   <div className="p-4 border-b space-y-3">
-                    <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Cameras</h3>
+                    <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Recording Policies</h3>
                     <div className="relative">
                       <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                       <Input
-                        placeholder="Search cameras..."
+                        placeholder="Search policies..."
                         value={scheduledSearch}
                         onChange={(e) => setScheduledSearch(e.target.value)}
                         className="h-10 pr-10 text-sm rounded-xl bg-slate-50 border-slate-200 focus:bg-white focus:ring-primary/20 transition-all"
@@ -3280,18 +3217,18 @@ export default function CloudRecordings() {
                   </div>
 
                   <div className="flex-1 overflow-y-auto max-h-[500px] divide-y divide-slate-100">
-                    {schedulesByCamera
-                      .filter(cam => !scheduledSearch || (cam.cameraName || "").toLowerCase().includes(scheduledSearch.toLowerCase()))
-                      .map(cam => {
-                        const isSelected = selectedScheduledCameraId === cam.cameraId;
-                        const runningSchedule = getCameraRunningSchedule(cam.schedules);
-                        const nextRun = getNextRunTime(cam.schedules);
+                    {policies
+                      .filter(p => !scheduledSearch || p.name.toLowerCase().includes(scheduledSearch.toLowerCase()))
+                      .map(p => {
+                        const isSelected = selectedPolicyId === p.id || (!selectedPolicyId && policies[0]?.id === p.id);
+                        if (isSelected && selectedPolicyId !== p.id) {
+                          setSelectedPolicyId(p.id);
+                        }
                         return (
                           <button
-                            key={cam.cameraId}
+                            key={p.id}
                             onClick={() => {
-                              setSelectedScheduledCameraId(cam.cameraId);
-                              setExpandedGroups(new Set());
+                              setSelectedPolicyId(p.id);
                             }}
                             className={cn(
                               "w-full text-left p-4 flex items-center justify-between transition-colors hover:bg-slate-50/50",
@@ -3300,30 +3237,24 @@ export default function CloudRecordings() {
                           >
                             <div className="space-y-1 min-w-0 pr-3">
                               <div className="font-bold text-slate-900 text-sm truncate flex items-center gap-2">
-                                <Camera className="h-4 w-4 text-slate-500 shrink-0" />
-                                {cam.cameraName}
+                                <Archive className="h-4 w-4 text-blue-600 shrink-0" />
+                                {p.name}
+                                {p.inactive && (
+                                  <Badge variant="secondary" className="text-[9px] scale-90 px-1 py-0 bg-slate-100 text-slate-400 font-bold uppercase">
+                                    Disabled
+                                  </Badge>
+                                )}
                               </div>
                               <div className="text-xs text-slate-500 font-medium flex items-center gap-1 flex-wrap">
-                                {runningSchedule ? (
-                                  <>
-                                    <span className="text-slate-600 font-semibold">{cam.schedules.length} schedule(s)</span>
-                                    <span className="text-slate-300">•</span>
-                                    <span className="text-green-600 font-semibold animate-pulse">
-                                      {getRunningNowLabel(runningSchedule)}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="text-slate-600 font-semibold">{cam.schedules.length} schedule(s)</span>
-                                    <span className="text-slate-300">•</span>
-                                    <span className="text-slate-400">Next:</span>
-                                    <span className={cn(
-                                      nextRun !== "No upcoming runs" ? "text-blue-600 font-semibold" : "text-slate-400"
-                                    )}>
-                                      {nextRun}
-                                    </span>
-                                  </>
-                                )}
+                                <Badge className="bg-slate-100 hover:bg-slate-100 text-slate-700 capitalize font-bold text-[9px] px-1 py-0">
+                                  {p.type}
+                                </Badge>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-slate-600 font-semibold">{p.cameras?.length || 0} camera(s)</span>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-slate-500 text-[10px] capitalize">
+                                  {p.recurrence === "weekday" ? "Weekly" : (p.recurrence === "monthday" ? "Monthly" : "One-time")}
+                                </span>
                               </div>
                             </div>
                             <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
@@ -3331,476 +3262,205 @@ export default function CloudRecordings() {
                         );
                       })}
 
-                    {schedulesByCamera.length === 0 && (
+                    {policies.length === 0 && (
                       <div className="p-8 text-center text-muted-foreground flex flex-col items-center justify-center h-full">
-                        <Camera className="h-8 w-8 opacity-40 mb-2" />
-                        <p className="font-bold text-sm">No cameras available</p>
+                        <Archive className="h-8 w-8 opacity-40 mb-2" />
+                        <p className="font-bold text-sm text-slate-700">No Policies Configured</p>
+                        <p className="text-xs text-slate-400 mt-1 max-w-[200px]">Create your first policy to schedule recording tasks.</p>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Right Side: Schedules Details (7 columns) */}
+                {/* Right Side: Policy Details & Upcoming Runs (7 columns) */}
                 <div className="col-span-7 bg-white border rounded-2xl shadow-sm flex flex-col overflow-hidden" style={{ gridColumn: 'span 1' }}>
-                  {selectedScheduledCameraId && schedulesByCamera.some(c => c.cameraId === selectedScheduledCameraId) ? (
-                    (() => {
-                      const selectedCam = schedulesByCamera.find(c => c.cameraId === selectedScheduledCameraId)!;
+                  {(() => {
+                    const activePolicy = policies.find(p => p.id === selectedPolicyId) || policies[0];
+                    if (!activePolicy) {
                       return (
-                        <div className="p-6 flex flex-col min-h-[520px] max-h-[min(720px,70vh)]">
-                          {/* Header */}
-                          <div className="flex items-start justify-between border-b pb-4 shrink-0">
-                            <div className="space-y-1">
-                              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                                <Camera className="h-5 w-5 text-blue-600" />
-                                {selectedCam.cameraName}
-                              </h3>
-                            </div>
-
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  const firstSched = selectedCam.schedules[0];
-                                  setScheduleCamera(`${firstSched?.systemId || selectedSystem}:${selectedCam.cameraId}`);
-                                  setScheduleSystem(firstSched?.systemId || selectedSystem);
-                                  setIsScheduleOpen(true);
-                                }}
-                                className="h-9 px-3 text-xs text-blue-600 hover:bg-blue-50/50 hover:text-blue-700 font-semibold border-slate-200 flex items-center gap-1.5"
-                              >
-                                <Plus className="h-4 w-4 mr-1.5" />
-                                Add Schedule
-                              </Button>
-                              {isEffectiveAdmin && selectedCam.schedules.length > 0 && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => requestCancel(selectedCam.schedules.map(s => s.id), true)}
-                                  className="h-9 px-3 text-xs text-destructive hover:bg-destructive/5 hover:text-destructive font-semibold border-slate-200"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-1.5" />
-                                  Delete All
-                                </Button>
-                              )}
-                            </div>
+                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-slate-50/50">
+                          <div className="bg-slate-100 p-6 rounded-full shadow-inner mb-4">
+                            <Archive className="h-10 w-10 text-slate-400" />
                           </div>
-
-                          {/* Groups List */}
-                          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 pr-2 custom-scrollbar">
-                            {groupedSchedulesForSelectedCamera.length === 0 ? (
-                              <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500 bg-slate-50/30 rounded-2xl border border-dashed border-slate-200/80">
-                                <div className="bg-slate-100/80 p-4 rounded-full mb-3">
-                                  <CalendarIcon className="h-6 w-6 text-slate-400" />
-                                </div>
-                                <p className="font-bold text-slate-700 text-sm">No Active Schedules</p>
-                                <p className="text-xs text-slate-400 max-w-xs mt-1 px-4">
-                                  There are no recording or snapshot schedules configured for this camera. Click "Add Schedule" above to create one.
-                                </p>
-                              </div>
-                            ) : (
-                              groupedSchedulesForSelectedCamera.map((group) => {
-                              const recurrenceText = getRecurrenceText(group);
-                              const first = group.records[0];
-                              const uniqueTimes = Array.from(
-                                new Set(
-                                  group.records.map(r =>
-                                    r.type === "screenshot" ? r.startTime : `${r.startTime} → ${r.endTime}`
-                                  )
-                                )
-                              );
-
-                              const isCollapsed = !expandedScheduleKeys.has(group.key);
-                              const conflictingKeys = getConflictingGroupKeys(group, groupedSchedulesForSelectedCamera);
-                              const isOverlapping = conflictingKeys.length > 0;
-                              const isExplicitlyActive = group.records.some(r => r.isExplicitlyActive === true);
-                              const isExplicitlyInactive = group.records.some(r => r.inactive === true);
-                              
-                              const isGroupInactive = isExplicitlyInactive || (isOverlapping && !isExplicitlyActive);
-
-                              const groupNextRun = getGroupNextRun(group.records);
-                              const groupRunningSchedule = group.records.find((rec) =>
-                                isScheduleRunningNow(rec, isGroupInactive),
-                              );
-                              const uniqueCreators = Array.from(new Set(group.records.map(r => r.scheduledBy).filter(Boolean)));
-                              const canModify = isEffectiveAdmin || group.records.every((rec) => canManageSchedule(effectiveUser, rec));
-
-                              const formatNextRunStr = (d: Date | null) => {
-                                if (isExplicitlyInactive) {
-                                  return "Inactive";
-                                }
-                                if (isGroupInactive) {
-                                  return "Inactive (Overlaps another recording)";
-                                }
-                                if (!d) return "No upcoming runs";
-                                return format(d, "EEE MMM d, HH:mm");
-                              };
-
-                              const handleActivateGroup = (e: React.MouseEvent) => {
-                                e.stopPropagation();
-                                if (!canModify) return;
-                                setScheduledRecordings(prev => {
-                                  const updated = prev.map(rec => {
-                                    const recGroupKey = rec.recurrence === "weekday"
-                                      ? `${rec.type}-weekday-${rec.startTime}-${rec.endTime || ''}`
-                                      : (rec.recurrence === "none"
-                                         ? (rec.batchId || `${rec.type}-none-${rec.date}-${rec.startTime}-${rec.endTime || ''}`)
-                                         : `${rec.type}-${rec.recurrence}-${rec.recurrenceDay || ''}-${rec.startTime}-${rec.endTime || ''}`);
-                                    
-                                    if (recGroupKey === group.key) {
-                                      return { ...rec, inactive: false, isExplicitlyActive: true };
-                                    }
-                                    if (conflictingKeys.includes(recGroupKey)) {
-                                      return { ...rec, inactive: true, isExplicitlyActive: false };
-                                    }
-                                    return rec;
-                                  });
-                                  saveToPersistence(updated, originalSchedules.current);
-                                  return updated;
-                                });
-                                addPersistentNotification({
-                                  type: 'success',
-                                  title: 'Schedule Activated',
-                                  message: `${group.type === "screenshot" ? "Snapshot" : "Video"} schedule has been activated, and conflicting schedules deactivated.`
-                                });
-                              };
-
-                              const handleDeactivateGroup = (e: React.MouseEvent) => {
-                                e.stopPropagation();
-                                if (!canModify) return;
-                                setScheduledRecordings(prev => {
-                                  const updated = prev.map(rec => {
-                                    const recGroupKey = rec.recurrence === "weekday"
-                                      ? `${rec.type}-weekday-${rec.startTime}-${rec.endTime || ''}`
-                                      : (rec.recurrence === "none"
-                                         ? (rec.batchId || `${rec.type}-none-${rec.date}-${rec.startTime}-${rec.endTime || ''}`)
-                                         : `${rec.type}-${rec.recurrence}-${rec.recurrenceDay || ''}-${rec.startTime}-${rec.endTime || ''}`);
-                                    
-                                    if (recGroupKey === group.key) {
-                                      return { ...rec, inactive: true, isExplicitlyActive: false };
-                                    }
-                                    return rec;
-                                  });
-                                  saveToPersistence(updated, originalSchedules.current);
-                                  return updated;
-                                });
-                                addPersistentNotification({
-                                  type: 'info',
-                                  title: 'Schedule Disabled',
-                                  message: `${group.type === "screenshot" ? "Snapshot" : "Video"} schedule has been disabled.`
-                                });
-                              };
-
-                              return (
-                                <div key={group.key} className={cn(
-                                  "p-4 rounded-xl border transition-all space-y-0.5",
-                                  isGroupInactive 
-                                    ? "bg-slate-100/50 border-slate-200/80 opacity-65 text-slate-500 hover:bg-slate-100" 
-                                    : "bg-slate-50/50 border-slate-100 hover:bg-slate-50"
-                                )}>
-                                  <div
-                                    onClick={() => {
-                                      setExpandedScheduleKeys(prev => {
-                                        const next = new Set(prev);
-                                        if (next.has(group.key)) next.delete(group.key);
-                                        else next.add(group.key);
-                                        return next;
-                                      });
-                                    }}
-                                    className="flex items-center justify-between cursor-pointer select-none py-1"
-                                  >
-                                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                      {isCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />}
-                                      <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                        <span className={cn(
-                                          "text-sm font-semibold",
-                                          isGroupInactive ? "text-slate-400 font-medium line-through decoration-slate-300" : "text-slate-700"
-                                        )}>
-                                          {group.type === "screenshot" ? "(Snapshot)" : "(Video)"}
-                                        </span>
-                                        <span className={cn(
-                                          "text-sm font-semibold truncate",
-                                          isGroupInactive ? "text-slate-400 font-medium line-through decoration-slate-300" : "text-slate-700"
-                                        )}>
-                                          {recurrenceText}
-                                        </span>
-                                        <span className="text-xs text-slate-400 font-medium">•</span>
-                                        <span className="text-xs font-bold text-slate-600">
-                                          {group.type === "screenshot" 
-                                            ? `${uniqueTimes.length} time(s)` 
-                                            : uniqueTimes.join(", ")}
-                                        </span>
-                                      </div>
-                                    </div>
-
-                                    {(() => {
-                                      let badgeText = "Active";
-                                      let badgeStyle = "bg-green-50 text-green-700 border border-green-200/50";
-                                      let Icon = CheckCircle2;
-
-                                      if (isOverlapping && !isExplicitlyActive) {
-                                        badgeText = "Overlaps • Requires Attention";
-                                        badgeStyle = "bg-red-50 text-red-500 border border-red-200/50";
-                                        Icon = AlertCircle;
-                                      } else if (isExplicitlyInactive) {
-                                        badgeText = "Disabled";
-                                        badgeStyle = "bg-slate-100 text-slate-600 border border-slate-200";
-                                        Icon = AlertCircle;
-                                      }
-
-                                      return (
-                                        <span className={cn(
-                                          "text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1 ml-2 shrink-0",
-                                          badgeStyle
-                                        )}>
-                                          <Icon className="h-3 w-3 shrink-0" />
-                                          {badgeText}
-                                        </span>
-                                      );
-                                    })()}
-                                  </div>
-
-                                  {!isCollapsed && (
-                                    <>
-                                      <div className="flex flex-wrap items-center gap-2 pt-3 mt-2 border-t border-slate-100">
-                                        {!isGroupInactive ? (
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            disabled={!canModify}
-                                            onClick={handleDeactivateGroup}
-                                            className="h-8 px-3 text-xs gap-1.5 font-bold border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-700"
-                                          >
-                                            <AlertCircle className="h-3.5 w-3.5 text-slate-400" /> Disable
-                                          </Button>
-                                        ) : (
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            disabled={!canModify}
-                                            onClick={handleActivateGroup}
-                                            className="h-8 px-3 text-xs gap-1.5 font-bold border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
-                                          >
-                                            <CheckCircle2 className="h-3.5 w-3.5" /> Enable
-                                          </Button>
-                                        )}
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          disabled={!canModify}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setScheduleCamera(`${first.systemId}:${first.cameraId}`);
-                                            setScheduleSystem(first.systemId);
-                                            setScheduleType(first.type);
-                                            setScheduleBatchId(first.batchId || null);
-                                            setScheduleDates(group.records.map(r => new Date(r.date)));
-                                            const parsedRanges = group.records.map(r => ({
-                                              start: r.startTime,
-                                              end: r.type === "screenshot" ? r.startTime : r.endTime
-                                            }));
-                                            const uniquePairs = Array.from(new Set(parsedRanges.map(r => `${r.start}-${r.end}`)))
-                                              .map(p => {
-                                                const [start, end] = p.split("-");
-                                                return { start, end };
-                                              });
-                                            setScheduleTimeRanges(uniquePairs);
-
-                                            if (first.recurrence === "weekday") {
-                                              setScheduleFrequencyTab("weekly");
-                                              const days = group.records.filter(r => r.recurrence === "weekday").map(r => new Date(r.date).getDay());
-                                              setScheduleDays([...new Set(days)]);
-                                            } else if (first.recurrence === "monthday") {
-                                              setScheduleFrequencyTab("monthly");
-                                              setScheduleMonthDay(first.recurrenceDay || "");
-                                            } else {
-                                              setScheduleFrequencyTab("specific");
-                                              setScheduleDates(group.records.map(r => new Date(r.date)));
-                                            }
-
-                                            setIsScheduleOpen(true);
-                                          }}
-                                          className="h-8 px-3 text-xs gap-1.5 font-bold border-slate-200 text-slate-700 hover:bg-slate-50"
-                                        >
-                                          <Pencil className="h-3 w-3" /> Edit
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          disabled={!canModify}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            requestCancel(group.records.map(r => r.id), true);
-                                          }}
-                                          className="h-8 px-3 text-xs gap-1.5 font-bold border-slate-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-                                        >
-                                          <Trash2 className="h-3 w-3" /> Delete
-                                        </Button>
-                                      </div>
-
-                                      <div className="pl-6 pt-3 space-y-3">
-                                      {group.type === "screenshot" && (
-                                        <div className="space-y-1.5">
-                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Scheduled Times</span>
-                                          <div className="flex flex-wrap gap-2">
-                                            {uniqueTimes.map((time, idx) => (
-                                              <div key={idx} className="bg-white border border-slate-200/80 text-slate-700 px-2.5 py-0.5 rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm">
-                                                <Clock className="h-3 w-3 text-slate-400" />
-                                                {time}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      <div className="flex flex-col gap-1 text-xs text-slate-500 font-medium">
-                                        <div>
-                                          {groupRunningSchedule ? (
-                                            <>
-                                              <span className="font-semibold text-green-700">Status:</span>{" "}
-                                              <span className="text-green-600 font-semibold animate-pulse">
-                                                {getRunningNowLabel(groupRunningSchedule)}
-                                              </span>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <span className="font-semibold text-slate-700">Next Run:</span>{" "}
-                                              {formatNextRunStr(groupNextRun)}
-                                            </>
-                                          )}
-                                        </div>
-                                        <div>
-                                          <span className="font-semibold text-slate-700">Created by:</span> {uniqueCreators.join(", ") || "System"}
-                                        </div>
-                                      </div>
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-                              );
-                            })
-                          )}
-
-                          {/* Recent Results (Last 3 Days) */}
-                          {selectedScheduledCameraRecentResults.length > 0 && (
-                            <div className="pt-6 border-t border-slate-100 mt-6 space-y-4">
-                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                                <Video className="h-3.5 w-3.5 text-slate-400" /> Recent Results (Last 3 Days)
-                              </h4>
-                              <div className="space-y-2">
-                                {selectedScheduledCameraRecentResults.map((result) => (
-                                  <div
-                                    key={result.id}
-                                    className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/30 text-xs font-semibold"
-                                  >
-                                    <div className="flex flex-col gap-1 min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-slate-700">
-                                          {format(new Date(result.startTimeMs), "EEE MMM d, HH:mm")}
-                                        </span>
-                                        <span className="text-slate-400 font-medium">
-                                          ({formatDuration(result.durationMs)})
-                                        </span>
-                                      </div>
-                                      {result.isLocal && result.fileName && (
-                                        <span className="text-[10px] text-slate-400 truncate max-w-[280px]">
-                                          File: {result.fileName}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => handlePreview(result.startTimeMs, result.durationMs, result.systemId, result.deviceId, result.isLocal, result.fileName, result.dateFolder, result.cameraFolderName)}
-                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
-                                        title="Preview"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => handleDownload(result.startTimeMs, result.durationMs, result.systemId, result.deviceId, result.isLocal, result.fileName, result.dateFolder, result.cameraName, result.cameraFolderName, result.isScreenshot)}
-                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
-                                        title="Download"
-                                      >
-                                        <Download className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Recent Errors */}
-                          {errorLogsForSelectedCamera.length > 0 && (
-                            <div className="pt-6 border-t border-slate-100 mt-6 space-y-4">
-                              <h4 className="text-xs font-black uppercase tracking-wider text-red-500 flex items-center gap-1.5">
-                                <AlertCircle className="h-3.5 w-3.5 text-red-500" /> Failed Runs / Errors
-                              </h4>
-                              <div className="space-y-2">
-                                {errorLogsForSelectedCamera.slice(0, 5).map((log) => (
-                                  <div
-                                    key={log.id}
-                                    className="p-3 rounded-xl border border-red-100 bg-red-50/20 text-xs font-semibold text-slate-700 flex flex-col gap-1"
-                                  >
-                                    <div className="flex items-center justify-between">
-                                      <span className="text-[10px] text-red-600 font-bold uppercase tracking-wider">
-                                        Failed
-                                      </span>
-                                      <span className="text-[10px] text-slate-400 font-medium">
-                                        {log.timestamp || (log.createdAtMs ? new Date(log.createdAtMs).toLocaleString() : "")}
-                                      </span>
-                                    </div>
-                                    <p className="text-slate-600 font-medium leading-relaxed">
-                                      {log.message}
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          </div>
-
-                          {/* Upcoming runs */}
-                          {upcomingRunsForSelectedCamera.length > 0 && (
-                            <div className="border-t pt-4 shrink-0">
-                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-                                <CalendarIcon className="h-3.5 w-3.5 text-slate-400" /> Upcoming Runs
-                              </h4>
-                              <div className="space-y-2">
-                                {upcomingRunsForSelectedCamera
-                                  .slice(0, UPCOMING_RUNS_PREVIEW)
-                                  .map((run) => renderUpcomingRunRow(run, true))}
-                              </div>
-                              {upcomingRunsForSelectedCamera.length > UPCOMING_RUNS_PREVIEW && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="mt-2 h-7 px-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100"
-                                  onClick={() => setShowAllUpcomingRuns(true)}
-                                >
-                                  View more ({upcomingRunsForSelectedCamera.length - UPCOMING_RUNS_PREVIEW} more)
-                                </Button>
-                              )}
-                            </div>
-                          )}
+                          <p className="font-bold text-slate-700 text-lg">Select a Policy</p>
+                          <p className="text-sm text-slate-500 max-w-xs">
+                            Choose a policy from the left panel to configure its cameras, schedules, and view its upcoming tasks.
+                          </p>
                         </div>
                       );
-                    })()
-                  ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-slate-50/50">
-                      <div className="bg-slate-100 p-6 rounded-full shadow-inner mb-4">
-                        <Camera className="h-10 w-10 text-slate-400" />
+                    }
+
+                    // Get runs generated by this policy
+                    const policyRuns = scheduledRecordings.filter(r => r.policyId === activePolicy.id);
+
+                    return (
+                      <div className="p-6 flex flex-col min-h-[520px] max-h-[min(720px,70vh)]">
+                        {/* Header */}
+                        <div className="flex items-start justify-between border-b pb-4 shrink-0">
+                          <div className="space-y-1">
+                            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                              <Archive className="h-5 w-5 text-blue-600" />
+                              {activePolicy.name}
+                            </h3>
+                            <p className="text-xs text-slate-500 font-medium">
+                              Type: <span className="font-bold text-slate-700 capitalize">{activePolicy.type}</span> | 
+                              Recurrence: <span className="font-bold text-slate-700 capitalize">
+                                {activePolicy.recurrence === "weekday" ? "Weekly" : (activePolicy.recurrence === "monthday" ? "Monthly" : "One-time")}
+                              </span>
+                            </p>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setPolicyName(activePolicy.name);
+                                setScheduleCamera(activePolicy.cameras.map(c => `${c.systemId}:${normalizeId(c.id)}`).join(","));
+                                setScheduleSystem(activePolicy.cameras[0]?.systemId || selectedSystem);
+                                setScheduleType(activePolicy.type);
+                                setScheduleFrequencyTab(activePolicy.recurrence === "weekday" ? "weekly" : (activePolicy.recurrence === "monthday" ? "monthly" : "specific"));
+                                if (activePolicy.recurrence === "weekday") {
+                                  setScheduleDays(activePolicy.weekdays || []);
+                                } else if (activePolicy.recurrence === "monthday") {
+                                  setScheduleMonthDay(activePolicy.monthDay || "");
+                                } else if (activePolicy.dates) {
+                                  setScheduleDates(activePolicy.dates.map(d => new Date(d)));
+                                }
+                                setScheduleTimeRanges(activePolicy.timeRanges || [{ start: "09:00", end: "10:00" }]);
+                                setScheduleBatchId(activePolicy.id);
+                                setIsScheduleOpen(true);
+                              }}
+                              className="h-9 px-3 text-xs text-blue-600 hover:bg-blue-50/50 hover:text-blue-700 font-semibold border-slate-200 flex items-center gap-1.5"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Edit Policy
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => togglePolicyActive(activePolicy.id)}
+                              className={cn(
+                                "h-9 px-3 text-xs font-semibold border-slate-200",
+                                activePolicy.inactive ? "text-green-600 hover:bg-green-50" : "text-amber-600 hover:bg-amber-50"
+                              )}
+                            >
+                              {activePolicy.inactive ? "Enable" : "Disable"}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => requestDeletePolicy(activePolicy.id)}
+                              className="h-9 px-3 text-xs text-destructive hover:bg-destructive/5 hover:text-destructive font-semibold border-slate-200"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Content scroll area */}
+                        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 pr-2 custom-scrollbar">
+                          {/* Targets list */}
+                          <div className="space-y-3 bg-slate-50/50 p-3.5 rounded-xl border border-slate-100">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                                Assigned Cameras ({activePolicy.cameras?.length || 0})
+                              </span>
+                              {activePolicy.cameras && activePolicy.cameras.length > 5 && (
+                                <div className="relative w-48">
+                                  <Search className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                                  <Input
+                                    placeholder="Filter assigned..."
+                                    value={assignedCameraSearch}
+                                    onChange={(e) => setAssignedCameraSearch(e.target.value)}
+                                    className="h-7 text-[10px] pr-7 rounded-lg bg-white border-slate-200"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 pt-1 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin">
+                              {activePolicy.cameras
+                                ?.filter((cam: any) => 
+                                  !assignedCameraSearch || 
+                                  cam.name.toLowerCase().includes(assignedCameraSearch.toLowerCase())
+                                )
+                                .map((cam: any) => (
+                                  <Badge key={cam.id} className="bg-white border-slate-200 hover:bg-white text-slate-800 font-semibold text-[10px] py-1 px-2.5 shadow-sm rounded-lg flex items-center gap-1">
+                                    <Camera className="h-3 w-3 text-slate-400" />
+                                    {cam.name}
+                                  </Badge>
+                                ))}
+                              {(!activePolicy.cameras || activePolicy.cameras.length === 0) && (
+                                <span className="text-xs text-slate-400 font-medium">No cameras assigned</span>
+                              )}
+                              {activePolicy.cameras && activePolicy.cameras.length > 0 && activePolicy.cameras.filter((cam: any) => cam.name.toLowerCase().includes(assignedCameraSearch.toLowerCase())).length === 0 && (
+                                <span className="text-xs text-slate-400 font-medium italic">No matching cameras found</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Time range details */}
+                          <div className="space-y-1.5 bg-slate-50/50 p-3.5 rounded-xl border border-slate-100">
+                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Scheduled Times</span>
+                            <div className="space-y-1 pt-1">
+                              {activePolicy.timeRanges?.map((range: any, idx: number) => (
+                                <div key={idx} className="text-xs font-semibold text-slate-700 flex items-center gap-2">
+                                  <Clock className="h-3.5 w-3.5 text-slate-400" />
+                                  {activePolicy.type === "screenshot" ? `Snapshot at ${range.start}` : `Recording: ${range.start} to ${range.end}`}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Upcoming generated runs */}
+                          <div className="space-y-3 pt-2">
+                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                              <CalendarDays className="h-3.5 w-3.5 text-slate-400" /> Upcoming Tasks ({policyRuns.length})
+                            </span>
+                            <div className="border border-slate-100 rounded-xl overflow-hidden shadow-sm">
+                              <Table>
+                                <TableHeader className="bg-slate-50/70">
+                                  <TableRow className="hover:bg-transparent border-slate-100">
+                                    <TableHead className="h-9 text-[9px] font-bold uppercase tracking-wider text-slate-400">Camera</TableHead>
+                                    <TableHead className="h-9 text-[9px] font-bold uppercase tracking-wider text-slate-400">Next Scheduled Time</TableHead>
+                                    <TableHead className="h-9 text-[9px] font-bold uppercase tracking-wider text-slate-400">Status</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {policyRuns.slice(0, 10).map((run) => (
+                                    <TableRow key={run.id} className="hover:bg-slate-50/40 border-slate-100">
+                                      <TableCell className="py-2.5 text-xs font-semibold text-slate-800">{run.cameraName}</TableCell>
+                                      <TableCell className="py-2.5 text-xs font-semibold text-slate-600">
+                                        {format(new Date(run.date), "EEE MMM d")} at {run.startTime}
+                                      </TableCell>
+                                      <TableCell className="py-2.5">
+                                        <Badge className={cn(
+                                          "text-[9px] font-bold uppercase scale-90 px-1.5 py-0.5 rounded-md",
+                                          run.status === "recording" || run.status === "in progress" ? "bg-green-100 text-green-700 hover:bg-green-100 animate-pulse" :
+                                          run.status === "failed" ? "bg-red-100 text-red-700 hover:bg-red-100" :
+                                          "bg-blue-100 text-blue-700 hover:bg-blue-100"
+                                        )}>
+                                          {run.status}
+                                        </Badge>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                  {policyRuns.length === 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={3} className="text-center py-6 text-xs text-slate-400 font-medium">
+                                        No upcoming runs generated
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      <p className="font-bold text-slate-700 text-lg">Select a Camera</p>
-                      <p className="text-sm text-slate-500 max-w-xs">
-                        Choose a camera from the list on the left to view, edit, or manage its recording and snapshot schedules.
-                      </p>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             </TabsContent>
@@ -3954,11 +3614,22 @@ export default function CloudRecordings() {
         <DialogContent className="sm:max-w-[500px]" onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {scheduleBatchId ? "Edit Recording Schedule" : "New Recording Schedule"}
+              {scheduleBatchId ? "Edit Recording Policy" : "New Recording Policy"}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-6 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="policyName">Policy Name</Label>
+              <Input
+                id="policyName"
+                placeholder="e.g. Weekend Backup"
+                value={policyName}
+                onChange={(e) => setPolicyName(e.target.value)}
+                className="h-10 text-slate-900 bg-white border-slate-200"
+              />
+            </div>
+
             <SearchableCameraMultiSelect
               value={scheduleCamera}
               onValueChange={handleScheduleSelectDevice}
@@ -4242,6 +3913,34 @@ export default function CloudRecordings() {
                   isSkip ? "bg-sky-500" : "bg-destructive"
                 )}>
                   {isSkip ? "Skip" : "Confirm Removal"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </NoOverlayAlertDialogContent>
+          );
+        })()}
+      </AlertDialog>
+
+      <AlertDialog open={isDeletePolicyConfirmOpen} onOpenChange={setIsDeletePolicyConfirmOpen}>
+        {(() => {
+          const policy = policies.find(p => p.id === policyIdToDelete);
+          return (
+            <NoOverlayAlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-slate-900 flex items-center gap-2">
+                  <Trash2 className="h-5 w-5 text-destructive" />
+                  Delete Recording Policy?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-slate-600">
+                  Are you sure you want to permanently delete the policy <strong>{policy?.name || "this policy"}</strong>?
+                  <div className="mt-2 text-xs opacity-60">
+                    This will delete the policy and cancel all of its generated upcoming execution runs. This action cannot be undone.
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-transparent border-slate-200 text-slate-500 hover:bg-slate-50">Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={confirmDeletePolicy} className="bg-destructive text-white hover:bg-destructive/90">
+                  Delete Policy
                 </AlertDialogAction>
               </AlertDialogFooter>
             </NoOverlayAlertDialogContent>

@@ -16,7 +16,26 @@ export const SCHEDULED_RECORDINGS_FILE = path.join(
 /** @deprecated Use SCHEDULED_RECORDINGS_FILE */
 export const LEGACY_SCHEDULED_FILE = SCHEDULED_RECORDINGS_FILE;
 
+export interface Policy {
+  id: string;
+  name: string;
+  type: "video" | "screenshot";
+  recurrence: "none" | "weekday" | "monthday";
+  recurrenceDay?: number;
+  startTime: string;
+  endTime: string;
+  date?: string; // ISO date string for "none" recurrence
+  cameras: {
+    id: string;
+    name: string;
+    systemId: string;
+    systemName: string;
+  }[];
+  inactive?: boolean;
+}
+
 export interface ScheduledRecordingsData {
+  policies?: Policy[];
   schedules: any[];
   originalSchedules: Record<string, unknown>;
   nxLocationIp?: string;
@@ -27,6 +46,7 @@ export interface ScheduledRecordingsData {
 
 export function emptyScheduledRecordings(): ScheduledRecordingsData {
   return {
+    policies: [],
     schedules: [],
     originalSchedules: {},
   };
@@ -44,6 +64,7 @@ function normalizeScheduledRecordings(data: ScheduledRecordingsData): ScheduledR
   return {
     ...emptyScheduledRecordings(),
     ...data,
+    policies: data.policies || [],
     schedules: data.schedules || [],
     originalSchedules: data.originalSchedules || {},
   };

@@ -1397,6 +1397,17 @@ export async function GET(request: NextRequest) {
   }
 }
 
+function getScheduleTimeBounds(rec: { date: Date; startTime: string; endTime: string; type: string }) {
+  const [sh, sm] = rec.startTime.split(":").map(Number);
+  const startMs = new Date(rec.date).setHours(sh, sm, 0, 0);
+  if (rec.type === "screenshot") {
+    return { startMs, endMs: startMs + 2 * 60 * 1000 };
+  }
+  const [eh, em] = rec.endTime.split(":").map(Number);
+  const endMs = new Date(rec.date).setHours(eh, em, 59, 999);
+  return { startMs, endMs };
+}
+
 export async function POST(request: NextRequest) {
   // Capture the port from the request to help the watchdog make internal calls
   const urlPort = request.nextUrl.port;
@@ -1411,11 +1422,18 @@ export async function POST(request: NextRequest) {
   startWatchdog();
   try {
     const body = await request.json();
-
-    // ── Multi-Tenant Merge Strategy ─────────────────────────────────────────
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      fs.appendFileSync(
+        path.join(process.cwd(), "data", "post_log.txt"),
+        `[${new Date().toISOString()}] POST /scheduled keys: ${Object.keys(body).join(", ")} | policies: ${body.policies?.length ?? 'undefined'} | schedules: ${body.schedules?.length ?? 'undefined'}\n`,
+        "utf8"
+      );
+    } catch (e) {}
     const existingData = await readScheduledRecordings();
 
-    // 2. Identify current user and their rights
+    // Identify current user and their rights
     const { rights, isAdmin: userIsAdmin, username, allowedCameraIds } =
       await getUserResourceRights(
         request,
@@ -1435,89 +1453,155 @@ export async function POST(request: NextRequest) {
       } catch (e) { }
     }
 
-    // Normalize placeholder owners before merge so saves are attributed to the VMS user.
-    if (Array.isArray(body.schedules) && username && username !== "System") {
-      body.schedules = body.schedules.map((s: any) => ({
-        ...s,
-        scheduledBy: normalizeScheduleOwner(s, username),
-      }));
-    }
-
-    // 3. Smart Merge: non-admins may only add/update/delete their own schedules.
-    // Admin users do a full replace; others merge to preserve other users' schedules.
-    if (!userIsAdmin) {
-      const existingById = new Map(
-        (existingData.schedules || []).map((s: any) => [s.id, s]),
-      );
-
-      // Always preserve schedules created by other users.
-      const otherUsersSchedules = (existingData.schedules || []).filter(
-        (s: any) => !isScheduleOwner(s, username)
-      );
-
-      // Accept incoming schedules for the current user (including UI placeholders).
-      const ownIncomingSchedules = (body.schedules || []).filter((s: any) => {
-        const existing = existingById.get(s.id);
-        const ownedViaAuth =
-          !!token && !!existing?.auth && existing.auth === token;
-
-        if (!isIncomingScheduleForUser(s, username) && !ownedViaAuth) {
-          return false;
-        }
-
-        if (ownedViaAuth) {
-          s.scheduledBy = username;
-        }
-
-        return canUserViewSchedule(s, userIsAdmin, allowedCameraIds, rights);
-      });
-
-      body.schedules = [...otherUsersSchedules, ...ownIncomingSchedules];
-
-      // 4. Deduplicate to prevent redundant tasks for the same camera/time/type
-      const seen = new Set();
-      body.schedules = (body.schedules || []).filter((s: any) => {
-        const dateStr = new Date(s.date).toDateString();
-        const key = `${normalizeCameraId(s.cameraId)}-${dateStr}-${s.startTime}-${s.type}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-
-
-      // Merge originalSchedules similarly
-      body.originalSchedules = {
-        ...(existingData.originalSchedules || {}),
-        ...(body.originalSchedules || {})
-      };
-    }
-
-    // ── Update Auth & Metadata ──────────────────────────────────────────────
     const userKey = body.notificationUserKey || request.cookies.get("local_nx_user")?.value || request.cookies.get("nx_cloud_session")?.value;
 
-    if (token) {
-      if (Array.isArray(body.schedules)) {
-        // Assign VMS-verified username and specific auth token to EACH schedule
-        body.schedules = body.schedules.map((s: any) => {
-          const finalUsername = normalizeScheduleOwner(s, username);
-
-          const existingSchedule = (existingData.schedules || []).find((old: any) => old.id === s.id);
-          const isOwner = finalUsername && finalUsername.toLowerCase() === username.toLowerCase();
-
-          // Auto-refresh the token if this user is the owner, otherwise preserve existing
-          const finalAuth = isOwner ? token : (existingSchedule?.auth || token);
-          const finalUserKey = isOwner ? userKey : (existingSchedule?.userKey || userKey);
-
-          return {
-            ...s,
-            scheduledBy: finalUsername,
-            auth: finalAuth,
-            userKey: finalUserKey
-          };
-        });
+    // Defensive check: if the client mistakenly sent flat runs (schedules) in the policies field
+    if (body.policies && Array.isArray(body.policies)) {
+      const containsFlatRuns = body.policies.some((p: any) => p.cameraId || !p.cameras);
+      if (containsFlatRuns) {
+        console.warn("[POST /scheduled] Detected flat runs inside policies payload. Correcting payload.");
+        if (body.schedules === undefined) {
+          body.schedules = body.policies;
+        }
+        body.policies = undefined;
       }
     }
 
+    // ── Policies Merge Strategy ─────────────────────────────────────────────
+    if (body.policies === undefined) {
+      body.policies = existingData.policies || [];
+    }
+
+    if (Array.isArray(body.policies) && username && username !== "System") {
+      body.policies = body.policies.map((p: any) => ({
+        ...p,
+        createdBy: p.createdBy || username,
+      }));
+    }
+
+    let finalPolicies = body.policies || [];
+    if (!userIsAdmin) {
+      const otherUsersPolicies = (existingData.policies || []).filter(
+        (p: any) => p.createdBy && p.createdBy.toLowerCase() !== username.toLowerCase()
+      );
+      const ownIncomingPolicies = (body.policies || []).filter(
+        (p: any) => p.createdBy && p.createdBy.toLowerCase() === username.toLowerCase()
+      );
+      finalPolicies = [...otherUsersPolicies, ...ownIncomingPolicies];
+    }
+    body.policies = finalPolicies;
+    body.originalSchedules = existingData.originalSchedules || {};
+
+    // ── Generate Schedules dynamically from Policies ───────────────────────
+    if (body.schedules === undefined) {
+      const generatedSchedules: any[] = [];
+      const existingSchedules = existingData.schedules || [];
+      const existingMap = new Map(existingSchedules.map((s: any) => [s.id, s]));
+
+      (body.policies || []).forEach((policy: any) => {
+        // 1. Resolve target dates for the policy based on recurrence
+        const targetDates: { date: Date; key: string }[] = [];
+
+        if (policy.recurrence === "weekday" && Array.isArray(policy.weekdays) && policy.weekdays.length > 0) {
+          const now = new Date();
+          policy.weekdays.forEach((dayIndex: number) => {
+            let targetDate = new Date(now);
+            const lastTime = policy.type === "screenshot" ? policy.timeRanges[policy.timeRanges.length - 1].start : policy.timeRanges[policy.timeRanges.length - 1].end;
+            const [lastH, lastM] = (lastTime || "00:00").split(":").map(Number);
+
+            while (true) {
+              const windowEnd = new Date(targetDate).setHours(lastH, lastM, 59, 999);
+              if (targetDate.getDay() === dayIndex && windowEnd >= now.getTime()) break;
+              targetDate.setDate(targetDate.getDate() + 1);
+            }
+            targetDates.push({ date: targetDate, key: `w-${dayIndex}` });
+          });
+        } else if (policy.recurrence === "monthday" && policy.monthDay) {
+          const now = new Date();
+          const targetDayNum = Number(policy.monthDay);
+          let year = now.getFullYear();
+          let monthIdx = now.getMonth();
+          let targetDate = new Date(year, monthIdx, targetDayNum);
+          const lastTime = policy.type === "screenshot" ? policy.timeRanges[policy.timeRanges.length - 1].start : policy.timeRanges[policy.timeRanges.length - 1].end;
+          const [lastH, lastM] = (lastTime || "00:00").split(":").map(Number);
+          const windowEnd = new Date(targetDate).setHours(lastH, lastM, 59, 999);
+
+          if (targetDate.getDate() !== targetDayNum || windowEnd < now.getTime()) {
+            while (true) {
+              monthIdx++;
+              targetDate = new Date(year, monthIdx, targetDayNum);
+              if (targetDate.getDate() === targetDayNum) break;
+            }
+          }
+          targetDates.push({ date: targetDate, key: `m-${targetDayNum}` });
+        } else if (Array.isArray(policy.dates) && policy.dates.length > 0) {
+          policy.dates.forEach((dStr: string) => {
+            targetDates.push({ date: new Date(dStr), key: `d-${dStr}` });
+          });
+        } else if (policy.date) {
+          targetDates.push({ date: new Date(policy.date), key: `once` });
+        } else {
+          targetDates.push({ date: new Date(), key: `once` });
+        }
+
+        // 2. Map all combinations of cameras, target dates, and time ranges to individual runs
+        (policy.cameras || []).forEach((camera: any) => {
+          targetDates.forEach((target) => {
+            (policy.timeRanges || []).forEach((range: any, rangeIdx: number) => {
+              const runId = `run-${policy.id}-${camera.id.replace(/[{}]/g, "").toLowerCase()}-${target.key}-${rangeIdx}`;
+              const existingRun = existingMap.get(runId);
+
+              // Compute time bounds using the policy settings for this range
+              const recTimeObj = {
+                date: target.date,
+                startTime: range.start || "00:00",
+                endTime: range.end || "00:00",
+                type: policy.type
+              };
+              const bounds = getScheduleTimeBounds(recTimeObj);
+
+              // Auto-refresh the token if this user is the owner, otherwise preserve existing
+              const isOwner = policy.createdBy && policy.createdBy.toLowerCase() === username.toLowerCase();
+              const finalAuth = isOwner ? token : (existingRun?.auth || token);
+              const finalUserKey = isOwner ? userKey : (existingRun?.userKey || userKey);
+
+              const run = {
+                id: runId,
+                policyId: policy.id,
+                cameraId: camera.id,
+                cameraName: camera.name,
+                systemId: camera.systemId,
+                systemName: camera.systemName,
+                date: target.date,
+                startTime: range.start || "00:00",
+                endTime: range.end || "00:00",
+                startMs: bounds.startMs,
+                endMs: bounds.endMs,
+                type: policy.type,
+                recurrence: policy.recurrence === "weekday" ? "weekday" : (policy.recurrence === "monthday" ? "monthday" : "none"),
+                recurrenceDay: policy.recurrence === "weekday" ? target.date.getDay() : (policy.recurrence === "monthday" ? target.date.getDate() : undefined),
+                status: existingRun ? existingRun.status : "pending",
+                record: true,
+                inactive: policy.inactive || false,
+                scheduledBy: existingRun ? existingRun.scheduledBy : (policy.createdBy || username || "System"),
+                auth: finalAuth,
+                userKey: finalUserKey,
+                startedAt: existingRun?.startedAt,
+                batchId: existingRun?.batchId || policy.id
+              };
+
+              generatedSchedules.push(run);
+            });
+          });
+        });
+      });
+
+      // Combine with legacy schedules that don't have a policyId
+      const legacySchedules = existingSchedules.filter((s: any) => !s.policyId);
+      body.schedules = [...legacySchedules, ...generatedSchedules];
+    }
+
+    // ── Update Auth & Metadata ──────────────────────────────────────────────
     let nxIp = body.nxLocationIp || request.cookies.get("nx_location_ip")?.value;
     let nxPort = body.nxLocationPort || request.cookies.get("nx_location_port")?.value;
 
