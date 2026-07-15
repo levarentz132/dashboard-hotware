@@ -9,7 +9,7 @@
   "scripts": {
     "redis:ensure": "node scripts/ensure-redis.js",
     "redis:start": "node scripts/start-redis.js",
-    "dev": "npm run redis:start && next dev -p 3081",
+    "dev": "npm run redis:start && next dev -p 3081 -H 0.0.0.0",
     "dev:electron": "electron electron/main.js",
     "build": "next build && node scripts/post-build.js",
     "start": "next start",
