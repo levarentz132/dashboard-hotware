@@ -327,7 +327,14 @@ export async function POST(request: NextRequest) {
     if (identificationId) {
       try {
         // Get VMS credentials from environment (plain-text for dev, decrypt for Electron)
-        const vmsUsername = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
+        let vmsUsername = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
+        console.log(`[Dual-Login] Debug VMS Username: resolved to '${vmsUsername}' (dynamicConfig: '${dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || ""}', env: '${process.env.NEXT_PUBLIC_NX_USERNAME || ""}'). License user is '${username}'.`);
+        
+        // Prevent using License username if it is not the VMS username
+        if (vmsUsername === username && process.env.NEXT_PUBLIC_NX_USERNAME && process.env.NEXT_PUBLIC_NX_USERNAME !== username) {
+          console.log(`[Dual-Login] Overriding VMS username to env default '${process.env.NEXT_PUBLIC_NX_USERNAME}' because it matched license username.`);
+          vmsUsername = process.env.NEXT_PUBLIC_NX_USERNAME;
+        }
         let vmsPassword: string | null = null;
 
         // Try to decrypt if encrypted password exists
