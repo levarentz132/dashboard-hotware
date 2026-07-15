@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Filter,
   X,
+  Download,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useCameras } from "@/hooks/useNxAPI-camera";
@@ -347,6 +348,134 @@ export default function CameraInventory() {
     ? (camerasBySystem.length === 0 && !loadingSync)
     : (displayCameras.length === 0 && !loading);
 
+  const getVisibleCameras = () => {
+    if (viewMode === "cloud") {
+      return (camerasBySystem || []).flatMap((sys) => {
+        return (sys.cameras || []).filter((cam) => {
+          const matchesSearch =
+            !searchTerm ||
+            cam.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            cam.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            cam.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            cam.model?.toLowerCase().includes(searchTerm.toLowerCase());
+
+          const matchesStatus =
+            filterStatus === "all" || cam.status?.toLowerCase() === filterStatus.toLowerCase();
+          const matchesVendor =
+            filterVendor === "all" || cam.vendor?.toLowerCase() === filterVendor.toLowerCase();
+
+          return matchesSearch && matchesStatus && matchesVendor;
+        });
+      });
+    } else {
+      return filteredCameras;
+    }
+  };
+
+  const exportToExcel = async () => {
+    try {
+      const { utils, writeFile } = await import("xlsx");
+      
+      const rows = getVisibleCameras().map((camera) => ({
+        "System Name": camera.systemName || "Local System",
+        "Camera Name": camera.name || "Unnamed Camera",
+        "Camera ID": camera.id || "",
+        "IP Address": camera.ip || camera.url || "",
+        "MAC Address": camera.mac || "",
+        "Vendor": camera.vendor || "-",
+        "Model": camera.model || "-",
+        "Status": camera.status || "Unknown"
+      }));
+
+      const worksheet = utils.json_to_sheet(rows);
+      const workbook = utils.book_new();
+      utils.book_append_sheet(workbook, worksheet, "Cameras");
+
+      // Auto-fit columns
+      const maxLens = Object.keys(rows[0] || {}).reduce((acc: any, key) => {
+        acc[key] = key.length;
+        return acc;
+      }, {});
+      rows.forEach((row: any) => {
+        Object.keys(row).forEach((key) => {
+          const val = String(row[key] || "");
+          if (val.length > maxLens[key]) {
+            maxLens[key] = val.length;
+          }
+        });
+      });
+      worksheet["!cols"] = Object.keys(maxLens).map((key) => ({
+        wch: maxLens[key] + 3
+      }));
+
+      writeFile(workbook, `camera_inventory_${new Date().toISOString().split("T")[0]}.xlsx`);
+    } catch (e) {
+      console.error("Export to Excel failed:", e);
+    }
+  };
+
+  const exportToPdf = async () => {
+    try {
+      const { jsPDF } = await import("jspdf");
+      const { default: autoTable } = await import("jspdf-autotable");
+
+      const doc = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: "a4"
+      });
+
+      // Title
+      doc.setFontSize(18);
+      doc.setTextColor(33, 41, 54);
+      doc.text("Camera Inventory Report", 14, 15);
+      
+      // Date info
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 21);
+
+      // Define table headers and data rows
+      const tableHeaders = [
+        ["System Name", "Camera Name", "Camera ID", "IP / Stream URL", "MAC Address", "Vendor", "Model", "Status"]
+      ];
+
+      const tableData = getVisibleCameras().map((camera) => [
+        camera.systemName || "Local System",
+        camera.name || "Unnamed Camera",
+        camera.id || "",
+        camera.ip || camera.url || "",
+        camera.mac || "",
+        camera.vendor || "-",
+        camera.model || "-",
+        camera.status || "Unknown"
+      ]);
+
+      autoTable(doc, {
+        startY: 25,
+        head: tableHeaders,
+        body: tableData,
+        theme: "striped",
+        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: "bold" },
+        styles: { fontSize: 8, cellPadding: 3 },
+        columnStyles: {
+          0: { cellWidth: 35 },
+          1: { cellWidth: 40 },
+          2: { cellWidth: 50 },
+          3: { cellWidth: 55 },
+          4: { cellWidth: 30 },
+          5: { cellWidth: 20 },
+          6: { cellWidth: 20 },
+          7: { cellWidth: 18 }
+        }
+      });
+
+      doc.save(`camera_inventory_${new Date().toISOString().split("T")[0]}.pdf`);
+    } catch (e) {
+      console.error("Export to PDF failed:", e);
+    }
+  };
+
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Modals */}
@@ -400,6 +529,26 @@ export default function CameraInventory() {
               className={`w-4 h-4 ${loading || loadingCloud ? "animate-spin" : ""}`}
             />
             <span className="font-medium">Refresh</span>
+          </button>
+
+          <button
+            onClick={exportToExcel}
+            disabled={getVisibleCameras().length === 0}
+            className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
+            title="Export filtered cameras to Excel"
+          >
+            <Download className="w-4 h-4" />
+            <span className="font-medium">Export Excel</span>
+          </button>
+
+          <button
+            onClick={exportToPdf}
+            disabled={getVisibleCameras().length === 0}
+            className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
+            title="Export filtered cameras to PDF"
+          >
+            <Download className="w-4 h-4" />
+            <span className="font-medium">Export PDF</span>
           </button>
         </div>
       </div>

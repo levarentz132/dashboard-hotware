@@ -342,10 +342,8 @@ const SearchableCameraSelect = ({
                 <SelectItem value="all" className="rounded-lg focus:bg-blue-50 focus:text-blue-700 font-bold text-primary">
                   All Cameras
                 </SelectItem>
-              )}
-
-              {filteredDevices.length > 0 ? (
-                filteredDevices.map((device: any) => {
+              )}              {filteredDevices.slice(0, 100).length > 0 ? (
+                filteredDevices.slice(0, 100).map((device: any) => {
                   const status = (device.status || "Offline").toLowerCase();
                   const isOnline = status === "online" || status === "recording" || status === "connected";
                   const isOffline = !isOnline;
@@ -363,7 +361,7 @@ const SearchableCameraSelect = ({
                     >
                       <div className="flex items-center justify-between w-full gap-3 pr-2">
                         <div className="flex flex-col min-w-0">
-                          <span className="font-bold text-[13px] truncate text-slate-700">{device.name || device.id}</span>
+                          <span className="font-bold text-[13px] truncate text-slate-750">{device.name || device.id}</span>
                           {device.systemName && (
                             <span className="text-[10px] text-slate-400 font-medium truncate">{device.systemName}</span>
                           )}
@@ -386,6 +384,12 @@ const SearchableCameraSelect = ({
                 <div className="py-8 px-4 text-center">
                   <Camera className="h-8 w-8 text-slate-200 mx-auto mb-2" />
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No matching cameras</p>
+                </div>
+              )}
+
+              {filteredDevices.length > 100 && (
+                <div className="text-[10px] text-slate-400 font-medium px-3 py-2 border-t mt-1 bg-slate-50/50 text-center rounded-lg">
+                  Showing first 100 of {filteredDevices.length} cameras. Search to filter.
                 </div>
               )}
             </div>
@@ -532,8 +536,8 @@ const SearchableCameraMultiSelect = ({
             )}
 
             <div className="max-h-[300px] overflow-y-auto p-1 custom-scrollbar space-y-0.5">
-              {filteredDevices.length > 0 ? (
-                filteredDevices.map((device: any) => {
+              {filteredDevices.slice(0, 100).length > 0 ? (
+                filteredDevices.slice(0, 100).map((device: any) => {
                   const status = (device.status || "Offline").toLowerCase();
                   const isOnline = status === "online" || status === "recording" || status === "connected";
                   const isOffline = !isOnline;
@@ -564,7 +568,7 @@ const SearchableCameraMultiSelect = ({
                       />
                       <div className="flex items-center justify-between flex-1 gap-3 min-w-0 pr-1">
                         <div className="flex flex-col min-w-0">
-                          <span className="font-bold text-[13px] truncate text-slate-700">{device.name || device.id}</span>
+                          <span className="font-bold text-[13px] truncate text-slate-705">{device.name || device.id}</span>
                           {device.systemName && (
                             <span className="text-[10px] text-slate-400 font-medium truncate">{device.systemName}</span>
                           )}
@@ -586,6 +590,12 @@ const SearchableCameraMultiSelect = ({
                 <div className="py-8 px-4 text-center">
                   <Camera className="h-8 w-8 text-slate-200 mx-auto mb-2" />
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No matching cameras</p>
+                </div>
+              )}
+
+              {filteredDevices.length > 100 && (
+                <div className="text-[10px] text-slate-400 font-medium px-3 py-2 border-t mt-1 bg-slate-50/50 text-center rounded-lg">
+                  Showing first 100 of {filteredDevices.length} cameras. Search to filter.
                 </div>
               )}
             </div>

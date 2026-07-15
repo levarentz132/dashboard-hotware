@@ -54,7 +54,7 @@ function decryptPassword(encryptedData: string | null): string | null {
   try {
     const crypto = require('crypto');
     const os = require('os');
-    const machineId = os.hostname() + os.platform() + os.arch();
+    const machineId = "hotware-dashboard-salt-v1-win32-x64-platform-" + os.platform() + os.arch();
     const key = crypto.createHash('sha256').update(machineId).digest();
     const parts = encryptedData.split(':');
     if (parts.length !== 3) return null;

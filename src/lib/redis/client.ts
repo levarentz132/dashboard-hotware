@@ -36,18 +36,29 @@ export function getRedisClient(): Redis | null {
   return client;
 }
 
+let isAvailableCache = false;
+let lastCheckTime = 0;
+
 export async function isRedisAvailable(): Promise<boolean> {
   if (!isRedisEnabled()) return false;
   const redis = getRedisClient();
   if (!redis) return false;
 
+  const now = Date.now();
+  if (now - lastCheckTime < 10000) {
+    return isAvailableCache;
+  }
+
+  lastCheckTime = now;
   try {
-    if (redis.status !== "ready") {
+    if (redis.status !== "ready" && redis.status !== "connecting") {
       await redis.connect();
     }
     const pong = await redis.ping();
-    return pong === "PONG";
+    isAvailableCache = pong === "PONG";
+    return isAvailableCache;
   } catch {
+    isAvailableCache = false;
     return false;
   }
 }

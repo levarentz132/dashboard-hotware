@@ -122,8 +122,7 @@ export function NxVmsLogin() {
 
     useEffect(() => {
         if (licenseError) {
-            console.log("[NxVmsLogin] Detected licenseError in hook:", licenseError);
-            window.alert("[License Error Alert] " + licenseError);
+            console.warn("[NxVmsLogin] Detected licenseError in hook:", licenseError);
         }
     }, [licenseError]);
 

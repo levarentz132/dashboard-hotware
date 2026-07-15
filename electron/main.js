@@ -402,7 +402,7 @@ const os = require('os');
 
 // Derive encryption key from machine-specific data
 function getEncryptionKey() {
-    const machineId = os.hostname() + os.platform() + os.arch();
+    const machineId = "hotware-dashboard-salt-v1-win32-x64-platform-" + os.platform() + os.arch();
     return crypto.createHash('sha256').update(machineId).digest();
 }
 

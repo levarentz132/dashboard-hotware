@@ -63,11 +63,17 @@ async function vmsRequest(
       headers["Authorization"] = `Bearer ${authToken}`;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     const res = await fetch(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
+
     if (!res.ok) {
       const text = await res.text();
       // logger.debug(`[Watchdog] VMS ${method} ${url} failed with status ${res.status}: ${text}`);

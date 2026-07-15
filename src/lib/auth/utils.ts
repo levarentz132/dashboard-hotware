@@ -185,7 +185,7 @@ export function canViewSchedule(
     accessibleCameraIds?: Set<string>,
 ): boolean {
     if (!user) return false;
-    if (isVmsAdmin(user)) return true;
+    if (isAdmin(user)) return true;
     return hasCameraViewPermission(user, schedule.cameraId, accessibleCameraIds);
 }
 
@@ -198,7 +198,7 @@ export function canManageSchedule(
     schedule: { scheduledBy?: string }
 ): boolean {
     if (!user) return false;
-    if (isVmsAdmin(user)) return true;
+    if (isAdmin(user)) return true;
 
     const owner = schedule.scheduledBy?.trim();
     const username = user.username?.trim();

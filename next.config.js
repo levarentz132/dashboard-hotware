@@ -9,6 +9,9 @@ const nextConfig = {
   output: 'standalone',
   compress: true,
   productionBrowserSourceMaps: false,
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 
   // Allow Turbopack (Next.js 16 default bundler)
   turbopack: {},

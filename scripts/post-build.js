@@ -81,6 +81,13 @@ if (fs.existsSync(srcImg)) {
     copyDir(srcImg, destImg);
 }
 
+// Copy node-bin and redis folders to standalone to resolve NFT file references
+console.log('Copying node-bin folder to standalone...');
+copyDir(path.join(projectRoot, 'node-bin'), path.join(serverDir, 'node-bin'));
+
+console.log('Copying redis folder to standalone...');
+copyDir(path.join(projectRoot, 'redis'), path.join(serverDir, 'redis'));
+
 // Verify chunks were copied
 const chunksPath = path.join(destStatic, 'chunks');
 if (fs.existsSync(chunksPath)) {
