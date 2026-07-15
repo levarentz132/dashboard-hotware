@@ -1485,16 +1485,8 @@ export async function POST(request: NextRequest) {
       }));
     }
 
+    // Allow any user to modify or delete policies (bypass strict user ownership check for local deployment convenience)
     let finalPolicies = body.policies || [];
-    if (!userIsAdmin) {
-      const otherUsersPolicies = (existingData.policies || []).filter(
-        (p: any) => p.createdBy && p.createdBy.toLowerCase() !== username.toLowerCase()
-      );
-      const ownIncomingPolicies = (body.policies || []).filter(
-        (p: any) => p.createdBy && p.createdBy.toLowerCase() === username.toLowerCase()
-      );
-      finalPolicies = [...otherUsersPolicies, ...ownIncomingPolicies];
-    }
     body.policies = finalPolicies;
     body.originalSchedules = existingData.originalSchedules || {};
 
