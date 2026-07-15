@@ -337,7 +337,7 @@ export async function POST(request: NextRequest) {
           const crypto = require('crypto');
           const os = require('os');
           try {
-            const machineId = os.hostname() + os.platform() + os.arch();
+            const machineId = "hotware-dashboard-salt-v1-win32-x64-platform-" + os.platform() + os.arch();
             const key = crypto.createHash('sha256').update(machineId).digest();
             const parts = vmsEncrypted.split(':');
             const iv = Buffer.from(parts[0], 'hex');
@@ -369,11 +369,14 @@ export async function POST(request: NextRequest) {
           const nxLocationIp = request.cookies.get("nx_location_ip")?.value || "localhost";
           const nxLocationPort = request.cookies.get("nx_location_port")?.value || "7001";
           
-          const relayLoginUrl = system_id
-            ? `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`
-            : `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`; // Fallback for local
+          // Connect directly to local IP/port if configured, fallback to Cloud Relay only if local IP is not specified
+          const relayLoginUrl = (nxLocationIp && nxLocationIp !== "localhost" && nxLocationIp !== "127.0.0.1")
+            ? `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`
+            : (system_id
+                ? `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`
+                : `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`);
 
-          console.log(`[Dual-Login] Attempting relay login for ${identificationId} with VMS user: ${vmsUsername}`);
+          console.log(`[Dual-Login] Attempting relay login for ${identificationId} with VMS user: ${vmsUsername} via URL: ${relayLoginUrl}`);
 
           const relayResponse = await fetch(relayLoginUrl, {
             method: "POST",

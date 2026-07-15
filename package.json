@@ -12,7 +12,7 @@
     "dev": "npm run redis:start && next dev -p 3081 -H 0.0.0.0",
     "dev:electron": "electron electron/main.js",
     "build": "next build && node scripts/post-build.js",
-    "start": "next start",
+    "start": "node .next/standalone/server.js",
     "lint": "next lint",
     "electron": "electron electron/main.js",
     "dist": "node scripts/ensure-redis.js && node scripts/clean.js && npm run build && npx electron-builder --win --publish always",
