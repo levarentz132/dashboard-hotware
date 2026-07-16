@@ -14,7 +14,85 @@ import {
 import { readCloudSystemsList } from "@/lib/cloud-systems-store";
 import { isCloudSystemsEndpoint } from "@/lib/redis/nx-cache-policy";
 import { getVmsSessionToken, invalidateVmsSessionToken } from "@/lib/vms-auth";
+import https from "https";
+import http from "http";
 
+// Stable HTTP client for local/NVR network requests to bypass Undici socket reset issues
+function stableLocalRequest(urlStr: string, options: any): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(urlStr);
+      const isHttps = url.protocol === "https:";
+      const lib = isHttps ? https : http;
+      
+      const reqHeaders = { ...options.headers };
+      delete reqHeaders['host'];
+      delete reqHeaders['content-length'];
+      delete reqHeaders['connection'];
+
+      const reqOptions: https.RequestOptions = {
+        method: options.method || "GET",
+        headers: reqHeaders,
+        rejectUnauthorized: false,
+        agent: false, // Disable pooling to ensure clean connection closure
+      };
+      
+      const req = lib.request(urlStr, reqOptions, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const body = Buffer.concat(chunks);
+          const responseHeaders = new Headers();
+          Object.entries(res.headers).forEach(([k, v]) => {
+            if (Array.isArray(v)) {
+              v.forEach(val => responseHeaders.append(k, val));
+            } else if (v) {
+              responseHeaders.set(k, v);
+            }
+          });
+          
+          resolve(new Response(body, {
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            headers: responseHeaders,
+          }));
+        });
+      });
+      
+      req.on("error", (err) => {
+        reject(err);
+      });
+      
+      req.setTimeout(25000, () => {
+        req.destroy(new Error("Timeout"));
+      });
+      
+      if (options.body) {
+        req.write(options.body);
+      }
+      req.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+// Wrapper to intercept local requests and execute them stably
+async function customFetch(url: string, options: any): Promise<Response> {
+  const isLocal = url.includes("localhost") || 
+                  url.includes("127.0.0.1") || 
+                  /https?:\/\/(?:\d{1,3}\.){3}\d{1,3}/.test(url);
+  if (isLocal) {
+    try {
+      return await stableLocalRequest(url, options);
+    } catch (err) {
+      console.warn(`[stableLocalRequest] Failed, falling back to standard fetch:`, err);
+    }
+  }
+  return globalThis.fetch(url, options);
+}
+
+const fetch = customFetch;
 
 // Disable SSL certificate validation for local/VMS requests as they are usually self-signed
 if (process.env.NODE_ENV === "development" || process.env.ALLOW_SELF_SIGNED === "true") {
