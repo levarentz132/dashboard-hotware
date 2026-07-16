@@ -238,6 +238,10 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     id.includes(':');
 
   // 2. Assign headers based on token type
+  if (isLocal) {
+    headers["Connection"] = "close";
+  }
+
   if (isGlobal) {
     // For global calls (e.g. /api/systems list or systemId=all), ALWAYS prefer the Cloud token (nxvms.com OAuth)
     if (cloudAuth && cloudAuth !== 'undefined') {

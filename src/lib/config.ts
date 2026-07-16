@@ -93,11 +93,18 @@ function getServerSideConfig(): Record<string, string> {
     }
   }
 
-  // If no Electron config file exists, fallback to standard project .env in current workspace directory!
+  // If no Electron config file exists, fallback to standard project .env in current workspace directory or parent directories!
   if (!configPath || !fs.existsSync(configPath)) {
     const projectEnvPath = path.join(process.cwd(), '.env');
+    const parentEnvPath = path.join(process.cwd(), '..', '.env');
+    const grandParentEnvPath = path.join(process.cwd(), '..', '..', '.env');
+
     if (fs.existsSync(projectEnvPath)) {
       configPath = projectEnvPath;
+    } else if (fs.existsSync(parentEnvPath)) {
+      configPath = parentEnvPath;
+    } else if (fs.existsSync(grandParentEnvPath)) {
+      configPath = grandParentEnvPath;
     }
   }
 
