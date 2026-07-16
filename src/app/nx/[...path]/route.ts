@@ -77,8 +77,14 @@ async function handleRequest(request: NextRequest, method: string) {
         request.headers.forEach((value, key) => {
             const lowerKey = key.toLowerCase();
             if (!['host', 'connection', 'content-length', 'content-encoding', 'transfer-encoding', 'accept-encoding', 'cookie', 'if-none-match', 'if-modified-since'].includes(lowerKey)) {
+                if (lowerKey === 'authorization') {
+                    // Ignore NextAuth dashboard JWT tokens (which typically contain dot separators or start with Bearer eyJ)
+                    if (value.includes('.') || value.startsWith('Bearer eyJ')) {
+                        return;
+                    }
+                    existingAuth = value;
+                }
                 headers[lowerKey] = value;
-                if (lowerKey === 'authorization') existingAuth = value;
             }
         });
         
