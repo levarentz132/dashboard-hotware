@@ -97,10 +97,10 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
     /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$/.test(cleanId) ||
     cleanId.includes(':');
 
-  let isConfiguredLocal = !!(cleanId === localSysId && API_CONFIG.serverHost);
+  let isConfiguredLocal = !!(cleanId && cleanId === localSysId && API_CONFIG.serverHost) || (!cleanId && !!API_CONFIG.serverHost);
 
   // Check cookies or watchdog headers for local system match
-  if (!isDirectAddress && !isConfiguredLocal && request) {
+  if (!isDirectAddress && !isConfiguredLocal && request && cleanId) {
     const localId = request.cookies.get("nx_system_id")?.value ||
       request.cookies.get("nx_server_id")?.value;
     const headerIp = request.headers.get("x-nx-location-ip");
@@ -121,7 +121,7 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
   if (isDirectAddress || isConfiguredLocal) {
     // Resolve host and port
     // If it's a loopback/direct address, we use it as base host, but STILL allow cookie/config overrides
-    let host = (isDirectAddress && cleanId !== 'localhost' && cleanId !== '127.0.0.1') 
+    let host = (isDirectAddress && cleanId !== 'localhost' && cleanId !== '127.0.0.1' && cleanId) 
       ? cleanId 
       : (API_CONFIG.serverHost || 'localhost');
     
@@ -577,6 +577,7 @@ export async function fetchFromCloudApi<T>(
 
     const contentType = response.headers.get("content-type");
     if (contentType && contentType.includes("application/json")) {
+      const responseCloneForError = response.clone();
       try {
         const data = await response.json();
         if (!skipCache && isCacheableNxEndpoint(endpoint, "GET")) {
@@ -589,7 +590,10 @@ export async function fetchFromCloudApi<T>(
         return NextResponse.json(data, { headers: { "X-NX-Cache": "MISS" } });
       } catch (e) {
         console.error(`[Cloud API] JSON Parse Error for ${cloudUrl}:`, e);
-        const text = await response.clone().text();
+        let text = "";
+        try {
+          text = await responseCloneForError.text();
+        } catch (_) {}
         console.warn(`[Cloud API] Raw response body:`, text.substring(0, 500));
         return createFetchErrorResponse("Invalid JSON response from cloud", systemId, systemName, 502);
       }
@@ -822,7 +826,7 @@ async function requestCloudApi<T>(
         return createAuthErrorResponse(systemId, systemName);
       }
     } else if (response.status === 401 || response.status === 403) {
-      const errorText = await response.clone().text();
+      const errorText = await response.text();
       console.warn(`[Cloud API] Auth error (${response.status}) for ${cloudUrl}:`, errorText);
       return createAuthErrorResponse(systemId, systemName);
     }
@@ -852,6 +856,7 @@ async function requestCloudApi<T>(
 
     const contentType = response.headers.get("content-type");
     if (contentType && contentType.includes("application/json")) {
+      const responseCloneForError = response.clone();
       try {
         const data = await response.json();
         if (method !== "GET") {
@@ -859,7 +864,10 @@ async function requestCloudApi<T>(
         }
         return NextResponse.json(data);
       } catch (e) {
-        const text = await response.clone().text();
+        let text = "";
+        try {
+          text = await responseCloneForError.text();
+        } catch (_) {}
         console.warn(`[Cloud API] Raw response body:`, text.substring(0, 500));
         return createFetchErrorResponse("Invalid JSON response from cloud", systemId, systemName, 502);
       }

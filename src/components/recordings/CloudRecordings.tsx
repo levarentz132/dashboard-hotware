@@ -2082,9 +2082,30 @@ export default function CloudRecordings() {
         console.warn("[CloudRecordings] Could not fetch system info:", e);
       }
       setSelectedSystem(localSystemId);
+      loadLocalCameras();
       loadSystems();
     })();
   }, []);
+
+  const loadLocalCameras = async () => {
+    setLoadingDevices(true);
+    setDevices([]);
+    setDevicesReady(false);
+    try {
+      const localCams = await nxAPI.getCameras();
+      const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
+      const mappedLocal = localCams.map(cam => ({
+        id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
+        systemId: localSystemId, systemName: "", // Hiding local system name text as requested
+      }));
+      setDevices(mappedLocal);
+      setDevicesReady(true);
+    } catch (e) {
+      console.warn("[CloudRecordings] Local camera fetch failed:", e);
+    } finally {
+      setLoadingDevices(false);
+    }
+  };
 
   const loadSystems = async () => {
     setLoadingSystems(true);
@@ -2093,7 +2114,7 @@ export default function CloudRecordings() {
     try {
       const data = await fetchCloudSystems();
       setSystems(data);
-      loadAllCameras(data);
+      loadCloudCameras(data);
     } catch (err: any) {
       if (err instanceof CloudAuthError || err.requiresAuth) {
         const localUserCookie = Cookies.get("local_nx_user");
@@ -2102,54 +2123,31 @@ export default function CloudRecordings() {
           setLoadingSystems(false);
           return;
         } else {
-          loadAllCameras([]);
+          loadCloudCameras([]);
         }
       } else {
-        loadAllCameras([]);
+        loadCloudCameras([]);
       }
     } finally {
       setLoadingSystems(false);
     }
   };
 
-  const loadAllCameras = async (cloudSystems: CloudSystem[]) => {
-    setLoadingDevices(true);
-    setDevices([]);
-    setDevicesReady(false);
-
-    // 1. LOCAL FIRST – immediate
-    try {
-      const localCams = await nxAPI.getCameras();
-      const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
-      const mappedLocal = localCams.map(cam => ({
-        id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
-        systemId: localSystemId, systemName: "", // Hiding local system name text as requested
-      }));
-      // Filter local cameras - removed to allow reactive visibility based on enriched user perms
-      // const allowedLocal = mappedLocal.filter(d => hasCameraViewPermission(effectiveUser, d.id));
-      setDevices(mappedLocal);
-      setDevicesReady(true);
-      // Removed auto-selection of first camera to allow user to explicitly "Choose Camera" first. 
-    } catch (e) {
-      console.warn("[CloudRecordings] Local camera fetch failed:", e);
-    }
-
-    // 2. CLOUD – incremental with timeout
+  const loadCloudCameras = async (cloudSystems: CloudSystem[]) => {
+    // CLOUD – incremental with timeout in background
     cloudSystems.forEach(async (system) => {
       try {
         const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "").replace(/[{}]/g, "").toLowerCase();
         if (system.id.replace(/[{}]/g, "").toLowerCase() === localSystemId) return;
         const data = await Promise.race([
           fetchCloudDevices(system.id),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 1500)),
         ]) as any[];
         if (Array.isArray(data)) {
           const cloudMapped = data.map((cam: any) => ({
             id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
             systemId: system.id, systemName: system.name,
           }));
-          // Filter cloud cameras - removed to allow reactive visibility based on enriched user perms
-          // const allowedCloud = cloudMapped.filter(d => hasCameraViewPermission(effectiveUser, d.id));
           setDevices(prev => {
             const existingIds = new Set(prev.map(d => normalizeId(d.id)));
             const newOnes = cloudMapped.filter(d => !existingIds.has(normalizeId(d.id)));
@@ -2160,8 +2158,6 @@ export default function CloudRecordings() {
         console.warn(`[CloudRecordings] Failed to fetch cameras from ${system.name}:`, e);
       }
     });
-
-    setLoadingDevices(false);
   };
 
   const getOriginalDeviceId = (normalizedId: string, devList?: any[]) => {
