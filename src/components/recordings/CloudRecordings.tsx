@@ -2092,7 +2092,15 @@ export default function CloudRecordings() {
     setDevices([]);
     setDevicesReady(false);
     try {
-      const localCams = await nxAPI.getCameras();
+      const response = await fetch("/nx/rest/v3/devices", {
+        headers: {
+          Accept: "application/json",
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Proxy responded with status ${response.status}`);
+      }
+      const localCams = await response.json() as any[];
       const localSystemId = String(process.env.NEXT_PUBLIC_NX_SYSTEM_ID || "127.0.0.1").replace(/[{}]/g, "");
       const mappedLocal = localCams.map(cam => ({
         id: cam.id, name: cam.name, typeId: cam.typeId, status: cam.status,
