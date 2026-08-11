@@ -88,6 +88,18 @@ copyDir(path.join(projectRoot, 'node-bin'), path.join(serverDir, 'node-bin'));
 console.log('Copying redis folder to standalone...');
 copyDir(path.join(projectRoot, 'redis'), path.join(serverDir, 'redis'));
 
+// Copy data folder to standalone to preserve JSON stores, schedules, and recorded screenshots
+console.log('Copying data folder to standalone...');
+copyDir(path.join(projectRoot, 'data'), path.join(serverDir, 'data'));
+
+// Copy .env file to standalone if it exists
+const srcEnv = path.join(projectRoot, '.env');
+const destEnv = path.join(serverDir, '.env');
+if (fs.existsSync(srcEnv)) {
+    console.log('Copying .env file to standalone...');
+    fs.copyFileSync(srcEnv, destEnv);
+}
+
 // Verify chunks were copied
 const chunksPath = path.join(destStatic, 'chunks');
 if (fs.existsSync(chunksPath)) {

@@ -1989,7 +1989,7 @@ export default function CloudRecordings() {
   useEffect(() => {
     if (scheduledRecordings.length === 0) return;
 
-    const pollId = setInterval(loadFromPersistence, 1000);
+    const pollId = setInterval(loadFromPersistence, 15000);
     return () => clearInterval(pollId);
   }, [scheduledRecordings.length > 0]);
 
