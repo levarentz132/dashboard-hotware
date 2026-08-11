@@ -127,6 +127,19 @@ export async function POST(request: NextRequest) {
 
       if (camRes.ok) {
         const camData = await camRes.json();
+        const cameraStatus = String(camData.status || "").toLowerCase();
+        if (cameraStatus && cameraStatus !== "online") {
+          await logScheduledRecordingError({
+            cameraId: cleanDeviceId,
+            cameraName: safeCameraName,
+            systemId: systemId || "",
+            message: `Screenshot failed for camera ${safeCameraName}: Camera is offline (${camData.status})`,
+          });
+          return NextResponse.json(
+            { error: `Camera is offline (${camData.status})` },
+            { status: 503 }
+          );
+        }
         originalSchedule = camData.schedule;
         const sNow = new Date();
         const adjustedNow = timeOffsetMs !== 0 ? new Date(sNow.getTime() + timeOffsetMs) : sNow;
