@@ -3,7 +3,14 @@
 
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import type {
   AuthContextValue,
@@ -35,18 +42,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Helper to get Electron headers
   const getElectronHeaders = useCallback((): Record<string, string> => {
-    const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+    const extConfig =
+      typeof window !== "undefined" ? (window as any).electronConfig : null;
     if (!extConfig) return {};
 
     return {
-      'X-Electron-System-ID': extConfig.NEXT_PUBLIC_NX_SYSTEM_ID || '',
-      'X-Electron-Username': extConfig.NEXT_PUBLIC_NX_USERNAME || '',
-      'X-Electron-VMS-Password': extConfig.NEXT_PUBLIC_NX_PASSWORD || '',
-      'X-Electron-VMS-Password-Encrypted': extConfig.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || '',
-      'X-Electron-Cloud-Username': extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
-      'X-Electron-Cloud-Password': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '',
-      'X-Electron-Cloud-Password-Encrypted': extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '',
-      'X-Electron-Cloud-Token': extConfig.NX_CLOUD_TOKEN || '',
+      "X-Electron-System-ID": extConfig.NEXT_PUBLIC_NX_SYSTEM_ID || "",
+      "X-Electron-Username": extConfig.NEXT_PUBLIC_NX_USERNAME || "",
+      "X-Electron-VMS-Password": extConfig.NEXT_PUBLIC_NX_PASSWORD || "",
+      "X-Electron-VMS-Password-Encrypted":
+        extConfig.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || "",
+      "X-Electron-Cloud-Username":
+        extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || "",
+      "X-Electron-Cloud-Password":
+        extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || "",
+      "X-Electron-Cloud-Password-Encrypted":
+        extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || "",
+      "X-Electron-Cloud-Token": extConfig.NX_CLOUD_TOKEN || "",
     };
   }, []);
 
@@ -56,7 +68,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await fetch(AUTH_ROUTES.API_SESSION, {
         method: "GET",
         headers: {
-          ...getElectronHeaders()
+          ...getElectronHeaders(),
         },
         credentials: "include",
       });
@@ -73,11 +85,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
           isLoading: false,
           error: null,
         });
+
+        // >>> ADDED: if a resumed session (not a fresh login()) lands the user on
+        // the plain root dashboard but their loginSource is actually "cloud",
+        // correct the route. Scoped to root ("/") only so normal navigation to
+        // other pages (e.g. /recordings) is never interrupted.
+        if (
+          typeof window !== "undefined" &&
+          data.user?.loginSource === "cloud" &&
+          window.location.pathname === AUTH_ROUTES.DASHBOARD
+        ) {
+          router.replace(AUTH_ROUTES.DASHBOARD_CLOUD);
+        }
         // (debug logs removed)
       } else if (data.dbError || response.status === 503) {
         // Database error - keep current auth state, don't logout
         // The JWT token is still valid per middleware
-        console.warn("Database temporarily unavailable, keeping current session");
+        console.warn(
+          "Database temporarily unavailable, keeping current session",
+        );
         setState((prev) => ({
           ...prev,
           isLoading: false,
@@ -97,8 +123,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
           });
           // Force full logout to clear cookies and redirect to login
           try {
-            await fetch(AUTH_ROUTES.API_LOGOUT, { method: "POST", credentials: "include" });
-          } catch (_) { /* best-effort */ }
+            await fetch(AUTH_ROUTES.API_LOGOUT, {
+              method: "POST",
+              credentials: "include",
+            });
+          } catch (_) {
+            /* best-effort */
+          }
           if (typeof window !== "undefined") {
             window.location.replace(AUTH_ROUTES.LOGIN);
           }
@@ -122,26 +153,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }));
       return { success: false, isAuthenticated: false };
     }
-  }, []);
+  }, [router]);
 
   // Initial session check
   useEffect(() => {
     let isInitialCheck = true;
-    
+
     const initAuth = async () => {
       // 1. First check if we already have a valid session cookie
       const sessionData = await checkSession();
-      
+
       // 2. If in Electron and not authenticated, attempt Auto-Login using local config
-      const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
+      const extConfig =
+        typeof window !== "undefined" ? (window as any).electronConfig : null;
       if (extConfig && isInitialCheck) {
         // We only attempt auto-login if the session check explicitly failed
         if (sessionData && !sessionData.isAuthenticated) {
-          console.log("[Auth] Electron detected and session invalid, attempting Auto-Login...");
+          console.log(
+            "[Auth] Electron detected and session invalid, attempting Auto-Login...",
+          );
+
+          // This path bypasses NxVmsLogin's button click, so dashboard_variant
+          // never gets set. Auto-login always uses cloud credentials
+          // (NEXT_PUBLIC_NX_CLOUD_USERNAME), so mark it as cloud explicitly
+          // before calling login().
+          if (typeof document !== "undefined") {
+            document.cookie = "dashboard_variant=cloud; path=/; max-age=86400";
+          }
+
           login({
-            username: extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || '',
-            password: 'AUTO_LOGIN_CONTEXT', 
-            system_id: extConfig.NEXT_PUBLIC_NX_SYSTEM_ID
+            username: extConfig.NEXT_PUBLIC_NX_CLOUD_USERNAME || "",
+            password: "AUTO_LOGIN_CONTEXT",
+            system_id: extConfig.NEXT_PUBLIC_NX_SYSTEM_ID,
           });
         }
       }
@@ -155,7 +198,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     if (!state.isAuthenticated) return;
 
-    const interval = setInterval(checkSession, AUTH_CONFIG.SESSION_CHECK_INTERVAL);
+    const interval = setInterval(
+      checkSession,
+      AUTH_CONFIG.SESSION_CHECK_INTERVAL,
+    );
 
     return () => clearInterval(interval);
   }, [state.isAuthenticated, checkSession]);
@@ -178,7 +224,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           try {
             const d = new Date(licenseExpiresAt);
             return !isNaN(d.getTime()) && d < new Date();
-          } catch { return false; }
+          } catch {
+            return false;
+          }
         })()
       : false;
 
@@ -188,11 +236,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       (typeof daysRemaining === "number" && daysRemaining <= 0);
 
     if (isExpired && licenseStatus !== "active") {
-      console.warn("[Auth] License expiry detected in user state. Forcing logout.");
+      console.warn(
+        "[Auth] License expiry detected in user state. Forcing logout.",
+      );
       (async () => {
         try {
-          await fetch(AUTH_ROUTES.API_LOGOUT, { method: "POST", credentials: "include" });
-        } catch (_) { /* best-effort */ }
+          await fetch(AUTH_ROUTES.API_LOGOUT, {
+            method: "POST",
+            credentials: "include",
+          });
+        } catch (_) {
+          /* best-effort */
+        }
         if (typeof window !== "undefined") {
           window.location.replace(AUTH_ROUTES.LOGIN);
         }
@@ -211,18 +266,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const vmsPerms = await nxAPI.getUserPermissions();
         if (vmsPerms) {
-          setState(prev => {
+          setState((prev) => {
             if (!prev.user) return prev;
             return {
               ...prev,
               user: {
                 ...prev.user,
                 vmsPermissions: vmsPerms.permissions,
-                vmsResourceAccessRights: vmsPerms.resourceAccessRights
-              }
+                vmsResourceAccessRights: vmsPerms.resourceAccessRights,
+              },
             };
           });
-          console.log(`[Auth] VMS permissions loaded for ${state.user?.username}`);
+          console.log(
+            `[Auth] VMS permissions loaded for ${state.user?.username}`,
+          );
         }
       } catch (error) {
         console.warn("[Auth] Failed to fetch VMS permissions:", error);
@@ -242,7 +299,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...getElectronHeaders()
+            ...getElectronHeaders(),
           },
           credentials: "include",
           body: JSON.stringify(credentials),
@@ -256,7 +313,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             nxAPI.setSystemId(data.user.system_id);
           }
           // Force sidebar to be collapsed when entering the app
-          if (typeof window !== 'undefined') {
+          if (typeof window !== "undefined") {
             localStorage.setItem("sidebar-collapsed", "true");
           }
           setState({
@@ -265,7 +322,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
             isLoading: false,
             error: null,
           });
-          router.replace(AUTH_ROUTES.DASHBOARD);
+
+          // Redirect ke dashboard sesuai jenis login (Local / NX Cloud).
+          // Penanda "dashboard_variant" diset oleh NxVmsLogin sesaat sebelum
+          // memanggil login() ini — cloud menang kalau keduanya terkoneksi.
+          const variant =
+            typeof window !== "undefined"
+              ? document.cookie.match(
+                  /(?:^|;\s*)dashboard_variant=([^;]+)/,
+                )?.[1]
+              : null;
+          router.replace(
+            variant === "cloud"
+              ? AUTH_ROUTES.DASHBOARD_CLOUD
+              : AUTH_ROUTES.DASHBOARD,
+          );
         } else {
           setState((prev) => ({
             ...prev,
@@ -285,7 +356,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { success: false, message };
       }
     },
-    [router]
+    [router],
   );
 
   // Logout handler

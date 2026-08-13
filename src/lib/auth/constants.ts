@@ -33,16 +33,14 @@ export const AUTH_ROUTES = {
   LOGIN: "/login",
   LOGOUT: "/logout",
   DASHBOARD: "/",
+  DASHBOARD_CLOUD: "/dashboard-cloud",
   API_LOGIN: "/auth/login",
   API_LOGOUT: "/auth/logout",
   API_SESSION: "/auth/session",
   API_REFRESH: "/auth/refresh",
 } as const;
 
-export const PUBLIC_ROUTES = [
-  AUTH_ROUTES.LOGIN,
-  "/auth/login",
-] as const;
+export const PUBLIC_ROUTES = [AUTH_ROUTES.LOGIN, "/auth/login"] as const;
 
 export const AUTH_MESSAGES = {
   LOGIN_SUCCESS: "Login successful",

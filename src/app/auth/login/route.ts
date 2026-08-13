@@ -61,12 +61,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log("[Login] Received body keys:", Object.keys(body), "username:", body.username, "has_password:", !!body.password);
+    console.log(
+      "[Login] Received body keys:",
+      Object.keys(body),
+      "username:",
+      body.username,
+      "has_password:",
+      !!body.password,
+    );
 
     // Validate input
     const validation = loginSchema.safeParse(body);
     if (!validation.success) {
-      console.error("[Login] Zod validation failed:", JSON.stringify(validation.error.flatten().fieldErrors));
+      console.error(
+        "[Login] Zod validation failed:",
+        JSON.stringify(validation.error.flatten().fieldErrors),
+      );
       return NextResponse.json(
         {
           success: false,
@@ -83,10 +93,16 @@ export async function POST(request: NextRequest) {
     // Secure Credentials Interceptor:
     // If the client submits the masked password placeholder "******", resolve and swap in the actual plain-text password securely on the server!
     if (password === "******") {
-      const serverPassword = dynamicConfig?.NEXT_PUBLIC_LICENSE_PASSWORD || process.env.NEXT_PUBLIC_LICENSE_PASSWORD || dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+      const serverPassword =
+        dynamicConfig?.NEXT_PUBLIC_LICENSE_PASSWORD ||
+        process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
+        dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD ||
+        process.env.NEXT_PUBLIC_NX_PASSWORD;
       if (serverPassword) {
         password = serverPassword;
-        console.log("[Login API] Secured Credentials Interceptor: Masked password swapped with actual password on server");
+        console.log(
+          "[Login API] Secured Credentials Interceptor: Masked password swapped with actual password on server",
+        );
       }
     }
 
@@ -101,37 +117,52 @@ export async function POST(request: NextRequest) {
     }
 
     if (!server_id && dynamicConfig?.NEXT_PUBLIC_NX_SERVER_ID) {
-      server_id = (dynamicConfig as any).NEXT_PUBLIC_NX_SERVER_ID.replace(/[{}]/g, "");
+      server_id = (dynamicConfig as any).NEXT_PUBLIC_NX_SERVER_ID.replace(
+        /[{}]/g,
+        "",
+      );
       console.log(`[Login] Using server_id from Electron header: ${server_id}`);
     }
 
     // NEW: Final fallback to server-side dynamicConfig for network clients
     if (!system_id && !server_id && dynamicConfig?.NEXT_PUBLIC_NX_SYSTEM_ID) {
-        system_id = dynamicConfig.NEXT_PUBLIC_NX_SYSTEM_ID.replace(/[{}]/g, "");
-        console.log(`[Login] Using global system_id fallback: ${system_id}`);
+      system_id = dynamicConfig.NEXT_PUBLIC_NX_SYSTEM_ID.replace(/[{}]/g, "");
+      console.log(`[Login] Using global system_id fallback: ${system_id}`);
     }
 
     const identificationId = system_id || server_id;
-    console.log(`[Login Attempt] User: ${username}, SystemID: ${system_id || "None"}, ServerID: ${server_id || "None"}`);
+    console.log(
+      `[Login Attempt] User: ${username}, SystemID: ${system_id || "None"}, ServerID: ${server_id || "None"}`,
+    );
 
     // Only attempt cloud detection when NEITHER system_id NOR server_id is provided.
     // If server_id is already set, we're in local-only mode — skip cloud detection.
     if (!system_id && !server_id) {
-      console.log("[Login] No system_id or server_id in request, attempting cloud detection...");
+      console.log(
+        "[Login] No system_id or server_id in request, attempting cloud detection...",
+      );
       const detectedSystems = await fetchCloudSystems(request);
-      console.log(`[Login] Detected ${detectedSystems.length} systems from cloud`);
+      console.log(
+        `[Login] Detected ${detectedSystems.length} systems from cloud`,
+      );
 
       if (detectedSystems.length > 0) {
-        const onlineSystem = detectedSystems.find((s) => s.stateOfHealth === "online");
+        const onlineSystem = detectedSystems.find(
+          (s) => s.stateOfHealth === "online",
+        );
         system_id = onlineSystem ? onlineSystem.id : detectedSystems[0].id;
-        console.log(`[Login] Auto-detected system_id: ${system_id} (${onlineSystem ? "online" : "fallback"})`);
+        console.log(
+          `[Login] Auto-detected system_id: ${system_id} (${onlineSystem ? "online" : "fallback"})`,
+        );
       }
     }
 
     // 2. Handle Auto-Login or Identity Swap for Electron
     let externalData: any = null;
-    const isAutoLogin = password === 'AUTO_LOGIN_CONTEXT';
-    const localHash = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD || process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
+    const isAutoLogin = password === "AUTO_LOGIN_CONTEXT";
+    const localHash =
+      dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD ||
+      process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD;
 
     if (isAutoLogin && localHash) {
       console.log(`[Login] Executing Identity Swap for ${username}...`);
@@ -140,15 +171,17 @@ export async function POST(request: NextRequest) {
         user: {
           username,
           email: username,
-          role: 'admin',
+          role: "admin",
           system_id,
-          license_status: 'ACTIVE'
-        }
+          license_status: "ACTIVE",
+        },
       };
     } else {
       // Call external API for authentication
       const access_role = system_id ? "owner" : undefined;
-      console.log(`[Login] Authenticating with External API: ${username} @ ${system_id || "Global"}`);
+      console.log(
+        `[Login] Authenticating with External API: ${username} @ ${system_id || "Global"}`,
+      );
       externalData = await callExternalAuthAPI({
         username,
         password,
@@ -167,10 +200,17 @@ export async function POST(request: NextRequest) {
       if (externalData.error_code === "LICENSE_EXPIRED") {
         message = externalData.message || "Lisensi Anda telah berakhir";
         status = 403;
-      } else if (externalData.error_code === "LICENSE_MISMATCH" || externalData.error_code === "SYSTEM_ID_MISMATCH" || externalData.error_code === "SERVER_ID_MISMATCH") {
+      } else if (
+        externalData.error_code === "LICENSE_MISMATCH" ||
+        externalData.error_code === "SYSTEM_ID_MISMATCH" ||
+        externalData.error_code === "SERVER_ID_MISMATCH"
+      ) {
         message = externalData.message || AUTH_MESSAGES.LICENSE_MISMATCH;
         status = 403;
-      } else if (externalData.error_code === "USER_NOT_FOUND" || externalData.error_code === "INVALID_PASSWORD") {
+      } else if (
+        externalData.error_code === "USER_NOT_FOUND" ||
+        externalData.error_code === "INVALID_PASSWORD"
+      ) {
         // Obfuscate specific credential errors for security
         message = AUTH_MESSAGES.LOGIN_FAILED;
         status = 401;
@@ -191,21 +231,31 @@ export async function POST(request: NextRequest) {
 
     // Check if user data exists
     if (!externalData.user) {
-      return NextResponse.json({ success: false, message: "Data pengguna tidak ditemukan" }, { status: 403 });
+      return NextResponse.json(
+        { success: false, message: "Data pengguna tidak ditemukan" },
+        { status: 403 },
+      );
     }
 
     const userData = externalData.user;
 
-    // If the server didn't explicitly return the system_id in the user object, 
+    // If the server didn't explicitly return the system_id in the user object,
     // but the login succeeded and we provided a system_id, trust that it's now associated.
-    if (userData && !userData.system_id && identificationId && (externalData.success || externalData.access_token)) {
+    if (
+      userData &&
+      !userData.system_id &&
+      identificationId &&
+      (externalData.success || externalData.access_token)
+    ) {
       userData.system_id = identificationId;
       console.log(`[Login] Using requested ID: ${identificationId}`);
     }
 
     // Map license status to role for backward compatibility
     const role =
-      userData.role === "admin" || userData.role === "operator" || userData.role === "viewer"
+      userData.role === "admin" ||
+      userData.role === "operator" ||
+      userData.role === "viewer"
         ? (userData.role as any)
         : mapLicenseToRole(userData.license_status || "");
 
@@ -213,7 +263,9 @@ export async function POST(request: NextRequest) {
     const isActive =
       userData.is_active !== false &&
       userData.license_status?.toLowerCase() !== "expired" &&
-      (userData.days_remaining === undefined || userData.days_remaining === null || userData.days_remaining > 0);
+      (userData.days_remaining === undefined ||
+        userData.days_remaining === null ||
+        userData.days_remaining > 0);
 
     // Transform privileges from external API format
     const privileges = (userData.privileges || []).map((p: any) => ({
@@ -246,7 +298,9 @@ export async function POST(request: NextRequest) {
       days_remaining: userData.days_remaining,
       is_active: isActive,
       created_at: new Date(),
-      last_login: userData.last_login ? new Date(userData.last_login) : new Date(),
+      last_login: userData.last_login
+        ? new Date(userData.last_login)
+        : new Date(),
     };
 
     // Check if license is expired or inactive
@@ -254,20 +308,24 @@ export async function POST(request: NextRequest) {
       const message =
         userData.license_status === "expired"
           ? `Lisensi Anda telah habis. Status: ${userData.license_status_display || "Expired"}`
-          : userData.days_remaining !== null && userData.days_remaining !== undefined && userData.days_remaining <= 0
+          : userData.days_remaining !== null &&
+              userData.days_remaining !== undefined &&
+              userData.days_remaining <= 0
             ? `Lisensi Anda telah habis (${userData.license_status_display || "Expired"})`
             : "Akun Anda tidak aktif";
 
       return NextResponse.json({ success: false, message }, { status: 403 });
     }
 
-
     // Use tokens from external API
     const accessToken = externalData.access_token;
     const refreshToken = externalData.refresh_token;
 
     if (!accessToken) {
-      return NextResponse.json({ success: false, message: "Server tidak memberikan token akses" }, { status: 500 });
+      return NextResponse.json(
+        { success: false, message: "Server tidak memberikan token akses" },
+        { status: 500 },
+      );
     }
 
     // Attempt to enrich user data from /me endpoint immediately
@@ -288,18 +346,28 @@ export async function POST(request: NextRequest) {
           created_at: profileData.user.created_at || user.created_at,
           last_login: profileData.user.last_login || (user.last_login as any),
         } as UserPublic;
-        console.log(`[Login] User profile enriched from /me for ${finalUser.username}`);
+        console.log(
+          `[Login] User profile enriched from /me for ${finalUser.username}`,
+        );
       }
     } catch (profileError) {
       console.warn("[Login] Could not enrich profile from /me:", profileError);
       // Proceed with basic user info from login
     }
 
+    // >>> ADDED: resolve login source (cloud/local) from the one-time client cookie
+    // set by NxVmsLogin.tsx just before calling licenseLogin(). This is our source
+    // of truth going forward — persisted as an httpOnly cookie below.
+    const loginSourceFromClient =
+      request.cookies.get("dashboard_variant")?.value;
+    const loginSource: "cloud" | "local" =
+      loginSourceFromClient === "cloud" ? "cloud" : "local";
+
     // Create response with user data
     const response = NextResponse.json({
       success: true,
       message: "Login berhasil",
-      user: finalUser,
+      user: { ...finalUser, loginSource }, // >>> ADDED: attach loginSource to response too
     });
 
     // 1. Establish Dashboard Session
@@ -321,74 +389,121 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // >>> ADDED: persist login source as its own httpOnly cookie, same lifetime as
+    // the refresh token. This survives page refreshes and the periodic checkSession()
+    // interval — unlike dashboard_variant, which was only ever read once.
+    response.cookies.set("login_source", loginSource, {
+      httpOnly: true,
+      secure: isSecureContext(),
+      sameSite: "lax",
+      maxAge: AUTH_CONFIG.COOKIE_REFRESH_MAX_AGE,
+      path: "/",
+    });
 
     // 2. Establish VMS Relay Session (Dual-Login)
     // Use VMS credentials from environment to establish relay session
     if (identificationId) {
       try {
         // Get VMS credentials from environment (plain-text for dev, decrypt for Electron)
-        let vmsUsername = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
-        console.log(`[Dual-Login] Debug VMS Username: resolved to '${vmsUsername}' (dynamicConfig: '${dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || ""}', env: '${process.env.NEXT_PUBLIC_NX_USERNAME || ""}'). License user is '${username}'.`);
-        
+        let vmsUsername =
+          dynamicConfig?.NEXT_PUBLIC_NX_USERNAME ||
+          process.env.NEXT_PUBLIC_NX_USERNAME;
+        console.log(
+          `[Dual-Login] Debug VMS Username: resolved to '${vmsUsername}' (dynamicConfig: '${dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || ""}', env: '${process.env.NEXT_PUBLIC_NX_USERNAME || ""}'). License user is '${username}'.`,
+        );
+
         // Prevent using License username if it is not the VMS username
-        if (vmsUsername === username && process.env.NEXT_PUBLIC_NX_USERNAME && process.env.NEXT_PUBLIC_NX_USERNAME !== username) {
-          console.log(`[Dual-Login] Overriding VMS username to env default '${process.env.NEXT_PUBLIC_NX_USERNAME}' because it matched license username.`);
+        if (
+          vmsUsername === username &&
+          process.env.NEXT_PUBLIC_NX_USERNAME &&
+          process.env.NEXT_PUBLIC_NX_USERNAME !== username
+        ) {
+          console.log(
+            `[Dual-Login] Overriding VMS username to env default '${process.env.NEXT_PUBLIC_NX_USERNAME}' because it matched license username.`,
+          );
           vmsUsername = process.env.NEXT_PUBLIC_NX_USERNAME;
         }
         let vmsPassword: string | null = null;
 
         // Try to decrypt if encrypted password exists
-        const vmsEncrypted = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED;
+        const vmsEncrypted =
+          dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED ||
+          process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED;
         if (vmsEncrypted) {
           // Import decryption function
-          const crypto = require('crypto');
-          const os = require('os');
+          const crypto = require("crypto");
+          const os = require("os");
           try {
-            const machineId = "hotware-dashboard-salt-v1-win32-x64-platform-" + os.platform() + os.arch();
-            const key = crypto.createHash('sha256').update(machineId).digest();
-            const parts = vmsEncrypted.split(':');
-            const iv = Buffer.from(parts[0], 'hex');
-            const authTag = Buffer.from(parts[1], 'hex');
+            const machineId =
+              "hotware-dashboard-salt-v1-win32-x64-platform-" +
+              os.platform() +
+              os.arch();
+            const key = crypto.createHash("sha256").update(machineId).digest();
+            const parts = vmsEncrypted.split(":");
+            const iv = Buffer.from(parts[0], "hex");
+            const authTag = Buffer.from(parts[1], "hex");
             const encrypted = parts[2];
-            const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+            const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
             decipher.setAuthTag(authTag);
-            let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-            decrypted += decipher.final('utf8');
+            let decrypted = decipher.update(encrypted, "hex", "utf8");
+            decrypted += decipher.final("utf8");
             vmsPassword = decrypted;
             console.log(`[Dual-Login] Decrypted VMS password for relay login`);
           } catch (decryptError) {
-            console.warn(`[Dual-Login] Decryption failed, using plain-text fallback`);
+            console.warn(
+              `[Dual-Login] Decryption failed, using plain-text fallback`,
+            );
           }
         }
 
         // Fallback to plain-text password (dev environment or Electron legacy)
         if (!vmsPassword) {
-          const rawPassword = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+          const rawPassword =
+            dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD ||
+            process.env.NEXT_PUBLIC_NX_PASSWORD;
 
-          if (rawPassword && (rawPassword.startsWith('$2b$') || rawPassword.startsWith('$2y$') || rawPassword.length === 60)) {
-            console.warn(`[Dual-Login] Detected bcrypt hash in VMS password field, ignoring for relay login`);
+          if (
+            rawPassword &&
+            (rawPassword.startsWith("$2b$") ||
+              rawPassword.startsWith("$2y$") ||
+              rawPassword.length === 60)
+          ) {
+            console.warn(
+              `[Dual-Login] Detected bcrypt hash in VMS password field, ignoring for relay login`,
+            );
           } else {
             vmsPassword = rawPassword;
           }
         }
 
         if (vmsUsername && vmsPassword) {
-          const nxLocationIp = request.cookies.get("nx_location_ip")?.value || "localhost";
-          const nxLocationPort = request.cookies.get("nx_location_port")?.value || "7001";
-          
-          // Connect directly to local IP/port if configured, fallback to Cloud Relay only if local IP is not specified
-          const relayLoginUrl = (nxLocationIp && nxLocationIp !== "localhost" && nxLocationIp !== "127.0.0.1")
-            ? `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`
-            : (system_id
-                ? `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`
-                : `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`);
+          const nxLocationIp =
+            request.cookies.get("nx_location_ip")?.value || "localhost";
+          const nxLocationPort =
+            request.cookies.get("nx_location_port")?.value || "7001";
 
-          console.log(`[Dual-Login] Attempting relay login for ${identificationId} with VMS user: ${vmsUsername} via URL: ${relayLoginUrl}`);
+          // Connect directly to local IP/port if configured, fallback to Cloud Relay only if local IP is not specified
+          const relayLoginUrl =
+            nxLocationIp &&
+            nxLocationIp !== "localhost" &&
+            nxLocationIp !== "127.0.0.1"
+              ? `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`
+              : system_id
+                ? `https://${system_id}.relay.vmsproxy.com/rest/v3/login/sessions`
+                : `https://${nxLocationIp}:${nxLocationPort}/rest/v3/login/sessions`;
+
+          console.log(
+            `[Dual-Login] Attempting relay login for ${identificationId} with VMS user: ${vmsUsername} via URL: ${relayLoginUrl}`,
+          );
 
           const relayResponse = await fetch(relayLoginUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: vmsUsername, password: vmsPassword, setCookie: true }),
+            body: JSON.stringify({
+              username: vmsUsername,
+              password: vmsPassword,
+              setCookie: true,
+            }),
           });
           if (relayResponse.ok) {
             const relayData = await relayResponse.json();
@@ -401,11 +516,15 @@ export async function POST(request: NextRequest) {
                 secure: isSecureContext(),
                 sameSite: "lax",
               });
-              console.log(`[Dual-Login] ✓ Relay session established for ${system_id} with token: ${relayToken.substring(0, 8)}...`);
+              console.log(
+                `[Dual-Login] ✓ Relay session established for ${system_id} with token: ${relayToken.substring(0, 8)}...`,
+              );
             }
           } else {
             const errorText = await relayResponse.text();
-            console.warn(`[Dual-Login] Relay login failed (${relayResponse.status}): ${errorText}`);
+            console.warn(
+              `[Dual-Login] Relay login failed (${relayResponse.status}): ${errorText}`,
+            );
           }
         } else {
           console.warn(`[Dual-Login] Missing VMS credentials for relay login`);
@@ -418,6 +537,9 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("Login API error:", error);
-    return NextResponse.json({ success: false, message: "Terjadi kesalahan pada server" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, message: "Terjadi kesalahan pada server" },
+      { status: 500 },
+    );
   }
 }

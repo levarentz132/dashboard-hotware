@@ -30,7 +30,7 @@ export default function LoginClient() {
       <NxLocationSettings />
 
       {/* Main Centered Card */}
-      <div className="w-full max-w-md relative z-10">
+      <div className="w-full max-w-4xl relative z-10">
         <NxVmsLogin />
       </div>
     </div>
