@@ -22,6 +22,7 @@ export class NxUserService extends NxServerService {
   }
 
   async getUserPermissions(): Promise<{ permissions: string; resourceAccessRights: Record<string, string> } | null> {
+    if (!this.systemId) return null;
     try {
       return await this.apiRequest<any>("/users/-/permissions", { skipCache: true });
     } catch (error) {

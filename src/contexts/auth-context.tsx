@@ -11,6 +11,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
 import type {
   AuthContextValue,
@@ -264,6 +265,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const fetchVmsPermissions = async () => {
       try {
+        if (!nxAPI.getSystemId()) {
+          const sysId = Cookies.get("nx_system_id") || state.user?.system_id;
+          if (sysId) {
+            nxAPI.setSystemId(sysId);
+          } else {
+            return; // Skip if no systemId available
+          }
+        }
         const vmsPerms = await nxAPI.getUserPermissions();
         if (vmsPerms) {
           setState((prev) => {

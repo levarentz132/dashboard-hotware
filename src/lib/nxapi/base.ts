@@ -64,7 +64,7 @@ export class NxWitnessAPIBase {
     }
   }
 
-  // Get request headers without auth (Nx Witness uses cookies)
+  // Get request headers with auth (extracts from electronConfig or browser cookies)
   protected getHeaders(): Record<string, string> {
     const extConfig = typeof window !== 'undefined' ? (window as any).electronConfig : null;
     const headers: Record<string, string> = {
@@ -81,6 +81,32 @@ export class NxWitnessAPIBase {
       headers['X-Electron-Cloud-Password'] = extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD || '';
       headers['X-Electron-Cloud-Password-Encrypted'] = extConfig.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || '';
       headers['X-Electron-Cloud-Token'] = extConfig.NX_CLOUD_TOKEN || '';
+    }
+
+    // Extract cloud OAuth token and local session token from browser cookies if extConfig is not present
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      try {
+        const cookieStr = document.cookie || '';
+        const cloudMatch = cookieStr.match(/(?:^|;\s*)nx_cloud_session=([^;]+)/);
+        if (cloudMatch) {
+          const session = JSON.parse(decodeURIComponent(cloudMatch[1]));
+          const cloudToken = session?.accessToken || session?.token;
+          if (cloudToken && !headers['X-Electron-Cloud-Token']) {
+            headers['X-Electron-Cloud-Token'] = cloudToken;
+            if (!headers['Authorization']) {
+              headers['Authorization'] = `Bearer ${cloudToken}`;
+            }
+          }
+        }
+
+        const localMatch = cookieStr.match(/(?:^|;\s*)local_nx_user=([^;]+)/);
+        if (localMatch) {
+          const user = JSON.parse(decodeURIComponent(localMatch[1]));
+          if (user?.token && !headers['x-runtime-guid']) {
+            headers['x-runtime-guid'] = user.token;
+          }
+        }
+      } catch (_) {}
     }
 
     return headers;
@@ -212,6 +238,8 @@ export class NxWitnessAPIBase {
           // Use debug for 404s (expected when endpoint not available), error for others
           if (response.status === 404) {
             console.debug(`[apiRequest] ${endpoint}: 404 Not Found`);
+          } else if (response.status === 403) {
+            console.warn(`[apiRequest 403 FORBIDDEN] Endpoint: ${endpoint} | SystemID: ${this.systemId} | HeadersSent:`, Object.keys(configHeaders), "| Response:", errorText);
           } else {
             console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
           }

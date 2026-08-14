@@ -296,26 +296,54 @@ export function getCloudAuthHeader(request?: Request | NextRequest): string {
     return ""; // Auth header should be handled by the server proxy
   }
 
+  // 1. Check client request headers
+  if (request) {
+    const headers = (request as NextRequest).headers;
+    const headerToken =
+      headers?.get("x-electron-cloud-token") ||
+      headers?.get("x-cloud-token") ||
+      headers?.get("authorization");
+
+    if (headerToken && headerToken !== "undefined" && headerToken.length > 20) {
+      if (headerToken.toLowerCase().startsWith("bearer ")) return headerToken;
+      // Skip dashboard jwt tokens if they start with Bearer eyJ
+      if (!headerToken.startsWith("Bearer eyJ")) {
+        return `Bearer ${headerToken}`;
+      }
+    }
+  }
+
   const dynamicConfig = getDynamicConfig(request);
 
-  // 1. Prefer static env / Electron-injected token
+  // 2. Prefer static env / Electron-injected token
   const token = dynamicConfig?.NX_CLOUD_TOKEN || process.env.NX_CLOUD_TOKEN;
   if (token && token !== 'undefined' && token.length > 20) {
     if (token.toLowerCase().startsWith('bearer ')) return token;
     return `Bearer ${token}`;
   }
 
-  // 2. Fall back to the OAuth token stored in the nx_cloud_session cookie
-  //    This is set by the browser-side OAuth flow in NxAuthentication
+  // 3. Fall back to the OAuth token stored in the nx_cloud_session cookie
   if (request) {
+    const nextReq = request as NextRequest;
+    const sessionCookie = nextReq.cookies?.get?.("nx_cloud_session")?.value;
+    if (sessionCookie) {
+      try {
+        const session = JSON.parse(decodeURIComponent(sessionCookie));
+        const accessToken = session?.accessToken || session?.token;
+        if (accessToken && accessToken.length > 20) {
+          return accessToken.toLowerCase().startsWith("bearer ") ? accessToken : `Bearer ${accessToken}`;
+        }
+      } catch {}
+    }
+
     try {
       const cookieHeader = (request as NextRequest).headers?.get('cookie') || '';
       const match = cookieHeader.match(/(?:^|;\s*)nx_cloud_session=([^;]+)/);
       if (match) {
         const session = JSON.parse(decodeURIComponent(match[1]));
-        const accessToken = session?.accessToken;
+        const accessToken = session?.accessToken || session?.token;
         if (accessToken && accessToken.length > 20) {
-          return `Bearer ${accessToken}`;
+          return accessToken.toLowerCase().startsWith("bearer ") ? accessToken : `Bearer ${accessToken}`;
         }
       }
     } catch {

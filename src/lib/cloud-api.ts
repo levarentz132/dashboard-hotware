@@ -320,19 +320,15 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     headers["Connection"] = "close";
   }
 
-  if (isGlobal) {
-    // For global calls (e.g. /api/systems list or systemId=all), ALWAYS prefer the Cloud token (nxvms.com OAuth)
-    if (cloudAuth && cloudAuth !== 'undefined') {
-      headers["Authorization"] = cloudAuth.toLowerCase().startsWith('bearer ')
-        ? cloudAuth
-        : `Bearer ${cloudAuth}`;
-    } else if (localToken && localToken !== 'undefined') {
-      const rawToken = localToken.toLowerCase().startsWith('bearer ')
-        ? localToken.substring(7).trim()
-        : localToken.trim();
-      headers["Authorization"] = `Bearer ${rawToken}`;
-    }
-  } else if (localToken && localToken !== 'undefined' && localToken !== 'SERVER_MANAGED') {
+  // Priority 1: If cloudAuth is available, set Authorization header for cloud/relay routing
+  if (cloudAuth && cloudAuth !== 'undefined' && cloudAuth !== 'SERVER_MANAGED') {
+    headers["Authorization"] = cloudAuth.toLowerCase().startsWith('bearer ')
+      ? cloudAuth
+      : `Bearer ${cloudAuth}`;
+  }
+
+  // Priority 2: If localToken is available, set x-runtime-guid for VMS server auth (and fallback Authorization if local or no cloudAuth)
+  if (localToken && localToken !== 'undefined' && localToken !== 'SERVER_MANAGED') {
     const rawToken = localToken.toLowerCase().startsWith('bearer ')
       ? localToken.substring(7).trim()
       : localToken.trim();
@@ -341,18 +337,14 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
     if (!headers["Authorization"] || isLocal) {
       headers["Authorization"] = `Bearer ${rawToken}`;
     }
-  } else if (cloudAuth && cloudAuth !== 'undefined' && cloudAuth !== 'SERVER_MANAGED') {
-    headers["Authorization"] = cloudAuth.toLowerCase().startsWith('bearer ')
-      ? cloudAuth
-      : `Bearer ${cloudAuth}`;
-  } else {
-    // 3. SERVER-SIDE FALLBACK (Shared Credentials)
-    // If no client-side session token is found, fallback to the server's own credentials
+  }
+
+  // Priority 3: Fallback to basic auth or cookies if no authorization header present
+  if (!headers["Authorization"]) {
     const basicAuth = getBasicAuthHeaderFromRequest(request);
     if (basicAuth) {
       headers["Authorization"] = basicAuth;
     } else {
-      // console.warn(`[Cloud Auth] No session or shared credentials found for ${systemId}`);
       const cookies = request.headers.get("cookie") || "";
       if (cookies) {
         headers.Cookie = cookies;
@@ -419,8 +411,28 @@ export function validateSystemId(request: NextRequest): { systemId: string | nul
   const searchParams = request.nextUrl.searchParams;
   let systemId = searchParams.get("systemId");
 
-  if (!systemId) {
+  if (!systemId && request) {
     systemId = request.headers.get('x-electron-system-id');
+  }
+
+  if (!systemId && request) {
+    systemId = request.cookies.get("nx_system_id")?.value ||
+               request.cookies.get("nx_server_id")?.value || null;
+
+    if (!systemId) {
+      try {
+        const cookieHeader = request.headers?.get('cookie') || '';
+        const match = cookieHeader.match(/(?:^|;\s*)nx_cloud_session=([^;]+)/);
+        if (match) {
+          const session = JSON.parse(decodeURIComponent(match[1]));
+          systemId = session?.ownerSystemId || session?.systemId || null;
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (!systemId && API_CONFIG.systemId) {
+    systemId = API_CONFIG.systemId;
   }
 
   // If systemId is a loopback/local placeholder, try to use the preconfigured host as the systemId
@@ -489,12 +501,13 @@ export async function fetchFromCloudApi<T>(
     // token will always be rejected with 403. Skip the call entirely if we only have local creds.
     const cloudAuthToken = getCloudAuthHeader(request);
     if (isCloudBound && !cloudAuthToken) {
-      // logger.debug(`[Cloud API] Skipping cloud call to ${endpoint} — no NX Cloud token available (local NVR mode).`);
+      console.warn(`[Cloud API AUTH BLOCKED] Endpoint: ${endpoint} | SystemID: ${systemId} | Reason: Missing NX Cloud OAuth token in headers and cookies.`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
     // Only block if it looks like a cloud-bound request (nxvms.com or vmsproxy.com)
     if (!hasAuth && isCloudBound) {
+      console.warn(`[Cloud API AUTH BLOCKED] Endpoint: ${endpoint} | SystemID: ${systemId} | Reason: No Authorization header set.`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
@@ -521,70 +534,102 @@ export async function fetchFromCloudApi<T>(
       }
     }
 
-    return (await singleFlightNxRequest(flightKey, async () => {
+    const result = await singleFlightNxRequest(flightKey, async () => {
       const storedEntry: CloudApiCacheEntry | null =
         !skipCache && isCacheableNxEndpoint(endpoint, "GET")
           ? await readCloudApiCache(cacheKey)
           : null;
 
-    const fetchHeaders = { ...headers };
-    if (!skipCache && storedEntry?.etag) {
-      fetchHeaders["If-None-Match"] = storedEntry.etag;
-    }
-    if (!skipCache && storedEntry?.lastModified) {
-      fetchHeaders["If-Modified-Since"] = storedEntry.lastModified;
-    }
-
-    let response = await fetch(cloudUrl, {
-      method: "GET",
-      headers: fetchHeaders,
-      redirect: "manual",
-    });
-
-    // Handle temporary redirects (301, 302, 307, 308)
-    if ([301, 302, 307, 308].includes(response.status)) {
-      const location = response.headers.get("location");
-      if (location) {
-        response = await fetch(location, {
-          method: "GET",
-          headers: fetchHeaders,
-        });
+      const fetchHeaders = { ...headers };
+      if (!skipCache && storedEntry?.etag) {
+        fetchHeaders["If-None-Match"] = storedEntry.etag;
       }
-    }
-
-    // Handle 304 Not Modified — serve from Redis when possible
-    if (response.status === 304) {
-      const cached304 = storedEntry ?? (await readCloudApiCache(cacheKey));
-      if (cached304 && !skipCache) {
-        return NextResponse.json(cached304.data as T, {
-          headers: { "X-NX-Cache": "HIT", "X-NX-Cache-Source": "304" },
-        });
+      if (!skipCache && storedEntry?.lastModified) {
+        fetchHeaders["If-Modified-Since"] = storedEntry.lastModified;
       }
-      return new NextResponse(null, {
-        status: 304,
-        headers,
+
+      let response = await fetch(cloudUrl, {
+        method: "GET",
+        headers: fetchHeaders,
+        redirect: "manual",
       });
-    }
 
-    // Check if this is an NX server endpoint (REST v3/v4 or legacy /api)
-    const isNxEndpoint = endpoint.startsWith("/rest/v3") || endpoint.startsWith("/rest/v4") || endpoint.startsWith("/api/");
-    // isCloudBound already declared above
-    const isRelay = cloudUrl.includes(".relay.vmsproxy.com");
-    
-    // We retry for relay connections or local direct connections (non-cloud bound)
-    const isLocalOrRelay = isRelay || !isCloudBound || (systemName?.toLowerCase().includes("local server"));
+      // Handle temporary redirects (301, 302, 307, 308)
+      if ([301, 302, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (location) {
+          response = await fetch(location, {
+            method: "GET",
+            headers: fetchHeaders,
+          });
+        }
+      }
 
-    // Retry once when session token is rejected (401/403)
-    if ((response.status === 401 || response.status === 403) && (isNxEndpoint || isLocalOrRelay)) {
-      const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
-      if (!isCloudBound) {
+      // Handle 304 Not Modified — serve from Redis when possible
+      if (response.status === 304) {
+        const cached304 = storedEntry ?? (await readCloudApiCache(cacheKey));
+        if (cached304 && !skipCache) {
+          return NextResponse.json(cached304.data as T, {
+            headers: { "X-NX-Cache": "HIT", "X-NX-Cache-Source": "304" },
+          });
+        }
+        return new NextResponse(null, {
+          status: 304,
+          headers,
+        });
+      }
+
+      // Handle 401/403 auth failures
+      if (response.status === 401 || response.status === 403) {
+        console.warn(`[Cloud API 403/401 REJECTED] Endpoint: ${endpoint} | SystemID: ${systemId} | URL: ${cloudUrl} | Status: ${response.status} | Authorization Header Present: ${!!headers["Authorization"]} | LocalToken Present: ${!!headers["x-runtime-guid"]}`);
+
+        // Try automatic VMS session login for cloud relay endpoints
         const { username, password } = getCloudCredentials(request);
-        if (username) {
+        if (username && password && systemId && systemId !== "all" && isCloudBound) {
+          try {
+            const loginUrl = `https://${systemId}.relay.vmsproxy.com/rest/v3/login/sessions`;
+            const cloudAuth = getCloudAuthHeader(request);
+            const loginHeaders: Record<string, string> = {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            };
+            if (cloudAuth) {
+              loginHeaders["Authorization"] = cloudAuth;
+            }
+
+            console.log(`[Cloud Relay Auth] Attempting auto-login for system ${systemId} as user '${username}'...`);
+            const loginRes = await fetch(loginUrl, {
+              method: "POST",
+              headers: loginHeaders,
+              body: JSON.stringify({ username, password, setCookie: true }),
+            });
+
+            if (loginRes.ok) {
+              const loginData = await loginRes.json();
+              if (loginData?.token) {
+                console.log(`[Cloud Relay Auth] Successfully authenticated to system ${systemId}`);
+                const retryHeaders = { ...headers };
+                retryHeaders["x-runtime-guid"] = loginData.token;
+
+                response = await fetch(cloudUrl, {
+                  method: "GET",
+                  headers: retryHeaders,
+                  redirect: "manual",
+                });
+              }
+            } else {
+              const loginErr = await loginRes.text();
+              console.warn(`[Cloud Relay Auth] Login failed for system ${systemId}:`, loginErr);
+            }
+          } catch (e) {
+            console.warn(`[Cloud Relay Auth Error] Exception during auto-login for system ${systemId}:`, e);
+          }
+        } else if (!isCloudBound && username) {
+          // For local direct NVR connections, try refreshing the local session token
           try {
             const parsedUrl = new URL(cloudUrl);
             const host = parsedUrl.hostname;
             const port = parsedUrl.port || "7001";
-            console.log(`[Cloud API] Auth failed (401/403). Invalidating cached token for ${username} at ${host}:${port} and retrying with fresh token...`);
             await invalidateVmsSessionToken(host, port, username);
             const freshToken = await getVmsSessionToken(host, port, username, password);
             if (freshToken) {
@@ -593,17 +638,7 @@ export async function fetchFromCloudApi<T>(
               retryHeaders["x-runtime-guid"] = freshToken;
               delete retryHeaders["x-nx-session"];
               delete retryHeaders["x-runtime-session-guid"];
-              
-              response = await fetch(cloudUrl, {
-                method: "GET",
-                headers: retryHeaders,
-                redirect: "manual",
-              });
-            } else if (basicAuthHeader) {
-              const retryHeaders: Record<string, string> = { ...headers, Authorization: basicAuthHeader };
-              delete retryHeaders["x-runtime-guid"];
-              delete retryHeaders["x-nx-session"];
-              delete retryHeaders["x-runtime-session-guid"];
+
               response = await fetch(cloudUrl, {
                 method: "GET",
                 headers: retryHeaders,
@@ -611,80 +646,58 @@ export async function fetchFromCloudApi<T>(
               });
             }
           } catch (e) {
-            // fallback if URL parsing or network fails
+            // Fall through to auth error response
           }
         }
-      } else if (basicAuthHeader) {
-        const retryHeaders: Record<string, string> = {
-          ...headers,
-          Authorization: basicAuthHeader,
-        };
-        delete retryHeaders["x-runtime-guid"];
-        delete retryHeaders["x-nx-session"];
-        delete retryHeaders["x-runtime-session-guid"];
 
-        response = await fetch(cloudUrl, {
-          method: "GET",
-          headers: retryHeaders,
-          redirect: "manual",
-        });
-      }
-      
-      if (response.status === 401 || response.status === 403) {
-        return createAuthErrorResponse(systemId, systemName);
-      }
-    } else if (response.status === 401 || response.status === 403) {
-      return createAuthErrorResponse(systemId, systemName);
-    }
-
-
-    // Handle other errors
-    if (!response.ok) {
-      const errorText = await response.text();
-      const status = response.status;
-
-      if ([502, 503, 504].includes(status)) {
-        // console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
-      } else {
-        // console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
-      }
-
-      return createFetchErrorResponse(
-        `Failed to fetch from ${systemName || systemId}`,
-        systemId,
-        systemName,
-        status
-      );
-    }
-
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
-      const responseCloneForError = response.clone();
-      try {
-        const data = await response.json();
-        if (!skipCache && isCacheableNxEndpoint(endpoint, "GET")) {
-          await afterCloudApiGetCached(systemId, endpoint, cacheKey, data, response.status, {
-            etag: response.headers.get("etag") ?? undefined,
-            lastModified: response.headers.get("last-modified") ?? undefined,
-            authFingerprint: authFp,
-          });
+        if (response.status === 401 || response.status === 403) {
+          return createAuthErrorResponse(systemId || "", systemName || undefined);
         }
-        return NextResponse.json(data, { headers: { "X-NX-Cache": "MISS" } });
-      } catch (e) {
-        console.error(`[Cloud API] JSON Parse Error for ${cloudUrl}:`, e);
-        let text = "";
-        try {
-          text = await responseCloneForError.text();
-        } catch (_) {}
-        console.warn(`[Cloud API] Raw response body:`, text.substring(0, 500));
-        return createFetchErrorResponse("Invalid JSON response from cloud", systemId, systemName, 502);
       }
-    }
 
-    const text = await response.text();
-    // console.warn(`[Cloud API] Non-JSON response from ${cloudUrl}:`, text.substring(0, 200));
-    return NextResponse.json({ success: true, message: "Request successful (non-JSON)" } as unknown as T);
-    })) as NextResponse<T | CloudApiError>;
+      // Handle other errors
+      if (!response.ok) {
+        const errorText = await response.text();
+        const status = response.status;
+
+        if ([502, 503, 504].includes(status)) {
+          // console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
+        } else {
+          // console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
+        }
+
+        return createFetchErrorResponse(
+          `Failed to fetch from ${systemName || systemId}`,
+          systemId,
+          systemName,
+          status
+        );
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        try {
+          const text = await response.text();
+          const data = text && text.trim() ? JSON.parse(text) : {};
+          if (!skipCache && isCacheableNxEndpoint(endpoint, "GET")) {
+            await afterCloudApiGetCached(systemId, endpoint, cacheKey, data, response.status, {
+              etag: response.headers.get("etag") ?? undefined,
+              lastModified: response.headers.get("last-modified") ?? undefined,
+              authFingerprint: authFp,
+            });
+          }
+          return NextResponse.json(data, { headers: { "X-NX-Cache": "MISS" } });
+        } catch (e) {
+          console.error(`[Cloud API] JSON Parse Error for ${cloudUrl}:`, e);
+          return createFetchErrorResponse("Invalid JSON response from cloud", systemId, systemName, 502);
+        }
+      }
+
+      const text = await response.text();
+      return NextResponse.json({ success: true, message: "Request successful (non-JSON)" } as unknown as T);
+    });
+
+    return result as NextResponse<T | CloudApiError>;
   } catch (error) {
     console.error(`[Cloud API] Error fetching ${endpoint} from ${systemName || systemId}:`, error);
     return createConnectionErrorResponse(systemId, systemName);

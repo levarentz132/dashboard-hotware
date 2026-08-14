@@ -53,6 +53,7 @@ export interface UserPublic {
   resourceAccessRights?: Record<string, string>; // Mapping of camera ID to rights
   vmsPermissions?: string; // Pipe-separated permissions from VMS
   vmsResourceAccessRights?: Record<string, string>; // More detailed rights from VMS
+  loginSource?: "cloud" | "local";
 }
 
 // Payload for creating JWT tokens (exp can be string like "24h")

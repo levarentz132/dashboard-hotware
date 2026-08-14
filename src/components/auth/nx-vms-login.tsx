@@ -109,8 +109,11 @@ export function NxVmsLogin() {
     }
   };
 
-  const handleDashboardLogin = async () => {
+  const [activeVariant, setActiveVariant] = useState<"local" | "cloud" | null>(null);
+
+  const handleDashboardLogin = async (variant: "local" | "cloud") => {
     clearLicenseError?.();
+    setActiveVariant(variant);
     let username = Cookies.get("license_saved_user");
     let password = Cookies.get("license_saved_pass");
 
@@ -129,38 +132,43 @@ export function NxVmsLogin() {
       setError(
         "License credentials not found. Please set them in the 'License Config' dropdown (top left).",
       );
+      setActiveVariant(null);
       return;
     }
 
-    // System ID and Server ID are kept separate — never fall back one to the
-    // other, since that causes the external license API to reject the login
-    // with SYSTEM_ID_MISMATCH ("License is bound to a different system").
-    let storedServerId = Cookies.get("nx_server_id") || session?.serverId || "";
-    // License API menolak jika system_id ikut dikirim bersamaan server_id yang valid.
-    // Prioritaskan server_id — hanya kirim system_id kalau server_id benar-benar tidak ada.
-    let storedSystemId = storedServerId
-      ? ""
-      : Cookies.get("nx_system_id") || cloudSession?.ownerSystemId || "";
+    let storedServerId =
+      variant === "local"
+        ? Cookies.get("nx_server_id") || session?.serverId || ""
+        : "";
+    let storedSystemId =
+      variant === "cloud"
+        ? Cookies.get("nx_system_id") || cloudSession?.ownerSystemId || ""
+        : storedServerId
+          ? ""
+          : Cookies.get("nx_system_id") || (session as any)?.systemId || "";
 
-    if (!storedSystemId) {
+    if (!storedSystemId && variant === "cloud") {
       console.warn(
-        "[NxVmsLogin] No System ID (localId) found yet. Make sure Local login finished discovering it, or try again in a moment.",
+        "[NxVmsLogin] No System ID found for cloud login.",
       );
     }
 
-    // Tandai jenis dashboard tujuan sebelum login — cloud menang kalau
-    // Local dan Cloud sama-sama terkoneksi.
-    Cookies.set("dashboard_variant", cloudSession ? "cloud" : "local", {
+    // Set dashboard_variant explicitly based on which button was clicked
+    Cookies.set("dashboard_variant", variant, {
       expires: 1,
       path: "/",
     });
 
-    await licenseLogin({
-      username,
-      password,
-      system_id: storedSystemId,
-      server_id: storedServerId,
-    });
+    try {
+      await licenseLogin({
+        username,
+        password,
+        system_id: storedSystemId,
+        server_id: storedServerId,
+      });
+    } finally {
+      setActiveVariant(null);
+    }
   };
 
   useEffect(() => {
@@ -168,8 +176,6 @@ export function NxVmsLogin() {
       console.warn("[NxVmsLogin] Detected licenseError in hook:", licenseError);
     }
   }, [licenseError]);
-
-  const isConnected = !!session || !!cloudSession;
 
   return (
     <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden transition-all duration-500 animate-in fade-in slide-in-from-bottom-8">
@@ -186,7 +192,7 @@ export function NxVmsLogin() {
         </p>
       </div>
 
-      {/* Banner status - bawaan asli, bukan tambahan baru */}
+      {/* Banner status */}
       <div className="p-2 bg-yellow-100 border-b border-yellow-200 text-[10px] font-mono text-yellow-800 text-center">
         VMS Error: {error || "none"} | License Error: {licenseError || "none"}
       </div>
@@ -226,14 +232,32 @@ export function NxVmsLogin() {
                   Connected
                 </span>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleLogout("local")}
-                className="text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl text-xs font-bold"
-              >
-                <LogOut className="w-3.5 h-3.5 mr-1.5" /> Disconnect
-              </Button>
+
+              <div className="w-full space-y-2 mt-2">
+                <Button
+                  onClick={() => handleDashboardLogin("local")}
+                  disabled={isLicenseLoading}
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-md shadow-blue-500/20 transition-all text-xs flex items-center justify-center gap-2 group"
+                >
+                  {isLicenseLoading && activeVariant === "local" ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <LogIn className="w-4 h-4" />
+                      <span>ENTER LOCAL DASHBOARD</span>
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleLogout("local")}
+                  className="w-full text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl text-xs font-bold"
+                >
+                  <LogOut className="w-3.5 h-3.5 mr-1.5" /> Disconnect
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="flex-1 space-y-3 p-6 rounded-2xl bg-slate-50 border border-slate-100 min-h-[21rem] flex flex-col justify-center">
@@ -312,7 +336,7 @@ export function NxVmsLogin() {
           </div>
         </div>
 
-        {/* RIGHT: Cloud Access — disederhanakan, langsung tombol OAuth */}
+        {/* RIGHT: Cloud Access */}
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2 text-slate-400">
             <Cloud className="w-3.5 h-3.5" />
@@ -334,14 +358,32 @@ export function NxVmsLogin() {
                   Authenticated
                 </span>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleLogout("cloud")}
-                className="text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl text-xs font-bold"
-              >
-                <LogOut className="w-3.5 h-3.5 mr-1.5" /> Disconnect
-              </Button>
+
+              <div className="w-full space-y-2 mt-2">
+                <Button
+                  onClick={() => handleDashboardLogin("cloud")}
+                  disabled={isLicenseLoading}
+                  className="w-full h-11 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white font-black rounded-xl shadow-md shadow-cyan-500/20 transition-all text-xs flex items-center justify-center gap-2 group"
+                >
+                  {isLicenseLoading && activeVariant === "cloud" ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <LogIn className="w-4 h-4" />
+                      <span>ENTER CLOUD DASHBOARD</span>
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleLogout("cloud")}
+                  className="w-full text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl text-xs font-bold"
+                >
+                  <LogOut className="w-3.5 h-3.5 mr-1.5" /> Disconnect
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="flex-1 p-6 rounded-2xl bg-slate-50 border border-slate-100 min-h-[21rem] flex flex-col items-center justify-center text-center gap-4">
@@ -376,26 +418,6 @@ export function NxVmsLogin() {
         </div>
       </div>
 
-      {/* Final Dashboard Button */}
-      {isConnected && (
-        <div className="px-8 pb-8 pt-2 space-y-6">
-          <div className="h-px bg-slate-100" />
-          <Button
-            onClick={handleDashboardLogin}
-            disabled={isLicenseLoading}
-            className="w-full h-16 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black rounded-2xl shadow-2xl shadow-blue-500/40 transition-all hover:scale-[1.02] active:scale-[0.98] group"
-          >
-            {isLicenseLoading ? (
-              <RefreshCw className="w-5 h-5 animate-spin" />
-            ) : (
-              <>
-                <LogIn className="w-5 h-5 mr-3 group-hover:translate-x-1 transition-transform" />
-                <span className="tracking-widest">ENTER DASHBOARD</span>
-              </>
-            )}
-          </Button>
-        </div>
-      )}
 
       {/* Footer */}
       <div className="px-8 py-6 bg-slate-50/50 border-t border-slate-100 flex justify-center">

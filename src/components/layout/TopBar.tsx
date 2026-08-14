@@ -153,13 +153,28 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
     };
   }, [isElectron]);
 
+  const isCloudTheme =
+    user?.loginSource === "cloud" ||
+    (typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/cloud"));
+
   return (
-    <header className="bg-white shadow-sm border-b px-3 sm:px-6 h-16 flex items-center select-none drag-region shrink-0 relative">
+    <header className={cn(
+      "px-3 sm:px-6 h-16 flex items-center select-none drag-region shrink-0 relative transition-colors duration-200",
+      isCloudTheme
+        ? "bg-[#0B152B] border-b border-blue-900/50 text-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.2)]"
+        : "bg-white border-b shadow-sm text-gray-900"
+    )}>
       <div className="flex items-center justify-between gap-2 sm:gap-4 w-full">
         {/* Mobile Menu Button - No drag on button */}
         <button
           onClick={onMenuClick}
-          className="lg:hidden p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg no-drag"
+          className={cn(
+            "lg:hidden p-2 rounded-lg no-drag transition-colors",
+            isCloudTheme
+              ? "text-slate-300 hover:text-white hover:bg-blue-900/50"
+              : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+          )}
         >
           <Menu className="w-5 h-5" />
         </button>
@@ -196,9 +211,12 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
 
           <TooltipProvider delayDuration={0}>
             {/* System Status - Hidden on mobile */}
-            <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600 px-2 group cursor-help">
+            <div className={cn(
+              "hidden md:flex items-center space-x-2 text-sm px-2 group cursor-help font-medium",
+              isCloudTheme ? "text-slate-200" : "text-gray-600"
+            )}>
               {isSystemLoading ? (
-                <RefreshCw className="w-3 h-3 animate-spin text-blue-500" />
+                <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
               ) : (
                 <>
                   <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse'}`}></div>
@@ -214,8 +232,13 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               if (open) fetchNotifications();
             }}>
               <PopoverTrigger asChild>
-                <button className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg relative no-drag transition-colors group">
-                  <Bell className={cn("w-5 h-5", unreadCount > 0 ? "text-primary" : "text-gray-500")} />
+                <button className={cn(
+                  "p-2 rounded-lg relative no-drag transition-colors group",
+                  isCloudTheme
+                    ? "text-slate-300 hover:text-white hover:bg-blue-900/50"
+                    : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                )}>
+                  <Bell className={cn("w-5 h-5", unreadCount > 0 ? (isCloudTheme ? "text-cyan-400" : "text-primary") : (isCloudTheme ? "text-slate-300" : "text-gray-500"))} />
                   {unreadCount > 0 && (
                     <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center border-2 border-white px-1 shadow-sm">
                       {unreadCount > 9 ? '9+' : unreadCount}

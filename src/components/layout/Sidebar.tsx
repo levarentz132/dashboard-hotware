@@ -190,7 +190,32 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     return true;
   });
 
+  const CLOUD_ROUTE_MAP: Record<string, string> = {
+    dashboard: "/cloud/dashboard",
+    cameras: "/cloud/camera-inventory",
+    health: "/cloud/system-health",
+    alarms: "/cloud/alarm-console",
+    recordings: "/cloud/recordings",
+    audits: "/cloud/user-logs",
+    storage: "/cloud/storage",
+    users: "/cloud/user-management",
+    subaccounts: "/cloud/role-management",
+  };
+
   const handleNavClick = (item: NavItem) => {
+    const isCloud =
+      user?.loginSource === "cloud" ||
+      (typeof window !== "undefined" &&
+        window.location.pathname.startsWith("/cloud"));
+
+    if (isCloud) {
+      const targetRoute = CLOUD_ROUTE_MAP[item.id] || `/cloud/${item.id}`;
+      router.push(targetRoute);
+      onSectionChange(item.id);
+      if (onClose) onClose();
+      return;
+    }
+
     // If item has href, navigate to that page
     if (item.href) {
       router.push(item.href);
@@ -200,12 +225,9 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
       return;
     }
 
-    // Update URL with section param to enable browser history (back button support)
+    // Update URL with section param for local dashboard
     router.push(`/?section=${item.id}`);
-
-    // Otherwise, use section change
     onSectionChange(item.id);
-    // Close sidebar on mobile after selection
     if (onClose) {
       onClose();
     }
@@ -214,21 +236,31 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
   const NavButton = ({ item }: { item: NavItem }) => {
     const Icon = item.icon;
     const isActive = activeSection === item.id;
+    const isCloud =
+      user?.loginSource === "cloud" ||
+      (typeof window !== "undefined" &&
+        window.location.pathname.startsWith("/cloud"));
 
     return (
       <button
         onClick={() => handleNavClick(item)}
         className={cn(
           "flex items-center w-full transition-all duration-200 group no-drag h-12 text-left px-0 select-none",
-          isActive
-            ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
-            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+          isCloud
+            ? isActive
+              ? "bg-blue-600/25 text-cyan-300 border-r-2 border-cyan-400 font-semibold shadow-[0_0_12px_rgba(6,182,212,0.15)]"
+              : "text-slate-300 hover:bg-blue-900/30 hover:text-white"
+            : isActive
+              ? "bg-blue-50 text-blue-600 border-r-2 border-blue-600"
+              : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
         )}
       >
         <div className="w-20 flex justify-center items-center shrink-0 h-full">
           <Icon className={cn(
             "flex-shrink-0 transition-all w-5 h-5",
-            isActive && !isCollapsed && "text-blue-600"
+            isCloud
+              ? isActive && !isCollapsed ? "text-cyan-400" : "text-slate-400 group-hover:text-slate-200"
+              : isActive && !isCollapsed ? "text-blue-600" : "text-gray-500"
           )} />
         </div>
 
@@ -242,17 +274,25 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     );
   };
 
+  const isCloudTheme =
+    user?.loginSource === "cloud" ||
+    (typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/cloud"));
+
   return (
     <TooltipProvider delayDuration={0}>
       {/* Mobile Overlay */}
-      {isOpen && <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={onClose} />}
+      {isOpen && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden" onClick={onClose} />}
 
       {/* Sidebar */}
       <div
         ref={sidebarRef}
         onClick={handleSidebarClick}
         className={cn(
-          "fixed lg:static inset-y-0 left-0 z-50 bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ease-in-out drag-region cursor-pointer",
+          "fixed lg:static inset-y-0 left-0 z-50 flex flex-col transition-all duration-300 ease-in-out drag-region cursor-pointer",
+          isCloudTheme
+            ? "bg-[#091124] border-r border-blue-950/80 text-slate-100 shadow-[4px_0_24px_rgba(0,0,0,0.3)]"
+            : "bg-white border-r border-gray-200 text-gray-900",
           isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
           isCollapsed ? "w-20" : "w-64 cursor-default",
           hideHeader ? "" : "shadow-xl lg:shadow-none",
@@ -262,15 +302,24 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
         {/* Header */}
         {!hideHeader && (
           <div className={cn(
-            "flex items-center border-b border-gray-100 h-16 shrink-0",
+            "flex items-center h-16 shrink-0",
+            isCloudTheme ? "border-b border-blue-900/40" : "border-b border-gray-100",
             isCollapsed ? "justify-center px-0" : "justify-between px-6"
           )}>
             {!isCollapsed && (
               <div className="no-drag whitespace-nowrap overflow-hidden min-w-0 flex-1 mr-2">
-                <h1 className="text-xl font-bold text-gray-900 tracking-tight truncate select-none">
-                  {user?.organization?.name || "Dashboard"}
+                <h1 className={cn(
+                  "text-xl font-bold tracking-tight truncate select-none",
+                  isCloudTheme ? "text-white" : "text-gray-900"
+                )}>
+                  {user?.organization?.name || "NX Cloud Admin"}
                 </h1>
-                <p className="text-xs text-gray-500 font-medium truncate select-none">Camera Dashboard</p>
+                <p className={cn(
+                  "text-xs font-medium truncate select-none",
+                  isCloudTheme ? "text-cyan-400" : "text-gray-500"
+                )}>
+                  {isCloudTheme ? "NX Cloud Management" : "Camera Dashboard"}
+                </p>
               </div>
             )}
 
@@ -278,7 +327,12 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
             {!disableCollapse && (
               <button
                 onClick={toggleCollapse}
-                className="hidden lg:flex p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors no-drag"
+                className={cn(
+                  "hidden lg:flex p-1.5 rounded-lg transition-colors no-drag",
+                  isCloudTheme
+                    ? "hover:bg-blue-900/50 text-slate-300 hover:text-white"
+                    : "hover:bg-gray-100 text-gray-500"
+                )}
               >
                 {isCollapsed ? <Menu className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
               </button>
@@ -287,7 +341,12 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
             {/* Close button for mobile */}
             <button
               onClick={onClose}
-              className="lg:hidden p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg no-drag"
+              className={cn(
+                "lg:hidden p-2 rounded-lg no-drag",
+                isCloudTheme
+                  ? "text-slate-300 hover:text-white hover:bg-blue-900/50"
+                  : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+              )}
             >
               <X className="w-5 h-5" />
             </button>

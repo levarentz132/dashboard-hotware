@@ -33,7 +33,7 @@ export const AUTH_ROUTES = {
   LOGIN: "/login",
   LOGOUT: "/logout",
   DASHBOARD: "/",
-  DASHBOARD_CLOUD: "/dashboard-cloud",
+  DASHBOARD_CLOUD: "/cloud/dashboard",
   API_LOGIN: "/auth/login",
   API_LOGOUT: "/auth/logout",
   API_SESSION: "/auth/session",
