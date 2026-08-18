@@ -21,9 +21,22 @@ import {
   EyeOff,
   Copy,
   Check,
-  Link,
+  Link as LinkIcon,
   MoreHorizontal,
   X,
+  Grid,
+  List,
+  UserCheck,
+  UserX,
+  Camera,
+  CheckSquare,
+  Square,
+  SlidersHorizontal,
+  Sparkles,
+  KeyRound,
+  ShieldAlert,
+  ShieldCheck,
+  Info,
 } from "lucide-react";
 import nxAPI, { NxSystemInfo } from "@/lib/nxapi";
 import { useAuth } from "@/contexts/auth-context";
@@ -72,6 +85,8 @@ import {
 } from "../ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { ScrollArea } from "../ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 
 // User interface based on NX Witness API
 export interface NxUser {
@@ -243,8 +258,6 @@ const DEFAULT_PERMISSION_GROUPS: NxUserGroup[] = [
   },
 ];
 
-// Helper functions for time conversion (moved to service)
-
 // Custom hook for fetching users
 function useUsers(systemId?: string) {
   const [users, setUsers] = useState<NxUser[]>([]);
@@ -328,6 +341,15 @@ function useUserGroups(systemId?: string) {
   return { groups, loading, error, refetch: fetchGroupsData };
 }
 
+// Helper to get initials for avatars
+const getInitials = (name: string = ""): string => {
+  if (!name) return "U";
+  const parts = name.trim().split(" ");
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+};
 
 export default function UserManagement() {
   const { user: localUser } = useAuth();
@@ -354,9 +376,13 @@ export default function UserManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const [resourceSearchTerm, setResourceSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [autoLoginAttempted, setAutoLoginAttempted] = useState<Set<string>>(new Set());
   const [isLoggedIn, setIsLoggedIn] = useState<Set<string>>(new Set());
+
+  // Modal active tab state
+  const [modalTab, setModalTab] = useState<"general" | "validity" | "permissions" | "cameras">("general");
 
   // Local (NX proxy) users & groups state
   const [localUsers, setLocalUsers] = useState<NxUser[]>([]);
@@ -404,11 +430,6 @@ export default function UserManagement() {
           resourceAccessRights: u.resourceAccessRights || undefined,
         }));
         console.log(`[UserManagement] Fetched ${mapped.length} local users`);
-        mapped.forEach(u => {
-          if (u.resourceAccessRights && Object.keys(u.resourceAccessRights).length > 0) {
-            console.log(`[UserManagement] User ${u.name} has ${Object.keys(u.resourceAccessRights).length} camera permissions`);
-          }
-        });
         setLocalUsers(mapped);
       }
 
@@ -511,19 +532,11 @@ export default function UserManagement() {
   // Copy permissions from existing user (use non-empty sentinel for 'none')
   const [copyFromUserId, setCopyFromUserId] = useState<string>("none");
 
-  // Rights options for devices
-  const DEVICE_RIGHTS_OPTIONS: { label: string; value: string }[] = [
-    { label: "View", value: "view" },
-    { label: "View + Archive", value: "view|viewArchive" },
-    { label: "View + Archive + Export", value: "view|viewArchive|exportArchive" },
-    { label: "Full (includes edit)", value: "view|viewArchive|exportArchive|edit" },
-  ];
-
   const handleCopyFromUser = (userId: string) => {
     setCopyFromUserId(userId);
     if (userId === "none") {
       setFormData((prev) => ({ ...prev, groupIds: [], resourceAccessRights: {} }));
-      showNotification({ type: "info", title: "Permissions cleared", message: "Cleared copied groups" });
+      showNotification({ type: "info", title: "Permissions cleared", message: "Cleared copied groups and camera access" });
       return;
     }
 
@@ -561,6 +574,7 @@ export default function UserManagement() {
   const filteredUsers = effectiveUsers.filter((user) => {
     const matchesSearch =
       user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (user.fullName && user.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (user.email && user.email.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = filterType === "all" || user.type === filterType;
     return matchesSearch && matchesType;
@@ -583,43 +597,45 @@ export default function UserManagement() {
     setIsRefreshing(false);
   };
 
-  // Get user type icon
-  const getUserTypeIcon = (type: NxUser["type"]) => {
+  // Get user type badge formatting
+  const getUserTypeBadge = (type: NxUser["type"]) => {
     switch (type) {
       case "local":
-        return <Users className="h-4 w-4" />;
+        return {
+          label: "Local",
+          icon: <Users className="h-3.5 w-3.5" />,
+          className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800",
+          avatarGradient: "from-blue-500 to-indigo-600",
+        };
       case "temporaryLocal":
-        return <Clock className="h-4 w-4" />;
+        return {
+          label: "Temporary",
+          icon: <Clock className="h-3.5 w-3.5" />,
+          className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800",
+          avatarGradient: "from-amber-500 to-orange-600",
+        };
       case "ldap":
-        return <Shield className="h-4 w-4" />;
+        return {
+          label: "LDAP",
+          icon: <Shield className="h-3.5 w-3.5" />,
+          className: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800",
+          avatarGradient: "from-purple-500 to-violet-600",
+        };
       case "cloud":
-        return <Cloud className="h-4 w-4" />;
+        return {
+          label: "Cloud",
+          icon: <Cloud className="h-3.5 w-3.5" />,
+          className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800",
+          avatarGradient: "from-emerald-500 to-teal-600",
+        };
       default:
-        return <User className="h-4 w-4" />;
+        return {
+          label: type,
+          icon: <User className="h-3.5 w-3.5" />,
+          className: "bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300",
+          avatarGradient: "from-slate-500 to-slate-600",
+        };
     }
-  };
-
-  // Get user type badge variant
-  const getUserTypeBadge = (type: NxUser["type"]) => {
-    const config = {
-      local: {
-        label: "Local",
-        className: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 transition-all",
-      },
-      temporaryLocal: {
-        label: "Temporary",
-        className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 transition-all",
-      },
-      ldap: {
-        label: "LDAP",
-        className: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 transition-all",
-      },
-      cloud: {
-        label: "Cloud",
-        className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 transition-all",
-      },
-    };
-    return config[type] || { label: type, className: "bg-gray-100 text-gray-800 transition-all" };
   };
 
   // Count users by type (from effective data)
@@ -643,6 +659,8 @@ export default function UserManagement() {
     setShowPassword(false);
     setShowConfirmPassword(false);
     setResourceSearchTerm("");
+    setCopyFromUserId("none");
+    setModalTab("general");
   };
 
   // Open create dialog
@@ -665,8 +683,6 @@ export default function UserManagement() {
     ) as Record<string, string>;
 
     console.log(`[UserManagement] Opening edit for user: ${user.name}`);
-    console.log(`[UserManagement] Raw RAR:`, rawRAR);
-    console.log(`[UserManagement] Normalized RAR:`, normalizedRAR);
 
     setFormData({
       name: user.name,
@@ -686,6 +702,7 @@ export default function UserManagement() {
       expiresAfterLoginUnit: timeConversion.unit,
     });
     setFormErrors({});
+    setModalTab("general");
     setShowEditDialog(true);
   };
 
@@ -758,7 +775,6 @@ export default function UserManagement() {
 
     setIsSubmitting(true);
     try {
-      // Helper to normalize IDs (remove curly braces)
       const normalizeId = (id: string) => id.replace(/[{}]/g, "");
 
       const body: any = {
@@ -767,7 +783,6 @@ export default function UserManagement() {
         groupIds: formData.groupIds.map(normalizeId),
       };
 
-      // Include camera/device resource access rights if defined
       if (formData.resourceAccessRights && Object.keys(formData.resourceAccessRights).length) {
         body.resourceAccessRights = Object.fromEntries(
           Object.entries(formData.resourceAccessRights).map(([deviceId, rights]) => [
@@ -805,6 +820,7 @@ export default function UserManagement() {
       setShowCreateDialog(false);
       resetForm();
       await refetchUsers();
+      showNotification({ type: "success", title: "User Created", message: `Successfully created user ${body.name}` });
     } catch (err) {
       setFormErrors({
         submit: err instanceof Error ? err.message : "Failed to create user",
@@ -822,10 +838,8 @@ export default function UserManagement() {
     try {
       const body: any = {};
 
-      // Basic fields
       if (formData.isEnabled !== selectedUser.isEnabled) body.isEnabled = formData.isEnabled;
 
-      // Compare and normalize groupIds
       const normalizeId = (id: string) => id.replace(/[{}]/g, "");
       const currentGroups = (selectedUser.groupIds || []).map(normalizeId).sort().join(",");
       const newGroups = (formData.groupIds || []).map(normalizeId).sort().join(",");
@@ -842,7 +856,6 @@ export default function UserManagement() {
         const isNameChanging = formData.name !== selectedUser.name;
         const hasPassword = formData.password && formData.password.trim() !== "";
 
-        // NX Witness requires password when changing username (security requirement)
         if (isNameChanging && !hasPassword) {
           setFormErrors({
             password: "Password is required when changing username",
@@ -870,10 +883,8 @@ export default function UserManagement() {
         }
       }
 
-      // Include resourceAccessRights - always send if defined to ensure camera access is updated
       const newRAR = formData.resourceAccessRights || {};
       if (Object.keys(newRAR).length > 0) {
-        // Normalize device IDs and ensure proper format
         body.resourceAccessRights = Object.fromEntries(
           Object.entries(newRAR).map(([deviceId, rights]) => [
             normalizeId(deviceId),
@@ -881,11 +892,9 @@ export default function UserManagement() {
           ])
         );
       } else {
-        // Send empty object to clear all resource access if user removed all devices
         body.resourceAccessRights = {};
       }
 
-      // If nothing actually changed, just close and return
       if (Object.keys(body).length === 0) {
         setShowEditDialog(false);
         setSelectedUser(null);
@@ -902,6 +911,7 @@ export default function UserManagement() {
       setSelectedUser(null);
       resetForm();
       await refetchUsers();
+      showNotification({ type: "success", title: "User Updated", message: `Changes saved for ${selectedUser.name}` });
     } catch (err) {
       setFormErrors({
         submit: err instanceof Error ? err.message : "Failed to update user",
@@ -923,8 +933,10 @@ export default function UserManagement() {
       }
 
       setShowDeleteDialog(false);
+      const deletedName = selectedUser.name;
       setSelectedUser(null);
       await refetchUsers();
+      showNotification({ type: "success", title: "User Deleted", message: `User ${deletedName} has been removed` });
     } catch (err) {
       console.error("Delete error:", err);
     } finally {
@@ -948,39 +960,33 @@ export default function UserManagement() {
       const normalizeId = (id: string) => id.replace(/[{}]/g, "");
       const normalizedId = normalizeId(deviceId);
       
-      // Create a copy of resource access rights
       const rar = { ...(prev.resourceAccessRights || {}) };
       
-      // Check both normalized and original ID formats
       const hasNormalizedKey = rar[normalizedId] !== undefined;
       const hasOriginalKey = rar[deviceId] !== undefined;
       
       if (hasNormalizedKey || hasOriginalKey) {
-        // Remove both possible formats to avoid duplicates
         delete rar[normalizedId];
         delete rar[deviceId];
       } else {
-        // Add using normalized ID (consistent format)
-        rar[normalizedId] = "view|viewArchive|exportArchive|edit"; // default right when enabling (Full)
+        rar[normalizedId] = "view|viewArchive|exportArchive|edit";
       }
       
       return { ...prev, resourceAccessRights: rar };
     });
   };
 
-  // Set device rights string
-  const handleSetDeviceRights = (deviceId: string, rights: string) => {
+  // Select all or clear all cameras
+  const handleSelectAllDevices = (select: boolean) => {
     setFormData((prev) => {
+      if (!select) return { ...prev, resourceAccessRights: {} };
+      
       const normalizeId = (id: string) => id.replace(/[{}]/g, "");
-      const normalizedId = normalizeId(deviceId);
-      
-      const rar = { ...(prev.resourceAccessRights || {}) };
-      
-      // Remove old format if exists, use normalized format
-      delete rar[deviceId];
-      rar[normalizedId] = rights;
-      
-      return { ...prev, resourceAccessRights: rar };
+      const newRar: Record<string, string> = {};
+      devices.forEach((d) => {
+        newRar[normalizeId(d.id)] = "view|viewArchive|exportArchive|edit";
+      });
+      return { ...prev, resourceAccessRights: newRar };
     });
   };
 
@@ -989,6 +995,18 @@ export default function UserManagement() {
     navigator.clipboard.writeText(token);
     setCopiedToken(true);
     setTimeout(() => setCopiedToken(false), 2000);
+    showNotification({ type: "success", title: "Token Copied", message: "Authentication token copied to clipboard" });
+  };
+
+  // Quick preset duration for temporary users
+  const handleSetQuickDuration = (days: number) => {
+    const nowS = Math.floor(Date.now() / 1000);
+    const endS = nowS + days * 86400;
+    setFormData((prev) => ({
+      ...prev,
+      startS: prev.startS || nowS,
+      endS: endS,
+    }));
   };
 
   // Convert timestamp to datetime-local input value
@@ -1004,476 +1022,45 @@ export default function UserManagement() {
     return Math.floor(new Date(value).getTime() / 1000);
   };
 
-
-
-  // Render form based on user type
-  const renderFormFields = () => {
-    return (
-      <div className="space-y-4">
-        {/* User Type Selection */}
-        <div className="space-y-2">
-          <Label>User Type *</Label>
-          <Select
-            value={formData.type}
-            onValueChange={(value: "local" | "temporaryLocal" | "cloud") =>
-              setFormData((prev) => ({ ...prev, type: value }))
-            }
-            disabled={showEditDialog}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select user type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="local">
-                <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  Local
-                </div>
-              </SelectItem>
-              <SelectItem value="temporaryLocal">
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  Temporary Local
-                </div>
-              </SelectItem>
-              <SelectItem value="cloud">
-                <div className="flex items-center gap-2">
-                  <Cloud className="h-4 w-4" />
-                  Cloud
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Enabled Toggle */}
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="isEnabled"
-            checked={formData.isEnabled}
-            onChange={(e) => setFormData((prev) => ({ ...prev, isEnabled: e.target.checked }))}
-            className="h-4 w-4 rounded border-gray-300"
-          />
-          <Label htmlFor="isEnabled" className="text-sm font-normal cursor-pointer">
-            User is enabled (disabled users cannot login)
-          </Label>
-        </div>
-
-        {/* Cloud User Fields */}
-        {formData.type === "cloud" && (
-          <div className="space-y-2">
-            <Label htmlFor="email">Email *</Label>
-            <Input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
-              placeholder="user@example.com"
-              disabled={showEditDialog}
-              className={cn(formErrors.email ? "border-red-500" : "", showEditDialog && "bg-muted opacity-80")}
-            />
-            {formErrors.email && <p className="text-xs text-red-500">{formErrors.email}</p>}
-          </div>
-        )}
-
-        {/* Local/Temporary User Fields */}
-        {(formData.type === "local" || formData.type === "temporaryLocal") && (
-          <>
-            <div className="space-y-2">
-              <Label htmlFor="name">Username *</Label>
-              <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder="username"
-                className={formErrors.name ? "border-red-500" : ""}
-              />
-              {formErrors.name && <p className="text-xs text-red-500">{formErrors.name}</p>}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="fullName">Full Name</Label>
-              <Input
-                id="fullName"
-                value={formData.fullName}
-                onChange={(e) => setFormData((prev) => ({ ...prev, fullName: e.target.value }))}
-                placeholder="John Doe"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
-                placeholder="user@example.com"
-                disabled={showEditDialog}
-                className={cn(showEditDialog && "bg-muted opacity-80")}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password {showEditDialog ? "(leave empty to keep current)" : "*"}</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={formData.password}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                  placeholder="••••••••"
-                  className={formErrors.password ? "border-red-500 pr-10" : "pr-10"}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              {formErrors.password && <p className="text-xs text-red-500">{formErrors.password}</p>}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <div className="relative">
-                <Input
-                  id="confirmPassword"
-                  type={showConfirmPassword ? "text" : "password"}
-                  value={formData.confirmPassword}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, confirmPassword: e.target.value }))}
-                  placeholder="••••••••"
-                  className={formErrors.confirmPassword ? "border-red-500 pr-10" : "pr-10"}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                >
-                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              {formErrors.confirmPassword && <p className="text-xs text-red-500">{formErrors.confirmPassword}</p>}
-            </div>
-          </>
-        )}
-
-        {/* Temporary User Specific Fields */}
-        {formData.type === "temporaryLocal" && (
-          <div className="space-y-4 p-3 sm:p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
-            <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
-              <Link className="h-4 w-4" />
-              <span className="font-medium text-sm sm:text-base">Link Valid Until</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="startS" className="text-sm">
-                  Start Date
-                </Label>
-                <Input
-                  id="startS"
-                  type="datetime-local"
-                  value={timestampToDatetimeLocal(formData.startS)}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      startS: datetimeLocalToTimestamp(e.target.value),
-                    }))
-                  }
-                  className="text-sm"
-                />
-                <p className="text-xs text-muted-foreground">Leave empty for current time</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="endS" className="text-sm">
-                  End Date *
-                </Label>
-                <Input
-                  id="endS"
-                  type="datetime-local"
-                  value={timestampToDatetimeLocal(formData.endS)}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      endS: datetimeLocalToTimestamp(e.target.value),
-                    }))
-                  }
-                  className={`text-sm ${formErrors.endS ? "border-red-500" : ""}`}
-                />
-                {formErrors.endS && <p className="text-xs text-red-500">{formErrors.endS}</p>}
-              </div>
-            </div>
-
-            {/* Revoke access after login */}
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="expiresAfterLoginEnabled"
-                  checked={formData.expiresAfterLoginEnabled}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      expiresAfterLoginEnabled: e.target.checked,
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <Label htmlFor="expiresAfterLoginEnabled" className="text-sm font-normal cursor-pointer">
-                  Revoke access after login
-                </Label>
-              </div>
-
-              {formData.expiresAfterLoginEnabled && (
-                <div className="flex items-center gap-2 pl-6">
-                  <span className="text-sm text-muted-foreground">In</span>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={formData.expiresAfterLoginValue}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        expiresAfterLoginValue: parseInt(e.target.value) || 1,
-                      }))
-                    }
-                    className="w-20 text-sm"
-                  />
-                  <Select
-                    value={formData.expiresAfterLoginUnit}
-                    onValueChange={(value: TimeUnit) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        expiresAfterLoginUnit: value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-28 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="minutes">Minutes</SelectItem>
-                      <SelectItem value="hours">Hours</SelectItem>
-                      <SelectItem value="days">Days</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-
-            {/* Show token if editing and token exists */}
-            {showEditDialog && selectedUser?.temporaryToken?.token && (
-              <div className="space-y-2">
-                <Label className="text-sm">Authentication Token</Label>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 p-2 bg-muted rounded text-xs break-all">
-                    {selectedUser.temporaryToken.token}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleCopyToken(selectedUser.temporaryToken!.token!)}
-                  >
-                    {copiedToken ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Resource Access (per-user) */}
-        <div className="space-y-2">
-          <Label>Resource Access (per-user)</Label>
-          <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Search cameras..."
-                className="pl-8 h-9 text-sm bg-white"
-                value={resourceSearchTerm}
-                onChange={(e) => setResourceSearchTerm(e.target.value)}
-              />
-              {resourceSearchTerm && (
-                <button 
-                  onClick={() => setResourceSearchTerm("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            <ScrollArea className="h-[300px] pr-2 -mr-2">
-              {(() => {
-                const effectiveSystemId = selectedSystemId || "localhost:7001";
-                
-                if (devicesLoading) {
-                  return <p className="text-sm text-muted-foreground py-4 text-center">Loading devices...</p>;
-                }
-                
-                const filteredDevices = devices.filter(d => 
-                  (d.name || "").toLowerCase().includes(resourceSearchTerm.toLowerCase()) ||
-                  (d.id || "").toLowerCase().includes(resourceSearchTerm.toLowerCase())
-                );
-
-                if (filteredDevices.length === 0) {
-                  return (
-                    <div className="text-sm text-muted-foreground py-8 text-center">
-                      <p>{devices.length === 0 ? "No devices available" : "No matching cameras"}</p>
-                    </div>
-                  );
-                }
-                
-                return (
-                  <div className="grid grid-cols-1 gap-1">
-                    {filteredDevices.map((device) => {
-                      const normalizeId = (id: string) => id.replace(/[{}]/g, "");
-                      const normalizedDeviceId = normalizeId(device.id);
-                      
-                      let hasAccess = false;
-                      if (formData.resourceAccessRights) {
-                        for (const key of Object.keys(formData.resourceAccessRights)) {
-                          if (normalizeId(key) === normalizedDeviceId) {
-                            hasAccess = true;
-                            break;
-                          }
-                        }
-                      }
-                      
-                      return (
-                        <div key={device.id} className={cn(
-                          "flex items-center space-x-2 p-2 rounded-md transition-colors",
-                          hasAccess ? "bg-blue-50/50 dark:bg-blue-900/10" : "hover:bg-muted"
-                        )}>
-                          <input
-                            type="checkbox"
-                            id={`device-${device.id}`}
-                            checked={hasAccess}
-                            onChange={() => handleToggleDevice(device.id)}
-                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <Label 
-                            htmlFor={`device-${device.id}`} 
-                            className="text-sm font-medium cursor-pointer flex-1 flex items-center justify-between"
-                          >
-                            <span className="truncate">{device.name}</span>
-                            {hasAccess && (
-                              <Badge variant="secondary" className="text-[10px] font-bold uppercase tracking-tight bg-blue-100 text-blue-700 hover:bg-blue-100 border-none">
-                                Full Access
-                              </Badge>
-                            )}
-                          </Label>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </ScrollArea>
-          </div>
-        </div>
-
-        {/* Permissions / Group Selection */}
-        <div className="space-y-2">
-          <Label>Permissions (Groups)</Label>
-          <div className="border rounded-lg p-3 space-y-4 bg-muted/20">
-            {effectiveUsers.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-sm">Copy permissions from existing user</Label>
-                <Select value={copyFromUserId} onValueChange={(v: string) => handleCopyFromUser(v)}>
-                  <SelectTrigger className="w-full bg-white">
-                    <SelectValue placeholder="Select user to copy from..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {effectiveUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        <div className="flex items-center gap-2">
-                          <span className="truncate">{u.name}{u.email ? ` • ${u.email}` : ""}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            
-            <div className="grid grid-cols-1 gap-2">
-              {DEFAULT_PERMISSION_GROUPS
-                .filter((g) => {
-                  const name = g.name.toLowerCase();
-                  return name.includes("power user");
-                })
-                .map((group) => (
-                  <div key={group.id} className="flex items-center space-x-2 p-1 rounded-md hover:bg-white/50 transition-colors">
-                    <input
-                      type="checkbox"
-                      id={`group-${group.id}`}
-                      checked={formData.groupIds.includes(group.id)}
-                      onChange={() => handleGroupToggle(group.id)}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <Label htmlFor={`group-${group.id}`} className="text-sm font-normal cursor-pointer flex-1">
-                      <div className="flex items-center gap-2 font-medium">
-                        <Shield className="h-3.5 w-3.5 text-blue-600" />
-                        {group.name}
-                      </div>
-                      {group.description && <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{group.description}</p>}
-                    </Label>
-                  </div>
-                ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Submit Error */}
-        {formErrors.submit && (
-          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-            <p className="text-sm text-red-600 dark:text-red-400">{formErrors.submit}</p>
-          </div>
-        )}
-      </div>
-    );
+  // Count camera rights count for a user
+  const getUserCameraCount = (u: NxUser): number => {
+    if (!u.resourceAccessRights) return 0;
+    return Object.keys(u.resourceAccessRights).length;
   };
 
-  const showNoCloudAlert = false; // Cloud failures are non-blocking
-
   return (
-    <div className="space-y-4 md:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Top Header & Global Actions */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-200/80 dark:border-slate-800">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Management</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+              User Management
+            </h1>
+            <Badge variant="outline" className="hidden sm:inline-flex bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800">
+              <Sparkles className="w-3 h-3 mr-1 text-blue-500" /> VMS Security
+            </Badge>
+          </div>
+          <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Manage system access accounts, cloud identities, temporary credentials, and camera permissions.
+          </p>
         </div>
 
-      
-
-        <div className="flex items-center gap-2">
-          {/* Cloud System Selector - only if systems exist */}
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+          {/* Cloud System Selector */}
           {cloudSystems.length > 0 && (
             <Select value={selectedSystemId} onValueChange={handleSystemChange} disabled={loadingCloud}>
-              <SelectTrigger className="w-full sm:w-[220px] h-10">
-                <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
-                <SelectValue placeholder="Select system..." />
+              <SelectTrigger className="w-full sm:w-[220px] h-10 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm rounded-xl text-xs sm:text-sm">
+                <Cloud className="h-4 w-4 mr-2 text-blue-500 shrink-0" />
+                <SelectValue placeholder="Select Cloud System..." />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="rounded-xl">
                 {cloudSystems.map((system) => (
-                  <SelectItem key={system.id} value={system.id}>
+                  <SelectItem key={system.id} value={system.id} className="rounded-lg">
                     <div className="flex items-center gap-2">
-                      <span className={cn("w-2 h-2 rounded-full", system.isOnline ? "bg-blue-500" : "bg-gray-400")} />
-                      <span>{system.name}</span>
-                      {!system.isOnline && <span className="text-xs text-gray-400">(offline)</span>}
+                      <span className={cn("w-2 h-2 rounded-full", system.isOnline ? "bg-emerald-500 shadow-sm shadow-emerald-500/50" : "bg-slate-400")} />
+                      <span className="font-medium">{system.name}</span>
+                      {!system.isOnline && <span className="text-[10px] text-slate-400">(offline)</span>}
                     </div>
                   </SelectItem>
                 ))}
@@ -1481,460 +1068,1190 @@ export default function UserManagement() {
             </Select>
           )}
 
+          {/* Add User CTA */}
           {canEditUsers && (
             <Button
               onClick={handleOpenCreate}
-              className="gap-2 h-10 px-4"
-              size="default"
+              className="gap-2 h-10 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl shadow-md shadow-blue-500/20 transition-all active:scale-[0.98]"
               disabled={!selectedSystemId && localUsers.length === 0}
             >
               <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Add User</span>
+              <span className="font-semibold text-xs sm:text-sm">Add User</span>
             </Button>
           )}
 
-          {/* Refresh Button - Styled like CameraInventory */}
-          <button
-            onClick={() => {
-              handleRefresh();
-            }}
+          {/* Refresh Button */}
+          <Button
+            onClick={handleRefresh}
             disabled={isRefreshing || loadingCloud}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
+            variant="outline"
+            className="gap-2 h-10 px-3.5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl text-slate-700 dark:text-slate-300 shadow-sm transition-all"
           >
-            <RefreshCw
-              className={`w-4 h-4 ${isRefreshing || loadingCloud ? "animate-spin" : ""}`}
-            />
-            <span className="font-medium">Refresh</span>
-          </button>
+            <RefreshCw className={`w-4 h-4 text-slate-500 ${isRefreshing || loadingCloud ? "animate-spin text-blue-600" : ""}`} />
+            <span className="hidden sm:inline font-medium text-xs sm:text-sm">Refresh</span>
+          </Button>
         </div>
       </div>
 
-      {/* Cloud Systems Warning - non-blocking, only shown when explicitly in cloud tab with no systems */}
-
-      <>
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
-          <Card>
-            <CardHeader className="p-3 sm:p-4 pb-2">
-              <CardDescription className="text-xs sm:text-sm">Total Users</CardDescription>
-              <CardTitle className="text-xl sm:text-2xl">{userStats.total}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="p-3 sm:p-4 pb-2">
-              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                <Users className="h-3 w-3" /> Local
-              </CardDescription>
-              <CardTitle className="text-xl sm:text-2xl text-blue-600">{userStats.local}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="p-3 sm:p-4 pb-2">
-              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                <Clock className="h-3 w-3" /> Temporary
-              </CardDescription>
-              <CardTitle className="text-xl sm:text-2xl text-yellow-600">{userStats.temporaryLocal}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="p-3 sm:p-4 pb-2">
-              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                <Shield className="h-3 w-3" /> LDAP
-              </CardDescription>
-              <CardTitle className="text-xl sm:text-2xl text-purple-600">{userStats.ldap}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card className="col-span-2 sm:col-span-1">
-            <CardHeader className="p-3 sm:p-4 pb-2">
-              <CardDescription className="flex items-center gap-1 text-xs sm:text-sm">
-                <Cloud className="h-3 w-3" /> Cloud
-              </CardDescription>
-              <CardTitle className="text-xl sm:text-2xl text-green-600">{userStats.cloud}</CardTitle>
-            </CardHeader>
-          </Card>
+      {/* Modern Stat Cards Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
+        {/* Total Users */}
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-200 group">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Users</span>
+            <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 group-hover:scale-110 transition-transform">
+              <Users className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-50">{userStats.total}</span>
+            <span className="text-xs text-slate-400">accounts</span>
+          </div>
+          <div className="mt-3 w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+            <div className="bg-slate-800 dark:bg-slate-200 h-full rounded-full w-full" />
+          </div>
         </div>
 
-        {/* Search and Filter */}
-        <Card className="mb-4">
-          <CardContent className="p-3 sm:p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-              <div className="relative flex-1 select-none">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Search users..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-10 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text h-10"
-                />
-                {searchTerm && (
-                  <button
-                    onClick={() => setSearchTerm("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
+        {/* Local Users */}
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 p-4 border border-blue-100 dark:border-blue-950/50 shadow-sm hover:shadow-md transition-all duration-200 group">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">Local</span>
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform">
+              <User className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-blue-600 dark:text-blue-400">{userStats.local}</span>
+            <span className="text-xs text-blue-400/80">
+              {userStats.total > 0 ? Math.round((userStats.local / userStats.total) * 100) : 0}%
+            </span>
+          </div>
+          <div className="mt-3 w-full bg-blue-50 dark:bg-blue-950/60 h-1.5 rounded-full overflow-hidden">
+            <div
+              className="bg-blue-600 h-full rounded-full transition-all duration-500"
+              style={{ width: `${userStats.total > 0 ? (userStats.local / userStats.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Temporary Users */}
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 p-4 border border-amber-100 dark:border-amber-950/50 shadow-sm hover:shadow-md transition-all duration-200 group">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">Temporary</span>
+            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform">
+              <Clock className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-amber-600 dark:text-amber-400">{userStats.temporaryLocal}</span>
+            <span className="text-xs text-amber-400/80">
+              {userStats.total > 0 ? Math.round((userStats.temporaryLocal / userStats.total) * 100) : 0}%
+            </span>
+          </div>
+          <div className="mt-3 w-full bg-amber-50 dark:bg-amber-950/60 h-1.5 rounded-full overflow-hidden">
+            <div
+              className="bg-amber-500 h-full rounded-full transition-all duration-500"
+              style={{ width: `${userStats.total > 0 ? (userStats.temporaryLocal / userStats.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+
+        {/* LDAP Users */}
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 p-4 border border-purple-100 dark:border-purple-950/50 shadow-sm hover:shadow-md transition-all duration-200 group">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400">LDAP</span>
+            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
+              <Shield className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-purple-600 dark:text-purple-400">{userStats.ldap}</span>
+            <span className="text-xs text-purple-400/80">
+              {userStats.total > 0 ? Math.round((userStats.ldap / userStats.total) * 100) : 0}%
+            </span>
+          </div>
+          <div className="mt-3 w-full bg-purple-50 dark:bg-purple-950/60 h-1.5 rounded-full overflow-hidden">
+            <div
+              className="bg-purple-600 h-full rounded-full transition-all duration-500"
+              style={{ width: `${userStats.total > 0 ? (userStats.ldap / userStats.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Cloud Users */}
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 p-4 border border-emerald-100 dark:border-emerald-950/50 shadow-sm hover:shadow-md transition-all duration-200 group col-span-2 sm:col-span-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Cloud</span>
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform">
+              <Cloud className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">{userStats.cloud}</span>
+            <span className="text-xs text-emerald-400/80">
+              {userStats.total > 0 ? Math.round((userStats.cloud / userStats.total) * 100) : 0}%
+            </span>
+          </div>
+          <div className="mt-3 w-full bg-emerald-50 dark:bg-emerald-950/60 h-1.5 rounded-full overflow-hidden">
+            <div
+              className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+              style={{ width: `${userStats.total > 0 ? (userStats.cloud / userStats.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Toolbar: Search, Filter Tabs & View Toggle */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        {/* Search Bar */}
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by name, email, or username..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-9 h-10 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950 text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 justify-between lg:justify-end overflow-x-auto pb-1 lg:pb-0">
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800">
+            <button
+              onClick={() => setFilterType("all")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
+                filterType === "all"
+                  ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm"
+                  : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+              )}
+            >
+              All ({effectiveUsers.length})
+            </button>
+            <button
+              onClick={() => setFilterType("local")}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap",
+                filterType === "local"
+                  ? "bg-blue-500 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+              )}
+            >
+              <User className="h-3 w-3" /> Local ({userStats.local})
+            </button>
+            <button
+              onClick={() => setFilterType("temporaryLocal")}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap",
+                filterType === "temporaryLocal"
+                  ? "bg-amber-500 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+              )}
+            >
+              <Clock className="h-3 w-3" /> Temp ({userStats.temporaryLocal})
+            </button>
+            <button
+              onClick={() => setFilterType("cloud")}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap",
+                filterType === "cloud"
+                  ? "bg-emerald-500 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+              )}
+            >
+              <Cloud className="h-3 w-3" /> Cloud ({userStats.cloud})
+            </button>
+          </div>
+
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800 shrink-0">
+            <button
+              onClick={() => setViewMode("table")}
+              title="Table View"
+              className={cn(
+                "p-1.5 rounded-lg transition-all text-slate-500",
+                viewMode === "table" ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm" : "hover:text-slate-900"
+              )}
+            >
+              <List className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("grid")}
+              title="Card Grid View"
+              className={cn(
+                "p-1.5 rounded-lg transition-all text-slate-500",
+                viewMode === "grid" ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm" : "hover:text-slate-900"
+              )}
+            >
+              <Grid className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="flex items-center justify-between p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/80 rounded-2xl text-red-700 dark:text-red-300">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="h-5 w-5 text-red-500 shrink-0" />
+            <span className="text-sm font-medium">{error}</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleRefresh} className="rounded-xl border-red-200 hover:bg-red-100 text-xs">
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading && (
+        <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+          <RefreshCw className="h-8 w-8 animate-spin text-blue-500 mb-3" />
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Loading user accounts...</p>
+        </div>
+      )}
+
+      {/* Content Area: Table vs Grid */}
+      {!loading && !error && (
+        <>
+          {filteredUsers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-center p-6">
+              <div className="p-4 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 mb-3">
+                <Users className="h-10 w-10 opacity-70" />
               </div>
-
-              <div className="flex gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={`gap-2 flex-1 sm:flex-none select-none w-[110px] justify-center h-10 ${filterType !== "all" ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : ""
-                        }`}
-                    >
-                      <Filter className="h-4 w-4 shrink-0" />
-                      <span>Filter</span>
-                      {filterType !== "all" && (
-                        <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0">
-                          1
-                        </Badge>
-                      )}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem onClick={() => setFilterType("all")}>All Types</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setFilterType("local")}>
-                      <Users className="h-4 w-4 mr-2" /> Local
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setFilterType("temporaryLocal")}>
-                      <Clock className="h-4 w-4 mr-2" /> Temporary
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setFilterType("ldap")}>
-                      <Shield className="h-4 w-4 mr-2" /> LDAP
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setFilterType("cloud")}>
-                      <Cloud className="h-4 w-4 mr-2" /> Cloud
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {filterType !== "all" && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0 text-gray-400 hover:text-gray-600 h-10"
-                    onClick={() => setFilterType("all")}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                )}
+              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">No users found</h3>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
+                {searchTerm ? "No user matching your search query or selected filter criteria." : "No users exist in this system yet."}
+              </p>
+              {searchTerm && (
+                <Button variant="ghost" size="sm" onClick={() => setSearchTerm("")} className="mt-4 text-blue-600 dark:text-blue-400">
+                  Clear Search Filter
+                </Button>
+              )}
+            </div>
+          ) : viewMode === "table" ? (
+            /* TABLE VIEW */
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-slate-50/80 dark:bg-slate-950/80">
+                    <TableRow className="border-b border-slate-200/80 dark:border-slate-800">
+                      <TableHead className="w-[50px] text-xs font-semibold text-slate-500">#</TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-500 min-w-[180px]">User Account</TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-500 hidden md:table-cell">Email</TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-500">Type</TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-500 hidden sm:table-cell">Status</TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-500 hidden lg:table-cell">Group Roles</TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-500 hidden xl:table-cell">Cameras</TableHead>
+                      <TableHead className="w-[70px] text-right text-xs font-semibold text-slate-500">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers.map((user, index) => {
+                      const badge = getUserTypeBadge(user.type);
+                      const cameraCount = getUserCameraCount(user);
+                      return (
+                        <TableRow key={user.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800/60 transition-colors">
+                          <TableCell className="font-medium text-slate-400 text-xs">{index + 1}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-9 w-9 border border-slate-200 dark:border-slate-700 shadow-xs">
+                                <AvatarFallback className={`bg-gradient-to-br ${badge.avatarGradient} text-white font-bold text-xs`}>
+                                  {getInitials(user.name || user.email)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                <span className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 block truncate">{user.name}</span>
+                                {user.fullName && (
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block truncate">{user.fullName}</span>
+                                )}
+                                {user.email && <span className="text-[10px] text-slate-400 md:hidden block truncate">{user.email}</span>}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            {user.email ? (
+                              <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+                                <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                <span className="truncate">{user.email}</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={cn("text-[10px] font-semibold gap-1 py-0.5 px-2 rounded-lg border", badge.className)}>
+                              {badge.icon}
+                              <span>{badge.label}</span>
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="hidden sm:table-cell">
+                            {user.isEnabled !== false ? (
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 text-[11px] font-semibold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                Active
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 text-[11px] font-semibold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                Disabled
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            {user.groupIds && user.groupIds.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {user.groupIds.slice(0, 2).map((groupId) => {
+                                  const name = getGroupName(groupId);
+                                  const isAdminGroup = name.toLowerCase().includes("administrator");
+                                  return (
+                                    <Badge
+                                      key={groupId}
+                                      variant="secondary"
+                                      className={cn(
+                                        "text-[10px] font-medium rounded-md px-1.5 py-0.5",
+                                        isAdminGroup
+                                          ? "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-200 dark:border-purple-800"
+                                          : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                      )}
+                                    >
+                                      {name}
+                                    </Badge>
+                                  );
+                                })}
+                                {user.groupIds.length > 2 && (
+                                  <Badge variant="outline" className="text-[10px] text-slate-500">
+                                    +{user.groupIds.length - 2}
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">No group</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="hidden xl:table-cell">
+                            {cameraCount > 0 ? (
+                              <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 font-medium">
+                                <Camera className="h-3.5 w-3.5" />
+                                <span>{cameraCount} cameras</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">Inherited</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {canEditUsers ? (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-40 rounded-xl">
+                                  <DropdownMenuItem onClick={() => handleOpenEdit(user)} disabled={user.type === "ldap"} className="rounded-lg text-xs gap-2">
+                                    <Pencil className="h-3.5 w-3.5 text-blue-500" />
+                                    <span>Edit Details</span>
+                                  </DropdownMenuItem>
+                                  {user.temporaryToken?.token && (
+                                    <DropdownMenuItem onClick={() => handleCopyToken(user.temporaryToken!.token!)} className="rounded-lg text-xs gap-2">
+                                      <Copy className="h-3.5 w-3.5 text-amber-500" />
+                                      <span>Copy Token</span>
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleOpenDelete(user)}
+                                    disabled={user.type === "ldap"}
+                                    className="rounded-lg text-xs gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950/40"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    <span>Delete Account</span>
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            ) : (
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-40 cursor-not-allowed" disabled>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            /* CARD GRID VIEW */
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredUsers.map((user) => {
+                const badge = getUserTypeBadge(user.type);
+                const cameraCount = getUserCameraCount(user);
+                return (
+                  <div
+                    key={user.id}
+                    className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-200 p-4 flex flex-col justify-between group"
+                  >
+                    <div>
+                      {/* Card Header */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10 border border-slate-200 dark:border-slate-700 shadow-xs">
+                            <AvatarFallback className={`bg-gradient-to-br ${badge.avatarGradient} text-white font-bold text-sm`}>
+                              {getInitials(user.name || user.email)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">{user.name}</h4>
+                            {user.fullName && <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.fullName}</p>}
+                          </div>
+                        </div>
 
-        {/* Error State */}
-        {error && (
-          <div className="flex items-center gap-2 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
-            <AlertCircle className="h-5 w-5" />
-            <span>{error}</span>
-            <Button variant="outline" size="sm" onClick={handleRefresh} className="ml-auto">
-              Retry
+                        <Badge variant="outline" className={cn("text-[10px] font-semibold gap-1 py-0.5 px-2 rounded-lg shrink-0", badge.className)}>
+                          {badge.icon}
+                          <span>{badge.label}</span>
+                        </Badge>
+                      </div>
+
+                      {/* Card Body */}
+                      <div className="mt-4 space-y-2.5 text-xs text-slate-600 dark:text-slate-400">
+                        {user.email && (
+                          <div className="flex items-center gap-2">
+                            <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">{user.email}</span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-slate-400">Account Status</span>
+                          {user.isEnabled !== false ? (
+                            <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 font-semibold text-slate-400 text-[11px]">
+                              Disabled
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Groups */}
+                        <div className="space-y-1">
+                          <span className="text-[11px] text-slate-400 block">Groups & Roles</span>
+                          {user.groupIds && user.groupIds.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {user.groupIds.map((gid) => (
+                                <Badge key={gid} variant="secondary" className="text-[10px] rounded-md px-1.5 py-0.2">
+                                  {getGroupName(gid)}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-[11px] italic">No group assigned</span>
+                          )}
+                        </div>
+
+                        {/* Camera Permissions */}
+                        {cameraCount > 0 && (
+                          <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 p-2 rounded-xl border border-blue-100 dark:border-blue-900/40 mt-2">
+                            <Camera className="h-3.5 w-3.5 shrink-0" />
+                            <span className="font-semibold text-[11px]">{cameraCount} specific cameras granted</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Card Actions */}
+                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                      {user.temporaryToken?.token ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyToken(user.temporaryToken!.token!)}
+                          className="h-8 px-2 text-xs text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/50 rounded-lg gap-1"
+                        >
+                          <Copy className="h-3.5 w-3.5" /> Token
+                        </Button>
+                      ) : (
+                        <div />
+                      )}
+
+                      {canEditUsers && (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenEdit(user)}
+                            disabled={user.type === "ldap"}
+                            className="h-8 px-2.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg gap-1"
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-blue-500" /> Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenDelete(user)}
+                            disabled={user.type === "ldap"}
+                            className="h-8 px-2.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg gap-1"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Permission Groups Summary Banner */}
+      {!loading && !error && DEFAULT_PERMISSION_GROUPS.length > 0 && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400">
+                <Shield className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">System Permission Groups</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Built-in roles for controlling access rights across the platform.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {DEFAULT_PERMISSION_GROUPS.map((group) => {
+              const assignedCount = effectiveUsers.filter((u) => u.groupIds?.includes(group.id)).length;
+              return (
+                <div
+                  key={group.id}
+                  className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 hover:border-slate-200 transition-colors flex items-start gap-3"
+                >
+                  <ShieldCheck className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-semibold text-xs text-slate-900 dark:text-slate-100 truncate">{group.name}</span>
+                      <Badge variant="secondary" className="text-[10px] bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md">
+                        {assignedCount} users
+                      </Badge>
+                    </div>
+                    {group.description && <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">{group.description}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* CREATE & EDIT USER MODAL DIALOG */}
+      <Dialog
+        open={showCreateDialog || showEditDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowCreateDialog(false);
+            setShowEditDialog(false);
+            resetForm();
+          }
+        }}
+      >
+        <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] p-0 rounded-2xl overflow-hidden border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl flex flex-col">
+          {/* Modal Top Banner Header */}
+          <div className="p-4 sm:p-6 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white flex items-start justify-between relative overflow-hidden">
+            <div className="relative z-10">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-white/10 backdrop-blur-md">
+                  {showEditDialog ? <Pencil className="h-5 w-5 text-blue-400" /> : <Plus className="h-5 w-5 text-blue-400" />}
+                </div>
+                <DialogTitle className="text-lg sm:text-xl font-extrabold text-white">
+                  {showEditDialog ? `Edit Account: ${selectedUser?.name}` : "Create New User Account"}
+                </DialogTitle>
+              </div>
+              <DialogDescription className="text-xs text-slate-300 mt-1.5">
+                Configure identity details, authentication, role groups, and camera permissions.
+              </DialogDescription>
+            </div>
+          </div>
+
+          {/* Modal Body with Structured Tabs */}
+          <div className="p-4 sm:p-6 flex-1 overflow-y-auto custom-scrollbar">
+            <Tabs value={modalTab} onValueChange={(val: any) => setModalTab(val)} className="w-full">
+              <TabsList className="grid grid-cols-3 sm:grid-cols-4 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl mb-4 h-auto">
+                <TabsTrigger value="general" className="text-xs py-2 rounded-lg font-semibold gap-1.5">
+                  <User className="h-3.5 w-3.5" /> <span className="hidden sm:inline">General</span> Info
+                </TabsTrigger>
+                {formData.type === "temporaryLocal" && (
+                  <TabsTrigger value="validity" className="text-xs py-2 rounded-lg font-semibold gap-1.5">
+                    <Clock className="h-3.5 w-3.5" /> Validity
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="permissions" className="text-xs py-2 rounded-lg font-semibold gap-1.5">
+                  <Shield className="h-3.5 w-3.5" /> Roles
+                </TabsTrigger>
+                <TabsTrigger value="cameras" className="text-xs py-2 rounded-lg font-semibold gap-1.5">
+                  <Camera className="h-3.5 w-3.5" /> Cameras
+                </TabsTrigger>
+              </TabsList>
+
+              {/* TAB 1: GENERAL INFO */}
+              <TabsContent value="general" className="space-y-4 mt-0">
+                {/* User Type Switcher */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Account Type *</Label>
+                  <Select
+                    value={formData.type}
+                    onValueChange={(val: "local" | "temporaryLocal" | "cloud") => setFormData((prev) => ({ ...prev, type: val }))}
+                    disabled={showEditDialog}
+                  >
+                    <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-xs sm:text-sm">
+                      <SelectValue placeholder="Select user type" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      <SelectItem value="local">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm font-medium">
+                          <User className="h-4 w-4 text-blue-500" />
+                          <span>Local User Account</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="temporaryLocal">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm font-medium">
+                          <Clock className="h-4 w-4 text-amber-500" />
+                          <span>Temporary Guest Account (Token-based)</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="cloud">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm font-medium">
+                          <Cloud className="h-4 w-4 text-emerald-500" />
+                          <span>Cloud Integrated Account</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Account Enabled Toggle */}
+                <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="isEnabled" className="text-xs font-semibold text-slate-900 dark:text-slate-100 cursor-pointer">
+                      Account Active Status
+                    </Label>
+                    <p className="text-[11px] text-slate-500">Disabled accounts cannot log into the VMS system.</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="isEnabled"
+                    checked={formData.isEnabled}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, isEnabled: e.target.checked }))}
+                    className="h-4 w-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                </div>
+
+                {/* Form Fields for Cloud User */}
+                {formData.type === "cloud" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="email" className="text-xs font-semibold">Cloud Email Address *</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                      placeholder="user@cloud-domain.com"
+                      disabled={showEditDialog}
+                      className={cn("h-10 rounded-xl text-xs sm:text-sm", formErrors.email && "border-red-500")}
+                    />
+                    {formErrors.email && <p className="text-xs text-red-500">{formErrors.email}</p>}
+                  </div>
+                )}
+
+                {/* Form Fields for Local & Temporary User */}
+                {(formData.type === "local" || formData.type === "temporaryLocal") && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="name" className="text-xs font-semibold">Username *</Label>
+                        <Input
+                          id="name"
+                          value={formData.name}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                          placeholder="johndoe"
+                          className={cn("h-10 rounded-xl text-xs sm:text-sm", formErrors.name && "border-red-500")}
+                        />
+                        {formErrors.name && <p className="text-xs text-red-500">{formErrors.name}</p>}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="fullName" className="text-xs font-semibold">Full Name</Label>
+                        <Input
+                          id="fullName"
+                          value={formData.fullName}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, fullName: e.target.value }))}
+                          placeholder="John Doe"
+                          className="h-10 rounded-xl text-xs sm:text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="email" className="text-xs font-semibold">Email Address (Optional)</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                        placeholder="john.doe@example.com"
+                        className="h-10 rounded-xl text-xs sm:text-sm"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="password" className="text-xs font-semibold">
+                          Password {showEditDialog ? "(Leave blank to keep unchanged)" : "*"}
+                        </Label>
+                        <div className="relative">
+                          <Input
+                            id="password"
+                            type={showPassword ? "text" : "password"}
+                            value={formData.password}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
+                            placeholder="••••••••"
+                            className={cn("h-10 rounded-xl text-xs sm:text-sm pr-10", formErrors.password && "border-red-500")}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-slate-400"
+                            onClick={() => setShowPassword(!showPassword)}
+                          >
+                            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                        {formErrors.password && <p className="text-xs text-red-500">{formErrors.password}</p>}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="confirmPassword" className="text-xs font-semibold">Confirm Password</Label>
+                        <div className="relative">
+                          <Input
+                            id="confirmPassword"
+                            type={showConfirmPassword ? "text" : "password"}
+                            value={formData.confirmPassword}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                            placeholder="••••••••"
+                            className={cn("h-10 rounded-xl text-xs sm:text-sm pr-10", formErrors.confirmPassword && "border-red-500")}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-slate-400"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          >
+                            {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                        {formErrors.confirmPassword && <p className="text-xs text-red-500">{formErrors.confirmPassword}</p>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* TAB 2: VALIDITY & TEMPORARY TOKEN (Only for temporary users) */}
+              {formData.type === "temporaryLocal" && (
+                <TabsContent value="validity" className="space-y-4 mt-0">
+                  <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 space-y-4">
+                    <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-semibold text-xs sm:text-sm">
+                      <Clock className="h-4 w-4" />
+                      <span>Temporary Access Lifetime</span>
+                    </div>
+
+                    {/* Quick duration presets */}
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] text-amber-700 dark:text-amber-400 block font-medium">Quick Set Duration</span>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => handleSetQuickDuration(1)} className="h-7 text-xs rounded-lg border-amber-300">
+                          +1 Day
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => handleSetQuickDuration(7)} className="h-7 text-xs rounded-lg border-amber-300">
+                          +7 Days
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => handleSetQuickDuration(30)} className="h-7 text-xs rounded-lg border-amber-300">
+                          +30 Days
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="startS" className="text-xs font-semibold text-amber-900 dark:text-amber-200">Start Time</Label>
+                        <Input
+                          id="startS"
+                          type="datetime-local"
+                          value={timestampToDatetimeLocal(formData.startS)}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, startS: datetimeLocalToTimestamp(e.target.value) }))}
+                          className="h-9 rounded-xl text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="endS" className="text-xs font-semibold text-amber-900 dark:text-amber-200">Expiration Time *</Label>
+                        <Input
+                          id="endS"
+                          type="datetime-local"
+                          value={timestampToDatetimeLocal(formData.endS)}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, endS: datetimeLocalToTimestamp(e.target.value) }))}
+                          className={cn("h-9 rounded-xl text-xs", formErrors.endS && "border-red-500")}
+                        />
+                        {formErrors.endS && <p className="text-[11px] text-red-500">{formErrors.endS}</p>}
+                      </div>
+                    </div>
+
+                    {/* Auto expiration option */}
+                    <div className="pt-2 border-t border-amber-200/60 dark:border-amber-900/40 space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="expiresAfterLoginEnabled"
+                          checked={formData.expiresAfterLoginEnabled}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, expiresAfterLoginEnabled: e.target.checked }))}
+                          className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                        />
+                        <Label htmlFor="expiresAfterLoginEnabled" className="text-xs font-medium text-amber-900 dark:text-amber-200 cursor-pointer">
+                          Automatically revoke access X time after first login
+                        </Label>
+                      </div>
+
+                      {formData.expiresAfterLoginEnabled && (
+                        <div className="flex items-center gap-2 pl-6">
+                          <span className="text-xs text-amber-800 dark:text-amber-300">Revoke in:</span>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={formData.expiresAfterLoginValue}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, expiresAfterLoginValue: parseInt(e.target.value) || 1 }))}
+                            className="w-20 h-8 text-xs rounded-lg"
+                          />
+                          <Select
+                            value={formData.expiresAfterLoginUnit}
+                            onValueChange={(val: TimeUnit) => setFormData((prev) => ({ ...prev, expiresAfterLoginUnit: val }))}
+                          >
+                            <SelectTrigger className="w-28 h-8 text-xs rounded-lg">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="rounded-xl">
+                              <SelectItem value="minutes">Minutes</SelectItem>
+                              <SelectItem value="hours">Hours</SelectItem>
+                              <SelectItem value="days">Days</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Show Token Display */}
+                    {showEditDialog && selectedUser?.temporaryToken?.token && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-amber-200 dark:border-amber-900/60 space-y-1.5">
+                        <span className="text-[11px] font-semibold text-slate-500 block">Access Token String</span>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 p-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-[11px] font-mono break-all text-amber-800 dark:text-amber-300">
+                            {selectedUser.temporaryToken.token}
+                          </code>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCopyToken(selectedUser.temporaryToken!.token!)}
+                            className="h-8 px-2.5 rounded-lg border-amber-300 text-xs gap-1"
+                          >
+                            {copiedToken ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              )}
+
+              {/* TAB 3: GROUP PERMISSIONS & COPY */}
+              <TabsContent value="permissions" className="space-y-4 mt-0">
+                {/* Copy permissions helper */}
+                {effectiveUsers.length > 0 && (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 space-y-1.5">
+                    <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Copy Roles From Existing User</Label>
+                    <Select value={copyFromUserId} onValueChange={handleCopyFromUser}>
+                      <SelectTrigger className="w-full h-9 bg-white dark:bg-slate-900 rounded-xl text-xs">
+                        <SelectValue placeholder="Select user to copy permissions from..." />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        <SelectItem value="none">None (Custom Permissions)</SelectItem>
+                        {effectiveUsers.map((u) => (
+                          <SelectItem key={u.id} value={u.id} className="text-xs">
+                            {u.name} {u.email ? `(${u.email})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Group Checkboxes */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">System Role Groups</Label>
+                  <div className="space-y-2">
+                    {DEFAULT_PERMISSION_GROUPS.map((group) => {
+                      const isChecked = formData.groupIds.includes(group.id);
+                      return (
+                        <div
+                          key={group.id}
+                          onClick={() => handleGroupToggle(group.id)}
+                          className={cn(
+                            "p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3",
+                            isChecked
+                              ? "bg-blue-50/60 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800"
+                              : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:border-slate-300"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}} // handled by parent onClick
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <Shield className={cn("h-3.5 w-3.5", isChecked ? "text-blue-600" : "text-slate-400")} />
+                              <span className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100">{group.name}</span>
+                            </div>
+                            {group.description && (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{group.description}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* TAB 4: CAMERA / RESOURCE ACCESS RIGHTS */}
+              <TabsContent value="cameras" className="space-y-3 mt-0">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Camera Specific Access</Label>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleSelectAllDevices(true)}
+                      className="h-7 text-[11px] text-blue-600 hover:bg-blue-50"
+                    >
+                      Select All
+                    </Button>
+                    <span className="text-slate-300">|</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleSelectAllDevices(false)}
+                      className="h-7 text-[11px] text-slate-500 hover:bg-slate-100"
+                    >
+                      Clear All
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Input
+                    placeholder="Search camera by name..."
+                    value={resourceSearchTerm}
+                    onChange={(e) => setResourceSearchTerm(e.target.value)}
+                    className="pl-9 h-9 rounded-xl text-xs bg-slate-50 dark:bg-slate-950"
+                  />
+                  {resourceSearchTerm && (
+                    <button onClick={() => setResourceSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <ScrollArea className="h-[260px] border border-slate-200/80 dark:border-slate-800 rounded-xl p-2 bg-slate-50/40 dark:bg-slate-950/40">
+                  {devicesLoading ? (
+                    <div className="flex items-center justify-center py-12 text-xs text-slate-400">
+                      <RefreshCw className="h-4 w-4 animate-spin mr-2 text-blue-500" /> Loading camera inventory...
+                    </div>
+                  ) : (
+                    (() => {
+                      const filteredDevs = devices.filter((d) =>
+                        (d.name || "").toLowerCase().includes(resourceSearchTerm.toLowerCase()) ||
+                        (d.id || "").toLowerCase().includes(resourceSearchTerm.toLowerCase())
+                      );
+
+                      if (filteredDevs.length === 0) {
+                        return (
+                          <div className="text-center py-10 text-xs text-slate-400">
+                            {devices.length === 0 ? "No cameras available in selected system." : "No cameras match search."}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-1">
+                          {filteredDevs.map((dev) => {
+                            const normalizeId = (id: string) => id.replace(/[{}]/g, "");
+                            const normDevId = normalizeId(dev.id);
+
+                            let hasAccess = false;
+                            if (formData.resourceAccessRights) {
+                              for (const k of Object.keys(formData.resourceAccessRights)) {
+                                if (normalizeId(k) === normDevId) {
+                                  hasAccess = true;
+                                  break;
+                                }
+                              }
+                            }
+
+                            return (
+                              <div
+                                key={dev.id}
+                                className={cn(
+                                  "flex items-center justify-between p-2.5 rounded-xl border transition-colors",
+                                  hasAccess
+                                    ? "bg-blue-50/80 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800"
+                                    : "bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-800 hover:border-slate-300"
+                                )}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    id={`dev-${dev.id}`}
+                                    checked={hasAccess}
+                                    onChange={() => handleToggleDevice(dev.id)}
+                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                  <Label htmlFor={`dev-${dev.id}`} className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate cursor-pointer">
+                                    {dev.name}
+                                  </Label>
+                                </div>
+
+                                {hasAccess && (
+                                  <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 border-0 font-bold uppercase">
+                                    Full Access
+                                  </Badge>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()
+                  )}
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
+
+            {/* Submit Error */}
+            {formErrors.submit && (
+              <div className="mt-4 p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-xs text-red-600 dark:text-red-300 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{formErrors.submit}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Modal Footer Actions */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setShowCreateDialog(false);
+                setShowEditDialog(false);
+                resetForm();
+              }}
+              disabled={isSubmitting}
+              className="h-9 px-4 rounded-xl text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={showEditDialog ? handleUpdate : handleCreate}
+              disabled={isSubmitting}
+              className="h-9 px-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : showEditDialog ? (
+                "Save Changes"
+              ) : (
+                "Create Account"
+              )}
             </Button>
           </div>
-        )}
+        </DialogContent>
+      </Dialog>
 
-        {/* Loading State */}
-        {loading && (
-          <div className="flex items-center justify-center py-12">
-            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-muted-foreground">Loading users...</span>
-          </div>
-        )}
-
-        {/* Users Table */}
-        {!loading && !error && (
-          <Card>
-            <CardHeader className="p-3 sm:p-6">
-              <CardTitle className="text-lg sm:text-xl">Users ({filteredUsers.length})</CardTitle>
-              <CardDescription className="text-xs sm:text-sm">
-                List of all users with access to the VMS system
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-0 sm:p-6 sm:pt-0">
-              {filteredUsers.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-muted-foreground">
-                  <Users className="h-10 w-10 sm:h-12 sm:w-12 mb-4 opacity-50" />
-                  <p className="text-sm sm:text-base">No users found</p>
-                  {searchTerm && <p className="text-xs sm:text-sm mt-1">Try adjusting your search or filter criteria</p>}
-                </div>
-              ) : (
-                <div className="rounded-md border overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[40px] sm:w-[50px] text-xs sm:text-sm">#</TableHead>
-                        <TableHead className="text-xs sm:text-sm min-w-[120px]">Name</TableHead>
-                        <TableHead className="text-xs sm:text-sm hidden md:table-cell">Email</TableHead>
-                        <TableHead className="text-xs sm:text-sm">Type</TableHead>
-                        <TableHead className="text-xs sm:text-sm hidden sm:table-cell">Status</TableHead>
-                        <TableHead className="text-xs sm:text-sm hidden lg:table-cell">Groups</TableHead>
-                        <TableHead className="w-[60px] sm:w-[80px]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredUsers.map((user, index) => {
-                        const typeBadge = getUserTypeBadge(user.type);
-                        return (
-                          <TableRow key={user.id}>
-                            <TableCell className="font-medium text-muted-foreground text-xs sm:text-sm">
-                              {index + 1}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <div className="p-1 sm:p-1.5 rounded-full bg-muted flex-shrink-0">
-                                  {getUserTypeIcon(user.type)}
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="font-medium text-xs sm:text-sm truncate block">{user.name}</span>
-                                  {user.fullName && (
-                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
-                                      {user.fullName}
-                                    </p>
-                                  )}
-                                  {/* Show email on mobile */}
-                                  {user.email && (
-                                    <p className="text-[10px] text-muted-foreground truncate md:hidden">{user.email}</p>
-                                  )}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell">
-                              {user.email ? (
-                                <div className="flex items-center gap-1 text-muted-foreground">
-                                  <Mail className="h-3 w-3 flex-shrink-0" />
-                                  <span className="text-xs sm:text-sm truncate">{user.email}</span>
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground text-xs sm:text-sm">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`${typeBadge.className} text-[10px] sm:text-xs`}>
-                                {typeBadge.label}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="hidden sm:table-cell">
-                              {user.isEnabled !== false ? (
-                                <Badge
-                                  variant="outline"
-                                  className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-[10px] sm:text-xs transition-all"
-                                >
-                                  Enabled
-                                </Badge>
-                              ) : (
-                                <Badge
-                                  variant="outline"
-                                  className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 text-[10px] sm:text-xs transition-all"
-                                >
-                                  Disabled
-                                </Badge>
-                              )}
-                            </TableCell>
-                            <TableCell className="hidden lg:table-cell">
-                              {user.groupIds && user.groupIds.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {user.groupIds.slice(0, 2).map((groupId) => (
-                                    <Badge key={groupId} variant="outline" className="text-[10px] sm:text-xs">
-                                      {getGroupName(groupId)}
-                                    </Badge>
-                                  ))}
-                                  {user.groupIds.length > 2 && (
-                                    <Badge variant="outline" className="text-[10px] sm:text-xs">
-                                      +{user.groupIds.length - 2}
-                                    </Badge>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground text-xs sm:text-sm">No groups</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {canEditUsers ? (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                      <MoreHorizontal className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => handleOpenEdit(user)} disabled={user.type === "ldap"}>
-                                      <Pencil className="h-4 w-4 mr-2" />
-                                      Edit
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onClick={() => handleOpenDelete(user)}
-                                      className="text-red-600 focus:text-red-600"
-                                      disabled={user.type === "ldap"}
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-2" />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              ) : (
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-not-allowed opacity-50 pointer-events-auto" disabled>
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* User Groups Section */}
-        {!loading && !error && DEFAULT_PERMISSION_GROUPS.length > 0 && (
-          <Card>
-            <CardHeader className="p-3 sm:p-6">
-              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <Shield className="h-4 w-4 sm:h-5 sm:w-5" />
-                User Groups ({DEFAULT_PERMISSION_GROUPS.length})
-              </CardTitle>
-              <CardDescription className="text-xs sm:text-sm">
-                Available user groups for permission management
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-                {DEFAULT_PERMISSION_GROUPS.map((group) => (
-                  <div
-                    key={group.id}
-                    className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="p-2 rounded-full bg-primary/10">
-                      <Shield className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{group.name}</p>
-                      {group.description && <p className="text-xs text-muted-foreground truncate">{group.description}</p>}
-                    </div>
-                    <Badge variant="secondary" className="text-xs">
-                      {users.filter((u) => u.groupIds?.includes(group.id)).length} users
-                    </Badge>
-                  </div>
-                ))}
+      {/* DELETE CONFIRMATION ALERT DIALOG */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent className="rounded-2xl border border-slate-200 dark:border-slate-800">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-full bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400">
+                <Trash2 className="h-5 w-5" />
               </div>
-            </CardContent>
-          </Card>
-        )}
+              <AlertDialogTitle className="text-lg font-bold">Confirm Account Deletion</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-2">
+              Are you sure you want to permanently delete user account <strong className="text-slate-900 dark:text-slate-100">{selectedUser?.name}</strong>? All privileges and access tokens associated with this user will be revoked.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4">
+            <AlertDialogCancel disabled={isSubmitting} className="rounded-xl text-xs">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isSubmitting}
+              className="bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 mr-2 animate-spin" /> Deleting...
+                </>
+              ) : (
+                "Delete Account"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-        {/* Create User Dialog */}
-        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-          <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6 custom-scrollbar">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
-                Create New User
-              </DialogTitle>
-              <DialogDescription className="text-xs sm:text-sm">Add a new user to the VMS system</DialogDescription>
-            </DialogHeader>
-            {renderFormFields()}
-            <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
-              <Button
-                variant="outline"
-                onClick={() => setShowCreateDialog(false)}
-                disabled={isSubmitting}
-                className="w-full sm:w-auto"
-                size="sm"
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleCreate} disabled={isSubmitting} className="w-full sm:w-auto" size="sm">
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  "Create User"
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit User Dialog */}
-        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6 custom-scrollbar">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                <Pencil className="h-4 w-4 sm:h-5 sm:w-5" />
-                Edit User
-              </DialogTitle>
-              <DialogDescription className="text-xs sm:text-sm">
-                Modify user details for {selectedUser?.name}
-              </DialogDescription>
-            </DialogHeader>
-            {renderFormFields()}
-            <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
-              <Button
-                variant="outline"
-                onClick={() => setShowEditDialog(false)}
-                disabled={isSubmitting}
-                className="w-full sm:w-auto"
-                size="sm"
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleUpdate} disabled={isSubmitting} className="w-full sm:w-auto" size="sm">
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Save Changes"
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Delete Confirmation Dialog */}
-        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete User</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete user <strong>{selectedUser?.name}</strong>? This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDelete} disabled={isSubmitting} className="bg-red-600 hover:bg-red-700">
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  "Delete"
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        {/* Cloud Login Dialog */}
-        <CloudLoginDialog
-          open={showLoginDialog}
-          onOpenChange={setShowLoginDialog}
-          systemId={loginSystemId}
-          systemName={loginSystemName}
-          onLoginSuccess={refetchUsers}
-        />
-      </>
+      {/* CLOUD LOGIN DIALOG */}
+      <CloudLoginDialog
+        open={showLoginDialog}
+        onOpenChange={setShowLoginDialog}
+        systemId={loginSystemId}
+        systemName={loginSystemName}
+        onLoginSuccess={refetchUsers}
+      />
     </div>
   );
 }

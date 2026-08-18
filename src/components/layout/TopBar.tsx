@@ -336,16 +336,21 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
               variant="outline"
               size="sm"
               onClick={toggleFullscreen}
-              className="gap-1 sm:gap-2 px-2 sm:px-3 no-drag ml-1 overflow-hidden"
+              className={cn(
+                "gap-1 sm:gap-2 px-3 no-drag ml-1 overflow-hidden transition-all duration-200 font-semibold shadow-sm",
+                isCloudTheme
+                  ? "bg-slate-800/90 text-slate-100 border-slate-700 hover:bg-blue-600 hover:text-white hover:border-blue-500"
+                  : "bg-white text-slate-800 border-slate-300 hover:bg-slate-100"
+              )}
             >
               {isFullscreen ? (
                 <>
-                  <Minimize className="w-4 h-4" />
+                  <Minimize className="w-4 h-4 text-slate-200" />
                   <span className="hidden sm:inline">Minimize</span>
                 </>
               ) : (
                 <>
-                  <Maximize className="w-4 h-4" />
+                  <Maximize className="w-4 h-4 text-cyan-400" />
                   <span className="hidden sm:inline">Full Screen</span>
                 </>
               )}

@@ -47,6 +47,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { getElectronHeaders } from "@/lib/config";
 import Cookies from "js-cookie";
 import { useCloudSystems } from "@/hooks/use-async-data";
+import { cn } from "@/lib/utils";
 
 type ViewMode = "local" | "cloud";
 
@@ -372,13 +373,13 @@ export default function StorageManagement() {
     switch (status) {
       case "Online":
       case "Recording":
-        return "bg-green-100 text-green-800";
+        return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30";
       case "Offline":
-        return "bg-red-100 text-red-800";
+        return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30";
       case "Unauthorized":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30";
     }
   };
 
@@ -608,32 +609,68 @@ export default function StorageManagement() {
   const showNoCloudAlert = viewMode === "cloud" && cloudSystems.length === 0 && !loadingSystems;
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <div className="space-y-6 select-none pb-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Storage Management</h1>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 dark:border-slate-800">
+        <div className="flex items-center gap-3.5">
+          <div className="p-3 bg-gradient-to-br from-cyan-500/10 to-blue-500/20 text-cyan-600 dark:text-cyan-400 rounded-2xl border border-cyan-500/20 shadow-sm">
+            <Database className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+              Storage Management
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Disk drives, Network Attached Storage (NAS), capacity metrics, and write status
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* View Mode Toggle */}
+          <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700">
+            <button
+              onClick={() => setViewMode("local")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                viewMode === "local"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              )}
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              <span>Local</span>
+            </button>
+            <button
+              onClick={() => setViewMode("cloud")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                viewMode === "cloud"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              )}
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Cloud</span>
+            </button>
+          </div>
 
           {/* System Selector - only for cloud mode */}
           {viewMode === "cloud" && cloudSystems.length > 0 && (
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="flex items-center gap-2 h-10">
-                  <Cloud className="w-4 h-4" />
+                <Button variant="outline" className="flex items-center gap-2 h-9 text-xs rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80">
+                  <Cloud className="w-3.5 h-3.5 text-blue-500" />
                   <span className="truncate max-w-[150px]">{selectedSystem?.name || "Select System"}</span>
-                  <ChevronDown className="w-4 h-4" />
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-64" align="end">
+              <PopoverContent className="w-64 rounded-2xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl" align="end">
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700">Select Cloud System</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Select Cloud System</p>
                   {loadingSystems ? (
                     <div className="flex items-center justify-center py-4">
-                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />
                     </div>
                   ) : (
                     <div className="max-h-60 overflow-y-auto space-y-1">
@@ -641,20 +678,22 @@ export default function StorageManagement() {
                         <button
                           key={system.id}
                           onClick={() => setSelectedSystem(system)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedSystem?.id === system.id
-                            ? "bg-blue-100 text-blue-800"
-                            : "hover:bg-gray-100 text-gray-700"
-                            }`}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-colors ${
+                            selectedSystem?.id === system.id
+                              ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold"
+                              : "hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
+                          }`}
                           disabled={system.stateOfHealth !== "online"}
                         >
                           <div className="flex items-center justify-between">
                             <span className="truncate">{system.name}</span>
                             <span
-                              className={`w-2 h-2 rounded-full ${system.stateOfHealth === "online" ? "bg-green-500" : "bg-gray-400"
-                                }`}
+                              className={`w-2 h-2 rounded-full ${
+                                system.stateOfHealth === "online" ? "bg-emerald-500" : "bg-slate-400"
+                              }`}
                             />
                           </div>
-                          {system.accessRole === "owner" && <span className="text-xs text-purple-600">Owner</span>}
+                          {system.accessRole === "owner" && <span className="text-[10px] font-semibold text-purple-600">Owner</span>}
                         </button>
                       ))}
                     </div>
@@ -664,7 +703,7 @@ export default function StorageManagement() {
             </Popover>
           )}
 
-          {/* Refresh Button - Styled like CameraInventory */}
+          {/* Refresh Button */}
           <button
             onClick={() => {
               if (viewMode === "cloud" && !selectedSystem && cloudSystems.length === 0) {
@@ -674,267 +713,400 @@ export default function StorageManagement() {
               }
             }}
             disabled={currentLoading || loadingSystems}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
+            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl disabled:opacity-50 text-xs font-semibold h-9 transition-all shadow-sm hover:shadow"
           >
             <RefreshCw
-              className={`w-4 h-4 ${currentLoading || loadingSystems ? "animate-spin" : ""}`}
+              className={`w-3.5 h-3.5 ${currentLoading || loadingSystems ? "animate-spin" : ""}`}
             />
-            <span className="font-medium">Refresh</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>
 
-      {/* View Mode Tabs - Keep outside so user can always switch */}
-
-
       {/* Main Content */}
       <>
-
         {/* Auth Required - only for cloud mode */}
-        {
-          viewMode === "cloud" && requiresAuth && !showLoginForm && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-yellow-600" />
-                  <div>
-                    <p className="font-medium text-yellow-800">Authentication Required</p>
-                    <p className="text-sm text-yellow-600">Please login to view storages for {selectedSystem?.name}</p>
-                  </div>
+        {viewMode === "cloud" && requiresAuth && !showLoginForm && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
+                <div>
+                  <p className="font-bold text-sm text-amber-700 dark:text-amber-400">Authentication Required</p>
+                  <p className="text-xs text-amber-600/80 dark:text-amber-400/80">Please login to view storages for {selectedSystem?.name}</p>
                 </div>
-                <Button onClick={() => setShowLoginForm(true)}>
-                  <LogIn className="w-4 h-4 mr-2" />
-                  Login
+              </div>
+              <Button size="sm" className="rounded-xl text-xs font-semibold" onClick={() => setShowLoginForm(true)}>
+                <LogIn className="w-3.5 h-3.5 mr-1.5" />
+                Login
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Login Form - only for cloud mode */}
+        {viewMode === "cloud" && showLoginForm && (
+          <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+            <h3 className="font-bold text-base text-slate-900 dark:text-white mb-4">Login to {selectedSystem?.name}</h3>
+            <div className="space-y-3.5 max-w-md">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Username</label>
+                <input
+                  type="text"
+                  value={loginForm.username}
+                  onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                  className="w-full px-3.5 py-2 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs bg-slate-50/50 dark:bg-slate-800/50"
+                  placeholder="admin"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                    className="w-full px-3.5 py-2 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs bg-slate-50/50 dark:bg-slate-800/50 pr-10"
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {loginError && <p className="text-xs text-rose-600 bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/20">{loginError}</p>}
+
+              <div className="flex gap-2 pt-1">
+                <Button size="sm" className="rounded-xl text-xs font-semibold" onClick={handleLogin} disabled={loggingIn}>
+                  {loggingIn ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      Logging in...
+                    </>
+                  ) : (
+                    <>
+                      <LogIn className="w-3.5 h-3.5 mr-1.5" />
+                      Login
+                    </>
+                  )}
+                </Button>
+                <Button size="sm" variant="outline" className="rounded-xl text-xs font-semibold" onClick={() => setShowLoginForm(false)}>
+                  Cancel
                 </Button>
               </div>
             </div>
-          )
-        }
+          </div>
+        )}
 
-        {/* Login Form - only for cloud mode */}
-        {
-          viewMode === "cloud" && showLoginForm && (
-            <div className="bg-white border rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-4">Login to {selectedSystem?.name}</h3>
-              <div className="space-y-3 max-w-md">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                  <input
-                    type="text"
-                    value={loginForm.username}
-                    onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    placeholder="admin"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={loginForm.password}
-                      onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm pr-10"
-                      placeholder="••••••••"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {loginError && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{loginError}</p>}
-
-                <div className="flex gap-2">
-                  <Button onClick={handleLogin} disabled={loggingIn}>
-                    {loggingIn ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Logging in...
-                      </>
-                    ) : (
-                      <>
-                        <LogIn className="w-4 h-4 mr-2" />
-                        Login
-                      </>
-                    )}
-                  </Button>
-                  <Button variant="outline" onClick={() => setShowLoginForm(false)}>
-                    Cancel
-                  </Button>
-                </div>
+        {/* Stats Overview */}
+        {(viewMode === "local" || (viewMode === "cloud" && !requiresAuth)) && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Storages</span>
+                <Database className="h-4 w-4 text-slate-400" />
+              </div>
+              <div className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{currentStorages.length}</div>
+            </div>
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-emerald-500 uppercase tracking-wider">Online Disks</span>
+                <Wifi className="h-4 w-4 text-emerald-500" />
+              </div>
+              <div className="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+                {onlineStorages}/{currentStorages.length}
               </div>
             </div>
-          )
-        }
-
-        {/* Stats Overview - show for local mode or when cloud mode is authenticated */}
-        {
-          (viewMode === "local" || (viewMode === "cloud" && !requiresAuth)) && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card>
-                <CardHeader className="pb-6">
-                  <CardDescription className="text-xs">Total Storages</CardDescription>
-                  <CardTitle className="text-2xl">{currentStorages.length}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-6">
-                  <CardDescription className="text-xs">Online</CardDescription>
-                  <CardTitle className="text-2xl text-green-600">
-                    {onlineStorages}/{currentStorages.length}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-6">
-                  <CardDescription className="text-xs">Free</CardDescription>
-                  <CardTitle className="text-2xl text-green-600">{formatBytes(totalFree)}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-6">
-                  <CardDescription className="text-xs">Used / Total Capacity</CardDescription>
-                  <CardTitle className="text-lg">
-                    <span className="text-orange-600">{formatBytes(totalUsed)}</span>
-                    <span className="text-gray-400 mx-1">/</span>
-                    <span className="text-gray-600">{formatBytes(totalStorage)}</span>
-                  </CardTitle>
-                </CardHeader>
-              </Card>
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-cyan-500 uppercase tracking-wider">Free Capacity</span>
+                <HardDrive className="h-4 w-4 text-cyan-500" />
+              </div>
+              <div className="text-2xl font-bold tracking-tight text-cyan-600 dark:text-cyan-400">{formatBytes(totalFree)}</div>
             </div>
-          )
-        }
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-amber-500 uppercase tracking-wider">Used / Capacity</span>
+                <Archive className="h-4 w-4 text-amber-500" />
+              </div>
+              <div className="text-base font-bold tracking-tight">
+                <span className="text-amber-600 dark:text-amber-400">{formatBytes(totalUsed)}</span>
+                <span className="text-slate-400 mx-1">/</span>
+                <span className="text-slate-600 dark:text-slate-300">{formatBytes(totalStorage)}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Storage List */}
-        {
-          viewMode === "local" ? (
-            // Local Storage List
+        {viewMode === "local" ? (
+          // Local Storage List
+          <div className="space-y-4">
+            {loadingLocal ? (
+              <div className="flex items-center justify-center p-12 bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mr-2" />
+                <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Loading local storages...</span>
+              </div>
+            ) : localError ? (
+              <div className="flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-rose-500">
+                <AlertCircle className="w-6 h-6 mb-2" />
+                <span className="text-sm font-medium text-center">{localError}</span>
+                <Button variant="outline" size="sm" className="mt-4 rounded-xl text-xs font-semibold" onClick={fetchLocalStorages}>
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                  Retry
+                </Button>
+              </div>
+            ) : localStorages.length === 0 ? (
+              <div className="flex items-center justify-center p-12 bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-slate-400">
+                <Database className="w-6 h-6 mr-2" />
+                <span className="text-sm font-medium">No local storages found</span>
+              </div>
+            ) : (
+              <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+                {localStorages.map((storage, index) => {
+                  const usagePercent = getUsagePercentage(storage);
+                  const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
+                  const isLastAndOdd = localStorages.length % 2 !== 0 && index === localStorages.length - 1;
+
+                  return (
+                    <Card
+                      key={storage.id}
+                      className={cn(
+                        "border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm rounded-2xl overflow-hidden transition-all duration-200 hover:shadow-md",
+                        !isOnline && "opacity-60",
+                        isLastAndOdd && "md:col-span-2"
+                      )}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className={cn(
+                                "p-2.5 rounded-xl shrink-0 border",
+                                isOnline
+                                  ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                                  : "bg-slate-500/10 text-slate-500 border-slate-500/20"
+                              )}
+                            >
+                              {getStorageTypeIcon(storage.type)}
+                            </div>
+                            <div className="min-w-0">
+                              <CardTitle className="text-base font-bold text-slate-900 dark:text-white truncate">
+                                {storage.name}
+                              </CardTitle>
+                              <CardDescription className="text-xs font-mono text-slate-400 truncate max-w-[220px]">
+                                {storage.path}
+                              </CardDescription>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className={cn(getStatusColor(storage.status), "shrink-0 text-xs rounded-lg px-2.5 py-0.5 font-semibold")}>
+                            {isOnline ? <Wifi className="w-3.5 h-3.5 mr-1" /> : <WifiOff className="w-3.5 h-3.5 mr-1" />}
+                            <span>{storage.status || "Unknown"}</span>
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-3 pt-0">
+                        {/* Usage Bar */}
+                        {storage.statusInfo && (
+                          <div className="space-y-1.5 bg-slate-50/60 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                            <div className="flex justify-between text-xs font-mono text-slate-600 dark:text-slate-300">
+                              <span>
+                                Used:{" "}
+                                {formatBytes(
+                                  parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace)
+                                )}
+                              </span>
+                              <span className="font-bold">{usagePercent}%</span>
+                            </div>
+                            <Progress
+                              value={usagePercent}
+                              className={cn(
+                                "h-2 rounded-full",
+                                usagePercent > 90
+                                  ? "[&>div]:bg-rose-500"
+                                  : usagePercent > 70
+                                  ? "[&>div]:bg-amber-500"
+                                  : "[&>div]:bg-emerald-500"
+                              )}
+                            />
+                            <div className="flex justify-between text-[11px] font-mono text-slate-400">
+                              <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
+                              <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Storage Info Badges */}
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <Badge variant="secondary" className="text-xs rounded-lg uppercase tracking-wider font-semibold">
+                            {storage.type || "Unknown"}
+                          </Badge>
+
+                          {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
+                            <Badge variant="secondary" className="text-xs rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold">
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Writing
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs rounded-lg bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20 font-semibold">
+                              <XCircle className="w-3 h-3 mr-1" />
+                              Read-only
+                            </Badge>
+                          )}
+
+                          {(storage.isBackup || storage.statusInfo?.isBackup) && (
+                            <Badge variant="secondary" className="text-xs rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-semibold">
+                              <Archive className="w-3 h-3 mr-1" />
+                              Backup
+                            </Badge>
+                          )}
+
+                          {storage.statusInfo?.isExternal && (
+                            <Badge variant="secondary" className="text-xs rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-semibold">
+                              External
+                            </Badge>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          // Cloud Storage List - only show when authenticated
+          !requiresAuth && (
             <div className="space-y-4">
-              {loadingLocal ? (
-                <div className="flex items-center justify-center p-8 bg-white rounded-lg border">
-                  <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-                  <span className="text-gray-600">Loading local storages...</span>
+              {loading ? (
+                <div className="flex items-center justify-center p-12 bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                  <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mr-2" />
+                  <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Loading storages...</span>
                 </div>
-              ) : localError ? (
-                <div className="flex flex-col items-center justify-center p-8 bg-white rounded-lg border text-red-600">
-                  <AlertCircle className="w-6 h-6 mb-2" />
-                  <span className="text-center">{localError}</span>
-                  <Button variant="outline" size="sm" className="mt-4" onClick={fetchLocalStorages}>
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Retry
-                  </Button>
+              ) : error ? (
+                <div className="flex items-center justify-center p-12 bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-rose-500">
+                  <AlertCircle className="w-6 h-6 mr-2" />
+                  <span className="text-sm font-medium">{error}</span>
                 </div>
-              ) : localStorages.length === 0 ? (
-                <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
+              ) : !selectedSystem ? (
+                <div className="flex items-center justify-center p-12 bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-slate-400">
+                  <Cloud className="w-6 h-6 mr-2" />
+                  <span className="text-sm font-medium">Select a cloud system to view storages</span>
+                </div>
+              ) : storages.length === 0 ? (
+                <div className="flex items-center justify-center p-12 bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-slate-400">
                   <Database className="w-6 h-6 mr-2" />
-                  <span>No local storages found</span>
+                  <span className="text-sm font-medium">No storages found</span>
                 </div>
               ) : (
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-                  {localStorages.map((storage, index) => {
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+                  {storages.map((storage, index) => {
                     const usagePercent = getUsagePercentage(storage);
                     const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
-                    const isLastAndOdd = localStorages.length % 2 !== 0 && index === localStorages.length - 1;
+                    const isLastAndOdd = storages.length % 2 !== 0 && index === storages.length - 1;
 
                     return (
                       <Card
                         key={storage.id}
-                        className={`${!isOnline ? "opacity-60" : ""} ${isLastAndOdd ? "sm:col-span-2" : ""}`}
+                        className={cn(
+                          "border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm rounded-2xl overflow-hidden transition-all duration-200 hover:shadow-md",
+                          !isOnline && "opacity-60",
+                          isLastAndOdd && "md:col-span-2"
+                        )}
                       >
-                        <CardHeader className="pb-2 sm:pb-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
                               <div
-                                className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
-                                  }`}
+                                className={cn(
+                                  "p-2.5 rounded-xl shrink-0 border",
+                                  isOnline
+                                    ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                                    : "bg-slate-500/10 text-slate-500 border-slate-500/20"
+                                )}
                               >
                                 {getStorageTypeIcon(storage.type)}
                               </div>
                               <div className="min-w-0">
-                                <CardTitle className="text-sm sm:text-base truncate">{storage.name}</CardTitle>
-                                <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
-                                  {storage.path}
+                                <CardTitle className="text-base font-bold text-slate-900 dark:text-white truncate">
+                                  {storage.statusInfo?.name || storage.name}
+                                </CardTitle>
+                                <CardDescription className="text-xs font-mono text-slate-400 truncate max-w-[220px]">
+                                  {storage.statusInfo?.url || storage.path}
                                 </CardDescription>
                               </div>
                             </div>
-                            <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
-                              {isOnline ? <Wifi className="w-3 h-3 mr-1" /> : <WifiOff className="w-3 h-3 mr-1" />}
-                              <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
+                            <Badge variant="outline" className={cn(getStatusColor(storage.status), "shrink-0 text-xs rounded-lg px-2.5 py-0.5 font-semibold")}>
+                              {isOnline ? <Wifi className="w-3.5 h-3.5 mr-1" /> : <WifiOff className="w-3.5 h-3.5 mr-1" />}
+                              <span>{storage.status || "Unknown"}</span>
                             </Badge>
                           </div>
                         </CardHeader>
-                        <CardContent className="space-y-2 sm:space-y-3 pt-0">
+                        <CardContent className="space-y-3 pt-0">
                           {/* Usage Bar */}
                           {storage.statusInfo && (
-                            <div className="space-y-1">
-                              <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                                <span>
-                                  Used:{" "}
-                                  {formatBytes(
-                                    parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
-                                  )}
-                                </span>
-                                <span>{usagePercent}%</span>
+                            <div className="space-y-1.5 bg-slate-50/60 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                              <div className="flex justify-between text-xs font-mono text-slate-600 dark:text-slate-300">
+                                <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
+                                <span className="font-bold">{usagePercent}%</span>
                               </div>
                               <Progress
                                 value={usagePercent}
-                                className={`h-1.5 sm:h-2 ${usagePercent > 95
-                                  ? "[&>div]:bg-red-500"
-                                  : usagePercent > 85
-                                    ? "[&>div]:bg-yellow-500"
-                                    : "[&>div]:bg-green-500"
-                                  }`}
+                                className={cn(
+                                  "h-2 rounded-full",
+                                  usagePercent > 90
+                                    ? "[&>div]:bg-rose-500"
+                                    : usagePercent > 70
+                                    ? "[&>div]:bg-amber-500"
+                                    : "[&>div]:bg-blue-500"
+                                )}
                               />
-                              <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                                <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
-                                <span>Total: {formatBytes(storage.statusInfo.totalSpace)}</span>
+                              <div className="flex justify-end text-[11px] font-mono text-slate-400">
+                                <span>
+                                  {formatBytes(
+                                    parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace)
+                                  )} / {formatBytes(storage.statusInfo.totalSpace)}
+                                </span>
                               </div>
                             </div>
                           )}
 
-                          {/* Storage Info */}
-                          <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                            <Badge variant="secondary" className="text-[10px] sm:text-xs">
-                              {storage.type || "Unknown"}
+                          {/* Storage Info Badges */}
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <Badge variant="secondary" className="text-xs rounded-lg uppercase tracking-wider font-semibold">
+                              {storage.statusInfo?.storageType || storage.type || "Unknown"}
                             </Badge>
 
                             {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
-                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-green-50 text-green-700">
-                                <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                              <Badge variant="secondary" className="text-xs rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold">
+                                <CheckCircle className="w-3 h-3 mr-1" />
                                 Writing
                               </Badge>
                             ) : (
-                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-gray-50 text-gray-600">
-                                <XCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                              <Badge variant="secondary" className="text-xs rounded-lg bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20 font-semibold">
+                                <XCircle className="w-3 h-3 mr-1" />
                                 Read-only
                               </Badge>
                             )}
 
                             {(storage.isBackup || storage.statusInfo?.isBackup) && (
-                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700">
-                                <Archive className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
+                              <Badge variant="secondary" className="text-xs rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-semibold">
+                                <Archive className="w-3 h-3 mr-1" />
                                 Backup
                               </Badge>
                             )}
 
                             {storage.statusInfo?.isExternal && (
-                              <Badge variant="secondary" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700">
+                              <Badge variant="secondary" className="text-xs rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-semibold">
                                 External
                               </Badge>
                             )}
                           </div>
-
-                          {/* Space Limit */}
-                          {storage.spaceLimitB && storage.spaceLimitB > 0 && (
-                            <div className="text-[10px] sm:text-xs text-gray-500">
-                              Reserved: {formatBytes(storage.spaceLimitB)}
-                            </div>
-                          )}
                         </CardContent>
                       </Card>
                     );
@@ -942,139 +1114,8 @@ export default function StorageManagement() {
                 </div>
               )}
             </div>
-          ) : (
-            // Cloud Storage List - only show when authenticated
-            !requiresAuth && (
-              <div className="space-y-4">
-                {loading ? (
-                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border">
-                    <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-                    <span className="text-gray-600">Loading storages...</span>
-                  </div>
-                ) : error ? (
-                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-red-600">
-                    <AlertCircle className="w-6 h-6 mr-2" />
-                    <span>{error}</span>
-                  </div>
-                ) : !selectedSystem ? (
-                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
-                    <Cloud className="w-6 h-6 mr-2" />
-                    <span>Select a cloud system to view storages</span>
-                  </div>
-                ) : storages.length === 0 ? (
-                  <div className="flex items-center justify-center p-8 bg-white rounded-lg border text-gray-500">
-                    <Database className="w-6 h-6 mr-2" />
-                    <span>No storages found</span>
-                  </div>
-                ) : (
-                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
-                    {storages.map((storage, index) => {
-                      const usagePercent = getUsagePercentage(storage);
-                      const isOnline = storage.status === "Online" || storage.statusInfo?.isOnline;
-                      // Make last item span full width if odd count
-                      const isLastAndOdd = storages.length % 2 !== 0 && index === storages.length - 1;
-
-                      return (
-                        <Card
-                          key={storage.id}
-                          className={`${!isOnline ? "opacity-60" : ""} ${isLastAndOdd ? "sm:col-span-2" : ""}`}
-                        >
-                          <CardHeader className="pb-2 sm:pb-3">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                                <div
-                                  className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${isOnline ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
-                                    }`}
-                                >
-                                  {getStorageTypeIcon(storage.type)}
-                                </div>
-                                <div className="min-w-0">
-                                  <CardTitle className="text-sm sm:text-base truncate">
-                                    {storage.statusInfo?.name || storage.name}
-                                  </CardTitle>
-                                  <CardDescription className="text-xs truncate max-w-[120px] sm:max-w-[200px]">
-                                    {storage.statusInfo?.url || storage.path}
-                                  </CardDescription>
-                                </div>
-                              </div>
-                              <Badge variant="outline" className={`${getStatusColor(storage.status)} shrink-0 text-xs`}>
-                                {isOnline ? <Wifi className="w-4 h-4 mr-1" /> : <WifiOff className="w-4 h-4 mr-1" />}
-                                <span className="hidden xs:inline">{storage.status || "Unknown"}</span>
-                              </Badge>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="space-y-2 sm:space-y-3 pt-0">
-                            {/* Usage Bar */}
-                            {storage.statusInfo && (
-                              <div className="space-y-1">
-                                <div className="flex justify-between text-[10px] sm:text-xs text-gray-500">
-                                  <span>Free: {formatBytes(storage.statusInfo.freeSpace)}</span>
-                                  <span>
-                                    {formatBytes(
-                                      parseInt(storage.statusInfo.totalSpace) - parseInt(storage.statusInfo.freeSpace),
-                                    )} / {formatBytes(storage.statusInfo.totalSpace)}
-                                  </span>
-                                </div>
-                                <Progress
-                                  value={usagePercent}
-                                  className={`h-1.5 sm:h-2 ${usagePercent > 90
-                                    ? "[&>div]:bg-red-500"
-                                    : usagePercent > 70
-                                      ? "[&>div]:bg-yellow-500"
-                                      : "[&>div]:bg-blue-500"
-                                    }`}
-                                />
-                                <div className="flex justify-end text-[10px] sm:text-xs text-gray-500">
-                                  <span>{usagePercent}%</span>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Storage Info */}
-                            <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                              <Badge variant="secondary" className="text-[10px] sm:text-xs">
-                                {storage.statusInfo?.storageType || storage.type || "Unknown"}
-                              </Badge>
-
-                              {storage.isUsedForWriting || storage.statusInfo?.isUsedForWriting ? (
-                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-green-50 text-green-700">
-                                  <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                                  Writing
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-gray-50 text-gray-600">
-                                  <XCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                                  Read-only
-                                </Badge>
-                              )}
-
-                              {(storage.isBackup || storage.statusInfo?.isBackup) && (
-                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-purple-50 text-purple-700">
-                                  <Archive className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-0.5 sm:mr-1" />
-                                  Backup
-                                </Badge>
-                              )}
-
-                              {storage.statusInfo?.isExternal && (
-                                <Badge variant="secondary" className="text-[10px] sm:text-xs bg-blue-50 text-blue-700">
-                                  External
-                                </Badge>
-                              )}
-                            </div>
-
-
-
-
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )
           )
-        }
+        )}
 
         {/* Create Storage Modal - only for cloud mode */}
         {

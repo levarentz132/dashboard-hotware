@@ -2927,58 +2927,89 @@ export default function CloudRecordings() {
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="space-y-6 select-none pb-8">
       <Tabs value={mainTab} onValueChange={setMainTab} className="w-full space-y-6">
-        {/* Header with Integrated Search/Filter and Tabs */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-muted/30 p-4 rounded-xl border shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center">
+        {/* Header & Navigation Bar */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 dark:border-slate-800">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 bg-gradient-to-br from-indigo-500/10 to-purple-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl border border-indigo-500/20 shadow-sm">
+              <Video className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+                Cloud Recordings
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Inspect recorded video clips, snapshot logs, and automated capture policies
+              </p>
+            </div>
+          </div>
 
-
-            <TabsList className="bg-background/50 p-1 rounded-xl border shadow-inner">
-              <TabsTrigger value="results" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <List className="h-4 w-4 mr-2" />
-                Results
+          <div className="flex flex-wrap items-center gap-3">
+            <TabsList className="bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60 shadow-inner">
+              <TabsTrigger
+                value="results"
+                className="rounded-lg px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm transition-all"
+              >
+                <List className="h-3.5 w-3.5 mr-1.5" />
+                Recording Files
               </TabsTrigger>
-              <TabsTrigger value="scheduled" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <Clock className="h-4 w-4 mr-2" />
-                Scheduled
+              <TabsTrigger
+                value="scheduled"
+                className="rounded-lg px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm transition-all"
+              >
+                <Clock className="h-3.5 w-3.5 mr-1.5" />
+                Scheduled Policies
               </TabsTrigger>
-              <TabsTrigger value="errors" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <AlertCircle className="h-4 w-4 mr-2" />
-                Errors
+              <TabsTrigger
+                value="errors"
+                className="rounded-lg px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm transition-all"
+              >
+                <AlertCircle className="h-3.5 w-3.5 mr-1.5 text-rose-500" />
+                Error Logs
                 {totalErrorLogCount > 0 && (
-                  <span className="ml-2 inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-[1.25rem] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none">
                     {totalErrorLogCount > 99 ? "99+" : totalErrorLogCount}
                   </span>
                 )}
               </TabsTrigger>
             </TabsList>
-          </div>
 
-          {/* Global Action Bar */}
-          <div className="flex items-center gap-2">
-            {isEffectiveAdmin && (
+            <div className="flex items-center gap-2">
+              {isEffectiveAdmin && (
+                <Button
+                  variant="outline"
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="h-9 px-3 rounded-xl border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="Snapshot Settings"
+                >
+                  <Settings className="h-3.5 w-3.5 mr-1.5 text-slate-500" />
+                  Settings
+                </Button>
+              )}
               <Button
-                variant="outline"
-                onClick={() => setIsSettingsOpen(true)}
-                className="h-9 gap-2 shadow-sm border-slate-200 hover:bg-slate-50"
-                title="Snapshot Settings"
+                onClick={() => {
+                  if (scheduleType === "screenshot" && !storagePath) {
+                    addPersistentNotification({
+                      type: "warning",
+                      title: "Action Required",
+                      message: "Please set a snapshot storage path in Settings.",
+                    });
+                  } else if (scheduleType === "video" && !videoStoragePath) {
+                    addPersistentNotification({
+                      type: "warning",
+                      title: "Action Required",
+                      message: "Please set a video storage path in Settings.",
+                    });
+                  }
+                  resetScheduleForm();
+                  setIsScheduleOpen(true);
+                }}
+                className="h-9 px-3.5 rounded-xl font-semibold text-xs bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-sm transition-all flex items-center gap-1.5"
               >
-                <Settings className="h-4 w-4 text-slate-500" />
-                Settings
+                <Plus className="h-3.5 w-3.5" /> New Schedule
               </Button>
-            )}
-            <Button onClick={() => {
-              if (scheduleType === "screenshot" && !storagePath) {
-                addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a snapshot storage path in Settings.' });
-              } else if (scheduleType === "video" && !videoStoragePath) {
-                addPersistentNotification({ type: 'warning', title: 'Action Required', message: 'Please set a video storage path in Settings.' });
-              }
-              resetScheduleForm();
-              setIsScheduleOpen(true);
-            }} className="h-9 gap-2 shadow-sm font-bold">
-              <Plus className="h-4 w-4" /> New Schedule
-            </Button>
+            </div>
           </div>
         </div>
 
@@ -3077,9 +3108,9 @@ export default function CloudRecordings() {
                   )}
 
                   {filteredRecentRecordings.length > 0 ? (
-                    <div className={cn("border rounded-2xl bg-white overflow-hidden shadow-sm transition-opacity duration-300", recentLoading && "opacity-40")}>
+                    <div className={cn("border border-slate-200/80 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900 overflow-hidden shadow-sm transition-opacity duration-300", recentLoading && "opacity-40")}>
                       <Table>
-                        <TableHeader className="bg-white border-b border-slate-200">
+                        <TableHeader className="bg-slate-50/80 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
                           <TableRow className="hover:bg-transparent">
                             <TableHead className="w-12 text-center">
                               <Checkbox
@@ -3089,15 +3120,15 @@ export default function CloudRecordings() {
                                 className="translate-y-[2px]"
                               />
                             </TableHead>
-                            <TableHead className="w-28 text-center text-black font-normal text-xs uppercase tracking-wider">Type</TableHead>
-                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Camera</TableHead>
-                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Time</TableHead>
-                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Date</TableHead>
-                            <TableHead className="text-black font-normal text-xs uppercase tracking-wider">Duration</TableHead>
-                            <TableHead className="text-right text-black font-normal text-xs uppercase tracking-wider">Actions</TableHead>
+                            <TableHead className="w-28 text-center text-slate-500 dark:text-slate-400 font-semibold text-[11px] uppercase tracking-wider">Type</TableHead>
+                            <TableHead className="text-slate-500 dark:text-slate-400 font-semibold text-[11px] uppercase tracking-wider">Camera</TableHead>
+                            <TableHead className="text-slate-500 dark:text-slate-400 font-semibold text-[11px] uppercase tracking-wider">Time</TableHead>
+                            <TableHead className="text-slate-500 dark:text-slate-400 font-semibold text-[11px] uppercase tracking-wider">Date</TableHead>
+                            <TableHead className="text-slate-500 dark:text-slate-400 font-semibold text-[11px] uppercase tracking-wider">Duration</TableHead>
+                            <TableHead className="text-right text-slate-500 dark:text-slate-400 font-semibold text-[11px] uppercase tracking-wider">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
-                        <TableBody>
+                        <TableBody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                           {filteredRecentRecordings.map(rec => {
                             const startTime = new Date(rec.startTimeMs);
                             const endTime = new Date(rec.startTimeMs + (rec.durationMs || 0));
@@ -3107,8 +3138,8 @@ export default function CloudRecordings() {
 
                             return (
                               <TableRow key={rec.id} className={cn(
-                                "hover:bg-slate-50/50 transition-colors border-b border-slate-100",
-                                selectedItems.some(s => s.id === rec.id) && "bg-primary/5 hover:bg-primary/10"
+                                "hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors border-b border-slate-100 dark:border-slate-800",
+                                selectedItems.some(s => s.id === rec.id) && "bg-blue-500/5 dark:bg-blue-500/10 hover:bg-blue-500/10"
                               )}>
                                 <TableCell className="text-center">
                                   <Checkbox
@@ -3118,21 +3149,27 @@ export default function CloudRecordings() {
                                     className="translate-y-[2px]"
                                   />
                                 </TableCell>
-                                <TableCell className="text-center text-black text-[12px]">
-                                  {rec.isScreenshot ? "snapshot" : "video"}
+                                <TableCell className="text-center">
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                                    rec.isScreenshot
+                                      ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20"
+                                      : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
+                                  }`}>
+                                    {rec.isScreenshot ? "Snapshot" : "Video"}
+                                  </span>
                                 </TableCell>
-                                <TableCell className="text-black text-[12px]">{rec.cameraName}</TableCell>
-                                <TableCell className="text-black text-[12px]">
+                                <TableCell className="font-bold text-slate-900 dark:text-white">{rec.cameraName}</TableCell>
+                                <TableCell className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
                                   {timeStr}
                                 </TableCell>
-                                <TableCell className="text-black text-[12px]">
-                                  {format(startTime, "MMM d")}
+                                <TableCell className="text-slate-600 dark:text-slate-400">
+                                  {format(startTime, "MMM d, yyyy")}
                                 </TableCell>
-                                <TableCell className="text-black text-[12px]">
+                                <TableCell className="text-slate-600 dark:text-slate-400">
                                   {!rec.isScreenshot ? formatDuration(rec.durationMs) : "-"}
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  <div className="flex items-center justify-end gap-1">
+                                  <div className="flex items-center justify-end gap-1.5">
                                     {rec.isScreenshot && (
                                       <Button
                                         variant="ghost"
@@ -3140,7 +3177,7 @@ export default function CloudRecordings() {
                                         onClick={() => {
                                           handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
                                         }}
-                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                        className="h-8 w-8 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-all"
                                         title="View Image"
                                       >
                                         <Eye className="h-4 w-4" />
@@ -3150,7 +3187,7 @@ export default function CloudRecordings() {
                                       variant="ghost"
                                       size="icon"
                                       onClick={() => handleDownload(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraName, rec.cameraFolderName, rec.isScreenshot)}
-                                      className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                      className="h-8 w-8 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-all"
                                       title={rec.isScreenshot ? "Save Image" : "Download"}
                                     >
                                       <Download className="h-4 w-4" />

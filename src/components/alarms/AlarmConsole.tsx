@@ -299,18 +299,23 @@ const getLevelConfig = (level: string, eventType?: string, caption?: string) => 
   const type = eventType?.toLowerCase() || "";
   const cap = caption?.toLowerCase() || "";
 
-  const isPositive = type.includes("start") || type.includes("online") ||
-    cap.includes("online") || cap.includes("started") ||
-    type.includes("finished") || type.includes("complete") ||
-    cap.includes("finished") || cap.includes("complete");
+  const isPositive =
+    type.includes("start") ||
+    type.includes("online") ||
+    cap.includes("online") ||
+    cap.includes("started") ||
+    type.includes("finished") ||
+    type.includes("complete") ||
+    cap.includes("finished") ||
+    cap.includes("complete");
 
   if (normalizedLevel === "critical" || normalizedLevel === "error") {
     return {
       variant: "destructive" as const,
-      bgClass: "bg-red-50 dark:bg-red-950/20",
-      borderClass: "border-red-200 dark:border-red-800",
-      textClass: "text-red-700 dark:text-red-400",
-      icon: <AlertCircle className="h-5 w-5 text-red-600" />,
+      bgClass: "bg-rose-500/5 dark:bg-rose-950/20",
+      borderClass: "border-rose-500/20 dark:border-rose-800/40",
+      textClass: "text-rose-600 dark:text-rose-400",
+      icon: <AlertCircle className="h-5 w-5 text-rose-500 shrink-0" />,
       label: "Critical",
     };
   }
@@ -318,10 +323,10 @@ const getLevelConfig = (level: string, eventType?: string, caption?: string) => 
   if (normalizedLevel === "warning") {
     return {
       variant: "outline" as const,
-      bgClass: "bg-amber-50 dark:bg-amber-950/20",
-      borderClass: "border-amber-200 dark:border-amber-800",
-      textClass: "text-amber-700 dark:text-amber-400",
-      icon: <AlertTriangle className="h-5 w-5 text-amber-500" />,
+      bgClass: "bg-amber-500/5 dark:bg-amber-950/20",
+      borderClass: "border-amber-500/20 dark:border-amber-800/40",
+      textClass: "text-amber-600 dark:text-amber-400",
+      icon: <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />,
       label: "Warning",
     };
   }
@@ -329,20 +334,20 @@ const getLevelConfig = (level: string, eventType?: string, caption?: string) => 
   if (isPositive) {
     return {
       variant: "secondary" as const,
-      bgClass: "bg-green-50 dark:bg-green-950/20",
-      borderClass: "border-green-200 dark:border-green-800",
-      textClass: "text-green-700 dark:text-green-400",
-      icon: <CheckCircle className="h-5 w-5 text-green-500" />,
+      bgClass: "bg-emerald-500/5 dark:bg-emerald-950/20",
+      borderClass: "border-emerald-500/20 dark:border-emerald-800/40",
+      textClass: "text-emerald-600 dark:text-emerald-400",
+      icon: <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />,
       label: "Info",
     };
   }
 
   return {
     variant: "secondary" as const,
-    bgClass: "bg-blue-50 dark:bg-blue-950/20",
-    borderClass: "border-blue-200 dark:border-blue-800",
-    textClass: "text-blue-700 dark:text-blue-400",
-    icon: <Info className="h-5 w-5 text-blue-500" />,
+    bgClass: "bg-blue-500/5 dark:bg-blue-950/20",
+    borderClass: "border-blue-500/20 dark:border-blue-800/40",
+    textClass: "text-blue-600 dark:text-blue-400",
+    icon: <Info className="h-5 w-5 text-blue-500 shrink-0" />,
     label: "Info",
   };
 };
@@ -362,30 +367,30 @@ interface StatsCardProps {
 
 function StatsCard({ title, value, icon, variant, onClick, active }: StatsCardProps) {
   const variantStyles = {
-    default: "bg-white hover:bg-gray-50 border-gray-200",
-    error: "bg-red-50 hover:bg-red-100 border-red-200 text-red-700",
-    warning: "bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700",
-    info: "bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700",
+    default: "bg-white dark:bg-slate-900/60 border-slate-200/80 dark:border-slate-800 text-slate-900 dark:text-white",
+    error: "bg-rose-500/5 dark:bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400",
+    warning: "bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400",
+    info: "bg-blue-500/5 dark:bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400",
   };
 
   return (
     <button
       onClick={onClick}
       className={cn(
-        "flex flex-col items-start p-3 sm:p-4 rounded-xl border transition-all duration-200 w-full text-left",
+        "flex flex-col justify-between p-4 rounded-2xl border transition-all duration-200 w-full text-left shadow-sm hover:shadow-md",
         variantStyles[variant],
-        active && "ring-2 ring-offset-2",
-        active && variant === "error" && "ring-red-500",
-        active && variant === "warning" && "ring-amber-500",
-        active && variant === "info" && "ring-blue-500",
-        active && variant === "default" && "ring-gray-500",
+        active && "ring-2 ring-offset-2 dark:ring-offset-slate-900",
+        active && variant === "error" && "ring-rose-500 border-rose-500/50",
+        active && variant === "warning" && "ring-amber-500 border-amber-500/50",
+        active && variant === "info" && "ring-blue-500 border-blue-500/50",
+        active && variant === "default" && "ring-slate-500 border-slate-500/50"
       )}
     >
-      <div className="flex items-center justify-between w-full mb-1 sm:mb-2">
-        <span className="text-[10px] sm:text-xs font-medium uppercase tracking-wider opacity-70">{title}</span>
-        <span className="hidden sm:block">{icon}</span>
+      <div className="flex items-center justify-between w-full mb-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider opacity-80">{title}</span>
+        <span className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 shadow-inner">{icon}</span>
       </div>
-      <span className="text-xl sm:text-2xl md:text-3xl font-bold">{value}</span>
+      <span className="text-2xl font-bold tracking-tight">{value}</span>
     </button>
   );
 }
@@ -464,17 +469,17 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
               {/* Main Content */}
               <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
                 {/* Title */}
-                <div className="font-medium text-gray-900 text-sm sm:text-base line-clamp-1">
+                <div className="font-semibold text-gray-900 dark:text-slate-100 text-sm sm:text-base line-clamp-1">
                   {caption || "System Event"}
                 </div>
 
                 {/* Preview Description */}
                 {description && !isExpanded && (
-                  <p className="text-xs sm:text-sm text-gray-500 line-clamp-1">{description}</p>
+                  <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400 line-clamp-1">{description}</p>
                 )}
 
                 {/* Resource & Time Row */}
-                <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[10px] sm:text-xs text-gray-500">
+                <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[10px] sm:text-xs text-gray-500 dark:text-slate-400">
                   {resource && resource.type === "camera" && (
                     <span className="flex items-center gap-1">
                       <Camera className="h-3 w-3" />
@@ -501,9 +506,9 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
               {/* Expand Icon */}
               <div className="shrink-0 self-center">
                 {isExpanded ? (
-                  <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+                  <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400 dark:text-slate-400" />
                 ) : (
-                  <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+                  <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400 dark:text-slate-400" />
                 )}
               </div>
             </div>
@@ -512,14 +517,14 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
 
         <CollapsibleContent>
           <div className={cn("px-3 sm:px-4 pb-3 sm:pb-4 space-y-3 sm:space-y-4", levelConfig.bgClass)}>
-            <Separator />
+            <Separator className="dark:bg-slate-800" />
 
             {/* Description Section */}
             {description && (
               <div className="space-y-2">
-                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Description</h4>
+                <h4 className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Description</h4>
                 {eventType === "serverConflictEvent" ? (
-                  <div className="bg-white rounded-lg border p-2.5 sm:p-3 space-y-2">
+                  <div className="bg-slate-50 dark:bg-slate-900/90 rounded-lg border border-slate-200 dark:border-slate-800 p-2.5 sm:p-3 space-y-2">
                     {(() => {
                       const parts = description.split(/\s+/);
                       const ip = parts[0];
@@ -528,25 +533,25 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
                         <>
                           <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                             <div className="flex items-center gap-2">
-                              <Server className="h-4 w-4 text-gray-400 shrink-0" />
-                              <span className="text-xs sm:text-sm text-gray-600">Conflict Server:</span>
+                              <Server className="h-4 w-4 text-gray-400 dark:text-slate-400 shrink-0" />
+                              <span className="text-xs sm:text-sm text-gray-600 dark:text-slate-300">Conflict Server:</span>
                             </div>
-                            <code className="px-2 py-0.5 bg-gray-100 rounded text-xs sm:text-sm font-mono">{ip}</code>
+                            <code className="px-2 py-0.5 bg-gray-100 dark:bg-slate-800 rounded text-xs sm:text-sm font-mono text-slate-800 dark:text-slate-200">{ip}</code>
                           </div>
                           {macOrUuid && (
                             <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                               <div className="flex items-center gap-2">
-                                <Cpu className="h-4 w-4 text-gray-400 shrink-0" />
-                                <span className="text-xs sm:text-sm text-gray-600">
+                                <Cpu className="h-4 w-4 text-gray-400 dark:text-slate-400 shrink-0" />
+                                <span className="text-xs sm:text-sm text-gray-600 dark:text-slate-300">
                                   {macOrUuid.includes("urn_uuid") ? "UUID:" : "MAC:"}
                                 </span>
                               </div>
-                              <code className="px-2 py-0.5 bg-gray-100 rounded text-xs sm:text-sm font-mono break-all">
+                              <code className="px-2 py-0.5 bg-gray-100 dark:bg-slate-800 rounded text-xs sm:text-sm font-mono break-all text-slate-800 dark:text-slate-200">
                                 {macOrUuid}
                               </code>
                             </div>
                           )}
-                          <div className="flex items-start gap-2 pt-2 text-amber-700 border-t border-amber-100">
+                          <div className="flex items-start gap-2 pt-2 text-amber-700 dark:text-amber-400 border-t border-amber-100 dark:border-amber-900/40">
                             <Info className="h-4 w-4 shrink-0 mt-0.5" />
                             <p className="text-xs">
                               Impact: This conflict may affect server response times and cause interruptions for cameras assigned to these servers.
@@ -557,7 +562,7 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
                     })()}
                   </div>
                 ) : (
-                  <p className="text-xs sm:text-sm text-gray-600 bg-white rounded-lg border p-2.5 sm:p-3">
+                  <p className="text-xs sm:text-sm text-gray-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/90 rounded-lg border border-slate-200 dark:border-slate-800 p-2.5 sm:p-3">
                     {description}
                   </p>
                 )}
@@ -1504,25 +1509,40 @@ export default function AlarmConsole() {
   const showNoCloudAlert = isCloudEmpty && !loadingCloud;
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <div className="space-y-6 select-none pb-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Alarm Console</h1>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 dark:border-slate-800">
+        <div className="flex items-center gap-3.5">
+          <div className="p-3 bg-gradient-to-br from-amber-500/10 to-rose-500/20 text-amber-600 dark:text-amber-400 rounded-2xl border border-amber-500/20 shadow-sm">
+            <Bell className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+              Alarm Console
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Real-time alarm events, critical system alerts, and automated action logs
+            </p>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5">
           {/* Server Selector */}
           <Select value={selectedCloudSystemId} onValueChange={handleSystemChange} disabled={syncLoading}>
-            <SelectTrigger className="w-full sm:w-[220px] h-10">
-              <Cloud className="h-4 w-4 mr-2 text-blue-400 shrink-0" />
-              <SelectValue placeholder="Pilih system..." />
+            <SelectTrigger className="w-full sm:w-[220px] h-9 text-xs rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80">
+              <Cloud className="h-3.5 w-3.5 mr-2 text-blue-500 shrink-0" />
+              <SelectValue placeholder="Select system..." />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-2xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
               {serverOptions.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
+                <SelectItem key={option.id} value={option.id} className="text-xs">
                   <div className="flex items-center gap-2">
-                    <span className={cn("w-2 h-2 rounded-full", option.status === "online" ? "bg-blue-500" : "bg-gray-400")} />
+                    <span
+                      className={cn(
+                        "w-2 h-2 rounded-full",
+                        option.status === "online" ? "bg-emerald-500" : "bg-slate-400"
+                      )}
+                    />
                     <span>{option.name}</span>
                   </div>
                 </SelectItem>
@@ -1646,22 +1666,22 @@ export default function AlarmConsole() {
           </div>
 
           {/* Search & Filters */}
-          <Card>
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
             <CardContent className="p-3 sm:p-4 space-y-3 sm:space-y-4">
               {/* Search Bar */}
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                 <div className="relative flex-1 select-none">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
                   <Input
                     placeholder="Search event..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 text-sm select-text h-10"
+                    className="pl-10 text-sm select-text h-10 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
                   />
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 select-none"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -1672,19 +1692,19 @@ export default function AlarmConsole() {
                   <Button
                     variant="outline"
                     onClick={() => setShowFilters(!showFilters)}
-                    className="gap-2 flex-1 sm:flex-none select-none w-[110px] justify-center"
+                    className="gap-2 flex-1 sm:flex-none select-none w-[110px] justify-center bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 font-semibold"
                   >
-                    <Filter className="h-4 w-4 shrink-0" />
+                    <Filter className="h-4 w-4 shrink-0 text-amber-500" />
                     <span>Filter</span>
                     {hasActiveFilters && (
-                      <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0">
+                      <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-amber-500 text-white font-bold">
                         {activeFilterCount}
                       </Badge>
                     )}
                   </Button>
 
                   {hasActiveFilters && (
-                    <Button variant="ghost" size="icon" onClick={clearFilters} className="shrink-0">
+                    <Button variant="ghost" size="icon" onClick={clearFilters} className="shrink-0 text-slate-400 hover:text-white">
                       <X className="h-4 w-4" />
                     </Button>
                   )}

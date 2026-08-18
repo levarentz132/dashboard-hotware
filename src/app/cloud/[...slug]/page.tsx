@@ -125,6 +125,16 @@ const CloudRecordings = dynamic(
   () => import("@/components/recordings/CloudRecordings"),
   { ssr: false },
 );
+const ReportingManagement = dynamic(
+  () => import("@/components/reporting/ReportingManagement"),
+  {
+    loading: () => (
+      <div className="h-full flex items-center justify-center p-8 text-slate-400">
+        Loading Reports & Analytics...
+      </div>
+    ),
+  },
+);
 
 const SECTION_MODULE_MAP: Record<string, string> = {
   dashboard: "dashboard",
@@ -133,6 +143,7 @@ const SECTION_MODULE_MAP: Record<string, string> = {
   alarms: "alarm_console",
   audits: "user_logs",
   analytics: "analytics",
+  reporting: "analytics",
   storage: "storage",
   users: "user_management",
   subaccounts: "user_management",
@@ -159,6 +170,8 @@ export function CloudPageContent() {
       section = "recordings";
     } else if (pathname.includes("/user-logs") || pathname.includes("/audits")) {
       section = "audits";
+    } else if (pathname.includes("/reporting") || pathname.includes("/reports")) {
+      section = "reporting";
     } else if (pathname.includes("/storage")) {
       section = "storage";
     } else if (pathname.includes("/user-management") || pathname.includes("/users")) {
@@ -194,7 +207,7 @@ export function CloudPageContent() {
           return false;
         });
 
-        if (privilege?.can_view || section === "recordings") {
+        if (privilege?.can_view || section === "recordings" || section === "reporting") {
           setActiveSection(section);
         } else {
           setActiveSection("unauthorized");
@@ -225,6 +238,8 @@ export function CloudPageContent() {
         return <AuditLog />;
       case "analytics":
         return <Analytics />;
+      case "reporting":
+        return <ReportingManagement />;
       case "storage":
         return <StorageManagement />;
       case "automation":
@@ -262,7 +277,7 @@ export function CloudPageContent() {
   };
 
   return (
-    <div className="flex h-screen bg-[#0A1329] text-slate-100">
+    <div className="dark flex h-screen bg-[#0A1329] text-slate-100">
       <Sidebar
         activeSection={activeSection}
         onSectionChange={setActiveSection}

@@ -71,22 +71,22 @@ interface CloudDevice {
 
 // Event type descriptions and icons
 const EVENT_TYPE_INFO: Record<string, { label: string; color: string; icon: string }> = {
-  AR_Login: { label: "User Login", color: "bg-green-100 text-green-800", icon: "login" },
-  AR_Logout: { label: "User Logout", color: "bg-gray-100 text-gray-800", icon: "logout" },
-  AR_CameraInsert: { label: "Camera Added", color: "bg-blue-100 text-blue-800", icon: "camera" },
-  AR_CameraUpdate: { label: "Camera Updated", color: "bg-yellow-100 text-yellow-800", icon: "camera" },
-  AR_CameraRemove: { label: "Camera Removed", color: "bg-red-100 text-red-800", icon: "camera" },
-  AR_ServerUpdate: { label: "Server Updated", color: "bg-purple-100 text-purple-800", icon: "server" },
-  AR_UserUpdate: { label: "User Updated", color: "bg-indigo-100 text-indigo-800", icon: "user" },
-  AR_UserInsert: { label: "User Added", color: "bg-teal-100 text-teal-800", icon: "user" },
-  AR_UserRemove: { label: "User Removed", color: "bg-orange-100 text-orange-800", icon: "user" },
-  AR_SystemNameChanged: { label: "System Name Changed", color: "bg-pink-100 text-pink-800", icon: "settings" },
-  AR_SettingsChange: { label: "Settings Changed", color: "bg-cyan-100 text-cyan-800", icon: "settings" },
-  AR_DatabaseRestore: { label: "Database Restored", color: "bg-amber-100 text-amber-800", icon: "database" },
-  AR_MitmAttack: { label: "Security Alert", color: "bg-red-200 text-red-900", icon: "shield" },
-  AR_StorageInsert: { label: "Storage Added", color: "bg-emerald-100 text-emerald-800", icon: "storage" },
-  AR_StorageUpdate: { label: "Storage Updated", color: "bg-lime-100 text-lime-800", icon: "storage" },
-  AR_StorageRemove: { label: "Storage Removed", color: "bg-rose-100 text-rose-800", icon: "storage" },
+  AR_Login: { label: "User Login", color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20", icon: "login" },
+  AR_Logout: { label: "User Logout", color: "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20", icon: "logout" },
+  AR_CameraInsert: { label: "Camera Added", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20", icon: "camera" },
+  AR_CameraUpdate: { label: "Camera Updated", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20", icon: "camera" },
+  AR_CameraRemove: { label: "Camera Removed", color: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20", icon: "camera" },
+  AR_ServerUpdate: { label: "Server Updated", color: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20", icon: "server" },
+  AR_UserUpdate: { label: "User Updated", color: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20", icon: "user" },
+  AR_UserInsert: { label: "User Added", color: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20", icon: "user" },
+  AR_UserRemove: { label: "User Removed", color: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20", icon: "user" },
+  AR_SystemNameChanged: { label: "System Name Changed", color: "bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/20", icon: "settings" },
+  AR_SettingsChange: { label: "Settings Changed", color: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20", icon: "settings" },
+  AR_DatabaseRestore: { label: "Database Restored", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20", icon: "database" },
+  AR_MitmAttack: { label: "Security Alert", color: "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40", icon: "shield" },
+  AR_StorageInsert: { label: "Storage Added", color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20", icon: "storage" },
+  AR_StorageUpdate: { label: "Storage Updated", color: "bg-lime-500/10 text-lime-600 dark:text-lime-400 border-lime-500/20", icon: "storage" },
+  AR_StorageRemove: { label: "Storage Removed", color: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20", icon: "storage" },
 };
 
 export default function AuditLog() {
@@ -373,22 +373,32 @@ export default function AuditLog() {
   const isCloudEmpty = cloudSystems.length === 0;
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <div className="space-y-6 select-none pb-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">User Log</h1>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 dark:border-slate-800">
+        <div className="flex items-center gap-3.5">
+          <div className="p-3 bg-gradient-to-br from-blue-500/10 to-indigo-500/20 text-blue-600 dark:text-blue-400 rounded-2xl border border-blue-500/20 shadow-sm">
+            <User className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+              User Logs
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Audit trails, user access events, and system configuration logs
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5">
           {!isCloudEmpty && selectedSystem && (
-            <div className="flex items-center gap-2 h-10 px-3 bg-gray-50 border rounded-lg text-sm text-gray-700">
-              <Cloud className="w-4 h-4 text-gray-500" />
-              <span className="truncate max-w-[150px] font-medium">{selectedSystem.name}</span>
+            <div className="flex items-center gap-2 h-9 px-3.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-inner">
+              <Cloud className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+              <span className="truncate max-w-[150px]">{selectedSystem.name}</span>
             </div>
           )}
 
-          {/* Refresh Button - Styled like CameraInventory */}
+          {/* Refresh Button */}
           <button
             onClick={() => {
               if (selectedSystem) {
@@ -398,12 +408,12 @@ export default function AuditLog() {
               }
             }}
             disabled={loading || loadingSystems}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 text-sm h-10 transition-colors shadow-sm"
+            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl disabled:opacity-50 text-xs font-semibold h-9 transition-all shadow-sm hover:shadow"
           >
             <RefreshCw
-              className={`w-4 h-4 ${loading || loadingSystems ? "animate-spin" : ""}`}
+              className={`w-3.5 h-3.5 ${loading || loadingSystems ? "animate-spin" : ""}`}
             />
-            <span className="font-medium">Refresh</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>
@@ -411,29 +421,28 @@ export default function AuditLog() {
       {/* Cloud Systems Loading Skeleton */}
       {loadingSystems && isCloudEmpty && (
         <div className="space-y-4">
-          <Skeleton className="h-24 w-full rounded-lg" />
+          <Skeleton className="h-24 w-full rounded-2xl" />
         </div>
       )}
 
       <>
-
         {/* Filters */}
-        <Card className="mb-4">
-          <CardContent className="p-3 sm:p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+        <Card className="border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm rounded-2xl overflow-hidden">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1 select-none">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Search events, users, resources..."
-                  className="w-full pl-10 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm select-text bg-white h-10"
+                  className="w-full pl-10 pr-10 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs select-text bg-slate-50/50 dark:bg-slate-800/50 text-slate-900 dark:text-white h-10 transition-colors"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
                 {searchTerm && (
                   <button
                     onClick={() => setSearchTerm("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 select-none"
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 select-none"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -445,47 +454,53 @@ export default function AuditLog() {
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
-                      className={`gap-2 flex-1 sm:flex-none select-none min-w-[110px] w-auto justify-between h-10 px-3 ${hasActiveFilters ? "border-blue-500 bg-blue-50 text-blue-700 font-medium hover:bg-blue-100 hover:text-blue-800" : ""}`}
+                      className={`gap-2 flex-1 sm:flex-none select-none min-w-[110px] w-auto justify-between h-10 px-3.5 text-xs rounded-xl border-slate-200 dark:border-slate-700 ${
+                        hasActiveFilters
+                          ? "border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold"
+                          : "bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200"
+                      }`}
                     >
                       <div className="flex items-center gap-2">
-                        <Filter className="h-4 w-4 shrink-0" />
+                        <Filter className="h-4 w-4 shrink-0 text-slate-500" />
                         <span>Filter</span>
                         {hasActiveFilters && (
-                          <Badge variant="secondary" className="h-5 w-5 p-0 flex items-center justify-center text-xs shrink-0 bg-blue-600 text-white border-0 hover:bg-blue-700">
+                          <Badge variant="secondary" className="h-4 w-4 p-0 flex items-center justify-center text-[10px] shrink-0 bg-blue-600 text-white border-0">
                             {activeFilterCount}
                           </Badge>
                         )}
                       </div>
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-72" align="end">
+                  <PopoverContent className="w-80 rounded-2xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl" align="end">
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-semibold text-gray-900">Filters</h4>
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">Filter Audit Logs</h4>
                         {hasActiveFilters && (
                           <button
                             onClick={clearFilters}
-                            className="text-xs text-blue-600 hover:text-blue-800"
+                            className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
                           >
                             Clear all
                           </button>
                         )}
                       </div>
 
-                      <Separator />
+                      <Separator className="bg-slate-200/80 dark:bg-slate-800" />
 
                       <div className="space-y-3">
                         {/* Event Type Filter */}
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Event Type</label>
+                          <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                            Event Type
+                          </label>
                           <Select value={filterEventType} onValueChange={setFilterEventType}>
-                            <SelectTrigger className="w-full bg-white">
+                            <SelectTrigger className="w-full h-9 text-xs rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                               <SelectValue placeholder="All Event Types" />
                             </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Event Types</SelectItem>
+                            <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
+                              <SelectItem value="all" className="text-xs">All Event Types</SelectItem>
                               {uniqueEventTypes.map((type) => (
-                                <SelectItem key={type} value={type}>
+                                <SelectItem key={type} value={type} className="text-xs">
                                   {getEventInfo(type).label}
                                 </SelectItem>
                               ))}
@@ -495,15 +510,17 @@ export default function AuditLog() {
 
                         {/* User Filter */}
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">User</label>
+                          <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                            User
+                          </label>
                           <Select value={filterUser} onValueChange={setFilterUser}>
-                            <SelectTrigger className="w-full bg-white">
+                            <SelectTrigger className="w-full h-9 text-xs rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                               <SelectValue placeholder="All Users" />
                             </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Users</SelectItem>
+                            <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
+                              <SelectItem value="all" className="text-xs">All Users</SelectItem>
                               {uniqueUsers.map((user) => (
-                                <SelectItem key={user} value={user}>
+                                <SelectItem key={user} value={user} className="text-xs">
                                   {user}
                                 </SelectItem>
                               ))}
@@ -513,18 +530,20 @@ export default function AuditLog() {
 
                         {/* Date Range Filter */}
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">Date Range</label>
+                          <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                            Date Range
+                          </label>
                           <Popover>
                             <PopoverTrigger asChild>
                               <Button
                                 id="date"
                                 variant={"outline"}
                                 className={cn(
-                                  "w-full justify-start text-left font-normal",
+                                  "w-full justify-start text-left font-normal h-9 text-xs rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800",
                                   !date && "text-muted-foreground"
                                 )}
                               >
-                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                <CalendarIcon className="mr-2 h-3.5 w-3.5 text-slate-400" />
                                 {date?.from ? (
                                   date.to ? (
                                     <>
@@ -539,7 +558,7 @@ export default function AuditLog() {
                                 )}
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="end">
+                            <PopoverContent className="w-auto p-0 rounded-2xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl" align="end">
                               <Calendar
                                 initialFocus
                                 mode="range"
@@ -553,13 +572,13 @@ export default function AuditLog() {
                         </div>
                       </div>
 
-                      <Button onClick={() => setShowFilters(false)} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                      <Button onClick={() => setShowFilters(false)} className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold h-9">
                         Apply Filters
                       </Button>
                       {hasActiveFilters && (
                         <button
                           onClick={clearFilters}
-                          className="w-full text-xs text-blue-600 hover:underline mt-2 text-center"
+                          className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline mt-2 text-center"
                         >
                           Clear all filters
                         </button>
@@ -572,25 +591,25 @@ export default function AuditLog() {
 
             {hasActiveFilters && (
               <>
-                <Separator className="my-2" />
+                <Separator className="my-2 bg-slate-200/80 dark:bg-slate-800" />
                 <div className="flex flex-wrap gap-2 pt-1">
                   {filterEventType !== "all" && (
-                    <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                    <Badge variant="secondary" className="flex items-center gap-1.5 py-1 px-2.5 text-xs rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                       Type: {getEventInfo(filterEventType).label}
-                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterEventType("all")} />
+                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900 dark:hover:text-blue-200" onClick={() => setFilterEventType("all")} />
                     </Badge>
                   )}
                   {filterUser !== "all" && (
-                    <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                    <Badge variant="secondary" className="flex items-center gap-1.5 py-1 px-2.5 text-xs rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                       User: {filterUser}
-                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => setFilterUser("all")} />
+                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900 dark:hover:text-blue-200" onClick={() => setFilterUser("all")} />
                     </Badge>
                   )}
                   {isDateChanged && date?.from && (
-                    <Badge variant="secondary" className="flex items-center gap-1 py-1 px-2 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                    <Badge variant="secondary" className="flex items-center gap-1.5 py-1 px-2.5 text-xs rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                       Date: {format(date.from, "LLL dd, y")}
                       {date.to ? ` - ${format(date.to, "LLL dd, y")}` : ""}
-                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900" onClick={() => {
+                      <X className="w-3 h-3 cursor-pointer hover:text-blue-900 dark:hover:text-blue-200" onClick={() => {
                         const today = new Date();
                         setDate({
                           from: today,
@@ -599,7 +618,7 @@ export default function AuditLog() {
                       }} />
                     </Badge>
                   )}
-                  <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline px-2">Clear all</button>
+                  <button onClick={clearFilters} className="text-xs text-blue-600 dark:text-blue-400 hover:underline px-2">Clear all</button>
                 </div>
               </>
             )}
@@ -608,109 +627,123 @@ export default function AuditLog() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-gray-900">{filteredLogs.length}</div>
-            <div className="text-xs text-gray-500">Total Events</div>
+          <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Events</span>
+              <Activity className="h-4 w-4 text-slate-400" />
+            </div>
+            <div className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{filteredLogs.length}</div>
           </div>
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-blue-600">{uniqueUsers.length}</div>
-            <div className="text-xs text-gray-500">Active Users</div>
+          <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-blue-500 uppercase tracking-wider">Active Users</span>
+              <User className="h-4 w-4 text-blue-500" />
+            </div>
+            <div className="text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">{uniqueUsers.length}</div>
           </div>
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-green-600">
+          <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-emerald-500 uppercase tracking-wider">Login Events</span>
+              <LogIn className="h-4 w-4 text-emerald-500" />
+            </div>
+            <div className="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
               {filteredLogs.filter((l) => l.eventType === "AR_Login").length}
             </div>
-            <div className="text-xs text-gray-500">Login Events</div>
           </div>
-          <div className="bg-white p-3 rounded-lg border">
-            <div className="text-2xl font-bold text-purple-600">{uniqueEventTypes.length}</div>
-            <div className="text-xs text-gray-500">Event Types</div>
+          <div className="bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-purple-500 uppercase tracking-wider">Event Types</span>
+              <Shield className="h-4 w-4 text-purple-500" />
+            </div>
+            <div className="text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">{uniqueEventTypes.length}</div>
           </div>
         </div>
 
         {/* Audit Log Table */}
-        <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+        <div className="bg-white dark:bg-slate-900/60 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800 overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center p-8">
-              <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-              <span className="text-gray-600">Loading audit logs...</span>
+            <div className="flex items-center justify-center p-12">
+              <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mr-2" />
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Loading audit logs...</span>
             </div>
           ) : error ? (
-            <div className="flex items-center justify-center p-8 text-red-600">
+            <div className="flex items-center justify-center p-12 text-rose-500">
               <AlertCircle className="w-6 h-6 mr-2" />
-              <span>{error}</span>
+              <span className="text-sm font-medium">{error}</span>
             </div>
           ) : !selectedSystem ? (
-            <div className="flex items-center justify-center p-8 text-gray-500">
+            <div className="flex items-center justify-center p-12 text-slate-400">
               <Activity className="w-6 h-6 mr-2" />
-              <span>Select a system to view audit logs</span>
+              <span className="text-sm font-medium">Select a system to view audit logs</span>
             </div>
           ) : displayedLogs.length === 0 ? (
-            <div className="flex items-center justify-center p-8 text-gray-500">
+            <div className="flex items-center justify-center p-12 text-slate-400">
               <Activity className="w-6 h-6 mr-2" />
-              <span>No audit logs found</span>
+              <span className="text-sm font-medium">No audit logs found</span>
             </div>
           ) : (
             <>
               {/* Desktop Table */}
               <div className="hidden md:block overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                <table className="min-w-full divide-y divide-slate-200/80 dark:divide-slate-800">
+                  <thead className="bg-slate-50/80 dark:bg-slate-800/50">
                     <tr>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         Time
                       </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         Event
                       </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         User
                       </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         Resources
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-200/60 dark:divide-slate-800/60">
                     {displayedLogs.map((log, index) => {
                       const eventInfo = getEventInfo(log.eventType);
                       return (
-                        <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-gray-50">
-                          <td className="px-3 py-2.5 whitespace-nowrap">
-                            <div className="flex items-center text-xs lg:text-sm text-gray-600">
-                              <Clock className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                        <tr key={`${log.createdTimeSec}-${index}`} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center text-xs font-mono text-slate-600 dark:text-slate-300">
+                              <Clock className="w-3.5 h-3.5 mr-2 text-slate-400 shrink-0" />
                               {formatTimestamp(log.createdTimeSec)}
                             </div>
                           </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${eventInfo.color}`}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${eventInfo.color}`}
                             >
                               {getEventIcon(eventInfo.icon)}
-                              <span className="hidden lg:inline">{eventInfo.label}</span>
+                              <span>{eventInfo.label}</span>
                             </span>
                           </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">
-                            <div className="flex items-center text-xs lg:text-sm">
-                              <User className="w-3.5 h-3.5 mr-1.5 text-gray-400 hidden lg:block" />
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center text-xs">
+                              <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mr-2.5 shrink-0 text-slate-500">
+                                <User className="w-3.5 h-3.5" />
+                              </div>
                               <div className="flex flex-col">
-                                <span className="font-medium text-gray-900">{log.authSession?.userName || "System"}</span>
+                                <span className="font-bold text-slate-900 dark:text-white">{log.authSession?.userName || "System"}</span>
                                 {log.authSession?.userHost && (
-                                  <span className="text-[10px] text-gray-400">
+                                  <span className="text-[10px] font-mono text-slate-400">
                                     {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
                                   </span>
                                 )}
                               </div>
                             </div>
                           </td>
-                          <td className="px-3 py-2.5">
-                            <div className="text-xs text-gray-500 max-w-[150px] lg:max-w-xs truncate">
+                          <td className="px-4 py-3">
+                            <div className="text-xs text-slate-500 dark:text-slate-400 max-w-[200px] lg:max-w-xs truncate font-mono">
                               {log.resources && log.resources.length > 0
                                 ? log.resources
-                                  .slice(0, 2)
-                                  .map((r) => getResourceName(r))
-                                  .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
-                                : ""}
+                                    .slice(0, 2)
+                                    .map((r) => getResourceName(r))
+                                    .join(", ") + (log.resources.length > 2 ? ` +${log.resources.length - 2} more` : "")
+                                : "-"}
                             </div>
                           </td>
                         </tr>
@@ -721,39 +754,39 @@ export default function AuditLog() {
               </div>
 
               {/* Mobile Cards */}
-              <div className="md:hidden space-y-2 p-2">
+              <div className="md:hidden space-y-2.5 p-3">
                 {displayedLogs.map((log, index) => {
                   const eventInfo = getEventInfo(log.eventType);
                   return (
                     <div
                       key={`${log.createdTimeSec}-${index}`}
-                      className="bg-gray-50 border rounded-lg p-2.5 space-y-1.5"
+                      className="bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 space-y-2"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${eventInfo.color}`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-semibold border ${eventInfo.color}`}
                         >
                           {getEventIcon(eventInfo.icon)}
                           {eventInfo.label}
                         </span>
-                        <span className="text-[10px] text-gray-500 whitespace-nowrap">
+                        <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
                           {formatTimestamp(log.createdTimeSec)}
                         </span>
                       </div>
-                      <div className="flex flex-col text-sm">
-                        <div className="flex items-center">
-                          <User className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
-                          <span className="font-medium text-gray-900 text-xs">{log.authSession?.userName || "System"}</span>
+                      <div className="flex flex-col text-xs">
+                        <div className="flex items-center font-bold text-slate-900 dark:text-white">
+                          <User className="w-3.5 h-3.5 mr-1.5 text-slate-400 shrink-0" />
+                          <span>{log.authSession?.userName || "System"}</span>
                         </div>
                         {log.authSession?.userHost && (
-                          <span className="text-[9px] text-gray-400 ml-5">
+                          <span className="text-[10px] font-mono text-slate-400 ml-5">
                             {log.authSession.userHost === "::1" ? "Localhost" : log.authSession.userHost}
                           </span>
                         )}
                       </div>
                       {log.resources && log.resources.length > 0 && (
-                        <div className="text-[10px] text-gray-500 truncate">
-                          <span className="font-medium">Resources:</span>{" "}
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate pt-1 border-t border-slate-200/60 dark:border-slate-800">
+                          <span className="font-semibold">Resources:</span>{" "}
                           {log.resources
                             .slice(0, 2)
                             .map((r) => getResourceName(r))
@@ -768,8 +801,8 @@ export default function AuditLog() {
 
               {/* Load More */}
               {sortedLogs.length > displayCount && (
-                <div className="p-3 border-t text-center">
-                  <Button variant="outline" size="sm" onClick={() => setDisplayCount((prev) => prev + 20)}>
+                <div className="p-4 border-t border-slate-200/80 dark:border-slate-800 text-center">
+                  <Button variant="outline" size="sm" className="rounded-xl text-xs font-semibold" onClick={() => setDisplayCount((prev) => prev + 20)}>
                     Load More ({sortedLogs.length - displayCount} remaining)
                   </Button>
                 </div>

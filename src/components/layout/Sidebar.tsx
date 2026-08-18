@@ -21,7 +21,8 @@ import {
   User,
   Loader2,
   Cpu,
-  Video
+  Video,
+  FileText
 } from "lucide-react";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
@@ -68,7 +69,7 @@ const navigationItems: NavItem[] = [
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle, module: "alarm_console" },
   { id: "recordings", label: "Recordings", icon: Video, href: "/recordings", module: "recordings" },
   { id: "audits", label: "User Logs", icon: Users, module: "user_logs" },
-  // { id: "analytics", label: "Analytics", icon: BarChart3, module: "analytics" },
+  { id: "reporting", label: "Reporting", icon: FileText, module: "analytics" },
   { id: "storage", label: "Storage", icon: Database, module: "storage" },
   // { id: "automation", label: "Automation", icon: Cpu, module: "automation" },
   { id: "users", label: "User Management", icon: Users, module: "user_management" },
@@ -197,6 +198,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     alarms: "/cloud/alarm-console",
     recordings: "/cloud/recordings",
     audits: "/cloud/user-logs",
+    reporting: "/cloud/reporting",
     storage: "/cloud/storage",
     users: "/cloud/user-management",
     subaccounts: "/cloud/role-management",
