@@ -14,6 +14,7 @@ import {
 import { readCloudSystemsList } from "@/lib/cloud-systems-store";
 import { isCloudSystemsEndpoint } from "@/lib/redis/nx-cache-policy";
 import { getVmsSessionToken, invalidateVmsSessionToken } from "@/lib/vms-auth";
+import { getNxSystemToken } from "./nx-cloud-service";
 import https from "https";
 import http from "http";
 
@@ -455,6 +456,28 @@ export async function fetchFromCloudApi<T>(
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
     const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
 
+    // Auto-acquire system-scoped OAuth token for Cloud UUID systems
+    const cleanSysId = (systemId || "").trim().toLowerCase().replace(/[{}]/g, "");
+    const isUuidSystem = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSysId);
+
+    if (isUuidSystem && request) {
+      try {
+        const cookieHeader = request.headers.get("cookie") || "";
+        const match = cookieHeader.match(/(?:^|;\s*)nx_cloud_session=([^;]+)/);
+        if (match) {
+          const session = JSON.parse(decodeURIComponent(match[1]));
+          if (session?.refreshToken) {
+            const scopedToken = await getNxSystemToken(session.refreshToken, cleanSysId);
+            if (scopedToken) {
+              headers["Authorization"] = `Bearer ${scopedToken}`;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[Cloud API Proxy] System-scoped token error for ${cleanSysId}:`, err.message);
+      }
+    }
+
     // Allow per-source session token or basic auth to drive requests when cloud/GUID tokens are unavailable.
     if (!headers["Authorization"] && !headers["x-runtime-guid"]) {
       const isCloudBound = cloudUrl.includes("nxvms.com") || cloudUrl.includes("vmsproxy.com");
@@ -794,6 +817,28 @@ async function requestCloudApi<T>(
     const cloudUrl = buildCloudUrl(systemId, endpoint, queryParams, request, systemName);
     const headers = buildCloudHeaders(request, systemId, preferCloudAuth);
     const basicAuthHeader = getBasicAuthHeaderFromRequest(request);
+
+    // Auto-acquire system-scoped OAuth token for Cloud UUID systems
+    const cleanSysId = (systemId || "").trim().toLowerCase().replace(/[{}]/g, "");
+    const isUuidSystem = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSysId);
+
+    if (isUuidSystem && request) {
+      try {
+        const cookieHeader = request.headers.get("cookie") || "";
+        const match = cookieHeader.match(/(?:^|;\s*)nx_cloud_session=([^;]+)/);
+        if (match) {
+          const session = JSON.parse(decodeURIComponent(match[1]));
+          if (session?.refreshToken) {
+            const scopedToken = await getNxSystemToken(session.refreshToken, cleanSysId);
+            if (scopedToken) {
+              headers["Authorization"] = `Bearer ${scopedToken}`;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[Cloud API Proxy] System-scoped token error for ${cleanSysId}:`, err.message);
+      }
+    }
 
     // DEBUG: Log request details
     /*

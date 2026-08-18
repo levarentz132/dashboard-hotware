@@ -239,10 +239,13 @@ export default function AlarmConsoleWidget({ systemId: propSystemId }: { systemI
 
         await Promise.allSettled(
           systems.map(async (sys: any) => {
-            const res = await fetch(`/api/nx/servers?systemId=${encodeURIComponent(sys.id)}`);
-            if (res.ok) {
-              const data = await res.json();
-              allServers.push(...(Array.isArray(data) ? data : []));
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sys.id);
+            if (!isUuid) {
+              const res = await fetch(`/api/nx/servers?systemId=${encodeURIComponent(sys.id)}`);
+              if (res.ok) {
+                const data = await res.json();
+                allServers.push(...(Array.isArray(data) ? data : []));
+              }
             }
           })
         );

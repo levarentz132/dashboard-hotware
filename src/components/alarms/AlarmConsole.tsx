@@ -948,6 +948,8 @@ export default function AlarmConsole() {
 
       await Promise.allSettled(
         systemIds.map(async (sysId) => {
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sysId);
+          if (isUuid) return;
           try {
             const res = await fetch(`/api/nx/servers?systemId=${encodeURIComponent(sysId)}`, {
               headers: { Accept: "application/json" }

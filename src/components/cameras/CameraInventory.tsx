@@ -9,6 +9,7 @@ import {
   WifiOff,
   RefreshCw,
   AlertCircle,
+  AlertTriangle,
   Cloud,
   Server,
   ChevronDown,
@@ -787,8 +788,7 @@ export default function CameraInventory() {
                   </div>
                 ) : (
                   camerasBySystem.map((systemData) => {
-                    const hasCameras = systemData.cameras.length > 0;
-                    const isExpanded = hasCameras && !collapsedSystems.has(systemData.systemId);
+                    const isExpanded = !collapsedSystems.has(systemData.systemId);
                     const isOnline = systemData.stateOfHealth === "online";
 
                     const filteredSystemCameras = systemData.cameras.filter((cam) => {
@@ -870,10 +870,15 @@ export default function CameraInventory() {
                         {/* System Cameras Grid */}
                         {isExpanded && (
                           <div className="p-4 bg-slate-50/40 dark:bg-slate-900/40 border-t border-slate-200/80 dark:border-slate-800">
-                            {!isOnline ? (
-                              <div className="p-6 text-center text-slate-500">
-                                <WifiOff className="w-6 h-6 mx-auto mb-2 text-slate-400" />
-                                <p className="text-xs font-medium">System is offline. Cannot retrieve cameras.</p>
+                            {!isOnline || systemData.cameras.length === 0 ? (
+                              <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-600 dark:text-rose-400 flex items-center gap-3 text-xs font-medium my-1">
+                                <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
+                                <div>
+                                  <div className="font-semibold text-rose-700 dark:text-rose-300">Server Unreachable / Connection Failed</div>
+                                  <div className="text-[11px] opacity-90">
+                                    {(systemData as any).error || "This Nx Witness server is currently offline or unreachable via Nx Cloud Relay (HTTP 502 / Offline)."}
+                                  </div>
+                                </div>
                               </div>
                             ) : filteredSystemCameras.length === 0 ? (
                               <div className="p-6 text-center text-slate-500">

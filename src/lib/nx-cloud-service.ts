@@ -220,13 +220,61 @@ export async function getNxDevices(cloudSystemId: string, systemAccessToken: str
     }
 
     return {
-      id: d.id || d.guid || "",
-      name: d.name || d.userDefinedName || "Unknown Camera",
+      id: String(d.id || d.guid || ""),
+      name: String(d.name || d.userDefinedName || "Camera"),
       status: statusStr,
-      serverId: d.serverId || d.serverIdGuid || "",
-      vendor: d.vendor || d.manufacturer || "Generic",
-      model: d.model || "IP Camera",
-      deviceType: d.deviceType || d.type || "Camera",
+      serverId: String(d.serverId || d.serverIdGuid || ""),
+      vendor: String(d.vendor || d.manufacturer || "Generic"),
+      model: String(d.model || "IP Camera"),
+      deviceType: String(d.deviceType || d.type || "Camera"),
     };
   });
+}
+
+/**
+ * 7. Get Event Log from Nx Witness System via Relay
+ * - Target: https://{cloudSystemId}.relay.vmsproxy.com/api/getEvents
+ * - Manually handles HTTP 307/301/302/308 redirects preserving Authorization header.
+ */
+export async function getNxEvents(cloudSystemId: string, systemAccessToken: string): Promise<any[]> {
+  const cleanId = cloudSystemId.trim().replace(/[{}]/g, "");
+  const headers = {
+    Authorization: `Bearer ${systemAccessToken}`,
+    Accept: "application/json",
+  };
+
+  const endpointsToTry = [
+    `https://${cleanId}.relay.vmsproxy.com/api/getEvents?limit=200`,
+    `https://${cleanId}.relay.vmsproxy.com/rest/v4/events`,
+    `https://${cleanId}.relay.vmsproxy.com/rest/v3/events`,
+  ];
+
+  for (const targetUrl of endpointsToTry) {
+    try {
+      let response = await fetch(targetUrl, {
+        method: "GET",
+        headers,
+        redirect: "manual",
+      });
+
+      if ([301, 302, 307, 308].includes(response.status)) {
+        const redirectUrl = response.headers.get("location");
+        if (redirectUrl) {
+          response = await fetch(redirectUrl, { method: "GET", headers });
+        }
+      }
+
+      if (response.ok) {
+        const rawData = await response.json();
+        const items = Array.isArray(rawData) ? rawData : rawData?.items || rawData?.events || rawData?.reply || [];
+        if (items.length > 0) {
+          return items;
+        }
+      }
+    } catch (e: any) {
+      console.warn(`[NxRelay Events] Endpoint try failed for ${targetUrl}:`, e.message);
+    }
+  }
+
+  return [];
 }

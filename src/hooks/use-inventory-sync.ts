@@ -98,8 +98,6 @@ export function useInventorySync<T>(
 
                         const cloudId = normalizeId(system.id);
                         if (localId && cloudId === localId) continue;
-                        const isOnline = system.stateOfHealth === "online" || (system as any).isOnline === true || system.stateOfHealth === undefined;
-                        if (!isOnline) continue;
 
                         try {
                             const items = await cloudItemFetcher(system, { skipCache });
@@ -113,16 +111,34 @@ export function useInventorySync<T>(
                                         {
                                             systemId: system.id,
                                             systemName: system.name,
-                                            items,
-                                            stateOfHealth: system.stateOfHealth,
+                                            items: items || [],
+                                            stateOfHealth: (items && items.length > 0) ? (system.stateOfHealth || "online") : (system.stateOfHealth || "offline"),
                                         },
                                     ];
                                     if (options.onUpdate) options.onUpdate(newData);
                                     return newData;
                                 });
                             }
-                        } catch (e) {
+                        } catch (e: any) {
                             console.error(`[InventorySync] Cloud fetch failed for ${system.name}:`, e);
+                            if (isMounted.current && currentFetchId === fetchCount.current) {
+                                setDataBySystem((prev) => {
+                                    if (prev.find((s) => normalizeId(s.systemId) === cloudId)) return prev;
+
+                                    const newData = [
+                                        ...prev,
+                                        {
+                                            systemId: system.id,
+                                            systemName: system.name,
+                                            items: [],
+                                            stateOfHealth: "offline",
+                                            error: e.message || "Failed to fetch devices from server",
+                                        },
+                                    ];
+                                    if (options.onUpdate) options.onUpdate(newData);
+                                    return newData;
+                                });
+                            }
                         }
                     }
                 } catch (e) {
