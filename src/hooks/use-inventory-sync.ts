@@ -98,7 +98,8 @@ export function useInventorySync<T>(
 
                         const cloudId = normalizeId(system.id);
                         if (localId && cloudId === localId) continue;
-                        if (system.stateOfHealth !== "online") continue;
+                        const isOnline = system.stateOfHealth === "online" || (system as any).isOnline === true || system.stateOfHealth === undefined;
+                        if (!isOnline) continue;
 
                         try {
                             const items = await cloudItemFetcher(system, { skipCache });

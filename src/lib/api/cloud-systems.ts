@@ -165,7 +165,8 @@ async function fetchCloudSystemsUncached(): Promise<CloudSystem[]> {
     fetchError = true;
   }
 
-  if (fetchError || systems.length === 0) {
+  // Only fall back to local system queries when user is NOT logged into Nx Cloud
+  if (!cloudToken && (fetchError || systems.length === 0)) {
     const localSystems = await fetchLocalSystemsAsCloudSystems();
     if (localSystems.length > 0) {
       systems = localSystems;

@@ -144,7 +144,7 @@ export default function CameraInventory() {
         if (options?.skipCache) {
           headers["x-skip-nx-cache"] = "1";
         }
-        const infoResp = await fetch("/nx/rest/v3/servers/this", { headers });
+        const infoResp = await fetch("/api/nx/rest/v3/servers/this", { headers });
         if (infoResp.ok) {
           const info = await infoResp.json();
           actualServerName = info.name || info.systemName || "";
@@ -161,7 +161,7 @@ export default function CameraInventory() {
         headers["x-skip-nx-cache"] = "1";
       }
 
-      const response = await fetch("/nx/rest/v3/devices", {
+      const response = await fetch("/api/nx/rest/v3/devices", {
         method: "GET",
         headers,
       });
@@ -197,7 +197,7 @@ export default function CameraInventory() {
           headers["x-skip-nx-cache"] = "1";
         }
         const response = await fetch(
-          `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
+          `/api/cloud/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
           {
             method: "GET",
             credentials: "include",
@@ -229,13 +229,14 @@ export default function CameraInventory() {
     refetch: refetchSync,
   } = useInventorySync<CameraDevice>(fetchLocalCameras, fetchCloudCamerasForSystem, syncOptions);
 
-  const { loading: loadingCameras, error: camerasError, refetch: refetchSingle } = useCameras(systemId);
-  const { error: serversError } = useServers(systemId);
-  const { testConnection } = useSystemInfo(systemId || "");
+  const isLocalSystemId = systemId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(systemId);
+  const { loading: loadingCameras, error: camerasError, refetch: refetchSingle } = useCameras(isLocalSystemId ? systemId : undefined);
+  const { error: serversError } = useServers(isLocalSystemId ? systemId : undefined);
+  const { testConnection } = useSystemInfo(isLocalSystemId ? (systemId || "") : "");
 
   const loading = loadingSync;
   const loadingCloud = loadingCloudSync;
-  const error = camerasError || serversError;
+  const error = isLocalSystemId ? (camerasError || serversError) : null;
   const isLoadingContent = loading;
 
   const camerasBySystem = useMemo(() => {

@@ -8,6 +8,7 @@ export interface CloudSystem {
   stateOfHealth: string;
   accessRole: string;
   version?: string;
+  isOnline?: boolean;
 }
 
 export interface CloudCamera {

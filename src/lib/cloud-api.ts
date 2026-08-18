@@ -156,45 +156,36 @@ export function getCloudCredentials(request: NextRequest) {
 }
 
 export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: URLSearchParams, request?: NextRequest, systemName?: string): string {
+  const targetEndpoint = (endpoint === '/rest/v3/system/info') ? '/api/system/info' : endpoint;
   const id = (systemId || API_CONFIG.systemId)?.trim().toLowerCase();
   const cleanId = id?.replace(/[{}]/g, "");
   const localSysId = API_CONFIG.systemId?.trim().toLowerCase().replace(/[{}]/g, "");
 
   // 1. Handle global 'all' systems list
   if (cleanId === 'all') {
-    const actualEndpoint = (endpoint === '/rest/v3/system/info' || endpoint === '/api/system/info')
+    const actualEndpoint = (targetEndpoint === '/rest/v3/system/info' || targetEndpoint === '/api/system/info')
       ? '/api/systems/'
-      : endpoint;
+      : targetEndpoint;
     const baseUrl = `https://nxvms.com${actualEndpoint}`;
     return queryParams?.toString() ? `${baseUrl}?${queryParams.toString()}` : baseUrl;
   }
 
-  // 2. Identify if this is a local system
+  // 1b. UUID cloud system IDs or Cloud API routes must ALWAYS use Nx Cloud Relay, never localhost:7001
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+  const isCloudRoute = request?.nextUrl?.pathname?.startsWith("/api/cloud") || false;
+
+  if (isUuid || isCloudRoute) {
+    const baseUrl = `https://${cleanId}.relay.vmsproxy.com${targetEndpoint}`;
+    return queryParams?.toString() ? `${baseUrl}?${queryParams.toString()}` : baseUrl;
+  }
+
+  // 2. Identify if this is a local direct system (only for explicit localhost/IP addresses)
   const isDirectAddress = cleanId === 'localhost' ||
     cleanId === '127.0.0.1' ||
     /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$/.test(cleanId) ||
     cleanId.includes(':');
 
-  let isConfiguredLocal = !!(cleanId && cleanId === localSysId && API_CONFIG.serverHost) || (!cleanId && !!API_CONFIG.serverHost);
-
-  // Check cookies or watchdog headers for local system match
-  if (!isDirectAddress && !isConfiguredLocal && request && cleanId) {
-    const localId = request.cookies.get("nx_system_id")?.value ||
-      request.cookies.get("nx_server_id")?.value;
-    const headerIp = request.headers.get("x-nx-location-ip");
-    
-    if (localId && localId.toLowerCase().replace(/[{}]/g, "") === cleanId) {
-      isConfiguredLocal = true;
-    } else if (headerIp) {
-      // If a watchdog location header is present, we treat it as a local-reachable system
-      isConfiguredLocal = true;
-    }
-  }
-
-  // 2b. Check System Name for "Local" markers if ID match failed
-  if (!isConfiguredLocal && systemName?.toLowerCase().includes("local server")) {
-    isConfiguredLocal = true;
-  }
+  let isConfiguredLocal = !isUuid && (!cleanId || cleanId === 'localhost' || cleanId === '127.0.0.1');
 
   if (isDirectAddress || isConfiguredLocal) {
     // Resolve host and port
@@ -245,13 +236,13 @@ export function buildCloudUrl(systemId: string, endpoint: string, queryParams?: 
     }
 
     const hostWithPort = `${host}:${port}`;
-    const baseUrl = `${protocol}://${hostWithPort}${endpoint}`;
+    const baseUrl = `${protocol}://${hostWithPort}${targetEndpoint}`;
 
     return queryParams?.toString() ? `${baseUrl}?${queryParams.toString()}` : baseUrl;
   }
 
   // 3. Handle cloud relay addresses
-  const baseUrl = `https://${cleanId}.relay.vmsproxy.com${endpoint}`;
+  const baseUrl = `https://${cleanId}.relay.vmsproxy.com${targetEndpoint}`;
   return queryParams?.toString() ? `${baseUrl}?${queryParams.toString()}` : baseUrl;
 }
 
@@ -501,13 +492,13 @@ export async function fetchFromCloudApi<T>(
     // token will always be rejected with 403. Skip the call entirely if we only have local creds.
     const cloudAuthToken = getCloudAuthHeader(request);
     if (isCloudBound && !cloudAuthToken) {
-      console.warn(`[Cloud API AUTH BLOCKED] Endpoint: ${endpoint} | SystemID: ${systemId} | Reason: Missing NX Cloud OAuth token in headers and cookies.`);
+      console.warn(`[Cloud API AUTH BLOCKED] Endpoint: GET ${endpoint} | System: ${systemName || systemId} (${systemId}) | Reason: Missing NX Cloud OAuth token in headers and cookies. URL: ${cloudUrl}`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
     // Only block if it looks like a cloud-bound request (nxvms.com or vmsproxy.com)
     if (!hasAuth && isCloudBound) {
-      console.warn(`[Cloud API AUTH BLOCKED] Endpoint: ${endpoint} | SystemID: ${systemId} | Reason: No Authorization header set.`);
+      console.warn(`[Cloud API AUTH BLOCKED] Endpoint: GET ${endpoint} | System: ${systemName || systemId} (${systemId}) | Reason: No Authorization header set. URL: ${cloudUrl}`);
       return createAuthErrorResponse(systemId, systemName);
     }
 
@@ -548,11 +539,29 @@ export async function fetchFromCloudApi<T>(
         fetchHeaders["If-Modified-Since"] = storedEntry.lastModified;
       }
 
-      let response = await fetch(cloudUrl, {
-        method: "GET",
-        headers: fetchHeaders,
-        redirect: "manual",
-      });
+      let response: Response;
+      try {
+        response = await fetch(cloudUrl, {
+          method: "GET",
+          headers: fetchHeaders,
+          redirect: "manual",
+        });
+      } catch (connErr: any) {
+        const cleanSysId = (systemId || "").trim().toLowerCase().replace(/[{}]/g, "");
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSysId);
+        
+        if (isUuid && (cloudUrl.includes("localhost") || cloudUrl.includes("127.0.0.1") || /https?:\/\/(?:\d{1,3}\.){3}\d{1,3}/.test(cloudUrl))) {
+          const relayUrl = `https://${cleanSysId}.relay.vmsproxy.com${endpoint}`;
+          console.warn(`[Cloud API Local Fallback] Local connection failed (${connErr.message}). Retrying system ${cleanSysId} via Nx Cloud Relay: ${relayUrl}`);
+          response = await fetch(relayUrl, {
+            method: "GET",
+            headers: fetchHeaders,
+            redirect: "manual",
+          });
+        } else {
+          throw connErr;
+        }
+      }
 
       // Handle temporary redirects (301, 302, 307, 308)
       if ([301, 302, 307, 308].includes(response.status)) {
@@ -597,29 +606,57 @@ export async function fetchFromCloudApi<T>(
               loginHeaders["Authorization"] = cloudAuth;
             }
 
-            console.log(`[Cloud Relay Auth] Attempting auto-login for system ${systemId} as user '${username}'...`);
-            const loginRes = await fetch(loginUrl, {
-              method: "POST",
-              headers: loginHeaders,
-              body: JSON.stringify({ username, password, setCookie: true }),
-            });
-
-            if (loginRes.ok) {
-              const loginData = await loginRes.json();
-              if (loginData?.token) {
-                console.log(`[Cloud Relay Auth] Successfully authenticated to system ${systemId}`);
-                const retryHeaders = { ...headers };
-                retryHeaders["x-runtime-guid"] = loginData.token;
-
-                response = await fetch(cloudUrl, {
-                  method: "GET",
-                  headers: retryHeaders,
-                  redirect: "manual",
-                });
+            // Try with configured username first (e.g. admin), fallback to cloud email if available
+            let usernamesToTry = [username];
+            let cloudEmail: string | null = null;
+            try {
+              const cookieHeader = request.headers?.get('cookie') || '';
+              const match = cookieHeader.match(/(?:^|;\s*)nx_cloud_session=([^;]+)/);
+              if (match) {
+                const session = JSON.parse(decodeURIComponent(match[1]));
+                cloudEmail = session?.email || null;
               }
-            } else {
-              const loginErr = await loginRes.text();
-              console.warn(`[Cloud Relay Auth] Login failed for system ${systemId}:`, loginErr);
+            } catch (_) {}
+
+            if (cloudEmail && !usernamesToTry.includes(cloudEmail)) {
+              usernamesToTry.push(cloudEmail);
+            }
+
+            let sessionToken: string | null = null;
+            for (const userCandidate of usernamesToTry) {
+              if (userCandidate.includes("@")) {
+                // Nx Witness v5+ forbids password auth for Cloud email accounts — OAuth tokens are used instead.
+                continue;
+              }
+              console.log(`[Cloud Relay Auth] Attempting auto-login for system ${systemId} as user '${userCandidate}'...`);
+              const loginRes = await fetch(loginUrl, {
+                method: "POST",
+                headers: loginHeaders,
+                body: JSON.stringify({ username: userCandidate, password, setCookie: true }),
+              });
+
+              if (loginRes.ok) {
+                const loginData = await loginRes.json();
+                if (loginData?.token) {
+                  sessionToken = loginData.token;
+                  console.log(`[Cloud Relay Auth] Successfully authenticated to system ${systemId} as '${userCandidate}'`);
+                  break;
+                }
+              } else {
+                const loginErr = await loginRes.text();
+                console.warn(`[Cloud Relay Auth] Login failed for system ${systemId} as '${userCandidate}':`, loginErr.substring(0, 150));
+              }
+            }
+
+            if (sessionToken) {
+              const retryHeaders = { ...headers };
+              retryHeaders["x-runtime-guid"] = sessionToken;
+
+              response = await fetch(cloudUrl, {
+                method: "GET",
+                headers: retryHeaders,
+                redirect: "manual",
+              });
             }
           } catch (e) {
             console.warn(`[Cloud Relay Auth Error] Exception during auto-login for system ${systemId}:`, e);
@@ -661,13 +698,13 @@ export async function fetchFromCloudApi<T>(
         const status = response.status;
 
         if ([502, 503, 504].includes(status)) {
-          // console.warn(`[Cloud API] System '${systemName || systemId}' is likely offline or unreachable via NX Cloud Relay (${status}). skipping detailed error.`);
+          console.warn(`[Cloud API UNREACHABLE] System '${systemName || systemId}' (${systemId}) is offline/unreachable via Nx Cloud Relay (HTTP ${status}). URL: ${cloudUrl}`);
         } else {
-          // console.warn(`[Cloud API] Error (${status}) for ${cloudUrl}:`, errorText);
+          console.warn(`[Cloud API ERROR] HTTP ${status} for system '${systemName || systemId}' (${systemId}) at ${cloudUrl}: ${errorText.substring(0, 300)}`);
         }
 
         return createFetchErrorResponse(
-          `Failed to fetch from ${systemName || systemId}`,
+          `Failed to fetch from ${systemName || systemId} (HTTP ${status})`,
           systemId,
           systemName,
           status
@@ -823,12 +860,30 @@ async function requestCloudApi<T>(
 
     // logger.debug(`[Cloud API] Requesting ${method} ${cloudUrl}`);
 
-    let response = await fetch(cloudUrl, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      redirect: "manual",
-    });
+    let response: Response;
+    try {
+      response = await fetch(cloudUrl, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        redirect: "manual",
+      });
+    } catch (connErr: any) {
+      const cleanSysId = (systemId || "").trim().toLowerCase().replace(/[{}]/g, "");
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSysId);
+      if (isUuid && (cloudUrl.includes("localhost") || cloudUrl.includes("127.0.0.1") || /https?:\/\/(?:\d{1,3}\.){3}\d{1,3}/.test(cloudUrl))) {
+        const relayUrl = `https://${cleanSysId}.relay.vmsproxy.com${endpoint}`;
+        console.warn(`[Cloud API Local Fallback] ${method} Local connection failed (${connErr.message}). Retrying system ${cleanSysId} via Nx Cloud Relay: ${relayUrl}`);
+        response = await fetch(relayUrl, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+          redirect: "manual",
+        });
+      } else {
+        throw connErr;
+      }
+    }
 
     // console.log(`[Cloud API DEBUG] Initial response status: ${response.status}`);
 

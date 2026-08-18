@@ -15,11 +15,12 @@ export { fetchCloudSystems } from "@/lib/api/cloud-systems";
  * Fetch cameras from a specific cloud system
  */
 export async function fetchCloudCameras(system: CloudSystem): Promise<CloudCamera[]> {
-  if (system.stateOfHealth !== "online") return [];
+  const isSystemOnline = system.stateOfHealth === "online" || system.isOnline === true || system.isOnline === undefined;
+  if (!isSystemOnline) return [];
 
   try {
     const response = await fetch(
-      `/api/nx/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
+      `/api/cloud/devices?systemId=${encodeURIComponent(system.id)}&systemName=${encodeURIComponent(system.name)}`,
       {
         method: "GET",
         credentials: "include",

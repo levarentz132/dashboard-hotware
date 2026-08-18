@@ -73,9 +73,10 @@ export function GlobalDeviceMonitor() {
   const fetchAllSystems = useCallback(async () => {
     const allSystems: CloudSystem[] = [];
 
-    // 1. Add Local System baseline if found in cookies
+    // 1. Add Local System baseline if found in cookies (only for direct local addresses/hostnames, not cloud UUIDs)
     const localId = Cookies.get("nx_system_id") || Cookies.get("nx_server_id");
-    if (localId) {
+    const isLocalUuid = localId ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(localId) : false;
+    if (localId && !isLocalUuid) {
       allSystems.push({
         id: localId.replace(/[{}]/g, ""),
         name: "Local Server"
@@ -113,10 +114,13 @@ export function GlobalDeviceMonitor() {
         "x-skip-nx-cache": "1",
         ...getElectronHeaders(),
       };
-      const base = `/api/nx/devices/status?systemId=${encodeURIComponent(systemId)}&systemName=${encodeURIComponent(systemName)}`;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(systemId);
+      const endpointUrl = isUuid 
+        ? `/api/cloud/devices?systemId=${encodeURIComponent(systemId)}&systemName=${encodeURIComponent(systemName)}`
+        : `/api/nx/devices/status?systemId=${encodeURIComponent(systemId)}&systemName=${encodeURIComponent(systemName)}`;
 
       const [statusRes, summaryRes] = await Promise.all([
-        fetch(base, { method: "GET", credentials: "include", headers }),
+        fetch(endpointUrl, { method: "GET", credentials: "include", headers }),
         fetch(
           `/api/nx/devices-summary?systemId=${encodeURIComponent(systemId)}`,
           { method: "GET", credentials: "include", headers },

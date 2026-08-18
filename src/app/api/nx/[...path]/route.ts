@@ -31,6 +31,8 @@ async function handleRequest(request: NextRequest, method: string) {
   let endpoint = path;
   if (path === "/devices/status" || path === "/rest/v3/devices/status" || path === "/rest/v4/devices/status") {
     endpoint = "/rest/v3/devices";
+  } else if (path === "/system/info" || path === "/rest/v3/system/info") {
+    endpoint = "/api/system/info";
   } else if (!path.startsWith("/rest/v3") && !path.startsWith("/rest/v4") && !path.startsWith("/api/")) {
     endpoint = `/rest/v3${path}`;
   }

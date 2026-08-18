@@ -41,11 +41,12 @@ export function useNxVmsAuth() {
   const refreshCloudSession = useCallback(async (refreshToken: string) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${CLOUD_HOST}/oauth/token/`, {
+      const response = await fetch(`${CLOUD_HOST}/cdb/oauth2/token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           grant_type: "refresh_token",
+          response_type: "token",
           refresh_token: refreshToken,
           client_id: CLIENT_ID,
         }),
@@ -183,7 +184,7 @@ export function useNxVmsAuth() {
         grant_type: "authorization_code",
         response_type: "token",
       };
-      const response = await fetch(`${CLOUD_HOST}/oauth/token/`, {
+      const response = await fetch(`${CLOUD_HOST}/cdb/oauth2/token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
