@@ -573,42 +573,42 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
               {/* Resource */}
               {resource && resource.type === "camera" && (
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 sm:p-3 shadow-sm">
+                  <div className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
                     Camera
                   </div>
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <Camera className="h-4 w-4 text-blue-500 shrink-0" />
-                    <span className="font-medium truncate">{resource.name}</span>
+                    <Camera className="h-4 w-4 text-blue-500 dark:text-blue-400 shrink-0" />
+                    <span className="font-semibold text-slate-900 dark:text-slate-100 truncate">{resource.name}</span>
                   </div>
                 </div>
               )}
 
               {/* Timestamp */}
-              <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Timestamp</div>
+              <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 sm:p-3 shadow-sm">
+                <div className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Timestamp</div>
                 <div className="flex items-center gap-2 text-xs sm:text-sm">
-                  <Calendar className="h-4 w-4 text-gray-400 shrink-0" />
-                  <span className="truncate">{formatTimestamp(timestamp)}</span>
+                  <Calendar className="h-4 w-4 text-slate-400 dark:text-slate-400 shrink-0" />
+                  <span className="truncate font-medium text-slate-900 dark:text-slate-100">{formatTimestamp(timestamp)}</span>
                 </div>
               </div>
 
               {/* Aggregation Count */}
               {event.aggregatedInfo?.total > 1 && (
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Occurrences</div>
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 sm:p-3 shadow-sm">
+                  <div className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Occurrences</div>
                   <div className="flex items-center gap-2 text-xs sm:text-sm">
-                    <MoreHorizontal className="h-4 w-4 text-gray-400 shrink-0" />
-                    <span className="font-medium">{event.aggregatedInfo.total} events</span>
+                    <MoreHorizontal className="h-4 w-4 text-slate-400 dark:text-slate-400 shrink-0" />
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">{event.aggregatedInfo.total} events</span>
                   </div>
                 </div>
               )}
 
               {/* Reason */}
               {event.eventData?.reason && event.eventData.reason !== "none" && (
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Reason</div>
-                  <Badge variant="outline" className="text-xs">
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 sm:p-3 shadow-sm">
+                  <div className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Reason</div>
+                  <Badge variant="outline" className="text-xs font-semibold text-slate-900 dark:text-slate-100 border-slate-300 dark:border-slate-600">
                     {event.eventData.reason}
                   </Badge>
                 </div>
@@ -616,25 +616,25 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
 
               {/* State */}
               {event.eventData?.state && (
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">State</div>
-                  <code className="text-xs sm:text-sm font-mono">{event.eventData.state}</code>
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 sm:p-3 shadow-sm">
+                  <div className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">State</div>
+                  <code className="text-xs sm:text-sm font-mono font-semibold text-slate-900 dark:text-slate-100">{event.eventData.state}</code>
                 </div>
               )}
 
               {/* Action URL */}
               {event.actionData?.url && (
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3 sm:col-span-2">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Action URL</div>
-                  <code className="text-xs sm:text-sm font-mono break-all text-blue-600">{event.actionData.url}</code>
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 sm:p-3 sm:col-span-2 shadow-sm">
+                  <div className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Action URL</div>
+                  <code className="text-xs sm:text-sm font-mono break-all text-blue-700 dark:text-blue-400">{event.actionData.url}</code>
                 </div>
               )}
 
               {/* Origin Peer ID */}
               {event.actionData?.originPeerId && (
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
-                  <div className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1">Origin Peer</div>
-                  <span className="text-xs sm:text-sm truncate block">
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 sm:p-3 shadow-sm">
+                  <div className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Origin Peer</div>
+                  <span className="text-xs sm:text-sm truncate block font-mono font-semibold text-slate-900 dark:text-slate-100">
                     {(() => {
                       const peer = getResourceName(event.actionData.originPeerId);
                       return peer ? peer.name : event.actionData.originPeerId;
@@ -647,13 +647,13 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
             {/* Attributes */}
             {event.actionData?.attributes && event.actionData.attributes.length > 0 && (
               <div className="space-y-2">
-                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Attributes</h4>
-                <div className="bg-white rounded-lg border p-2.5 sm:p-3">
+                <h4 className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">Attributes</h4>
+                <div className="bg-slate-50 dark:bg-slate-900/90 rounded-lg border border-slate-200 dark:border-slate-800 p-2.5 sm:p-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {event.actionData.attributes.map((attr: any, i: number) => (
                       <div key={i} className="text-xs sm:text-sm">
-                        <span className="text-gray-500">{attr.name || i}:</span>{" "}
-                        <span className="font-medium">{attr.value || JSON.stringify(attr)}</span>
+                        <span className="text-slate-500 dark:text-slate-400">{attr.name || i}:</span>{" "}
+                        <span className="font-medium text-slate-800 dark:text-slate-200">{attr.value || JSON.stringify(attr)}</span>
                       </div>
                     ))}
                   </div>
@@ -664,12 +664,12 @@ function EventCard({ event, isExpanded, onToggle, getResourceName }: EventCardPr
             {/* Related Devices */}
             {event.actionData?.deviceIds && event.actionData.deviceIds.length > 0 && (
               <div className="space-y-2">
-                <h4 className="text-xs sm:text-sm font-medium text-gray-700">Related Devices</h4>
+                <h4 className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">Related Devices</h4>
                 <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   {event.actionData.deviceIds.map((id, i) => {
                     const camera = getResourceName(id);
                     return (
-                      <Badge key={i} variant="secondary" className="gap-1 text-xs">
+                      <Badge key={i} variant="secondary" className="gap-1 text-xs text-slate-800 dark:text-slate-200 bg-slate-200 dark:bg-slate-800">
                         <Camera className="h-3 w-3" />
                         {camera ? camera.name : id}
                       </Badge>
@@ -1790,7 +1790,7 @@ export default function AlarmConsole() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
                     {/* Event Type Filter */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Tipe Event</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Tipe Event</label>
                       <Select value={filterEventType} onValueChange={setFilterEventType}>
                         <SelectTrigger className="text-sm">
                           <SelectValue placeholder="Semua Event" />
@@ -1811,7 +1811,7 @@ export default function AlarmConsole() {
 
                     {/* Level Filter */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Level</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Level</label>
                       <Select value={filterLevel} onValueChange={setFilterLevel}>
                         <SelectTrigger className="text-sm">
                           <SelectValue placeholder="Semua Level" />
@@ -1842,7 +1842,7 @@ export default function AlarmConsole() {
 
                     {/* Action Type Filter */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Tipe Action</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Tipe Action</label>
                       <Select value={filterActionType} onValueChange={setFilterActionType}>
                         <SelectTrigger className="text-sm">
                           <SelectValue placeholder="Semua Action" />
@@ -1860,7 +1860,7 @@ export default function AlarmConsole() {
 
                     {/* Resource Filter */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Resource</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Resource</label>
                       <Select value={filterResource} onValueChange={setFilterResource}>
                         <SelectTrigger className="text-sm">
                           <SelectValue placeholder="Semua Resource" />
@@ -1885,7 +1885,7 @@ export default function AlarmConsole() {
 
                     {/* Source Server Filter */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Source Server</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Source Server</label>
                       <Select value={filterSourceServer} onValueChange={setFilterSourceServer}>
                         <SelectTrigger className="text-sm">
                           <SelectValue placeholder="Semua Server" />
@@ -1906,7 +1906,7 @@ export default function AlarmConsole() {
 
                     {/* Date From Filter */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Dari Tanggal</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Dari Tanggal</label>
                       <div className="relative">
                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                         <Input
@@ -1920,7 +1920,7 @@ export default function AlarmConsole() {
 
                     {/* Date To Filter */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Sampai Tanggal</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Sampai Tanggal</label>
                       <div className="relative">
                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                         <Input
@@ -1935,7 +1935,7 @@ export default function AlarmConsole() {
 
                     {/* Auto Refresh Interval */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <label className="text-xs sm:text-sm font-medium text-gray-700">Auto Refresh</label>
+                      <label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-slate-300">Auto Refresh</label>
                       <Select
                         value={autoRefresh ? refreshInterval.toString() : "off"}
                         onValueChange={(val) => {

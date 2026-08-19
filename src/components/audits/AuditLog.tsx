@@ -168,8 +168,8 @@ export default function AuditLog() {
   useEffect(() => {
     if (fetchedCloudSystems.length === 0) return;
 
+    let systems = [...fetchedCloudSystems];
     setCloudSystems((prev) => {
-      let systems = [...fetchedCloudSystems];
       const localEntry = prev.find((s) => s.name === "Local System") || prev[0];
       if (localEntry && !systems.find((s) => s.name === "Local System")) {
         systems.unshift(localEntry);
@@ -183,6 +183,12 @@ export default function AuditLog() {
       });
       return systems;
     });
+
+    // Auto-select first online Cloud System if current selection is Local System or null
+    const firstOnlineCloud = systems.find((s) => s.name !== "Local System" && s.stateOfHealth === "online") || systems.find((s) => s.stateOfHealth === "online");
+    if (firstOnlineCloud) {
+      setSelectedSystem((prev) => (prev?.name === "Local System" || !prev ? firstOnlineCloud : prev));
+    }
   }, [fetchedCloudSystems]);
 
   // Fetch devices for name mapping
@@ -244,15 +250,35 @@ export default function AuditLog() {
         });
 
         if (!response.ok) {
-          throw new Error(response.status === 401 ? "Unauthorized access" : "Failed to fetch audit logs");
+          const errData = await response.json().catch(() => ({}));
+          const statusMsg =
+            response.status === 401 || response.status === 403
+              ? "Akses ditolak: Membutuhkan akun Administrator / Power User pada VMS"
+              : errData.error || "Gagal mengambil user logs dari server VMS";
+          throw new Error(statusMsg);
         }
 
         const data = await response.json();
-        const logs = data.reply || data;
-        setAuditLogs(Array.isArray(logs) ? logs : []);
-      } catch (err) {
+        const logs = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.reply)
+          ? data.reply
+          : Array.isArray(data?.result)
+          ? data.result
+          : Array.isArray(data?.records)
+          ? data.records
+          : Array.isArray(data?.auditLog)
+          ? data.auditLog
+          : [];
+
+        if (!Array.isArray(logs) || (logs.length === 0 && data?.error)) {
+          throw new Error(data?.error || "Gagal memproses data user logs dari server");
+        }
+
+        setAuditLogs(logs);
+      } catch (err: any) {
         console.error("Error fetching audit logs:", err);
-        setError("Failed to fetch audit logs");
+        setError(err.message || "Gagal mengambil user logs");
       } finally {
         setLoading(false);
       }
@@ -390,15 +416,44 @@ export default function AuditLog() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {!isCloudEmpty && selectedSystem && (
-            <div className="flex items-center gap-2 h-9 px-3.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-inner">
-              <Cloud className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-              <span className="truncate max-w-[150px]">{selectedSystem.name}</span>
-            </div>
+        <div className="flex items-center gap-2.5 justify-end">
+          {cloudSystems.length > 0 && selectedSystem && (
+            <Select
+              value={selectedSystem.id}
+              onValueChange={(sysId) => {
+                const sys = cloudSystems.find((s) => s.id === sysId);
+                if (sys) {
+                  setSelectedSystem(sys);
+                }
+              }}
+            >
+              <SelectTrigger className="h-9 px-3.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-2">
+                <Cloud className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                <SelectValue placeholder="Pilih System">{selectedSystem.name}</SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
+                {cloudSystems.map((sys) => (
+                  <SelectItem key={sys.id} value={sys.id} className="text-xs cursor-pointer font-medium">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          sys.stateOfHealth === "online" ? "bg-emerald-500" : "bg-slate-400"
+                        }`}
+                      />
+                      <span>{sys.name}</span>
+                      {sys.accessRole && (
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 capitalize ml-1">
+                          ({sys.accessRole})
+                        </span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
 
-          {/* Refresh Button */}
+          {/* Refresh Button on the far right */}
           <button
             onClick={() => {
               if (selectedSystem) {
@@ -408,7 +463,7 @@ export default function AuditLog() {
               }
             }}
             disabled={loading || loadingSystems}
-            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl disabled:opacity-50 text-xs font-semibold h-9 transition-all shadow-sm hover:shadow"
+            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl disabled:opacity-50 text-xs font-semibold h-9 transition-all shadow-sm hover:shadow shrink-0"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 ${loading || loadingSystems ? "animate-spin" : ""}`}

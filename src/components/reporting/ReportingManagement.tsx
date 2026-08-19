@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   FileText,
   Calendar,
@@ -212,12 +212,26 @@ export default function ReportingManagement() {
     window.print();
   };
 
+  // Auto-refresh interval state (Default 5s Realtime polling)
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(5000);
+
   // Refresh all data
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     refetchCloudSystems();
     refetchCameras();
     refetchServers();
-  };
+  }, [refetchCloudSystems, refetchCameras, refetchServers]);
+
+  // Realtime polling effect
+  useEffect(() => {
+    if (!autoRefreshInterval || autoRefreshInterval <= 0) return;
+
+    const timer = setInterval(() => {
+      handleRefresh();
+    }, autoRefreshInterval);
+
+    return () => clearInterval(timer);
+  }, [autoRefreshInterval, handleRefresh]);
 
   const isLoading = loadingCloudSystems || loadingCameras || loadingServers;
 
@@ -236,8 +250,14 @@ export default function ReportingManagement() {
               <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
                 Reports & Analytics
               </h1>
-              <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 text-[11px] font-semibold">
-                Executive Reporting
+              <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 text-[11px] font-semibold flex items-center gap-1.5">
+                {autoRefreshInterval > 0 && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                )}
+                <span>Executive Reporting</span>
               </Badge>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -247,13 +267,50 @@ export default function ReportingManagement() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Realtime Interval Selector */}
+          <Select
+            value={String(autoRefreshInterval)}
+            onValueChange={(val) => setAutoRefreshInterval(Number(val))}
+          >
+            <SelectTrigger className="h-9 px-3 text-xs bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl focus:ring-1 focus:ring-blue-500">
+              <div className="flex items-center gap-2">
+                {autoRefreshInterval > 0 ? (
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                ) : (
+                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                )}
+                <SelectValue placeholder="Auto Refresh" />
+              </div>
+            </SelectTrigger>
+            <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
+              <SelectItem value="0" className="text-xs">
+                Auto-Refresh: Matikan (Manual)
+              </SelectItem>
+              <SelectItem value="5000" className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                ⚡ Realtime (Setiap 5 dtk)
+              </SelectItem>
+              <SelectItem value="10000" className="text-xs">
+                ⏱️ Setiap 10 dtk
+              </SelectItem>
+              <SelectItem value="30000" className="text-xs">
+                ⏱️ Setiap 30 dtk
+              </SelectItem>
+              <SelectItem value="60000" className="text-xs">
+                ⏱️ Setiap 1 mnt
+              </SelectItem>
+            </SelectContent>
+          </Select>
+
           {/* Refresh Button */}
           <Button
             variant="outline"
             size="sm"
             onClick={handleRefresh}
             disabled={isLoading}
-            className="h-9 px-3 gap-2 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="h-9 px-3 gap-2 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl"
           >
             <RefreshCw className={cn("w-4 h-4 text-blue-400", isLoading && "animate-spin")} />
             <span className="text-xs font-semibold">Refresh Data</span>

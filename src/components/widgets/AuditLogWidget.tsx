@@ -169,13 +169,29 @@ export default function AuditLogWidget({ systemId }: { systemId?: string }) {
         );
 
         if (!response.ok) {
-          throw new Error(response.status === 401 ? "Unauthorized access" : "Failed to fetch logs");
+          const errData = await response.json().catch(() => ({}));
+          const statusMsg =
+            response.status === 401 || response.status === 403
+              ? "Akses ditolak (butuh hak Administrator/Power User)"
+              : errData.error || "Gagal mengambil log dari VMS";
+          throw new Error(statusMsg);
         }
 
         const data = await response.json();
-        const logs = data.reply || data;
+        const logs = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.reply)
+          ? data.reply
+          : Array.isArray(data?.result)
+          ? data.result
+          : Array.isArray(data?.records)
+          ? data.records
+          : Array.isArray(data?.auditLog)
+          ? data.auditLog
+          : [];
+
         const sortedLogs = Array.isArray(logs)
-          ? logs.sort((a: AuditLogEntry, b: AuditLogEntry) => b.createdTimeSec - a.createdTimeSec)
+          ? [...logs].sort((a: AuditLogEntry, b: AuditLogEntry) => b.createdTimeSec - a.createdTimeSec)
           : [];
 
         setAuditLogs(sortedLogs);
