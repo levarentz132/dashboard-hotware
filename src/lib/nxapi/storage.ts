@@ -79,7 +79,7 @@ export class NxStorageService extends NxUserService {
       }
       return events;
     } catch (error) {
-      console.error("[getAlarms] Error fetching alarms:", error);
+      // Quietly return empty list if server doesn't support metrics alarms
       return [];
     }
   }

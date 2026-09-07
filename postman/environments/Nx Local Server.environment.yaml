@@ -1,0 +1,6 @@
+name: Nx Local Server
+values:
+  - key: base_url
+    value: ''
+  - key: nx_token
+    value: ''

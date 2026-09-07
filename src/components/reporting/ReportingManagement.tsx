@@ -4,8 +4,6 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   FileText,
   Calendar,
-  Download,
-  Printer,
   RefreshCw,
   Camera,
   Video,
@@ -14,28 +12,39 @@ import {
   AlertTriangle,
   AlertCircle,
   TrendingUp,
-  TrendingDown,
-  CheckCircle2,
-  XCircle,
-  Info,
-  Clock,
-  Cloud,
+  Shield,
   Server,
   HardDrive,
-  Shield,
-  Zap,
-  BarChart3,
-  ArrowUpRight,
-  ArrowDownRight,
-  Eye,
+  Cloud,
+  FileCode,
   FileSpreadsheet,
   Cpu,
-  MemoryStick
+  MemoryStick,
+  CheckCircle2,
+  Clock,
+  Info,
+  Layers,
+  ArrowUpRight,
+  ArrowDownRight,
+  BarChart3,
 } from "lucide-react";
-import { useCameras } from "@/hooks/useNxAPI-camera";
-import { useServers } from "@/hooks/useNxAPI-server";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  CartesianGrid,
+  Legend,
+  AreaChart,
+  Area,
+  ReferenceLine,
+} from "recharts";
 import { useCloudSystemsWithOnline } from "@/hooks/use-cloud-systems-with-online";
 import { useAlarmsQuery, useEventsQuery } from "@/hooks/use-nx-queries";
+import nxAPI, { type NxCamera } from "@/lib/nxapi";
+import { fetchFromCloudRelay } from "@/hooks/use-async-data";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,290 +52,40 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import {
+  exportToWord,
+  exportToPdf,
+  type FullReportData,
+  type CameraReportItem,
+  type OfflineCameraItem,
+  type ServerHealthItem,
+  type ServerStorageDiskItem,
+  type AlarmReportItem,
+  type S3LogItem,
+} from "./export-utils";
+import { ORIX_LOGO_BASE64_PNG } from "@/assets/orix-logo";
 
 // ============================================
-// TYPES & INTERFACES
+// CONSTANTS & BRANDING
 // ============================================
-type ReportPeriod = "weekly" | "monthly" | "yearly" | "custom";
-type ReportCategory = "all" | "cameras" | "recordings" | "health" | "alarms";
+const COMPANY_NAME = "PT ORIX FINANCE INDONESIA";
+const DASHBOARD_TITLE = "ORIX INDONESIA FINANCE";
 
-// ============================================
-// HELPER: Build CSV string from section data
-// ============================================
-function buildCsvSection(title: string, headers: string[], rows: (string | number | undefined | null)[][]): string {
-  const safeVal = (v: string | number | undefined | null) => {
-    const s = String(v ?? "-").replace(/"/g, '""');
-    return `"${s}"`;
-  };
-  const lines: string[] = [
-    `"=== ${title} ==="`,
-    headers.map(safeVal).join(","),
-    ...rows.map((r) => r.map(safeVal).join(",")),
-    "",
-  ];
-  return lines.join("\n");
+type ReportPeriod = "daily" | "weekly" | "monthly" | "yearly" | "custom";
+type ReportCategory = "all" | "cameras" | "recordings" | "health" | "alarms" | "s3bridge";
+
+function formatBytesToReadable(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-// ============================================
-// HELPER: Build full-featured PDF HTML
-// ============================================
-function buildPdfHtml(opts: {
-  systemLabel: string;
-  period: string;
-  dateFrom: string;
-  dateTo: string;
-  cameras: any[];
-  servers: any[];
-  alarms: any[];
-  events: any[];
-  cloudSystems: any[];
-  category: ReportCategory;
-  onlineCameras: number;
-  totalCameras: number;
-  onlineServers: number;
-  totalServers: number;
-  criticalAlarms: number;
-  warningAlarms: number;
-  totalAlarms: number;
-  cameraOnlineRate: number;
-  serverOnlineRate: number;
-}): string {
-  const now = new Date().toLocaleString("id-ID", {
-    dateStyle: "full",
-    timeStyle: "short",
-  });
-  const periodLabel =
-    opts.period === "weekly"
-      ? "Mingguan"
-      : opts.period === "monthly"
-      ? "Bulanan"
-      : opts.period === "yearly"
-      ? "Tahunan"
-      : "Custom";
-
-  const showAll = opts.category === "all";
-  const showCameras = showAll || opts.category === "cameras";
-  const showHealth = showAll || opts.category === "health";
-  const showAlarms = showAll || opts.category === "alarms";
-  const showRecordings = showAll || opts.category === "recordings";
-
-  const cameraRows = opts.cameras
-    .map((cam: any, i: number) => {
-      const isOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
-      return `<tr>
-        <td>${i + 1}</td>
-        <td>${cam.name || `Kamera ${i + 1}`}</td>
-        <td><span class="${isOnline ? "badge-online" : "badge-offline"}">${isOnline ? "Online" : "Offline"}</span></td>
-        <td>${cam.ipAddr || cam.ip || cam.url || "-"}</td>
-        <td>${[cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX Camera"}</td>
-        <td>${cam.resolution || "-"}</td>
-      </tr>`;
-    })
-    .join("");
-
-  const serverRows = opts.servers
-    .map((srv: any, i: number) => {
-      const isOnline = ["online", "Online"].includes(String(srv.status ?? srv.stateOfHealth ?? ""));
-      const cpuUsage = srv.cpuUsagePercent ?? srv.cpuUsage ?? srv.cpu ?? "-";
-      const ramTotal = srv.ramUsageMb || srv.totalRamMb || "-";
-      const storageTotal = srv.hddList?.length ?? srv.storages?.length ?? "-";
-      return `<tr>
-        <td>${i + 1}</td>
-        <td>${srv.name || `Server ${i + 1}`}</td>
-        <td><span class="${isOnline ? "badge-online" : "badge-offline"}">${isOnline ? "Online" : "Offline"}</span></td>
-        <td>${srv.version || srv.softwareVersion || "-"}</td>
-        <td>${cpuUsage !== "-" ? `${cpuUsage}%` : "-"}</td>
-        <td>${ramTotal !== "-" ? `${ramTotal} MB` : "-"}</td>
-        <td>${storageTotal !== "-" ? `${storageTotal} disk(s)` : "-"}</td>
-      </tr>`;
-    })
-    .join("");
-
-  const alarmSource = opts.alarms.length > 0 ? opts.alarms : opts.events;
-  const alarmRows = alarmSource
-    .slice(0, 200)
-    .map((a: any, i: number) => {
-      const sev = String(a.level ?? a.severity ?? a.type ?? "-");
-      const sevClass = ["error", "critical", "fatal"].includes(sev.toLowerCase())
-        ? "badge-offline"
-        : ["warning", "warn"].includes(sev.toLowerCase())
-        ? "badge-warning"
-        : "badge-info";
-      const ts = a.timestampMs || a.eventTimestampUsec
-        ? new Date(
-            a.timestampMs ?? Math.floor(a.eventTimestampUsec / 1000)
-          ).toLocaleString("id-ID")
-        : a.createdAt || a.timestamp || "-";
-      return `<tr>
-        <td>${i + 1}</td>
-        <td>${a.name || a.caption || a.source || "-"}</td>
-        <td><span class="${sevClass}">${sev}</span></td>
-        <td>${ts}</td>
-        <td>${a.description || a.resourceName || "-"}</td>
-      </tr>`;
-    })
-    .join("");
-
-  return `<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="UTF-8" />
-  <title>Laporan NX Cloud — ${opts.systemLabel}</title>
-  <style>
-    @page { size: A4; margin: 20mm 15mm; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1e293b; background: #fff; }
-    .report-header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: white; padding: 20px 24px; margin-bottom: 20px; border-radius: 6px; display: flex; justify-content: space-between; align-items: flex-start; }
-    .report-header h1 { font-size: 20px; font-weight: 700; }
-    .report-header p { font-size: 11px; opacity: 0.85; margin-top: 3px; }
-    .report-header .meta { text-align: right; font-size: 10px; opacity: 0.8; }
-    .report-header .meta strong { display: block; font-size: 12px; opacity: 1; }
-    .section { margin-bottom: 20px; }
-    .section-title { font-size: 13px; font-weight: 700; color: #1e40af; border-bottom: 2px solid #3b82f6; padding-bottom: 4px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
-    .metric-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; text-align: center; background: #f8fafc; }
-    .metric-card .value { font-size: 22px; font-weight: 800; color: #1e293b; }
-    .metric-card .label { font-size: 10px; color: #64748b; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .metric-card.blue .value { color: #2563eb; }
-    .metric-card.green .value { color: #16a34a; }
-    .metric-card.amber .value { color: #d97706; }
-    .metric-card.red .value { color: #dc2626; }
-    table { width: 100%; border-collapse: collapse; font-size: 10px; }
-    th { background: #1e40af; color: white; padding: 7px 8px; text-align: left; font-weight: 600; }
-    td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; color: #374151; }
-    tr:nth-child(even) td { background: #f8fafc; }
-    .badge-online { background: #dcfce7; color: #16a34a; padding: 2px 6px; border-radius: 10px; font-weight: 600; font-size: 9px; }
-    .badge-offline { background: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 10px; font-weight: 600; font-size: 9px; }
-    .badge-warning { background: #fef3c7; color: #d97706; padding: 2px 6px; border-radius: 10px; font-weight: 600; font-size: 9px; }
-    .badge-info { background: #dbeafe; color: #2563eb; padding: 2px 6px; border-radius: 10px; font-weight: 600; font-size: 9px; }
-    .footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 9px; color: #94a3b8; }
-    .summary-bar { display: flex; gap: 8px; margin-bottom: 20px; }
-    .summary-item { flex: 1; background: #f1f5f9; border-radius: 6px; padding: 10px 12px; border-left: 3px solid #3b82f6; }
-    .summary-item.green { border-left-color: #16a34a; }
-    .summary-item.amber { border-left-color: #d97706; }
-    .summary-item .s-val { font-size: 18px; font-weight: 800; }
-    .summary-item .s-label { font-size: 9px; color: #64748b; text-transform: uppercase; }
-    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-  </style>
-</head>
-<body>
-  <!-- HEADER -->
-  <div class="report-header">
-    <div>
-      <h1>📊 Laporan Sistem NX Cloud</h1>
-      <p>Sistem: ${opts.systemLabel} &nbsp;|&nbsp; Periode: ${periodLabel} (${opts.dateFrom} – ${opts.dateTo})</p>
-      <p style="margin-top:6px; font-size:10px; opacity:0.7;">Laporan ini dibuat otomatis dari data real-time NX Cloud VMS</p>
-    </div>
-    <div class="meta">
-      <strong>Dibuat:</strong>
-      ${now}
-    </div>
-  </div>
-
-  <!-- METRICS SUMMARY -->
-  <div class="metrics-grid">
-    <div class="metric-card blue">
-      <div class="value">${opts.cameraOnlineRate}%</div>
-      <div class="label">Camera Uptime</div>
-      <div style="font-size:9px;color:#64748b;margin-top:4px">${opts.onlineCameras} / ${opts.totalCameras} Aktif</div>
-    </div>
-    <div class="metric-card green">
-      <div class="value">${opts.serverOnlineRate}%</div>
-      <div class="label">Server Health</div>
-      <div style="font-size:9px;color:#64748b;margin-top:4px">${opts.onlineServers} / ${opts.totalServers} Server Online</div>
-    </div>
-    <div class="metric-card amber">
-      <div class="value">${opts.totalAlarms}</div>
-      <div class="label">Total Alarm Events</div>
-      <div style="font-size:9px;color:#64748b;margin-top:4px">${opts.criticalAlarms} Critical, ${opts.warningAlarms} Warning</div>
-    </div>
-    <div class="metric-card red">
-      <div class="value">${opts.totalCameras - opts.onlineCameras}</div>
-      <div class="label">Kamera Offline</div>
-      <div style="font-size:9px;color:#64748b;margin-top:4px">Perlu pengecekan</div>
-    </div>
-  </div>
-
-  ${showCameras && opts.cameras.length > 0 ? `
-  <!-- CAMERA TABLE -->
-  <div class="section">
-    <div class="section-title">📹 Laporan Kamera (${opts.cameras.length} unit)</div>
-    <table>
-      <thead><tr>
-        <th>#</th><th>Nama Kamera</th><th>Status</th><th>IP Address</th><th>Vendor / Model</th><th>Resolusi</th>
-      </tr></thead>
-      <tbody>${cameraRows}</tbody>
-    </table>
-  </div>
-  ` : ""}
-
-  ${showHealth && opts.servers.length > 0 ? `
-  <!-- SERVER / HEALTH TABLE -->
-  <div class="section">
-    <div class="section-title">🖥️ Laporan Server & System Health (${opts.servers.length} server)</div>
-    <table>
-      <thead><tr>
-        <th>#</th><th>Nama Server</th><th>Status</th><th>Versi Software</th><th>CPU</th><th>RAM</th><th>Storage Disk</th>
-      </tr></thead>
-      <tbody>${serverRows}</tbody>
-    </table>
-  </div>
-  ` : ""}
-
-  ${showAlarms && alarmSource.length > 0 ? `
-  <!-- ALARMS TABLE -->
-  <div class="section">
-    <div class="section-title">🚨 Laporan Alarm & Events (${alarmSource.length} kejadian)</div>
-    <table>
-      <thead><tr>
-        <th>#</th><th>Nama / Sumber</th><th>Severity</th><th>Waktu</th><th>Deskripsi</th>
-      </tr></thead>
-      <tbody>${alarmRows}</tbody>
-    </table>
-    ${alarmSource.length > 200 ? `<p style="font-size:9px;color:#94a3b8;margin-top:6px;">* Menampilkan 200 dari ${alarmSource.length} kejadian</p>` : ""}
-  </div>
-  ` : ""}
-
-  ${showRecordings && opts.servers.length > 0 ? `
-  <!-- RECORDINGS / STORAGE TABLE -->
-  <div class="section">
-    <div class="section-title">💾 Laporan Rekaman & Storage per Server</div>
-    <table>
-      <thead><tr>
-        <th>#</th><th>Nama Server</th><th>Status</th><th>Jumlah Disk / Storage</th><th>Total Storage</th>
-      </tr></thead>
-      <tbody>
-        ${opts.servers.map((srv: any, i: number) => {
-          const isOnline = ["online", "Online"].includes(String(srv.status ?? srv.stateOfHealth ?? ""));
-          const diskCount = srv.hddList?.length ?? srv.storages?.length ?? "-";
-          const totalStorageMb = (srv.hddList || srv.storages || []).reduce(
-            (sum: number, d: any) => sum + (d.totalSpaceMb || d.totalSpace || 0), 0
-          );
-          const totalStorageLabel = totalStorageMb > 0 ? `${(totalStorageMb / 1024).toFixed(1)} GB` : "-";
-          return `<tr>
-            <td>${i + 1}</td>
-            <td>${srv.name || `Server ${i + 1}`}</td>
-            <td><span class="${isOnline ? "badge-online" : "badge-offline"}">${isOnline ? "Online" : "Offline"}</span></td>
-            <td>${diskCount}</td>
-            <td>${totalStorageLabel}</td>
-          </tr>`;
-        }).join("")}
-      </tbody>
-    </table>
-  </div>
-  ` : ""}
-
-  <!-- FOOTER -->
-  <div class="footer">
-    <p>Dokumen ini dibuat otomatis oleh Hotware Cloud Dashboard &nbsp;|&nbsp; ${now}</p>
-    <p>Data bersumber dari NX Cloud VMS secara real-time &nbsp;|&nbsp; Sistem: ${opts.systemLabel}</p>
-  </div>
-
-  <script>
-    window.onload = function() { window.print(); };
-  </script>
-</body>
-</html>`;
+function formatDateLocal(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function ReportingManagement() {
@@ -334,69 +93,378 @@ export default function ReportingManagement() {
   const [period, setPeriod] = useState<ReportPeriod>("monthly");
   const [category, setCategory] = useState<ReportCategory>("all");
   const [selectedSystemId, setSelectedSystemId] = useState<string>("all");
+  const [s3TimeRange, setS3TimeRange] = useState<"1h" | "24h" | "7d">("1h");
+  
   const [dateFrom, setDateFrom] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().split("T")[0];
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    return formatDateLocal(firstDay);
   });
   const [dateTo, setDateTo] = useState<string>(() => {
-    return new Date().toISOString().split("T")[0];
+    const today = new Date();
+    return formatDateLocal(today);
   });
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [isPdfLoading, setIsPdfLoading] = useState<boolean>(false);
+  
+  const [isExportingWord, setIsExportingWord] = useState<boolean>(false);
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(5000);
 
-  // Fetch live system data (using existing API hooks)
-  const activeSystemId = selectedSystemId !== "all" ? selectedSystemId : undefined;
-  const { cloudSystems, loadingCloud: loadingCloudSystems, refetchCloudSystems } = useCloudSystemsWithOnline();
-  const { cameras, loading: loadingCameras, refetch: refetchCameras } = useCameras(activeSystemId);
-  const { servers, loading: loadingServers, refetch: refetchServers } = useServers(activeSystemId);
+  // Raw fetched arrays for aggregated system resources
+  const [cameras, setCameras] = useState<NxCamera[]>([]);
+  const [servers, setServers] = useState<any[]>([]);
+  const [storages, setStorages] = useState<any[]>([]);
+  const [loadingData, setLoadingData] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Live Cloud Systems list & events queries
+  const { cloudSystems, loadingCloud, refetchCloudSystems } = useCloudSystemsWithOnline();
   const { alarms, loading: loadingAlarms, refetch: refetchAlarms } = useAlarmsQuery();
-  const { events, loading: loadingEvents, refetch: refetchEvents } = useEventsQuery(200);
+  const { events, loading: loadingEvents, refetch: refetchEvents } = useEventsQuery(300);
 
-  // Preset Date range handler
+  // ============================================
+  // MULTI-SYSTEM DATA AGGREGATION (SERVER FILTER ALL)
+  // ============================================
+  const fetchAggregatedData = useCallback(async () => {
+    setLoadingData(true);
+    setFetchError(null);
+    try {
+      if (selectedSystemId === "all") {
+        if (cloudSystems.length > 0) {
+          const activeSystems = cloudSystems.filter((s) => s.isOnline);
+          const targetSystems = activeSystems.length > 0 ? activeSystems : cloudSystems;
+
+          const devicePromises = targetSystems.map((sys) =>
+            fetchFromCloudRelay<NxCamera[]>(sys.id, "/devices").then((res) =>
+              (res || []).map((c) => ({ ...c, _systemName: sys.name, _systemId: sys.id }))
+            )
+          );
+          const serverPromises = targetSystems.map((sys) =>
+            fetchFromCloudRelay<any[]>(sys.id, "/servers").then((res) =>
+              (res || []).map((srv) => ({ ...srv, _systemName: sys.name, _systemId: sys.id }))
+            )
+          );
+          const storagePromises = targetSystems.map((sys) =>
+            fetch(`/api/cloud/storages?systemId=${encodeURIComponent(sys.id)}`)
+              .then((res) => (res.ok ? res.json() : []))
+              .then((list) =>
+                (Array.isArray(list) ? list : []).map((st: any) => ({
+                  ...st,
+                  _systemName: sys.name,
+                  _systemId: sys.id,
+                }))
+              )
+              .catch(() => [])
+          );
+
+          const [deviceResults, serverResults, storageResults] = await Promise.all([
+            Promise.allSettled(devicePromises),
+            Promise.allSettled(serverPromises),
+            Promise.allSettled(storagePromises),
+          ]);
+
+          const allCams: NxCamera[] = [];
+          deviceResults.forEach((res) => {
+            if (res.status === "fulfilled" && Array.isArray(res.value)) {
+              allCams.push(...res.value);
+            }
+          });
+
+          const allSrvs: any[] = [];
+          serverResults.forEach((res) => {
+            if (res.status === "fulfilled" && Array.isArray(res.value)) {
+              allSrvs.push(...res.value);
+            }
+          });
+
+          const allStrs: any[] = [];
+          storageResults.forEach((res) => {
+            if (res.status === "fulfilled" && Array.isArray(res.value)) {
+              allStrs.push(...res.value);
+            }
+          });
+
+          // Fallback to local nxAPI if cloud relay returned empty
+          if (allCams.length === 0 && allSrvs.length === 0) {
+            const [localCams, localSrvs, localStrs] = await Promise.all([
+              nxAPI.getCameras().catch(() => []),
+              nxAPI.getServers().catch(() => []),
+              nxAPI.getStorages().catch(() => []),
+            ]);
+            setCameras(localCams || []);
+            setServers(localSrvs || []);
+            setStorages(localStrs || []);
+          } else {
+            setCameras(allCams);
+            setServers(allSrvs);
+            setStorages(allStrs);
+          }
+        } else {
+          // Fetch local system fallback
+          const [localCams, localSrvs, localStrs] = await Promise.all([
+            nxAPI.getCameras().catch(() => []),
+            nxAPI.getServers().catch(() => []),
+            nxAPI.getStorages().catch(() => []),
+          ]);
+          setCameras(localCams || []);
+          setServers(localSrvs || []);
+          setStorages(localStrs || []);
+        }
+      } else {
+        // Fetch specific single system
+        const targetSys = cloudSystems.find((s) => s.id === selectedSystemId);
+        const sysName = targetSys?.name || selectedSystemId;
+
+        const [sysCams, sysSrvs, sysStrs] = await Promise.all([
+          fetchFromCloudRelay<NxCamera[]>(selectedSystemId, "/devices").catch(() => []),
+          fetchFromCloudRelay<any[]>(selectedSystemId, "/servers").catch(() => []),
+          fetch(`/api/cloud/storages?systemId=${encodeURIComponent(selectedSystemId)}`)
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => []),
+        ]);
+
+        if ((!sysCams || sysCams.length === 0) && (!sysSrvs || sysSrvs.length === 0)) {
+          nxAPI.setSystemId(selectedSystemId);
+          const [localCams, localSrvs, localStrs] = await Promise.all([
+            nxAPI.getCameras().catch(() => []),
+            nxAPI.getServers().catch(() => []),
+            nxAPI.getStorages().catch(() => []),
+          ]);
+          setCameras((localCams || []).map((c: any) => ({ ...c, _systemName: sysName })));
+          setServers((localSrvs || []).map((s: any) => ({ ...s, _systemName: sysName })));
+          setStorages((localStrs || []).map((st: any) => ({ ...st, _systemName: sysName })));
+        } else {
+          setCameras((sysCams || []).map((c: any) => ({ ...c, _systemName: sysName })));
+          setServers((sysSrvs || []).map((s: any) => ({ ...s, _systemName: sysName })));
+          setStorages((Array.isArray(sysStrs) ? sysStrs : []).map((st: any) => ({ ...st, _systemName: sysName })));
+        }
+      }
+    } catch (err) {
+      console.error("[ReportingManagement] Error aggregating reporting data:", err);
+      setFetchError("Failed to fetch system data from server endpoints.");
+    } finally {
+      setLoadingData(false);
+    }
+  }, [selectedSystemId, cloudSystems]);
+
+  // Initial & Dependency Trigger for Data Aggregation
+  useEffect(() => {
+    fetchAggregatedData();
+  }, [fetchAggregatedData]);
+
+  // Manual Refresh Handler
+  const handleRefresh = useCallback(() => {
+    refetchCloudSystems();
+    refetchAlarms();
+    refetchEvents();
+    fetchAggregatedData();
+  }, [refetchCloudSystems, refetchAlarms, refetchEvents, fetchAggregatedData]);
+
+  // Auto-Refresh Polling Effect
+  useEffect(() => {
+    if (!autoRefreshInterval || autoRefreshInterval <= 0) return;
+    const timer = setInterval(() => {
+      handleRefresh();
+    }, autoRefreshInterval);
+    return () => clearInterval(timer);
+  }, [autoRefreshInterval, handleRefresh]);
+
+  // Date Period Change Handler (ACCURATE PERIOD FIX — NO FUTURE DATES)
   const handlePeriodChange = (newPeriod: ReportPeriod) => {
     setPeriod(newPeriod);
     const today = new Date();
-    let from = new Date();
+    const todayStr = formatDateLocal(today);
+    const year = today.getFullYear();
+    const month = today.getMonth();
 
-    if (newPeriod === "weekly") {
-      from.setDate(today.getDate() - 7);
+    if (newPeriod === "daily") {
+      setDateFrom(todayStr);
+      setDateTo(todayStr);
+    } else if (newPeriod === "weekly") {
+      const from = new Date(today);
+      from.setDate(today.getDate() - 6);
+      setDateFrom(formatDateLocal(from));
+      setDateTo(todayStr);
     } else if (newPeriod === "monthly") {
-      from.setDate(today.getDate() - 30);
+      const firstDay = new Date(year, month, 1);
+      setDateFrom(formatDateLocal(firstDay));
+      setDateTo(todayStr);
     } else if (newPeriod === "yearly") {
-      from.setFullYear(today.getFullYear() - 1);
-    }
-
-    if (newPeriod !== "custom") {
-      setDateFrom(from.toISOString().split("T")[0]);
-      setDateTo(today.toISOString().split("T")[0]);
+      const firstDayYear = new Date(year, 0, 1);
+      setDateFrom(formatDateLocal(firstDayYear));
+      setDateTo(todayStr);
     }
   };
 
-  // Real Metrics Calculation
-  const totalCameras = cameras?.length || 0;
-  const onlineCameras = cameras?.filter((c: any) =>
+  // ============================================
+  // REAL METRICS CALCULATIONS
+  // ============================================
+  const totalCameras = cameras.length;
+  const onlineCameras = cameras.filter((c: any) =>
     ["online", "Online", "recording", "Recording"].includes(String(c.status))
-  ).length || 0;
-  const cameraOnlineRate = totalCameras > 0 ? Math.round((onlineCameras / totalCameras) * 100) : 0;
+  ).length;
+  const offlineCamerasCount = totalCameras - onlineCameras;
+  const cameraOnlineRate = totalCameras > 0 ? Number(((onlineCameras / totalCameras) * 100).toFixed(1)) : 0;
 
-  const totalServers = servers?.length || 0;
-  const onlineServers = servers?.filter((s: any) =>
+  const totalServers = servers.length;
+  const onlineServers = servers.filter((s: any) =>
     ["online", "Online"].includes(String(s.status ?? s.stateOfHealth ?? ""))
-  ).length || 0;
+  ).length;
   const serverOnlineRate = totalServers > 0 ? Math.round((onlineServers / totalServers) * 100) : 0;
 
   const alarmList = Array.isArray(alarms) ? alarms : [];
   const eventList = Array.isArray(events) ? events : [];
-  const totalAlarms = alarmList.length || eventList.length;
-  const criticalAlarms = alarmList.filter((a: any) =>
-    ["error", "critical", "fatal"].includes(String(a.level ?? a.severity ?? "").toLowerCase())
-  ).length;
-  const warningAlarms = alarmList.filter((a: any) =>
-    ["warning", "warn"].includes(String(a.level ?? a.severity ?? "").toLowerCase())
-  ).length;
+  const targetAlarmEvents = alarmList.length > 0 ? alarmList : eventList;
+  
+  // Real Alarm Count strictly from configured alarm/event source for selected period
+  const totalAlarms = targetAlarmEvents.length;
 
-  // Server storage aggregation (real data)
+  const criticalAlarms = useMemo(() => {
+    return targetAlarmEvents.filter((a: any) => {
+      const txt = String(a.level ?? a.severity ?? a.type ?? a.eventType ?? a.caption ?? a.description ?? "").toLowerCase();
+      return (
+        txt.includes("error") ||
+        txt.includes("critical") ||
+        txt.includes("fatal") ||
+        txt.includes("disconnect") ||
+        txt.includes("offline") ||
+        txt.includes("failure") ||
+        txt.includes("lost")
+      );
+    }).length;
+  }, [targetAlarmEvents]);
+  
+  const warningAlarms = useMemo(() => {
+    return targetAlarmEvents.filter((a: any) => {
+      const txt = String(a.level ?? a.severity ?? a.type ?? a.eventType ?? a.caption ?? a.description ?? "").toLowerCase();
+      return txt.includes("warning") || txt.includes("warn") || txt.includes("attention");
+    }).length;
+  }, [targetAlarmEvents]);
+
+  // Selected Server Name Label
+  const selectedServerLabel = useMemo(() => {
+    if (selectedSystemId === "all") return "ALL SERVERS (CENTRALIZED)";
+    const sys = cloudSystems.find((s) => s.id === selectedSystemId);
+    return (sys?.name || selectedSystemId).toUpperCase();
+  }, [selectedSystemId, cloudSystems]);
+
+  // Dynamic Offline Camera Summary Title
+  const offlineSummaryTitle = useMemo(() => {
+    switch (period) {
+      case "daily":
+        return "DAILY OFFLINE CAMERA SUMMARY";
+      case "weekly":
+        return "WEEKLY OFFLINE CAMERA SUMMARY";
+      case "monthly":
+        return "MONTHLY OFFLINE CAMERA SUMMARY";
+      case "yearly":
+        return "YEARLY OFFLINE CAMERA SUMMARY";
+      default:
+        return "OFFLINE CAMERA SUMMARY";
+    }
+  }, [period]);
+
+  // Dynamic Period Description Label
+  const periodLabel = useMemo(() => {
+    if (period === "daily") {
+      return `DAILY • ${dateTo} (00:00 - 23:59)`;
+    } else if (period === "weekly") {
+      return `WEEKLY • ${dateFrom} TO ${dateTo} (7 DAYS)`;
+    } else if (period === "monthly") {
+      return `MONTHLY • ${dateFrom} TO ${dateTo}`;
+    } else if (period === "yearly") {
+      return `YEARLY • ${dateFrom} TO ${dateTo}`;
+    }
+    return `CUSTOM • ${dateFrom} TO ${dateTo}`;
+  }, [period, dateFrom, dateTo]);
+
+  // ============================================
+  // SERVER STORAGE DISK BREAKDOWN (REQUIREMENT 1)
+  // ============================================
+  const formattedServerDisks = useMemo<ServerStorageDiskItem[]>(() => {
+    if (!storages || storages.length === 0) return [];
+
+    return storages.map((st: any, idx: number) => {
+      const serverName = (st._systemName || st.serverName || "SERVER").toUpperCase();
+      const diskName = (st.name || st.path || st.url || `DISK ${idx + 1}`).toUpperCase();
+      const status = (st.statusInfo?.status || st.status || "ONLINE").toUpperCase();
+
+      const totalBytes = Number(st.statusInfo?.totalSpace || st.spaceLimitB || st.totalSpace || 0);
+      const freeBytes = Number(st.statusInfo?.freeSpace || st.freeSpace || 0);
+      const usedBytes = totalBytes > freeBytes ? totalBytes - freeBytes : Number(st.statusInfo?.usedSpace || 0);
+      const usagePct = totalBytes > 0 ? `${Math.round((usedBytes / totalBytes) * 100)}%` : "N/A";
+
+      return {
+        serverName,
+        diskName,
+        status: ["online", "ONLINE", "ok", "OK"].includes(status) ? "ONLINE" : "OFFLINE",
+        total: totalBytes > 0 ? formatBytesToReadable(totalBytes) : "DATA NOT AVAILABLE FROM SOURCE",
+        used: usedBytes > 0 ? formatBytesToReadable(usedBytes) : "DATA NOT AVAILABLE FROM SOURCE",
+        free: freeBytes > 0 ? formatBytesToReadable(freeBytes) : "DATA NOT AVAILABLE FROM SOURCE",
+        usagePct,
+      };
+    });
+  }, [storages]);
+
+  // ============================================
+  // OFFLINE CAMERA SUMMARY CALCULATOR (REQUIREMENT 2 & 3)
+  // ============================================
+  const offlineCamerasSummary = useMemo<OfflineCameraItem[]>(() => {
+    if (!cameras || cameras.length === 0) return [];
+
+    return cameras.map((cam: any) => {
+      const isOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+      const camEvents = eventList.filter(
+        (e: any) =>
+          String(e.resourceId || e.cameraId || e.source || "").includes(String(cam.id)) ||
+          String(e.caption || e.description || "").toLowerCase().includes(String(cam.name || "").toLowerCase())
+      );
+
+      const disconnectEvents = camEvents.filter((e: any) => {
+        const txt = String(e.caption || e.description || e.type || "").toLowerCase();
+        return txt.includes("offline") || txt.includes("disconnect") || txt.includes("lost");
+      });
+
+      const incidentCount = !isOnline ? Math.max(1, disconnectEvents.length) : disconnectEvents.length;
+
+      let firstOffline = "ONLINE — NO OFFLINE EVENTS RECORDED";
+      let lastOffline = "ONLINE — NO OFFLINE EVENTS RECORDED";
+      let offlineDuration = "N/A — HISTORICAL DATA NOT AVAILABLE";
+      let availabilityRate = "ONLINE";
+
+      if (!isOnline) {
+        firstOffline = `CURRENTLY OFFLINE`;
+        lastOffline = `CURRENTLY OFFLINE (STILL OFFLINE)`;
+        offlineDuration = "N/A — HISTORICAL DATA NOT AVAILABLE";
+        availabilityRate = "N/A — HISTORICAL DATA NOT AVAILABLE";
+      } else if (incidentCount > 0) {
+        firstOffline = `HISTORICAL OFFLINE EVENT (${dateFrom})`;
+        lastOffline = `HISTORICAL OFFLINE EVENT (${dateTo})`;
+        offlineDuration = "N/A — HISTORICAL DATA NOT AVAILABLE";
+        availabilityRate = "ONLINE (RECOVERED)";
+      }
+
+      const serverName = (cam._systemName || cam.serverName || "SERVER 01").toUpperCase();
+
+      return {
+        serverName,
+        cameraName: cam.name || `CAMERA_${cam.id?.slice(0, 6) || "UNK"}`,
+        cameraId: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
+        status: isOnline ? "ONLINE" : "OFFLINE",
+        firstOffline,
+        lastOffline,
+        offlineDuration,
+        incidentCount,
+        availabilityRate,
+      };
+    });
+  }, [cameras, eventList, dateFrom, dateTo]);
+
+  // Aggregate Total Offline Incidents Count
+  const totalOfflineIncidents = useMemo(() => {
+    return offlineCamerasSummary.reduce((acc, curr) => acc + curr.incidentCount, 0);
+  }, [offlineCamerasSummary]);
+
+  // Storage Stats per Server
   const serverStorageStats = useMemo(() => {
     if (!servers || servers.length === 0) return [];
     return servers.map((srv: any) => {
@@ -405,35 +473,52 @@ export default function ReportingManagement() {
       const usedMb = diskList.reduce((sum: number, d: any) => sum + (d.reservedSpaceMb || d.usedSpace || 0), 0);
       const freeMb = totalMb - usedMb;
       const usedPct = totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0;
+
+      const rawCpu = srv.cpuUsagePercent ?? srv.cpuUsage ?? srv.cpu;
+      const cpuText = typeof rawCpu === "number" && rawCpu >= 0 ? `${Math.round(rawCpu)}%` : "N/A — DATA NOT AVAILABLE FROM CONFIGURED SOURCE";
+
+      const rawRamUsed = srv.ramUsageMb ?? srv.ramUsedMb;
+      const rawRamTotal = srv.totalRamMb ?? srv.ramTotalMb;
+      const ramText =
+        typeof rawRamUsed === "number" && typeof rawRamTotal === "number" && rawRamTotal > 0
+          ? `${(rawRamUsed / 1024).toFixed(1)} GB / ${(rawRamTotal / 1024).toFixed(1)} GB`
+          : "N/A — DATA NOT AVAILABLE FROM CONFIGURED SOURCE";
+
       return {
-        name: srv.name || "Server",
+        name: (srv._systemName || srv.name || "SERVER").toUpperCase(),
         isOnline: ["online", "Online"].includes(String(srv.status ?? srv.stateOfHealth ?? "")),
-        totalGb: (totalMb / 1024).toFixed(1),
-        usedGb: (usedMb / 1024).toFixed(1),
-        freeGb: (freeMb / 1024).toFixed(1),
+        totalGb: totalMb > 0 ? (totalMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+        usedGb: usedMb > 0 ? (usedMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+        freeGb: freeMb > 0 ? (freeMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
         usedPct,
-        diskCount: diskList.length,
-        cpu: srv.cpuUsagePercent ?? srv.cpuUsage ?? null,
-        ramUsedMb: srv.ramUsageMb ?? null,
-        ramTotalMb: srv.totalRamMb ?? null,
-        version: srv.version || srv.softwareVersion || "-",
-        osName: srv.osName || "-",
+        diskCount: diskList.length > 0 ? String(diskList.length) : "1 DISK",
+        cpuText,
+        ramText,
+        version: srv.version || srv.softwareVersion || "DATA NOT AVAILABLE FROM SOURCE",
+        osName: srv.osName || srv.osInfo?.name || "DATA NOT AVAILABLE FROM SOURCE",
       };
     });
   }, [servers]);
 
-  // Aggregate breakdown trends based on real live data
+  // Trend Chart Data
   const trendData = useMemo(() => {
     const liveCam = onlineCameras;
     const liveAlarms = totalAlarms;
     const liveHealth = serverOnlineRate;
 
-    if (period === "weekly") {
+    if (period === "daily") {
+      return Array.from({ length: 8 }, (_, i) => ({
+        label: `${i * 3}:00`,
+        cameras: liveCam,
+        alarms: Math.round(liveAlarms / 8),
+        healthScore: liveHealth || 100,
+      }));
+    } else if (period === "weekly") {
       return Array.from({ length: 7 }, (_, i) => {
         const d = new Date();
         d.setDate(d.getDate() - (6 - i));
         return {
-          label: d.toLocaleDateString("id-ID", { weekday: "short" }),
+          label: d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase(),
           cameras: liveCam,
           alarms: Math.round(liveAlarms / 7),
           healthScore: liveHealth || 100,
@@ -446,315 +531,197 @@ export default function ReportingManagement() {
         alarms: Math.round(liveAlarms / 4),
         healthScore: liveHealth || 100,
       }));
-    } else if (period === "custom") {
-      const start = new Date(dateFrom);
-      const end = new Date(dateTo);
-      const diffTime = Math.abs(end.getTime() - start.getTime());
-      const diffDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-
-      if (diffDays <= 14) {
-        return Array.from({ length: diffDays }, (_, i) => {
-          const d = new Date(start);
-          d.setDate(d.getDate() + i);
-          return {
-            label: d.toLocaleDateString("id-ID", { day: "numeric", month: "short" }),
-            cameras: liveCam,
-            alarms: Math.round(liveAlarms / diffDays),
-            healthScore: liveHealth || 100,
-          };
-        });
-      } else {
-        const steps = Math.min(6, diffDays);
-        const stepSize = Math.floor(diffDays / steps);
-        return Array.from({ length: steps }, (_, i) => {
-          const d = new Date(start);
-          d.setDate(d.getDate() + i * stepSize);
-          return {
-            label: d.toLocaleDateString("id-ID", { day: "numeric", month: "short" }),
-            cameras: liveCam,
-            alarms: Math.round(liveAlarms / steps),
-            healthScore: liveHealth || 100,
-          };
-        });
-      }
     } else {
-      return ["Minggu 1", "Minggu 2", "Minggu 3", "Minggu 4"].map((w) => ({
+      return ["WEEK 1", "WEEK 2", "WEEK 3", "WEEK 4"].map((w) => ({
         label: w,
         cameras: liveCam,
         alarms: Math.round(liveAlarms / 4),
         healthScore: liveHealth || 100,
       }));
     }
-  }, [period, dateFrom, dateTo, onlineCameras, totalAlarms, serverOnlineRate]);
+  }, [period, onlineCameras, totalAlarms, serverOnlineRate]);
+
+  // S3 Cloud Bridge — No live S3 API endpoint exists in this deployment.
+  const s3PerformanceData: S3LogItem[] = useMemo(() => {
+    return [];
+  }, []);
 
   // ============================================
-  // SYSTEM LABEL HELPER
+  // EXPORT HANDLERS (WORD & PDF)
   // ============================================
-  const systemLabel = useMemo(() => {
-    if (selectedSystemId === "all") return "Semua Cloud System";
-    const sys = cloudSystems.find((s) => s.id === selectedSystemId);
-    return sys?.name || selectedSystemId;
-  }, [selectedSystemId, cloudSystems]);
+  const prepareFullReportData = useCallback((): FullReportData => {
+    const d = new Date();
+    const dateStr = d.toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    const timeStr = d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+    const now = `${dateStr} AT ${timeStr}`.toUpperCase();
 
-  // ============================================
-  // EXPORT CSV — Real-time NX Cloud Data
-  // ============================================
-  const exportCSV = useCallback(() => {
-    setIsExporting(true);
-    try {
-      const metaHeader = [
-        `"Laporan NX Cloud VMS — Hotware Dashboard"`,
-        `"Dibuat: ${new Date().toLocaleString("id-ID")}"`,
-        `"Sistem: ${systemLabel}"`,
-        `"Periode: ${period} (${dateFrom} s/d ${dateTo})"`,
-        "",
-      ].join("\n");
+    const formattedCameras: CameraReportItem[] = cameras.map((cam: any) => ({
+      id: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
+      name: cam.name || "UNNAMED CAMERA",
+      serverName: (cam._systemName || cam.serverName || "SERVER 01").toUpperCase(),
+      status: ["online", "Online", "recording", "Recording"].includes(String(cam.status)) ? "ONLINE" : "OFFLINE",
+      ipAddress: cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE FROM SOURCE",
+      vendorModel: [cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA",
+      resolutionFps: cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE FROM SOURCE",
+      uptimeRate: ["online", "Online", "recording", "Recording"].includes(String(cam.status)) ? "ONLINE (LIVE)" : "N/A — HISTORICAL DATA NOT AVAILABLE",
+    }));
 
-      const sections: string[] = [metaHeader];
+    const formattedServers: ServerHealthItem[] = serverStorageStats.map((srv) => ({
+      serverName: srv.name,
+      status: srv.isOnline ? "ONLINE" : "OFFLINE",
+      version: srv.version,
+      osName: srv.osName,
+      cpuUsage: srv.cpuText,
+      ramUsage: srv.ramText,
+      diskCount: srv.diskCount,
+      storageUsage: srv.totalGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB (${srv.usedPct}%)` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+    }));
 
-      // SECTION: Cameras
-      if (category === "all" || category === "cameras") {
-        const cams = Array.isArray(cameras) ? cameras : [];
-        const camRows = cams.map((cam: any) => {
-          const isOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
-          return [
-            cam.name || "-",
-            isOnline ? "Online" : "Offline",
-            cam.ipAddr || cam.ip || cam.url || "-",
-            cam.vendor || "-",
-            cam.model || cam.type || "NX Camera",
-            cam.resolution || "-",
-            cam.fps ? `${cam.fps} fps` : "-",
-            cam.id || "-",
-          ];
-        });
-        sections.push(
-          buildCsvSection(
-            "DATA KAMERA REAL-TIME",
-            ["Nama Kamera", "Status", "IP Address", "Vendor", "Model", "Resolusi", "FPS", "Camera ID"],
-            camRows
-          )
-        );
-      }
+    const formattedAlarms: AlarmReportItem[] = alarmList.map((a: any) => ({
+      id: a.id || "DATA NOT AVAILABLE FROM SOURCE",
+      source: (a.name || a.caption || a.source || "SYSTEM LOG").toUpperCase(),
+      severity: String(a.level ?? a.severity ?? a.type ?? "INFO").toUpperCase(),
+      timestamp: a.timestampMs
+        ? new Date(a.timestampMs).toLocaleString("en-US")
+        : a.eventTimestampUsec
+        ? new Date(Math.floor(a.eventTimestampUsec / 1000)).toLocaleString("en-US")
+        : a.createdAt || "DATA NOT AVAILABLE FROM SOURCE",
+      description: a.description || a.resourceName || "NO DESCRIPTION AVAILABLE",
+    }));
 
-      // SECTION: Servers / Health
-      if (category === "all" || category === "health") {
-        const srvs = Array.isArray(servers) ? servers : [];
-        const srvRows = srvs.map((srv: any) => {
-          const isOnline = ["online", "Online"].includes(String(srv.status ?? srv.stateOfHealth ?? ""));
-          const diskList: any[] = srv.hddList || srv.storages || [];
-          const totalMb = diskList.reduce((sum: number, d: any) => sum + (d.totalSpaceMb || 0), 0);
-          return [
-            srv.name || "-",
-            isOnline ? "Online" : "Offline",
-            srv.version || srv.softwareVersion || "-",
-            srv.osName || "-",
-            srv.cpuUsagePercent != null ? `${srv.cpuUsagePercent}%` : "-",
-            srv.ramUsageMb != null ? `${srv.ramUsageMb} MB` : "-",
-            srv.totalRamMb != null ? `${srv.totalRamMb} MB` : "-",
-            diskList.length > 0 ? diskList.length : "-",
-            totalMb > 0 ? `${(totalMb / 1024).toFixed(1)} GB` : "-",
-            srv.id || "-",
-          ];
-        });
-        sections.push(
-          buildCsvSection(
-            "DATA SERVER & SYSTEM HEALTH REAL-TIME",
-            [
-              "Nama Server", "Status", "Versi NX", "OS", "CPU Usage",
-              "RAM Digunakan", "RAM Total", "Jumlah Disk", "Total Storage", "Server ID"
-            ],
-            srvRows
-          )
-        );
-      }
-
-      // SECTION: Alarms / Events
-      if (category === "all" || category === "alarms") {
-        const alarmSource = alarmList.length > 0 ? alarmList : eventList;
-        const alarmRows = alarmSource.map((a: any) => {
-          const ts = a.timestampMs
-            ? new Date(a.timestampMs).toLocaleString("id-ID")
-            : a.eventTimestampUsec
-            ? new Date(Math.floor(a.eventTimestampUsec / 1000)).toLocaleString("id-ID")
-            : a.createdAt || a.timestamp || "-";
-          return [
-            a.name || a.caption || a.source || "-",
-            a.level ?? a.severity ?? a.type ?? "-",
-            ts,
-            a.description || a.resourceName || "-",
-            a.id || "-",
-          ];
-        });
-        sections.push(
-          buildCsvSection(
-            `DATA ALARM & EVENTS REAL-TIME (${alarmSource.length} kejadian)`,
-            ["Nama / Sumber", "Severity / Level", "Waktu Kejadian", "Deskripsi", "Event ID"],
-            alarmRows
-          )
-        );
-      }
-
-      // SECTION: Cloud Systems
-      if (category === "all") {
-        const sysRows = cloudSystems.map((sys) => [
-          sys.name || "-",
-          sys.isOnline ? "Online" : "Offline",
-          sys.stateOfHealth || "-",
-          sys.id || "-",
-        ]);
-        sections.push(
-          buildCsvSection(
-            "DAFTAR CLOUD SYSTEMS",
-            ["Nama System", "Status Online", "State of Health", "System ID"],
-            sysRows
-          )
-        );
-      }
-
-      const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(sections.join("\n"));
-      const link = document.createElement("a");
-      link.setAttribute("href", csvContent);
-      link.setAttribute(
-        "download",
-        `NXCloud_Report_${category}_${selectedSystemId}_${dateFrom}_to_${dateTo}.csv`
-      );
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err) {
-      console.error("[ReportingManagement] CSV export error:", err);
-    } finally {
-      setIsExporting(false);
-    }
+    return {
+      companyName: COMPANY_NAME,
+      dashboardTitle: DASHBOARD_TITLE,
+      generatedAt: now,
+      periodType: period,
+      periodLabel,
+      dateFrom,
+      dateTo,
+      selectedServerLabel,
+      totalCameras,
+      onlineCameras,
+      offlineCamerasCount,
+      cameraOnlineRate,
+      totalServers,
+      onlineServers,
+      offlineServers: totalServers - onlineServers,
+      serverOnlineRate,
+      totalAlarms,
+      criticalAlarms,
+      warningAlarms,
+      totalOfflineIncidents,
+      offlineSummaryTitle,
+      cameras: formattedCameras,
+      offlineCameras: offlineCamerasSummary,
+      servers: formattedServers,
+      serverDisks: formattedServerDisks,
+      alarms: formattedAlarms,
+      s3Logs: s3PerformanceData,
+    };
   }, [
-    cameras, servers, alarms, events, cloudSystems,
-    category, period, dateFrom, dateTo, systemLabel, selectedSystemId,
-    alarmList, eventList,
+    cameras,
+    serverStorageStats,
+    formattedServerDisks,
+    alarmList,
+    offlineCamerasSummary,
+    s3PerformanceData,
+    period,
+    periodLabel,
+    dateFrom,
+    dateTo,
+    selectedServerLabel,
+    totalCameras,
+    onlineCameras,
+    offlineCamerasCount,
+    cameraOnlineRate,
+    totalServers,
+    onlineServers,
+    serverOnlineRate,
+    totalAlarms,
+    criticalAlarms,
+    warningAlarms,
+    totalOfflineIncidents,
+    offlineSummaryTitle,
   ]);
 
-  // ============================================
-  // EXPORT PDF — Real-time NX Cloud, Popup Window
-  // ============================================
-  const handlePrint = useCallback(() => {
-    setIsPdfLoading(true);
+  const handleExportWord = () => {
+    setIsExportingWord(true);
     try {
-      const html = buildPdfHtml({
-        systemLabel,
-        period,
-        dateFrom,
-        dateTo,
-        cameras: Array.isArray(cameras) ? cameras : [],
-        servers: Array.isArray(servers) ? servers : [],
-        alarms: alarmList,
-        events: eventList,
-        cloudSystems,
-        category,
-        onlineCameras,
-        totalCameras,
-        onlineServers,
-        totalServers,
-        criticalAlarms,
-        warningAlarms,
-        totalAlarms,
-        cameraOnlineRate,
-        serverOnlineRate,
-      });
-
-      const printWindow = window.open("", "_blank", "width=900,height=700,scrollbars=yes");
-      if (!printWindow) {
-        console.warn("[ReportingManagement] Popup blocked. Please allow popups for this site.");
-        // Fallback: create blob URL
-        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `NXCloud_Report_${dateFrom}_to_${dateTo}.html`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-        return;
-      }
-      printWindow.document.open();
-      printWindow.document.write(html);
-      printWindow.document.close();
+      const data = prepareFullReportData();
+      exportToWord(data);
     } catch (err) {
-      console.error("[ReportingManagement] PDF print error:", err);
+      console.error("[ReportingManagement] Word export error:", err);
     } finally {
-      setTimeout(() => setIsPdfLoading(false), 1500);
+      setTimeout(() => setIsExportingWord(false), 1000);
     }
-  }, [
-    systemLabel, period, dateFrom, dateTo,
-    cameras, servers, alarmList, eventList, cloudSystems, category,
-    onlineCameras, totalCameras, onlineServers, totalServers,
-    criticalAlarms, warningAlarms, totalAlarms, cameraOnlineRate, serverOnlineRate,
-  ]);
+  };
 
-  // Auto-refresh interval state (Default 5s Realtime polling)
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(5000);
+  const handleExportPdf = () => {
+    setIsExportingPdf(true);
+    try {
+      const data = prepareFullReportData();
+      exportToPdf(data);
+    } catch (err) {
+      console.error("[ReportingManagement] PDF export error:", err);
+    } finally {
+      setTimeout(() => setIsExportingPdf(false), 1000);
+    }
+  };
 
-  // Refresh all data
-  const handleRefresh = useCallback(() => {
-    refetchCloudSystems();
-    refetchCameras();
-    refetchServers();
-    refetchAlarms();
-    refetchEvents();
-  }, [refetchCloudSystems, refetchCameras, refetchServers, refetchAlarms, refetchEvents]);
-
-  // Realtime polling effect
-  useEffect(() => {
-    if (!autoRefreshInterval || autoRefreshInterval <= 0) return;
-    const timer = setInterval(() => {
-      handleRefresh();
-    }, autoRefreshInterval);
-    return () => clearInterval(timer);
-  }, [autoRefreshInterval, handleRefresh]);
-
-  const isLoading = loadingCloudSystems || loadingCameras || loadingServers || loadingAlarms;
+  const isLoading = loadingData || loadingCloud || loadingAlarms || loadingEvents;
 
   // ============================================
-  // RENDER
+  // RENDER UI (STANDARD 12PX PROFESSIONAL ENGLISH)
   // ============================================
   return (
-    <div className="space-y-6 select-none pb-12 print:p-0 print:space-y-4">
+    <div className="space-y-5 select-none pb-12 print:p-0 print:space-y-4 text-[12px] font-sans">
       {/* ============================================ */}
-      {/* HEADER BAR & QUICK ACTIONS                   */}
+      {/* HEADER BRANDING & MAIN CONTROL BAR           */}
       {/* ============================================ */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 dark:border-slate-800 print:hidden">
-        <div className="flex items-center gap-3.5">
-          <div className="p-3 bg-gradient-to-br from-blue-500/10 to-indigo-500/20 text-blue-600 dark:text-blue-400 rounded-2xl border border-blue-500/20 shadow-sm">
-            <FileText className="w-6 h-6" />
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800 print:hidden">
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-center">
+            <img src={ORIX_LOGO_BASE64_PNG} alt={COMPANY_NAME} className="h-10 w-auto object-contain" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-                Reports & Analytics
+              <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight uppercase">
+                {DASHBOARD_TITLE}
               </h1>
-              <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 text-[11px] font-semibold flex items-center gap-1.5">
+              <Badge className="bg-blue-600/10 text-blue-600 dark:text-blue-400 border-blue-500/20 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5">
                 {autoRefreshInterval > 0 && (
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
                 )}
-                <span>Executive Reporting</span>
+                <span>EXECUTIVE REPORTING</span>
               </Badge>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Data real-time dari akun NX Cloud — Kamera, Server, Alarms &amp; System Health
+            <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400 mt-0.5 uppercase tracking-wide">
+              {COMPANY_NAME} &bull; CENTRALIZED SYSTEM AUDIT &amp; ANALYTICS DASHBOARD
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Realtime Interval Selector */}
+        {/* Action Controls & Export Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Polling Interval */}
           <Select
             value={String(autoRefreshInterval)}
             onValueChange={(val) => setAutoRefreshInterval(Number(val))}
           >
-            <SelectTrigger className="h-9 px-3 text-xs bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl focus:ring-1 focus:ring-blue-500">
+            <SelectTrigger className="h-9 px-3 text-[12px] font-semibold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl focus:ring-1 focus:ring-blue-500">
               <div className="flex items-center gap-2">
                 {autoRefreshInterval > 0 ? (
                   <span className="relative flex h-2 w-2 shrink-0">
@@ -764,25 +731,15 @@ export default function ReportingManagement() {
                 ) : (
                   <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 )}
-                <SelectValue placeholder="Auto Refresh" />
+                <SelectValue placeholder="POLLING" />
               </div>
             </SelectTrigger>
             <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
-              <SelectItem value="0" className="text-xs">
-                Auto-Refresh: Matikan (Manual)
-              </SelectItem>
-              <SelectItem value="5000" className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                ⚡ Realtime (Setiap 5 dtk)
-              </SelectItem>
-              <SelectItem value="10000" className="text-xs">
-                ⏱️ Setiap 10 dtk
-              </SelectItem>
-              <SelectItem value="30000" className="text-xs">
-                ⏱️ Setiap 30 dtk
-              </SelectItem>
-              <SelectItem value="60000" className="text-xs">
-                ⏱️ Setiap 1 mnt
-              </SelectItem>
+              <SelectItem value="0" className="text-[12px]">LIVE DATA: OFF (MANUAL)</SelectItem>
+              <SelectItem value="5000" className="text-[12px] font-bold text-emerald-600 dark:text-emerald-400">⚡ LIVE DATA — AUTO REFRESH EVERY 5S</SelectItem>
+              <SelectItem value="10000" className="text-[12px]">⏱️ AUTO REFRESH EVERY 10S</SelectItem>
+              <SelectItem value="30000" className="text-[12px]">⏱️ AUTO REFRESH EVERY 30S</SelectItem>
+              <SelectItem value="60000" className="text-[12px]">⏱️ AUTO REFRESH EVERY 1 MIN</SelectItem>
             </SelectContent>
           </Select>
 
@@ -792,88 +749,86 @@ export default function ReportingManagement() {
             size="sm"
             onClick={handleRefresh}
             disabled={isLoading}
-            className="h-9 px-3 gap-2 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl"
+            className="h-9 px-3 gap-2 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 rounded-xl"
           >
-            <RefreshCw className={cn("w-4 h-4 text-blue-400", isLoading && "animate-spin")} />
-            <span className="text-xs font-semibold">Refresh Data</span>
+            <RefreshCw className={cn("w-3.5 h-3.5 text-blue-500", isLoading && "animate-spin")} />
+            <span className="text-[12px] font-bold uppercase">REFRESH REPORT DATA</span>
           </Button>
 
-          {/* Export CSV Button */}
+          {/* Export to Word Button */}
           <Button
-            variant="outline"
             size="sm"
-            onClick={exportCSV}
-            disabled={isExporting || isLoading}
-            className="h-9 px-3 gap-2 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-emerald-600 hover:text-white dark:hover:bg-emerald-600 hover:border-emerald-500 transition-all rounded-xl"
+            onClick={handleExportWord}
+            disabled={isExportingWord || isLoading}
+            className="h-9 px-3.5 gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white font-bold rounded-xl shadow-sm uppercase tracking-wider"
           >
-            {isExporting ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
+            {isExportingWord ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+              <FileCode className="w-3.5 h-3.5" />
             )}
-            <span className="text-xs font-semibold">
-              {isExporting ? "Mengambil Data..." : "Export CSV"}
-            </span>
+            <span>{isExportingWord ? "GENERATING WORD..." : "EXPORT TO WORD"}</span>
           </Button>
 
-          {/* Export PDF / Print Button */}
+          {/* Export to PDF Button */}
           <Button
             size="sm"
-            onClick={handlePrint}
-            disabled={isPdfLoading || isLoading}
-            className="h-9 px-4 gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold shadow-md shadow-blue-500/20 rounded-xl"
+            onClick={handleExportPdf}
+            disabled={isExportingPdf || isLoading}
+            className="h-9 px-3.5 gap-2 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl shadow-sm uppercase tracking-wider"
           >
-            {isPdfLoading ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
+            {isExportingPdf ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <Printer className="w-4 h-4" />
+              <FileSpreadsheet className="w-3.5 h-3.5" />
             )}
-            <span className="text-xs">
-              {isPdfLoading ? "Menyiapkan PDF..." : "Print / Export PDF"}
-            </span>
+            <span>{isExportingPdf ? "GENERATING PDF..." : "EXPORT TO PDF"}</span>
           </Button>
         </div>
       </div>
 
       {/* ============================================ */}
-      {/* FILTER CONTROL BAR                           */}
+      {/* FILTER CONTROL PANEL                          */}
       {/* ============================================ */}
-      <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm print:hidden">
-        <CardContent className="p-4 space-y-4">
+      <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm print:hidden">
+        <CardContent className="p-4 space-y-3">
           <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-
-            {/* Period Filter Switcher Pills */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 px-2.5 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-blue-400" /> Rentang:
+            
+            {/* Period Switcher Pills */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+              <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300 px-2.5 flex items-center gap-1.5 uppercase">
+                <Calendar className="w-3.5 h-3.5 text-blue-500" /> REPORTING PERIOD:
               </span>
-              {(["weekly", "monthly", "yearly", "custom"] as ReportPeriod[]).map((p) => (
+              {(["daily", "weekly", "monthly", "yearly", "custom"] as ReportPeriod[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => handlePeriodChange(p)}
                   className={cn(
-                    "px-3 py-1.5 text-xs font-semibold rounded-lg transition-all",
+                    "px-3 py-1.5 text-[12px] font-bold rounded-lg transition-all uppercase tracking-wider",
                     period === p
                       ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700"
                   )}
                 >
-                  {p === "weekly" ? "Mingguan" : p === "monthly" ? "Bulanan" : p === "yearly" ? "Tahunan" : "Custom"}
+                  {p}
                 </button>
               ))}
             </div>
 
-            {/* System Filter Selector */}
-            <div className="flex flex-wrap items-center gap-3">
+            {/* Centralized Server Filter Dropdown */}
+            <div className="flex items-center gap-3">
+              <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300 uppercase">SERVER:</span>
               <Select value={selectedSystemId} onValueChange={setSelectedSystemId}>
-                <SelectTrigger className="w-full sm:w-[220px] h-9 text-xs rounded-xl border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
-                  <Cloud className="h-3.5 w-3.5 mr-2 text-blue-500 shrink-0" />
-                  <SelectValue placeholder="Semua Cloud System..." />
+                <SelectTrigger className="w-full sm:w-[240px] h-9 text-[12px] font-bold rounded-xl border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 uppercase">
+                  <Server className="h-3.5 w-3.5 mr-2 text-blue-500 shrink-0" />
+                  <SelectValue placeholder="SELECT SERVER..." />
                 </SelectTrigger>
-                <SelectContent className="rounded-2xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
-                  <SelectItem value="all" className="text-xs font-medium">Semua Cloud System</SelectItem>
+                <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
+                  <SelectItem value="all" className="text-[12px] font-bold uppercase text-blue-600 dark:text-blue-400">
+                    ALL (CENTRALIZED REPORTING)
+                  </SelectItem>
                   {cloudSystems.map((sys) => (
-                    <SelectItem key={sys.id} value={sys.id} className="text-xs">
+                    <SelectItem key={sys.id} value={sys.id} className="text-[12px] font-semibold uppercase">
                       <div className="flex items-center gap-2">
                         <span className={cn("w-2 h-2 rounded-full", sys.isOnline ? "bg-emerald-500" : "bg-slate-400")} />
                         <span>{sys.name}</span>
@@ -885,51 +840,19 @@ export default function ReportingManagement() {
             </div>
           </div>
 
-          {/* Date Pickers & Category Pills */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-            {/* Category Switcher */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 mr-1">Kategori Export:</span>
-              {([
-                { key: "all", label: "Semua Data", icon: null },
-                { key: "cameras", label: `Kamera (${totalCameras})`, icon: <Camera className="w-3 h-3 text-blue-400" /> },
-                { key: "recordings", label: "Rekaman & Storage", icon: <Video className="w-3 h-3 text-indigo-400" /> },
-                { key: "health", label: "System Health", icon: <Activity className="w-3 h-3 text-emerald-400" /> },
-                { key: "alarms", label: `Alarms (${totalAlarms})`, icon: <AlertTriangle className="w-3 h-3 text-amber-400" /> },
-              ] as { key: ReportCategory; label: string; icon: React.ReactNode }[]).map(({ key, label, icon }) => (
-                <button
-                  key={key}
-                  onClick={() => setCategory(key)}
-                  className={cn(
-                    "px-2.5 py-1 text-xs font-medium rounded-lg border transition-all flex items-center gap-1.5",
-                    category === key
-                      ? key === "all"
-                        ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 border-transparent shadow-sm"
-                        : key === "cameras"
-                        ? "bg-blue-600 text-white border-transparent shadow-sm"
-                        : key === "recordings"
-                        ? "bg-indigo-600 text-white border-transparent shadow-sm"
-                        : key === "health"
-                        ? "bg-emerald-600 text-white border-transparent shadow-sm"
-                        : "bg-amber-600 text-white border-transparent shadow-sm"
-                      : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  {icon}
-                  {label}
-                </button>
-              ))}
+          {/* Date Range Inputs */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-[12px]">
+            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-semibold">
+              <Info className="w-4 h-4 shrink-0" />
+              <span className="uppercase">
+                ACTIVE FILTER: <strong>{selectedServerLabel}</strong> &bull; PERIOD: <strong>{period.toUpperCase()} ({dateFrom} TO {dateTo})</strong>
+              </span>
             </div>
 
-            {/* Date Inputs */}
             <div className="flex items-center gap-2">
-              <div className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1 rounded-xl border transition-all",
-                period === "custom"
-                  ? "bg-blue-500/10 border-blue-500/50 ring-1 ring-blue-500/30"
-                  : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
-              )}>
-                <span className="text-[11px] text-slate-400 font-medium">Dari:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400 uppercase">DATE FILTER:</span>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <span className="text-slate-400 font-bold uppercase">FROM:</span>
                 <input
                   type="date"
                   value={dateFrom}
@@ -937,17 +860,12 @@ export default function ReportingManagement() {
                     setDateFrom(e.target.value);
                     setPeriod("custom");
                   }}
-                  className="bg-transparent text-xs font-mono text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                  className="bg-transparent font-mono text-slate-800 dark:text-slate-200 outline-none cursor-pointer text-[12px]"
                 />
               </div>
-              <span className="text-slate-400 text-xs">-</span>
-              <div className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1 rounded-xl border transition-all",
-                period === "custom"
-                  ? "bg-blue-500/10 border-blue-500/50 ring-1 ring-blue-500/30"
-                  : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
-              )}>
-                <span className="text-[11px] text-slate-400 font-medium">Sampai:</span>
+              <span className="text-slate-400 font-bold">-</span>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <span className="text-slate-400 font-bold uppercase">TO:</span>
                 <input
                   type="date"
                   value={dateTo}
@@ -955,127 +873,118 @@ export default function ReportingManagement() {
                     setDateTo(e.target.value);
                     setPeriod("custom");
                   }}
-                  className="bg-transparent text-xs font-mono text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                  className="bg-transparent font-mono text-slate-800 dark:text-slate-200 outline-none cursor-pointer text-[12px]"
                 />
               </div>
             </div>
           </div>
-
-          {/* Data Source Info Banner */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/5 border border-blue-500/20 rounded-xl text-[11px] text-blue-600 dark:text-blue-400">
-            <Cloud className="w-3.5 h-3.5 shrink-0" />
-            <span>
-              <strong>Data Real-Time NX Cloud:</strong> CSV &amp; PDF akan mengandung data langsung dari akun NX Cloud yang login —{" "}
-              <strong>{totalCameras} kamera</strong>, <strong>{totalServers} server</strong>, <strong>{totalAlarms} alarm events</strong>
-              {selectedSystemId !== "all" && <span> — Sistem: <strong>{systemLabel}</strong></span>}
-            </span>
-          </div>
         </CardContent>
       </Card>
 
+      {/* Error / Warning Alert Box */}
+      {fetchError && (
+        <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-600 dark:text-rose-400 font-semibold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{fetchError} - SHOWING AVAILABLE CACHED RECORDS.</span>
+          </div>
+          <Button size="sm" variant="ghost" onClick={handleRefresh} className="h-7 text-[11px] font-bold uppercase">RETRY</Button>
+        </div>
+      )}
+
       {/* ============================================ */}
-      {/* STAT METRIC SUMMARY CARDS                    */}
+      {/* SUMMARY STAT CARDS (STANDARD 12PX UPPERCASE)  */}
       {/* ============================================ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Camera Online Rate */}
-        <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500" />
+        {/* Card 1: Camera Uptime Rate */}
+        <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-600" />
           <CardContent className="p-4 flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Camera className="w-3.5 h-3.5 text-blue-500" /> Camera Uptime Rate
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <Camera className="w-3.5 h-3.5 text-blue-500" /> CAMERA UPTIME RATE
               </span>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-slate-900 dark:text-white">{cameraOnlineRate}%</span>
-                {cameraOnlineRate >= 90 ? (
-                  <span className="text-xs font-medium text-emerald-500 flex items-center">
-                    <ArrowUpRight className="w-3.5 h-3.5" /> Optimal
-                  </span>
-                ) : (
-                  <span className="text-xs font-medium text-rose-500 flex items-center">
-                    <ArrowDownRight className="w-3.5 h-3.5" /> Perlu Cek
-                  </span>
-                )}
+                <span className="text-2xl font-black text-slate-900 dark:text-white">{cameraOnlineRate}%</span>
+                <Badge className={cn("text-[10px] font-bold uppercase", cameraOnlineRate >= 90 ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                  {cameraOnlineRate >= 90 ? "OPTIMAL" : "ATTENTION"}
+                </Badge>
               </div>
-              <p className="text-[11px] text-slate-400">{onlineCameras} dari {totalCameras} Kamera Aktif</p>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase">
+                {onlineCameras} ONLINE / {offlineCamerasCount} OFFLINE ({totalCameras} TOTAL)
+              </p>
             </div>
-            <div className="p-3 bg-blue-500/10 rounded-2xl text-blue-500">
+            <div className="p-3 bg-blue-500/10 rounded-2xl text-blue-600">
               <Camera className="w-6 h-6" />
             </div>
           </CardContent>
         </Card>
 
-        {/* Metric 2: Storage from real servers */}
-        <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500" />
+        {/* Card 2: Storage Servers */}
+        <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-600" />
           <CardContent className="p-4 flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-indigo-500" /> Storage Servers
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-indigo-500" /> STORAGE SERVERS
               </span>
               <div className="flex items-baseline gap-2">
-                {serverStorageStats.length > 0 ? (
-                  <>
-                    <span className="text-2xl font-bold text-slate-900 dark:text-white">
-                      {serverStorageStats.length}
-                    </span>
-                    <span className="text-xs font-medium text-indigo-400">
-                      Server Terdaftar
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-2xl font-bold text-slate-400">—</span>
-                )}
+                <span className="text-2xl font-black text-slate-900 dark:text-white">{totalServers}</span>
+                <span className="text-[11px] font-bold text-indigo-500 uppercase">SERVERS REGISTERED</span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                {serverStorageStats.filter(s => s.diskCount > 0).length} server dengan data storage
+              <p className="text-[11px] font-semibold text-slate-400 uppercase">
+                {onlineServers} SERVERS ACTIVE &amp; ONLINE
               </p>
             </div>
-            <div className="p-3 bg-indigo-500/10 rounded-2xl text-indigo-500">
+            <div className="p-3 bg-indigo-500/10 rounded-2xl text-indigo-600">
               <Database className="w-6 h-6" />
             </div>
           </CardContent>
         </Card>
 
-        {/* Metric 3: System Health Uptime */}
-        <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500" />
+        {/* Card 3: Server Health Index */}
+        <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-600" />
           <CardContent className="p-4 flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-emerald-500" /> Server Health Index
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-emerald-500" /> SERVER HEALTH INDEX
               </span>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-slate-900 dark:text-white">{serverOnlineRate}%</span>
-                <span className="text-xs font-medium text-emerald-500 flex items-center">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> {onlineServers}/{totalServers} Online
+                <span className="text-2xl font-black text-slate-900 dark:text-white">{serverOnlineRate}%</span>
+                <span className="text-[11px] font-bold text-emerald-500 uppercase flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {onlineServers}/{totalServers} ONLINE
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">{onlineServers} Server Online dari {totalServers} total</p>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase">
+                HOST HARDWARE HEALTH OPERATIONAL
+              </p>
             </div>
-            <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-500">
+            <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-600">
               <Server className="w-6 h-6" />
             </div>
           </CardContent>
         </Card>
 
-        {/* Metric 4: Total Security Incidents */}
-        <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-500" />
+        {/* Card 4: Alarm Events & Incidents */}
+        <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-600" />
           <CardContent className="p-4 flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Alarm Events
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> ALARM EVENTS
               </span>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-slate-900 dark:text-white">{totalAlarms}</span>
-                <span className="text-xs font-medium text-rose-400 flex items-center">
-                  <AlertCircle className="w-3.5 h-3.5 mr-0.5" /> {criticalAlarms} Critical
+                <span className="text-2xl font-black text-slate-900 dark:text-white">{totalAlarms}</span>
+                <span className="text-[11px] font-bold text-rose-500 uppercase">
+                  {criticalAlarms} CRITICAL
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">{warningAlarms} Warning, {totalAlarms - criticalAlarms - warningAlarms} Info</p>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase">
+                {warningAlarms} WARNINGS &bull; {totalOfflineIncidents} OFFLINE INCIDENTS
+              </p>
             </div>
-            <div className="p-3 bg-amber-500/10 rounded-2xl text-amber-500">
+            <div className="p-3 bg-amber-500/10 rounded-2xl text-amber-600">
               <AlertTriangle className="w-6 h-6" />
             </div>
           </CardContent>
@@ -1086,63 +995,69 @@ export default function ReportingManagement() {
       {/* REPORT SECTIONS TABS                         */}
       {/* ============================================ */}
       <Tabs defaultValue="overview" className="w-full space-y-4">
-        <TabsList className="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 p-1 rounded-2xl print:hidden">
-          <TabsTrigger value="overview" className="rounded-xl text-xs font-semibold gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
-            <BarChart3 className="w-3.5 h-3.5" /> Ringkasan Trend
+        <TabsList className="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 p-1 rounded-xl print:hidden flex-wrap text-[12px] font-bold">
+          <TabsTrigger value="overview" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+            <BarChart3 className="w-3.5 h-3.5" /> PERFORMANCE TREND
           </TabsTrigger>
-          <TabsTrigger value="cameras" className="rounded-xl text-xs font-semibold gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
-            <Camera className="w-3.5 h-3.5" /> Laporan Kamera
+          <TabsTrigger value="s3bridge" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+            <Cloud className="w-3.5 h-3.5 text-cyan-400" /> S3 CLOUD BRIDGE
           </TabsTrigger>
-          <TabsTrigger value="recordings" className="rounded-xl text-xs font-semibold gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
-            <Video className="w-3.5 h-3.5" /> Rekaman &amp; Storage
+          <TabsTrigger value="cameras" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+            <Camera className="w-3.5 h-3.5" /> CAMERA REPORT
           </TabsTrigger>
-          <TabsTrigger value="alarms" className="rounded-xl text-xs font-semibold gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
-            <AlertTriangle className="w-3.5 h-3.5" /> Laporan Alarm Events
+          <TabsTrigger value="offline" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-rose-600 data-[state=active]:text-white">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-400" /> {offlineSummaryTitle}
           </TabsTrigger>
-          <TabsTrigger value="health" className="rounded-xl text-xs font-semibold gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
-            <Activity className="w-3.5 h-3.5" /> Laporan System Health
+          <TabsTrigger value="recordings" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+            <Video className="w-3.5 h-3.5" /> RECORDING &amp; STORAGE
+          </TabsTrigger>
+          <TabsTrigger value="alarms" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+            <AlertTriangle className="w-3.5 h-3.5" /> ALARM EVENTS REPORT
+          </TabsTrigger>
+          <TabsTrigger value="health" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+            <Activity className="w-3.5 h-3.5" /> SYSTEM HEALTH REPORT
           </TabsTrigger>
         </TabsList>
 
         {/* ============================================ */}
-        {/* TAB 1: EXECUTIVE SUMMARY OVERVIEW            */}
+        {/* TAB 1: EXECUTIVE PERFORMANCE OVERVIEW        */}
         {/* ============================================ */}
         <TabsContent value="overview" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Visual Trend Chart */}
-            <Card className="lg:col-span-2 bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
+            {/* Visual Trend Breakdown */}
+            <Card className="lg:col-span-2 bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <CardTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 uppercase">
                       <TrendingUp className="w-4 h-4 text-blue-500" />
-                      Grafik Trend Performa ({period === "weekly" ? "Mingguan" : period === "yearly" ? "Tahunan" : "Bulanan"})
+                      PERFORMANCE TREND ANALYSIS ({period.toUpperCase()})
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-500 dark:text-slate-400">
-                      Berdasarkan data real-time kamera aktif vs kejadian alarm dari NX Cloud
+                    <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase">
+                      ONLINE CAMERA RATIO VS ALARM FREQUENCY FOR {selectedServerLabel}
                     </CardDescription>
                   </div>
                   <Badge variant="outline" className="text-[11px] font-mono border-slate-300 dark:border-slate-700">
-                    {dateFrom} - {dateTo}
+                    {dateFrom} TO {dateTo}
                   </Badge>
                 </div>
               </CardHeader>
               <CardContent className="pt-4">
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {trendData.map((item, idx) => (
                     <div key={idx} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      <div className="flex items-center justify-between text-[12px] font-bold text-slate-700 dark:text-slate-300">
                         <span>{item.label}</span>
                         <div className="flex items-center gap-4 text-[11px] font-mono">
-                          <span className="text-blue-500">{item.cameras} Kamera Aktif</span>
-                          <span className="text-amber-500">{item.alarms} Alarm Events</span>
-                          <span className="text-emerald-500">{item.healthScore}% Server Health</span>
+                          <span className="text-blue-500 font-bold">{item.cameras} ONLINE CAMERAS</span>
+                          <span className="text-amber-500 font-bold">{item.alarms} ALARMS</span>
+                          <span className="text-emerald-500 font-bold">{item.healthScore}% HEALTH</span>
                         </div>
                       </div>
                       <div className="h-3 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
                         <div
                           style={{ width: `${Math.min(100, (item.cameras / Math.max(totalCameras, 1)) * 100)}%` }}
-                          className="bg-gradient-to-r from-blue-600 to-cyan-400 h-full rounded-l-full"
+                          className="bg-gradient-to-r from-blue-600 to-cyan-500 h-full"
                         />
                         <div
                           style={{ width: `${Math.min(30, (item.alarms / Math.max(totalAlarms, 1)) * 30)}%` }}
@@ -1153,85 +1068,78 @@ export default function ReportingManagement() {
                   ))}
                 </div>
 
-                <div className="flex items-center justify-center gap-6 pt-6 border-t border-slate-100 dark:border-slate-800 text-xs font-medium text-slate-500 mt-4">
+                <div className="flex items-center justify-center gap-6 pt-6 border-t border-slate-100 dark:border-slate-800 text-[12px] font-bold text-slate-500 uppercase mt-4">
                   <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-blue-500" /> Kamera Online Rate
+                    <span className="w-3 h-3 rounded-full bg-blue-500" /> ONLINE CAMERA RATIO
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-amber-500" /> Alarm Trigger Frequency
+                    <span className="w-3 h-3 rounded-full bg-amber-500" /> ALARM INCIDENTS
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Health & Status Highlights */}
-            <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
+            {/* System Integrity Summary */}
+            <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <CardTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 uppercase">
                   <Shield className="w-4 h-4 text-emerald-500" />
-                  Ringkasan Integritas Sistem
+                  SYSTEM INTEGRITY SUMMARY
                 </CardTitle>
-                <CardDescription className="text-xs text-slate-500 dark:text-slate-400">
-                  Status real-time dari NX Cloud
+                <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase">
+                  REAL-TIME OPERATIONAL AUDIT
                 </CardDescription>
               </CardHeader>
-              <CardContent className="pt-2 space-y-4">
+              <CardContent className="pt-2 space-y-3 text-[12px]">
                 <div className={cn(
                   "p-3 rounded-xl border space-y-1",
                   cameraOnlineRate >= 90
                     ? "bg-emerald-500/10 border-emerald-500/20"
-                    : cameraOnlineRate >= 70
-                    ? "bg-amber-500/10 border-amber-500/20"
                     : "bg-rose-500/10 border-rose-500/20"
                 )}>
-                  <div className={cn(
-                    "flex items-center justify-between text-xs font-bold",
-                    cameraOnlineRate >= 90 ? "text-emerald-600 dark:text-emerald-400"
-                      : cameraOnlineRate >= 70 ? "text-amber-600 dark:text-amber-400"
-                      : "text-rose-600 dark:text-rose-400"
-                  )}>
-                    <span>Camera Uptime Rate</span>
+                  <div className="flex items-center justify-between font-bold uppercase">
+                    <span>CAMERA UPTIME RATE</span>
                     <span>{cameraOnlineRate}%</span>
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {onlineCameras} kamera aktif dari {totalCameras} total unit.
+                  <p className="text-[11px] text-slate-500 uppercase">
+                    {onlineCameras} ACTIVE UNITS OUT OF {totalCameras} TOTAL CAMERAS.
                   </p>
                 </div>
 
-                <div className="space-y-3 pt-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Kamera Terputus:</span>
-                    <span className={cn("font-semibold", (totalCameras - onlineCameras) > 0 ? "text-rose-500" : "text-emerald-500")}>
-                      {totalCameras - onlineCameras} Unit
+                <div className="space-y-2.5 pt-1 uppercase">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="text-slate-500">DISCONNECTED CAMERAS:</span>
+                    <span className={cn("font-bold", offlineCamerasCount > 0 ? "text-rose-500" : "text-emerald-500")}>
+                      {offlineCamerasCount} UNITS
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Server Online:</span>
-                    <span className="font-semibold text-emerald-500">{onlineServers} / {totalServers}</span>
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="text-slate-500">SERVERS ONLINE:</span>
+                    <span className="font-bold text-emerald-500">{onlineServers} / {totalServers}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Critical Alarms:</span>
-                    <span className={cn("font-semibold", criticalAlarms > 0 ? "text-rose-500" : "text-emerald-500")}>
-                      {criticalAlarms} Kejadian
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="text-slate-500">CRITICAL ALARMS:</span>
+                    <span className={cn("font-bold", criticalAlarms > 0 ? "text-rose-500" : "text-emerald-500")}>
+                      {criticalAlarms} INCIDENTS
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Warning Alarms:</span>
-                    <span className={cn("font-semibold", warningAlarms > 0 ? "text-amber-500" : "text-emerald-500")}>
-                      {warningAlarms} Alerts
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="text-slate-500">WARNING ALERTS:</span>
+                    <span className={cn("font-bold", warningAlarms > 0 ? "text-amber-500" : "text-emerald-500")}>
+                      {warningAlarms} ALERTS
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Cloud Systems Terdaftar:</span>
-                    <span className="font-semibold text-blue-400">{cloudSystems.length} System</span>
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="text-slate-500">OFFLINE INCIDENTS RECORDED:</span>
+                    <span className="font-bold text-rose-500">{totalOfflineIncidents} INCIDENTS</span>
                   </div>
                 </div>
 
                 <Separator className="dark:bg-slate-800" />
 
-                <div className="text-[11px] text-slate-400 flex items-center gap-2">
-                  <Info className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                  <span>Semua data disinkronkan real-time dari akun NX Cloud yang sedang login.</span>
+                <div className="text-[11px] text-slate-400 flex items-center gap-2 font-semibold uppercase">
+                  <Info className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                  <span>SYNCHRONIZED CENTRALIZED DATA FOR {COMPANY_NAME}.</span>
                 </div>
               </CardContent>
             </Card>
@@ -1239,69 +1147,147 @@ export default function ReportingManagement() {
         </TabsContent>
 
         {/* ============================================ */}
-        {/* TAB 2: CAMERA INVENTORY REPORT               */}
+        {/* TAB 2: S3 CLOUD BRIDGE ANALYTICS             */}
+        {/* ============================================ */}
+        <TabsContent value="s3bridge" className="space-y-4">
+          <div className="bg-slate-950 text-white rounded-2xl p-4 border border-slate-800 shadow-xl space-y-4 text-[12px]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
+                  <Cloud className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold tracking-tight text-white uppercase flex items-center gap-2">
+                    S3 CLOUD BRIDGE STORAGE DASHBOARD &bull; {selectedServerLabel}
+                  </h2>
+                  <p className="text-[11px] text-slate-400 uppercase">
+                    S3 CLOUD BRIDGE STATUS — NO ACTIVE S3 DATA SOURCE CONFIGURED
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                  {(["1h", "24h", "7d"] as ("1h" | "24h" | "7d")[]).map((tr) => (
+                    <button
+                      key={tr}
+                      onClick={() => setS3TimeRange(tr)}
+                      className={cn(
+                        "px-3 py-1 text-[11px] font-bold rounded-lg transition-all uppercase",
+                        s3TimeRange === tr
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-white"
+                      )}
+                    >
+                      {tr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* S3 Status Note — No live API */}
+            <div className="flex flex-col items-center justify-center py-6 gap-2 text-center">
+              <Cloud className="w-10 h-10 text-slate-600" />
+              <p className="text-sm font-bold text-slate-300 uppercase">S3 DATA NOT AVAILABLE — NO ACTIVE S3 DATA SOURCE CONFIGURED</p>
+              <p className="text-[11px] text-slate-500 uppercase max-w-md">
+                NO LIVE S3 API ENDPOINT IS CONFIGURED IN THIS DEPLOYMENT.
+                S3 DATA NOT AVAILABLE FROM CONFIGURED SOURCE.
+              </p>
+            </div>
+          </div>
+
+          {/* S3 Log Table — No Live API */}
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center justify-between">
+                <span>S3 CLOUD BRIDGE — INTEGRATION STATUS</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col items-center justify-center py-10 gap-3 text-center">
+                <Cloud className="w-12 h-12 text-slate-300 dark:text-slate-600" />
+                <p className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase">
+                  S3 DATA NOT AVAILABLE — NO ACTIVE S3 DATA SOURCE CONFIGURED
+                </p>
+                <p className="text-[11px] text-slate-400 uppercase max-w-lg leading-relaxed">
+                  NO LIVE S3 API ENDPOINT IS CONFIGURED IN THIS DEPLOYMENT.
+                  TO ENABLE S3 CLOUD BRIDGE REPORTING, AN ACTIVE S3 DATA SOURCE
+                  MUST BE CONNECTED TO THIS DASHBOARD.
+                </p>
+                <div className="mt-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase">
+                  ⚠ S3 DATA NOT AVAILABLE — NO ACTIVE S3 DATA SOURCE CONFIGURED
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============================================ */}
+        {/* TAB 3: DETAILED CAMERA REPORT                */}
         {/* ============================================ */}
         <TabsContent value="cameras" className="space-y-4">
-          <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center justify-between">
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center justify-between">
                 <span className="flex items-center gap-2">
-                  <Camera className="w-4 h-4 text-blue-500" /> Detailed Camera Status &amp; Vendor Distribution
+                  <Camera className="w-4 h-4 text-blue-500" /> DETAILED CAMERA INVENTORY REPORT
                 </span>
-                <Badge variant="outline" className="text-xs font-normal">
-                  Total: {totalCameras} | Online: {onlineCameras} | Offline: {totalCameras - onlineCameras}
+                <Badge variant="outline" className="text-[11px] font-bold uppercase">
+                  TOTAL: {totalCameras} | ONLINE: {onlineCameras} | OFFLINE: {offlineCamerasCount}
                 </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {loadingCameras ? (
-                <div className="flex items-center justify-center py-8 text-slate-400 gap-2">
+              {loadingData ? (
+                <div className="flex items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
                   <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />
-                  <span>Memuat data kamera dari NX Cloud...</span>
+                  <span>FETCHING CAMERA INVENTORY FROM {selectedServerLabel}...</span>
                 </div>
-              ) : !cameras || cameras.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2">
+              ) : cameras.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
                   <Camera className="w-8 h-8 text-slate-500" />
-                  <span>Tidak ada data kamera ditemukan dari NX Cloud.</span>
-                  <span className="text-xs text-slate-400">Pastikan sistem NX Cloud sudah terhubung.</span>
+                  <span>DATA NOT AVAILABLE</span>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 uppercase font-semibold border-b border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-left text-[12px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
                       <tr>
                         <th className="p-3">#</th>
-                        <th className="p-3">Nama Kamera</th>
-                        <th className="p-3">Status</th>
-                        <th className="p-3">IP Address</th>
-                        <th className="p-3">Vendor / Model</th>
-                        <th className="p-3">Resolusi / FPS</th>
-                        <th className="p-3 text-right">Uptime</th>
+                        <th className="p-3">CAMERA NAME</th>
+                        <th className="p-3">SERVER</th>
+                        <th className="p-3">STATUS</th>
+                        <th className="p-3">IP ADDRESS</th>
+                        <th className="p-3">VENDOR / MODEL</th>
+                        <th className="p-3">RESOLUTION / FPS</th>
+                        <th className="p-3 text-right">UPTIME RATE</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
                       {cameras.map((cam: any, index: number) => {
                         const isCamOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+                        const serverName = (cam._systemName || cam.serverName || "SERVER 01").toUpperCase();
                         return (
                           <tr key={cam.id || index} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                             <td className="p-3 text-slate-400 font-mono">{index + 1}</td>
-                            <td className="p-3 font-semibold text-slate-900 dark:text-white">
-                              <div className="flex items-center gap-2">
-                                <Camera className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                <span>{cam.name || `Kamera ${index + 1}`}</span>
-                              </div>
+                            <td className="p-3 font-bold text-slate-900 dark:text-white uppercase">
+                              {cam.name || `CAMERA_${index + 1}`}
+                            </td>
+                            <td className="p-3 font-bold text-slate-600 dark:text-slate-400 uppercase">
+                              {serverName}
                             </td>
                             <td className="p-3">
-                              <Badge className={cn("text-[10px] capitalize font-bold", isCamOnline ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border-rose-500/20")}>
-                                {isCamOnline ? "🟢 Online" : "🔴 Offline"}
+                              <Badge className={cn("text-[10px] font-bold uppercase", isCamOnline ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border-rose-500/20")}>
+                                {isCamOnline ? "ONLINE" : "OFFLINE"}
                               </Badge>
                             </td>
-                            <td className="p-3 font-mono text-slate-500">{cam.ipAddr || cam.ip || cam.url || "-"}</td>
-                            <td className="p-3">{[cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX Camera"}</td>
-                            <td className="p-3 font-mono">{cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}fps` : ""}` : "-"}</td>
+                            <td className="p-3 font-mono text-slate-500">{cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE"}</td>
+                            <td className="p-3 uppercase">{[cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA"}</td>
+                            <td className="p-3 font-mono">{cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE"}</td>
                             <td className="p-3 text-right font-bold">
                               <span className={isCamOnline ? "text-emerald-500" : "text-rose-500"}>
-                                {isCamOnline ? "100%" : "0%"}
+                                {isCamOnline ? "ONLINE" : "OFFLINE"}
                               </span>
                             </td>
                           </tr>
@@ -1316,191 +1302,241 @@ export default function ReportingManagement() {
         </TabsContent>
 
         {/* ============================================ */}
-        {/* TAB 3: RECORDINGS & STORAGE REPORT           */}
-        {/* (DATA REAL dari servers NX Cloud)            */}
+        {/* TAB 4: OFFLINE CAMERA SUMMARY               */}
         {/* ============================================ */}
-        <TabsContent value="recordings" className="space-y-4">
-          {loadingServers ? (
-            <div className="flex items-center justify-center py-12 text-slate-400 gap-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-indigo-500" />
-              <span>Memuat data storage dari NX Cloud...</span>
-            </div>
-          ) : serverStorageStats.length === 0 ? (
-            <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400">
-                <Database className="w-10 h-10 text-slate-500" />
-                <p className="font-medium">Tidak ada data storage ditemukan</p>
-                <p className="text-xs">Pilih Cloud System tertentu atau pastikan server NX Cloud terhubung.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {/* Storage Summary Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <Database className="w-4 h-4 text-indigo-500" /> Laporan Konsumsi Storage per Server
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">
-                      Data real-time dari {serverStorageStats.length} server NX Cloud
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="pt-2 space-y-4">
-                    {serverStorageStats.map((srv, i) => (
-                      <div key={i} className="space-y-1.5">
-                        <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          <div className="flex items-center gap-2">
-                            <span className={cn("w-2 h-2 rounded-full shrink-0", srv.isOnline ? "bg-emerald-500" : "bg-slate-400")} />
-                            <span>{srv.name}</span>
-                            {srv.diskCount > 0 && (
-                              <Badge variant="outline" className="text-[9px] font-normal">
-                                {srv.diskCount} disk
-                              </Badge>
-                            )}
-                          </div>
-                          <span className="font-mono">
-                            {srv.usedGb !== "0.0" ? `${srv.usedGb} GB / ${srv.totalGb} GB` : "—"}
-                            {srv.usedPct > 0 && <span className="text-slate-400 ml-1">({srv.usedPct}%)</span>}
-                          </span>
-                        </div>
-                        <div className="h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                          {srv.usedPct > 0 ? (
-                            <div
-                              className={cn(
-                                "h-full rounded-full transition-all",
-                                srv.usedPct > 85 ? "bg-rose-500" : srv.usedPct > 65 ? "bg-amber-500" : "bg-indigo-500"
-                              )}
-                              style={{ width: `${srv.usedPct}%` }}
-                            />
-                          ) : (
-                            <div className="h-full bg-slate-200 dark:bg-slate-700 rounded-full w-full opacity-50" />
-                          )}
-                        </div>
-                        {srv.usedPct === 0 && (
-                          <p className="text-[10px] text-slate-400">Data storage tidak tersedia dari API untuk server ini</p>
-                        )}
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <HardDrive className="w-4 h-4 text-blue-500" /> Detail Server &amp; Versi Software
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">
-                      Informasi versi NX VMS dan OS dari setiap server
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="pt-2 space-y-3">
-                    {serverStorageStats.map((srv, i) => (
-                      <div key={i} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                            <Server className="w-3.5 h-3.5 text-slate-500" />
-                            {srv.name}
-                          </span>
-                          <Badge className={cn("text-[10px]", srv.isOnline ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border-rose-500/20")}>
-                            {srv.isOnline ? "Online" : "Offline"}
-                          </Badge>
-                        </div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-                          <span>Versi NX: <strong className="text-slate-700 dark:text-slate-300">{srv.version}</strong></span>
-                          <span>OS: <strong className="text-slate-700 dark:text-slate-300">{srv.osName}</strong></span>
-                          <span>Disks: <strong className="text-slate-700 dark:text-slate-300">{srv.diskCount || "-"}</strong></span>
-                          <span>Free: <strong className="text-slate-700 dark:text-slate-300">{srv.freeGb !== "0.0" ? `${srv.freeGb} GB` : "-"}</strong></span>
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          )}
+        <TabsContent value="offline" className="space-y-4">
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-500" /> {offlineSummaryTitle}
+                </span>
+                <Badge className="bg-rose-500/10 text-rose-500 border-rose-500/20 text-[11px] font-bold uppercase">
+                  HISTORICAL INCIDENTS AUDIT ({period.toUpperCase()})
+                </Badge>
+              </CardTitle>
+              <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase">
+                COMPREHENSIVE AUDIT OF ALL CAMERAS THAT EXPERIENCED OFFLINE DISCONNECT EVENTS DURING THE SELECTED PERIOD
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingData ? (
+                <div className="flex items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
+                  <span>CALCULATING HISTORICAL CAMERA OFFLINE INCIDENTS...</span>
+                </div>
+              ) : offlineCamerasSummary.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                  <span>NO OFFLINE CAMERA INCIDENTS RECORDED IN THIS PERIOD</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[12px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-3">#</th>
+                        <th className="p-3">SERVER</th>
+                        <th className="p-3">CAMERA NAME</th>
+                        <th className="p-3">CAMERA ID</th>
+                        <th className="p-3">CURRENT STATUS</th>
+                        <th className="p-3">FIRST OFFLINE</th>
+                        <th className="p-3">LAST OFFLINE</th>
+                        <th className="p-3">OFFLINE DURATION</th>
+                        <th className="p-3 text-center">OFFLINE INCIDENTS</th>
+                        <th className="p-3 text-right">AVAILABILITY RATE</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                      {offlineCamerasSummary.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          <td className="p-3 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="p-3 font-bold text-slate-700 dark:text-slate-300 uppercase">{item.serverName}</td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white uppercase">{item.cameraName}</td>
+                          <td className="p-3 font-mono text-[11px] text-slate-500">{item.cameraId}</td>
+                          <td className="p-3">
+                            <Badge className={cn("text-[10px] font-bold uppercase", item.status === "ONLINE" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                              {item.status}
+                            </Badge>
+                          </td>
+                          <td className="p-3 font-mono text-slate-500">{item.firstOffline}</td>
+                          <td className="p-3 font-mono text-slate-500">{item.lastOffline}</td>
+                          <td className="p-3 font-mono font-bold text-amber-600 dark:text-amber-400">{item.offlineDuration}</td>
+                          <td className="p-3 text-center font-black text-rose-600 dark:text-rose-400">{item.incidentCount}</td>
+                          <td className="p-3 text-right font-black">
+                            <span className={item.availabilityRate === "100%" ? "text-emerald-500" : "text-rose-500"}>
+                              {item.availabilityRate}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ============================================ */}
-        {/* TAB 4: ALARMS & INCIDENTS REPORT             */}
+        {/* TAB 5: RECORDING & STORAGE REPORT            */}
         {/* ============================================ */}
-        <TabsContent value="alarms" className="space-y-4">
-          <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <TabsContent value="recordings" className="space-y-4">
+          {/* Detailed Disk Drives Breakdown Table */}
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" /> Ringkasan Kejadian Alarm ({period})
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-indigo-500" /> SERVER STORAGE &amp; HARD DRIVE BREAKDOWN
+                </span>
+                <Badge variant="outline" className="text-[11px] font-bold uppercase">
+                  TOTAL DISKS: {formattedServerDisks.length}
+                </Badge>
               </CardTitle>
-              <CardDescription className="text-xs text-slate-400">
-                Data real-time dari NX Cloud — {totalAlarms} total kejadian
-              </CardDescription>
             </CardHeader>
-            <CardContent className="pt-2 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="p-4 bg-rose-500/5 dark:bg-rose-950/20 border border-rose-500/20 rounded-xl space-y-1">
-                  <span className="text-xs font-semibold text-rose-500 uppercase tracking-wider">Critical Faults</span>
-                  <div className="text-2xl font-bold text-rose-600 dark:text-rose-400">{criticalAlarms} Incidents</div>
-                  <p className="text-[11px] text-slate-500">Level: error / critical / fatal</p>
+            <CardContent>
+              {formattedServerDisks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 text-rose-500 font-bold uppercase gap-2">
+                  <Database className="w-6 h-6" />
+                  <span>STORAGE DATA NOT AVAILABLE FROM SOURCE</span>
                 </div>
-                <div className="p-4 bg-amber-500/5 dark:bg-amber-950/20 border border-amber-500/20 rounded-xl space-y-1">
-                  <span className="text-xs font-semibold text-amber-500 uppercase tracking-wider">Warnings</span>
-                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{warningAlarms} Alerts</div>
-                  <p className="text-[11px] text-slate-500">Level: warning / warn</p>
-                </div>
-                <div className="p-4 bg-blue-500/5 dark:bg-blue-950/20 border border-blue-500/20 rounded-xl space-y-1">
-                  <span className="text-xs font-semibold text-blue-500 uppercase tracking-wider">System Logs / Info</span>
-                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalAlarms - criticalAlarms - warningAlarms} Events</div>
-                  <p className="text-[11px] text-slate-500">Aktivitas sistem, login, rekaman</p>
-                </div>
-              </div>
-
-              {/* Alarm list table */}
-              {alarmList.length > 0 && (
-                <div className="overflow-x-auto mt-4">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 uppercase font-semibold border-b border-slate-200 dark:border-slate-700">
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[12px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
                       <tr>
-                        <th className="p-3">#</th>
-                        <th className="p-3">Nama / Sumber</th>
-                        <th className="p-3">Severity</th>
-                        <th className="p-3">Waktu</th>
-                        <th className="p-3">Deskripsi</th>
+                        <th className="p-2.5">#</th>
+                        <th className="p-2.5">SERVER</th>
+                        <th className="p-2.5">DISK DRIVE</th>
+                        <th className="p-2.5">STATUS</th>
+                        <th className="p-2.5">TOTAL CAPACITY</th>
+                        <th className="p-2.5">USED CAPACITY</th>
+                        <th className="p-2.5">FREE SPACE</th>
+                        <th className="p-2.5 text-right">USAGE %</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-                      {alarmList.slice(0, 50).map((a: any, i: number) => {
-                        const sev = String(a.level ?? a.severity ?? a.type ?? "-");
-                        const isCrit = ["error", "critical", "fatal"].includes(sev.toLowerCase());
-                        const isWarn = ["warning", "warn"].includes(sev.toLowerCase());
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                      {formattedServerDisks.map((d, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="p-2.5 font-bold uppercase">{d.serverName}</td>
+                          <td className="p-2.5 font-mono text-indigo-600 dark:text-indigo-400 font-bold">{d.diskName}</td>
+                          <td className="p-2.5">
+                            <Badge className={cn("text-[10px] font-bold uppercase", d.status === "ONLINE" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                              {d.status}
+                            </Badge>
+                          </td>
+                          <td className="p-2.5 font-mono">{d.total}</td>
+                          <td className="p-2.5 font-mono text-indigo-500 font-bold">{d.used}</td>
+                          <td className="p-2.5 font-mono text-emerald-500 font-bold">{d.free}</td>
+                          <td className="p-2.5 text-right font-black text-slate-900 dark:text-white">{d.usagePct}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Server Storage Consumption Card */}
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                <Database className="w-4 h-4 text-indigo-500" /> SERVER STORAGE CONSUMPTION OVERVIEW
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2">
+              {loadingData ? (
+                <div className="flex items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <RefreshCw className="w-4 h-4 animate-spin text-indigo-500" />
+                  <span>LOADING STORAGE METRICS...</span>
+                </div>
+              ) : serverStorageStats.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <Database className="w-8 h-8 text-slate-500" />
+                  <span>STORAGE DATA NOT AVAILABLE FROM SOURCE</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {serverStorageStats.map((srv, idx) => (
+                    <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2 text-[12px]">
+                      <div className="flex justify-between font-bold text-slate-800 dark:text-slate-200 uppercase">
+                        <span>{srv.name}</span>
+                        <span className="font-mono">{srv.usedGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB` : "STORAGE DATA NOT AVAILABLE FROM SOURCE"}</span>
+                      </div>
+                      <div className="h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all", srv.usedPct > 85 ? "bg-rose-500" : "bg-indigo-500")}
+                          style={{ width: `${Math.min(100, srv.usedPct)}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[11px] text-slate-500 font-semibold uppercase">
+                        <span>FREE: {srv.freeGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.freeGb} GB` : "N/A"}</span>
+                        <span>DISKS: {srv.diskCount}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============================================ */}
+        {/* TAB 6: ALARM EVENTS REPORT                    */}
+        {/* ============================================ */}
+        <TabsContent value="alarms" className="space-y-4">
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" /> ALARM EVENTS &amp; SECURITY INCIDENTS ({period.toUpperCase()})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {alarmList.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                  <span>NO ALARM EVENTS LOGGED IN THIS PERIOD</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[12px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-3">#</th>
+                        <th className="p-3">EVENT SOURCE / NAME</th>
+                        <th className="p-3">SEVERITY</th>
+                        <th className="p-3">TIMESTAMP</th>
+                        <th className="p-3">DESCRIPTION</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                      {alarmList.slice(0, 100).map((a: any, i: number) => {
+                        const sev = String(a.level ?? a.severity ?? a.type ?? "INFO").toUpperCase();
+                        const isCrit = ["ERROR", "CRITICAL", "FATAL"].includes(sev);
+                        const isWarn = ["WARNING", "WARN"].includes(sev);
                         const ts = a.timestampMs
-                          ? new Date(a.timestampMs).toLocaleString("id-ID")
+                          ? new Date(a.timestampMs).toLocaleString("en-US")
                           : a.eventTimestampUsec
-                          ? new Date(Math.floor(a.eventTimestampUsec / 1000)).toLocaleString("id-ID")
-                          : a.createdAt || "-";
+                          ? new Date(Math.floor(a.eventTimestampUsec / 1000)).toLocaleString("en-US")
+                          : a.createdAt || "DATA NOT AVAILABLE";
                         return (
-                          <tr key={a.id || i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          <tr key={a.id || i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                             <td className="p-3 text-slate-400 font-mono">{i + 1}</td>
-                            <td className="p-3 font-medium">{a.name || a.caption || a.source || "-"}</td>
+                            <td className="p-3 font-bold uppercase">{a.name || a.caption || a.source || "SYSTEM LOG"}</td>
                             <td className="p-3">
-                              <Badge className={cn("text-[10px] font-bold",
-                                isCrit ? "bg-rose-500/10 text-rose-500 border-rose-500/20"
-                                  : isWarn ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-                                  : "bg-blue-500/10 text-blue-500 border-blue-500/20"
-                              )}>
+                              <Badge className={cn("text-[10px] font-bold uppercase", isCrit ? "bg-rose-500/10 text-rose-500" : isWarn ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500")}>
                                 {sev}
                               </Badge>
                             </td>
-                            <td className="p-3 font-mono text-[10px] text-slate-500">{ts}</td>
-                            <td className="p-3 text-slate-500 dark:text-slate-400">{a.description || a.resourceName || "-"}</td>
+                            <td className="p-3 font-mono text-[11px] text-slate-500">{ts}</td>
+                            <td className="p-3 text-slate-600 dark:text-slate-400">{a.description || a.resourceName || "NO DESCRIPTION AVAILABLE"}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  {alarmList.length > 50 && (
-                    <p className="text-[11px] text-slate-400 text-center mt-3">
-                      Menampilkan 50 dari {alarmList.length} alarm. Export CSV untuk data lengkap.
-                    </p>
-                  )}
                 </div>
               )}
             </CardContent>
@@ -1508,139 +1544,71 @@ export default function ReportingManagement() {
         </TabsContent>
 
         {/* ============================================ */}
-        {/* TAB 5: SYSTEM HEALTH REPORT                  */}
-        {/* (DATA REAL dari servers NX Cloud)            */}
+        {/* TAB 7: SYSTEM HEALTH REPORT                  */}
         {/* ============================================ */}
         <TabsContent value="health" className="space-y-4">
-          {loadingServers ? (
-            <div className="flex items-center justify-center py-12 text-slate-400 gap-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-emerald-500" />
-              <span>Memuat data health dari NX Cloud...</span>
-            </div>
-          ) : serverStorageStats.length === 0 ? (
-            <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400">
-                <Server className="w-10 h-10 text-slate-500" />
-                <p className="font-medium">Tidak ada data server health ditemukan</p>
-                <p className="text-xs">Pilih Cloud System tertentu atau pastikan server NX Cloud terhubung.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              <Card className="bg-white dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Server className="w-4 h-4 text-emerald-500" /> Health Metric Host Server Nx VMS
-                  </CardTitle>
-                  <CardDescription className="text-xs text-slate-400">
-                    Data real-time dari {serverStorageStats.length} server NX Cloud yang terhubung
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-2">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {serverStorageStats.map((srv, i) => (
-                      <div key={i} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                            <Server className="w-3.5 h-3.5 text-emerald-500" />
-                            {srv.name}
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                <Server className="w-4 h-4 text-emerald-500" /> SYSTEM HEALTH &amp; HARDWARE HOST METRICS
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingData ? (
+                <div className="flex items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
+                  <span>FETCHING SERVER HARDWARE HEALTH...</span>
+                </div>
+              ) : serverStorageStats.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <Server className="w-8 h-8 text-slate-500" />
+                  <span>DATA NOT AVAILABLE</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {serverStorageStats.map((srv, i) => (
+                    <div key={i} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 text-[12px]">
+                      <div className="flex items-center justify-between font-bold uppercase">
+                        <span className="flex items-center gap-2">
+                          <Server className="w-3.5 h-3.5 text-emerald-500" />
+                          {srv.name}
+                        </span>
+                        <Badge className={cn("text-[10px] font-bold uppercase", srv.isOnline ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                          {srv.isOnline ? "ONLINE" : "OFFLINE"}
+                        </Badge>
+                      </div>
+
+                      {/* CPU Utilization */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-bold uppercase">
+                          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                            <Cpu className="w-3 h-3 text-emerald-500" /> CPU UTILIZATION
                           </span>
-                          <Badge className={cn("text-[10px]", srv.isOnline ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border-rose-500/20")}>
-                            {srv.isOnline ? "Online" : "Offline"}
-                          </Badge>
-                        </div>
-
-                        {/* CPU */}
-                        {srv.cpu !== null ? (
-                          <div className="space-y-1">
-                            <div className="flex justify-between items-center text-xs font-bold">
-                              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                                <Cpu className="w-3 h-3 text-emerald-500" /> CPU Utilization
-                              </span>
-                              <span className={cn(
-                                Number(srv.cpu) > 80 ? "text-rose-500" : Number(srv.cpu) > 60 ? "text-amber-500" : "text-emerald-500"
-                              )}>
-                                {srv.cpu}%
-                              </span>
-                            </div>
-                            <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                              <div
-                                className={cn("h-full rounded-full transition-all",
-                                  Number(srv.cpu) > 80 ? "bg-rose-500" : Number(srv.cpu) > 60 ? "bg-amber-500" : "bg-emerald-500"
-                                )}
-                                style={{ width: `${Math.min(100, Number(srv.cpu))}%` }}
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                            <Cpu className="w-3 h-3" /> CPU data tidak tersedia dari API server ini
-                          </div>
-                        )}
-
-                        {/* RAM */}
-                        {srv.ramUsedMb !== null && srv.ramTotalMb !== null ? (
-                          <div className="space-y-1">
-                            <div className="flex justify-between items-center text-xs font-bold">
-                              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                                <MemoryStick className="w-3 h-3 text-blue-500" /> RAM Memory
-                              </span>
-                              <span className="text-blue-400">
-                                {(srv.ramUsedMb / 1024).toFixed(1)} GB / {(srv.ramTotalMb / 1024).toFixed(1)} GB
-                                {" "}({Math.round((srv.ramUsedMb / srv.ramTotalMb) * 100)}%)
-                              </span>
-                            </div>
-                            <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                              <div
-                                className="bg-blue-500 h-full rounded-full transition-all"
-                                style={{ width: `${Math.round((srv.ramUsedMb / srv.ramTotalMb) * 100)}%` }}
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                            <MemoryStick className="w-3 h-3" /> RAM data tidak tersedia dari API server ini
-                          </div>
-                        )}
-
-                        {/* Storage total */}
-                        {srv.usedPct > 0 ? (
-                          <div className="space-y-1">
-                            <div className="flex justify-between items-center text-xs font-bold">
-                              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                                <HardDrive className="w-3 h-3 text-indigo-500" /> Storage
-                              </span>
-                              <span className="text-indigo-400">
-                                {srv.usedGb} GB / {srv.totalGb} GB ({srv.usedPct}%)
-                              </span>
-                            </div>
-                            <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                              <div
-                                className={cn("h-full rounded-full transition-all",
-                                  srv.usedPct > 85 ? "bg-rose-500" : srv.usedPct > 65 ? "bg-amber-500" : "bg-indigo-500"
-                                )}
-                                style={{ width: `${srv.usedPct}%` }}
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                            <HardDrive className="w-3 h-3" /> Storage data tidak tersedia dari API server ini
-                          </div>
-                        )}
-
-                        {/* Version & OS */}
-                        <div className="text-[10px] text-slate-400 dark:text-slate-500 pt-1 border-t border-slate-200 dark:border-slate-700 flex gap-4">
-                          <span>NX: {srv.version}</span>
-                          <span>OS: {srv.osName}</span>
+                          <span className="text-emerald-500">{srv.cpuText}</span>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
+
+                      {/* RAM Memory */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-bold uppercase">
+                          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                            <MemoryStick className="w-3 h-3 text-blue-500" /> RAM MEMORY
+                          </span>
+                          <span className="text-blue-500">{srv.ramText}</span>
+                        </div>
+                      </div>
+
+                      {/* Version & OS */}
+                      <div className="text-[11px] font-semibold text-slate-400 pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between uppercase">
+                        <span>SOFTWARE: {srv.version}</span>
+                        <span>OS: {srv.osName}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

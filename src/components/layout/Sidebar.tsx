@@ -22,11 +22,13 @@ import {
   Loader2,
   Cpu,
   Video,
-  FileText
+  FileText,
+  MonitorPlay
 } from "lucide-react";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
+import { ORIX_LOGO_BASE64_PNG } from "@/assets/orix-logo";
 import { Privilege, isAdmin, getDisplayRole } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import {
@@ -64,6 +66,7 @@ interface NavItem {
 
 const navigationItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard", module: "dashboard" },
+  { id: "videoxware", label: "VideoXware Dashboard", icon: MonitorPlay, href: "/videoxware", module: "dashboard" },
   { id: "cameras", label: "Camera Inventory", icon: Camera, module: "camera_inventory" },
   { id: "health", label: "System Health", icon: Activity, module: "system_health" },
   { id: "alarms", label: "Alarm Console", icon: AlertTriangle, module: "alarm_console" },
@@ -175,6 +178,9 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     // Explicitly hide sensitive management items from non-admins
     if (item.id === 'debug' || item.id === 'subaccounts') return false;
 
+    // Always show main dashboard and VideoXware
+    if (item.id === 'dashboard' || item.id === 'videoxware') return true;
+
     // If item has a module requirement, check privileges
     if (item.module) {
       const privilege = user?.privileges?.find((p: Privilege) => {
@@ -193,6 +199,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
 
   const CLOUD_ROUTE_MAP: Record<string, string> = {
     dashboard: "/cloud/dashboard",
+    videoxware: "/cloud/videoxware",
     cameras: "/cloud/camera-inventory",
     health: "/cloud/system-health",
     alarms: "/cloud/alarm-console",
@@ -304,26 +311,33 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
         {/* Header */}
         {!hideHeader && (
           <div className={cn(
-            "flex items-center h-16 shrink-0",
+            "flex items-center h-16 shrink-0 gap-3",
             isCloudTheme ? "border-b border-blue-900/40" : "border-b border-gray-100",
-            isCollapsed ? "justify-center px-0" : "justify-between px-6"
+            isCollapsed ? "justify-center px-0" : "justify-between px-4"
           )}>
-            {!isCollapsed && (
-              <div className="no-drag whitespace-nowrap overflow-hidden min-w-0 flex-1 mr-2">
-                <h1 className={cn(
-                  "text-xl font-bold tracking-tight truncate select-none",
-                  isCloudTheme ? "text-white" : "text-gray-900"
-                )}>
-                  {user?.organization?.name || "NX Cloud Admin"}
-                </h1>
-                <p className={cn(
-                  "text-xs font-medium truncate select-none",
-                  isCloudTheme ? "text-cyan-400" : "text-gray-500"
-                )}>
-                  {isCloudTheme ? "NX Cloud Management" : "Camera Dashboard"}
-                </p>
-              </div>
-            )}
+            <div className="flex items-center gap-3.5 min-w-0 flex-1 overflow-hidden no-drag">
+              <img
+                src={ORIX_LOGO_BASE64_PNG}
+                alt="PT ORIX Indonesia Finance Logo"
+                className="h-8 w-auto object-contain shrink-0"
+              />
+              {!isCollapsed && (
+                <div className="whitespace-nowrap overflow-hidden min-w-0 flex-1">
+                  <h1 className={cn(
+                    "text-sm font-bold tracking-tight truncate select-none leading-tight",
+                    isCloudTheme ? "text-white" : "text-gray-900"
+                  )}>
+                    {user?.organization?.name || "PT ORIX Indonesia Finance"}
+                  </h1>
+                  <p className={cn(
+                    "text-[11px] font-semibold truncate select-none leading-snug",
+                    isCloudTheme ? "text-cyan-400" : "text-gray-500"
+                  )}>
+                    Camera Dashboard Management
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* Collapse Button (Desktop) */}
             {!disableCollapse && (

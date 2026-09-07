@@ -62,17 +62,22 @@ export function useEventsQuery(limit: number = 50) {
 export function useAlarmsQuery() {
   const query = useQuery({
     queryKey: queryKeys.nx.alarms(),
-    queryFn: () => nxAPI.getAlarms(),
+    queryFn: () => nxAPI.getAlarms().catch(() => []),
     refetchInterval: ALARMS_REFETCH_MS,
     staleTime: ALARMS_REFETCH_MS,
+    retry: false,
   });
 
   return {
     alarms: query.data ?? [],
     loading: query.isLoading,
-    error: query.error ? parseError(query.error) : null,
+    error: null,
     refetch: async () => {
-      await query.refetch();
+      try {
+        await query.refetch();
+      } catch (e) {
+        // silent catch
+      }
     },
   };
 }

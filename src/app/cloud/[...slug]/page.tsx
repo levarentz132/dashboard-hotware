@@ -135,9 +135,20 @@ const ReportingManagement = dynamic(
     ),
   },
 );
+const VideoXwareDashboard = dynamic(
+  () => import("@/components/dashboard/VideoXwareDashboard"),
+  {
+    loading: () => (
+      <div className="h-full flex items-center justify-center p-8 text-slate-400">
+        Loading VideoXware...
+      </div>
+    ),
+  },
+);
 
 const SECTION_MODULE_MAP: Record<string, string> = {
   dashboard: "dashboard",
+  videoxware: "dashboard",
   cameras: "camera_inventory",
   health: "system_health",
   alarms: "alarm_console",
@@ -168,6 +179,8 @@ export function CloudPageContent() {
       section = "alarms";
     } else if (pathname.includes("/recordings")) {
       section = "recordings";
+    } else if (pathname.includes("/videoxware")) {
+      section = "videoxware";
     } else if (pathname.includes("/user-logs") || pathname.includes("/audits")) {
       section = "audits";
     } else if (pathname.includes("/reporting") || pathname.includes("/reports")) {
@@ -207,7 +220,7 @@ export function CloudPageContent() {
           return false;
         });
 
-        if (privilege?.can_view || section === "recordings" || section === "reporting") {
+        if (privilege?.can_view || section === "recordings" || section === "reporting" || section === "videoxware") {
           setActiveSection(section);
         } else {
           setActiveSection("unauthorized");
@@ -224,6 +237,8 @@ export function CloudPageContent() {
     switch (activeSection) {
       case "dashboard":
         return <ModernDashboard />;
+      case "videoxware":
+        return <VideoXwareDashboard />;
       case "cameras":
         return <CameraInventory />;
       case "servers":

@@ -91,6 +91,7 @@
     "@types/archiver": "^7.0.0",
     "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
+    "docx": "^9.7.1",
     "dotenv": "^16.4.5",
     "electron-updater": "^6.7.3",
     "jspdf": "^4.2.0",

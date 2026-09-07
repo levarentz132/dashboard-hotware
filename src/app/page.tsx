@@ -45,6 +45,9 @@ const UserManagement = dynamic(() => import("@/components/users/UserManagement")
 const SubAccountManagement = dynamic(() => import("@/components/rolemanagement/RoleManagement"), {
   loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Role Management...</div>
 });
+const VideoXwareDashboard = dynamic(() => import("@/components/dashboard/VideoXwareDashboard"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading VideoXware...</div>
+});
 import Link from "next/link";
 import { ArrowRight, Camera, Eye, Shield, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -52,6 +55,7 @@ import { Privilege, isAdmin } from "@/lib/auth";
 
 const SECTION_MODULE_MAP: Record<string, string> = {
   dashboard: "dashboard",
+  videoxware: "dashboard",
   cameras: "camera_inventory",
   health: "system_health",
   alarms: "alarm_console",
@@ -117,6 +121,8 @@ function PageContent() {
     switch (activeSection) {
       case "dashboard":
         return <Link href="/dashboard" />;
+      case "videoxware":
+        return <VideoXwareDashboard />;
       case "cameras":
         return <CameraInventory />;
       case "servers":
