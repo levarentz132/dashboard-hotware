@@ -27,7 +27,11 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   BarChart3,
+  Search,
+  WifiOff,
+  Wifi,
 } from "lucide-react";
+import Cookies from "js-cookie";
 import {
   ResponsiveContainer,
   LineChart,
@@ -45,13 +49,16 @@ import { useCloudSystemsWithOnline } from "@/hooks/use-cloud-systems-with-online
 import { useAlarmsQuery, useEventsQuery } from "@/hooks/use-nx-queries";
 import nxAPI, { type NxCamera } from "@/lib/nxapi";
 import { fetchFromCloudRelay } from "@/hooks/use-async-data";
+import { getElectronHeaders } from "@/lib/config";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { normalizeNxEvents } from "@/lib/nx-normalization";
 import {
   exportToWord,
   exportToPdf,
@@ -88,12 +95,85 @@ function formatDateLocal(d: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+const normalizeEpochMs = (value: string | number | null | undefined): number | null => {
+  if (value === undefined || value === null || value === "") return null;
+  const raw = typeof value === "string" ? Number(value) : value;
+  if (Number.isFinite(raw)) {
+    const abs = Math.abs(raw);
+    if (abs >= 1e15) return raw / 1000;
+    if (abs >= 1e12) return raw;
+    if (abs >= 1e9) return raw * 1000;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) {
+      const year = new Date(parsed).getFullYear();
+      if (year >= 1970 && year <= 2100) return parsed;
+    }
+  }
+  return null;
+};
+
+const formatTimestamp = (timestampValue: string | number | null | undefined): string => {
+  if (timestampValue === undefined || timestampValue === null || timestampValue === "") return "N/A";
+  const ms = normalizeEpochMs(timestampValue);
+  if (ms === null) return String(timestampValue);
+  const date = new Date(ms);
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+};
+
+const getEventTypeLabel = (eventType: string, caption?: string): string => {
+  if (eventType === "userDefinedEvent" && caption) return caption;
+  const labels: Record<string, string> = {
+    undefinedEvent: "Undefined Event",
+    cameraMotionEvent: "Motion Detected",
+    cameraInputEvent: "Camera Input",
+    cameraDisconnectEvent: "Camera Disconnected",
+    deviceDisconnected: "Camera Disconnected",
+    storageFailureEvent: "Storage Failure",
+    networkIssueEvent: "Network Issue",
+    cameraIpConflictEvent: "IP Conflict",
+    serverFailureEvent: "Server Failure",
+    serverConflictEvent: "Server Conflict",
+    serverStartEvent: "Server Started",
+    serverStarted: "Server Started",
+    licenseIssueEvent: "License Issue",
+    backupFinishedEvent: "Backup Complete",
+    softwareTriggerEvent: "Software Trigger",
+    analyticsSdkEvent: "Analytics Event",
+    pluginDiagnosticEvent: "Plugin Diagnostic",
+    poeOverBudgetEvent: "PoE Over Budget",
+    fanErrorEvent: "Fan Error",
+    analyticsSdkObjectDetected: "Object Detected",
+    serverCertificateError: "Certificate Error",
+    ldapSyncIssueEvent: "LDAP Sync Issue",
+    saasIssueEvent: "Cloud Issue",
+    systemHealthEvent: "System Health",
+    maxSystemHealthEvent: "Critical Health",
+    anyCameraEvent: "Camera Event",
+    anyServerEvent: "Server Event",
+    anyEvent: "System Event",
+    userDefinedEvent: "Custom Event",
+  };
+  return labels[eventType] || eventType;
+};
+
 export default function ReportingManagement() {
   // State variables
   const [period, setPeriod] = useState<ReportPeriod>("monthly");
   const [category, setCategory] = useState<ReportCategory>("all");
   const [selectedSystemId, setSelectedSystemId] = useState<string>("all");
   const [s3TimeRange, setS3TimeRange] = useState<"1h" | "24h" | "7d">("1h");
+  const [globalCameras, setGlobalCameras] = useState<any[]>([]);
   
   const [dateFrom, setDateFrom] = useState<string>(() => {
     const today = new Date();
@@ -113,13 +193,39 @@ export default function ReportingManagement() {
   const [cameras, setCameras] = useState<NxCamera[]>([]);
   const [servers, setServers] = useState<any[]>([]);
   const [storages, setStorages] = useState<any[]>([]);
+  const [alarmEvents, setAlarmEvents] = useState<any[]>([]);
+  const [alarmSearch, setAlarmSearch] = useState<string>("");
+  const [alarmSeverityFilter, setAlarmSeverityFilter] = useState<string>("all");
   const [loadingData, setLoadingData] = useState<boolean>(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [systemOffline, setSystemOffline] = useState<boolean>(false);
+
+  // Check if local NX user session is present
+  const hasLocalServer = useMemo(() => {
+    return typeof window !== "undefined" && (!!Cookies.get("local_nx_user") || !!Cookies.get("nx_server_id"));
+  }, []);
 
   // Live Cloud Systems list & events queries
   const { cloudSystems, loadingCloud, refetchCloudSystems } = useCloudSystemsWithOnline();
   const { alarms, loading: loadingAlarms, refetch: refetchAlarms } = useAlarmsQuery();
   const { events, loading: loadingEvents, refetch: refetchEvents } = useEventsQuery(300);
+
+  // Global cameras lookup fallback from device monitor
+  useEffect(() => {
+    const fetchGlobalCameras = async () => {
+      try {
+        const response = await fetch("/api/device-monitor");
+        if (response.ok) {
+          const snapshot = await response.json();
+          const allDevices = (snapshot.systems || []).flatMap((s: any) => s.devices || []);
+          setGlobalCameras(allDevices);
+        }
+      } catch (e) {
+        console.error("[ReportingManagement] Failed to fetch global cameras lookup:", e);
+      }
+    };
+    fetchGlobalCameras();
+  }, []);
 
   // ============================================
   // MULTI-SYSTEM DATA AGGREGATION (SERVER FILTER ALL)
@@ -127,116 +233,217 @@ export default function ReportingManagement() {
   const fetchAggregatedData = useCallback(async () => {
     setLoadingData(true);
     setFetchError(null);
+    setSystemOffline(false);
     try {
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        ...getElectronHeaders(),
+      };
+
+      const localUserStr = Cookies.get("local_nx_user");
+      let localSid = "local";
+      if (localUserStr) {
+        try {
+          const parsed = JSON.parse(localUserStr);
+          localSid = Cookies.get("nx_server_id") || parsed.serverId || "local";
+        } catch (_) {}
+      }
+
       if (selectedSystemId === "all") {
-        if (cloudSystems.length > 0) {
-          const activeSystems = cloudSystems.filter((s) => s.isOnline);
-          const targetSystems = activeSystems.length > 0 ? activeSystems : cloudSystems;
+        // 1. Fetch from all online cloud systems (or all cloud systems)
+        const activeSystems = cloudSystems.filter((s) => s.isOnline);
+        const targetSystems = activeSystems.length > 0 ? activeSystems : cloudSystems;
 
-          const devicePromises = targetSystems.map((sys) =>
-            fetchFromCloudRelay<NxCamera[]>(sys.id, "/devices").then((res) =>
-              (res || []).map((c) => ({ ...c, _systemName: sys.name, _systemId: sys.id }))
+        const devicePromises = targetSystems.map((sys) =>
+          fetchFromCloudRelay<NxCamera[]>(sys.id, "/devices")
+            .then((res) => (res || []).map((c) => ({ ...c, _systemName: sys.name, _systemId: sys.id })))
+            .catch(() => [])
+        );
+        const serverPromises = targetSystems.map((sys) =>
+          fetchFromCloudRelay<any[]>(sys.id, "/servers")
+            .then((res) => (res || []).map((srv) => ({ ...srv, _systemName: sys.name, _systemId: sys.id })))
+            .catch(() => [])
+        );
+        const storagePromises = targetSystems.map((sys) =>
+          fetch(`/api/cloud/storages?systemId=${encodeURIComponent(sys.id)}`)
+            .then((res) => (res.ok ? res.json() : []))
+            .then((list) =>
+              (Array.isArray(list) ? list : []).map((st: any) => ({
+                ...st,
+                _systemName: sys.name,
+                _systemId: sys.id,
+              }))
             )
-          );
-          const serverPromises = targetSystems.map((sys) =>
-            fetchFromCloudRelay<any[]>(sys.id, "/servers").then((res) =>
-              (res || []).map((srv) => ({ ...srv, _systemName: sys.name, _systemId: sys.id }))
-            )
-          );
-          const storagePromises = targetSystems.map((sys) =>
-            fetch(`/api/cloud/storages?systemId=${encodeURIComponent(sys.id)}`)
-              .then((res) => (res.ok ? res.json() : []))
-              .then((list) =>
-                (Array.isArray(list) ? list : []).map((st: any) => ({
-                  ...st,
-                  _systemName: sys.name,
-                  _systemId: sys.id,
-                }))
-              )
+            .catch(() => [])
+        );
+        const eventPromises = targetSystems.map((sys) =>
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(sys.id)}`, { headers })
+            .then((res) => (res.ok ? res.json() : []))
+            .then((list) => {
+              const normalized = normalizeNxEvents(Array.isArray(list) ? list : []);
+              return normalized.map((ev: any) => ({
+                ...ev,
+                _systemName: sys.name,
+                _systemId: sys.id,
+              }));
+            })
+            .catch(() => [])
+        );
+
+        // 2. Also fetch local system if local session is available (Local-first strategy matching AlarmConsole)
+        const localDevicePromise = localUserStr
+          ? fetchFromCloudRelay<NxCamera[]>(localSid, "/devices")
+              .catch(() => nxAPI.getCameras().catch(() => []))
+              .then((cams) => (cams || []).map((c: any) => ({ ...c, _systemName: "Local Server", _systemId: localSid })))
               .catch(() => [])
-          );
+          : Promise.resolve([]);
 
-          const [deviceResults, serverResults, storageResults] = await Promise.all([
-            Promise.allSettled(devicePromises),
-            Promise.allSettled(serverPromises),
-            Promise.allSettled(storagePromises),
-          ]);
+        const localServerPromise = localUserStr
+          ? fetchFromCloudRelay<any[]>(localSid, "/servers")
+              .catch(() => nxAPI.getServers().catch(() => []))
+              .then((srvs) => (srvs || []).map((s: any) => ({ ...s, _systemName: "Local Server", _systemId: localSid })))
+              .catch(() => [])
+          : Promise.resolve([]);
 
-          const allCams: NxCamera[] = [];
-          deviceResults.forEach((res) => {
-            if (res.status === "fulfilled" && Array.isArray(res.value)) {
-              allCams.push(...res.value);
-            }
-          });
+        const localStoragePromise = localUserStr
+          ? fetch(`/api/cloud/storages?systemId=${encodeURIComponent(localSid)}`)
+              .then((res) => (res.ok ? res.json() : []))
+              .catch(() => nxAPI.getStorages().catch(() => []))
+              .then((strs) => (strs || []).map((st: any) => ({ ...st, _systemName: "Local Server", _systemId: localSid })))
+              .catch(() => [])
+          : Promise.resolve([]);
 
-          const allSrvs: any[] = [];
-          serverResults.forEach((res) => {
-            if (res.status === "fulfilled" && Array.isArray(res.value)) {
-              allSrvs.push(...res.value);
-            }
-          });
+        const localEventPromise = localUserStr
+          ? fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}`, { headers })
+              .then((res) => (res.ok ? res.json() : []))
+              .catch(() => [])
+              .then((evts) => {
+                const normalized = normalizeNxEvents(Array.isArray(evts) ? evts : []);
+                return normalized.map((ev: any) => ({
+                  ...ev,
+                  _systemName: "Local Server",
+                  _systemId: localSid,
+                }));
+              })
+              .catch(() => [])
+          : Promise.resolve([]);
 
-          const allStrs: any[] = [];
-          storageResults.forEach((res) => {
-            if (res.status === "fulfilled" && Array.isArray(res.value)) {
-              allStrs.push(...res.value);
-            }
-          });
+        const [
+          deviceResults,
+          serverResults,
+          storageResults,
+          eventResults,
+          localDevices,
+          localServers,
+          localStorages,
+          localEvents,
+        ] = await Promise.all([
+          Promise.allSettled(devicePromises),
+          Promise.allSettled(serverPromises),
+          Promise.allSettled(storagePromises),
+          Promise.allSettled(eventPromises),
+          localDevicePromise,
+          localServerPromise,
+          localStoragePromise,
+          localEventPromise,
+        ]);
 
-          // Fallback to local nxAPI if cloud relay returned empty
-          if (allCams.length === 0 && allSrvs.length === 0) {
-            const [localCams, localSrvs, localStrs] = await Promise.all([
-              nxAPI.getCameras().catch(() => []),
-              nxAPI.getServers().catch(() => []),
-              nxAPI.getStorages().catch(() => []),
-            ]);
-            setCameras(localCams || []);
-            setServers(localSrvs || []);
-            setStorages(localStrs || []);
-          } else {
-            setCameras(allCams);
-            setServers(allSrvs);
-            setStorages(allStrs);
+        const allCams: NxCamera[] = [...(Array.isArray(localDevices) ? localDevices : [])];
+        deviceResults.forEach((res) => {
+          if (res.status === "fulfilled" && Array.isArray(res.value)) {
+            allCams.push(...res.value);
           }
-        } else {
-          // Fetch local system fallback
-          const [localCams, localSrvs, localStrs] = await Promise.all([
-            nxAPI.getCameras().catch(() => []),
-            nxAPI.getServers().catch(() => []),
-            nxAPI.getStorages().catch(() => []),
-          ]);
-          setCameras(localCams || []);
-          setServers(localSrvs || []);
-          setStorages(localStrs || []);
-        }
-      } else {
-        // Fetch specific single system
-        const targetSys = cloudSystems.find((s) => s.id === selectedSystemId);
-        const sysName = targetSys?.name || selectedSystemId;
+        });
 
-        const [sysCams, sysSrvs, sysStrs] = await Promise.all([
-          fetchFromCloudRelay<NxCamera[]>(selectedSystemId, "/devices").catch(() => []),
-          fetchFromCloudRelay<any[]>(selectedSystemId, "/servers").catch(() => []),
-          fetch(`/api/cloud/storages?systemId=${encodeURIComponent(selectedSystemId)}`)
+        const allSrvs: any[] = [...(Array.isArray(localServers) ? localServers : [])];
+        serverResults.forEach((res) => {
+          if (res.status === "fulfilled" && Array.isArray(res.value)) {
+            allSrvs.push(...res.value);
+          }
+        });
+
+        const allStrs: any[] = [...(Array.isArray(localStorages) ? localStorages : [])];
+        storageResults.forEach((res) => {
+          if (res.status === "fulfilled" && Array.isArray(res.value)) {
+            allStrs.push(...res.value);
+          }
+        });
+
+        const allEvts: any[] = [...(Array.isArray(localEvents) ? localEvents : [])];
+        eventResults.forEach((res) => {
+          if (res.status === "fulfilled" && Array.isArray(res.value)) {
+            allEvts.push(...res.value);
+          }
+        });
+
+        setCameras(allCams);
+        setServers(allSrvs);
+        setStorages(allStrs);
+        setAlarmEvents(allEvts);
+      } else if (selectedSystemId === "local" || selectedSystemId === localSid) {
+        // Fetch Local System directly
+        const [localCams, localSrvs, localStrs, localEvents] = await Promise.all([
+          fetchFromCloudRelay<NxCamera[]>(localSid, "/devices").catch(() => nxAPI.getCameras().catch(() => [])),
+          fetchFromCloudRelay<any[]>(localSid, "/servers").catch(() => nxAPI.getServers().catch(() => [])),
+          fetch(`/api/cloud/storages?systemId=${encodeURIComponent(localSid)}`)
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => nxAPI.getStorages().catch(() => [])),
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}`, { headers })
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => []),
         ]);
 
-        if ((!sysCams || sysCams.length === 0) && (!sysSrvs || sysSrvs.length === 0)) {
-          nxAPI.setSystemId(selectedSystemId);
-          const [localCams, localSrvs, localStrs] = await Promise.all([
-            nxAPI.getCameras().catch(() => []),
-            nxAPI.getServers().catch(() => []),
-            nxAPI.getStorages().catch(() => []),
-          ]);
-          setCameras((localCams || []).map((c: any) => ({ ...c, _systemName: sysName })));
-          setServers((localSrvs || []).map((s: any) => ({ ...s, _systemName: sysName })));
-          setStorages((localStrs || []).map((st: any) => ({ ...st, _systemName: sysName })));
-        } else {
-          setCameras((sysCams || []).map((c: any) => ({ ...c, _systemName: sysName })));
-          setServers((sysSrvs || []).map((s: any) => ({ ...s, _systemName: sysName })));
-          setStorages((Array.isArray(sysStrs) ? sysStrs : []).map((st: any) => ({ ...st, _systemName: sysName })));
+        setCameras((localCams || []).map((c: any) => ({ ...c, _systemName: "Local Server" })));
+        setServers((localSrvs || []).map((s: any) => ({ ...s, _systemName: "Local Server" })));
+        setStorages((Array.isArray(localStrs) ? localStrs : []).map((st: any) => ({ ...st, _systemName: "Local Server" })));
+        const normalized = normalizeNxEvents(Array.isArray(localEvents) ? localEvents : []);
+        setAlarmEvents(
+          normalized.map((ev: any) => ({
+            ...ev,
+            _systemName: "Local Server",
+            _systemId: localSid,
+          }))
+        );
+      } else {
+        // Fetch specific single cloud system safely
+        const targetSys = cloudSystems.find((s) => s.id === selectedSystemId);
+        const sysName = targetSys?.name || selectedSystemId;
+
+        const [camsRes, srvsRes, strsRes, evtsRes] = await Promise.allSettled([
+          fetchFromCloudRelay<NxCamera[]>(selectedSystemId, "/devices"),
+          fetchFromCloudRelay<any[]>(selectedSystemId, "/servers"),
+          fetch(`/api/cloud/storages?systemId=${encodeURIComponent(selectedSystemId)}`).then((r) => (r.ok ? r.json() : [])),
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(selectedSystemId)}`, { headers }).then(async (r) => {
+            if (!r.ok) {
+              if (r.status === 503 || r.status === 502 || r.status === 504) {
+                setSystemOffline(true);
+              }
+              return [];
+            }
+            return r.json();
+          }),
+        ]);
+
+        const sysCams = camsRes.status === "fulfilled" && Array.isArray(camsRes.value) ? camsRes.value : [];
+        const sysSrvs = srvsRes.status === "fulfilled" && Array.isArray(srvsRes.value) ? srvsRes.value : [];
+        const sysStrs = strsRes.status === "fulfilled" && Array.isArray(strsRes.value) ? strsRes.value : [];
+        const sysEvents = evtsRes.status === "fulfilled" && Array.isArray(evtsRes.value) ? evtsRes.value : [];
+
+        if (sysCams.length === 0 && sysSrvs.length === 0 && sysEvents.length === 0) {
+          setSystemOffline(true);
         }
+
+        setCameras(sysCams.map((c: any) => ({ ...c, _systemName: sysName })));
+        setServers(sysSrvs.map((s: any) => ({ ...s, _systemName: sysName })));
+        setStorages(sysStrs.map((st: any) => ({ ...st, _systemName: sysName })));
+        const normalized = normalizeNxEvents(sysEvents);
+        setAlarmEvents(
+          normalized.map((ev: any) => ({
+            ...ev,
+            _systemName: sysName,
+            _systemId: selectedSystemId,
+          }))
+        );
       }
     } catch (err) {
       console.error("[ReportingManagement] Error aggregating reporting data:", err);
@@ -311,41 +518,186 @@ export default function ReportingManagement() {
   ).length;
   const serverOnlineRate = totalServers > 0 ? Math.round((onlineServers / totalServers) * 100) : 0;
 
-  const alarmList = Array.isArray(alarms) ? alarms : [];
-  const eventList = Array.isArray(events) ? events : [];
-  const targetAlarmEvents = alarmList.length > 0 ? alarmList : eventList;
-  
-  // Real Alarm Count strictly from configured alarm/event source for selected period
-  const totalAlarms = targetAlarmEvents.length;
+  // Camera Name Map for resolving device IDs
+  const cameraMap = useMemo(() => {
+    const map = new Map<string, string>();
+    globalCameras.forEach((c: any) => {
+      if (c.id) {
+        const cleanId = String(c.id).replace(/[{}]/g, "").toLowerCase();
+        map.set(cleanId, c.name);
+        map.set(String(c.id), c.name);
+      }
+    });
+    cameras.forEach((c: any) => {
+      if (c.id) {
+        const cleanId = String(c.id).replace(/[{}]/g, "").toLowerCase();
+        map.set(cleanId, c.name);
+        map.set(String(c.id), c.name);
+      }
+    });
+    return map;
+  }, [cameras, globalCameras]);
 
-  const criticalAlarms = useMemo(() => {
-    return targetAlarmEvents.filter((a: any) => {
-      const txt = String(a.level ?? a.severity ?? a.type ?? a.eventType ?? a.caption ?? a.description ?? "").toLowerCase();
-      return (
-        txt.includes("error") ||
-        txt.includes("critical") ||
-        txt.includes("fatal") ||
-        txt.includes("disconnect") ||
-        txt.includes("offline") ||
-        txt.includes("failure") ||
-        txt.includes("lost")
-      );
-    }).length;
-  }, [targetAlarmEvents]);
-  
-  const warningAlarms = useMemo(() => {
-    return targetAlarmEvents.filter((a: any) => {
-      const txt = String(a.level ?? a.severity ?? a.type ?? a.eventType ?? a.caption ?? a.description ?? "").toLowerCase();
-      return txt.includes("warning") || txt.includes("warn") || txt.includes("attention");
-    }).length;
-  }, [targetAlarmEvents]);
+  // Server Name Map for resolving server IDs
+  const serverMap = useMemo(() => {
+    const map = new Map<string, string>();
+    servers.forEach((s: any) => {
+      if (s.id) {
+        const cleanId = String(s.id).replace(/[{}]/g, "").toLowerCase();
+        map.set(cleanId, s.name);
+        map.set(String(s.id), s.name);
+      }
+    });
+    return map;
+  }, [servers]);
 
   // Selected Server Name Label
   const selectedServerLabel = useMemo(() => {
     if (selectedSystemId === "all") return "ALL SERVERS (CENTRALIZED)";
+    if (selectedSystemId === "local") return "LOCAL SERVER";
     const sys = cloudSystems.find((s) => s.id === selectedSystemId);
     return (sys?.name || selectedSystemId).toUpperCase();
   }, [selectedSystemId, cloudSystems]);
+
+  // Combine fetched alarm events from Alarm Console endpoint or fallback to queries
+  const rawAlarmList = useMemo(() => {
+    if (alarmEvents.length > 0) return normalizeNxEvents(alarmEvents);
+    if (Array.isArray(events) && events.length > 0) return normalizeNxEvents(events);
+    if (Array.isArray(alarms) && alarms.length > 0) return normalizeNxEvents(alarms);
+    return [];
+  }, [alarmEvents, events, alarms]);
+
+  const eventList = rawAlarmList;
+
+  const parsedAlarmList = useMemo(() => {
+    return rawAlarmList.map((ev: any, idx: number) => {
+      const eventType = ev.eventData?.type || ev.type || ev.eventType || "systemEvent";
+      const eventLabel = getEventTypeLabel(eventType, ev.actionData?.caption);
+      let caption = ev.actionData?.caption || ev.caption || ev.name || "";
+      let description = ev.actionData?.description || ev.description || "";
+      let sourceName = ev.actionData?.sourceName || ev.sourceName || ev.source || "";
+      const systemName = ev._systemName || ev.systemName || (selectedSystemId === "all" ? "Centralized" : selectedServerLabel);
+
+      // Check deviceIds for camera name if sourceName is empty
+      const deviceIds = ev.actionData?.deviceIds || (ev.cameraId ? [ev.cameraId] : []);
+      if (!sourceName && deviceIds.length > 0) {
+        const devId = String(deviceIds[0]).replace(/[{}]/g, "").toLowerCase();
+        sourceName = cameraMap.get(devId) || cameraMap.get(deviceIds[0]) || "";
+      }
+
+      // Check serverId for server name if sourceName is empty
+      const serverId = ev.eventData?.serverId || ev.actionData?.serverId || ev.serverId;
+      if (!sourceName && serverId) {
+        const cleanSrvId = String(serverId).replace(/[{}]/g, "").toLowerCase();
+        sourceName = serverMap.get(cleanSrvId) || serverMap.get(serverId) || "";
+      }
+
+      // Camera disconnect friendly text
+      if (
+        eventType === "cameraDisconnectEvent" ||
+        eventType === "deviceDisconnected" ||
+        (caption && caption.toLowerCase().includes("disconnected"))
+      ) {
+        const devName = sourceName || "Camera";
+        if (!caption || caption === "deviceDisconnected" || caption === "cameraDisconnectEvent") {
+          caption = `${devName} Disconnected`;
+        }
+        if (!description || description === "deviceDisconnected" || description === "cameraDisconnectEvent") {
+          description = `Camera '${devName}' has lost connection to the server.`;
+        }
+      }
+
+      if (!sourceName) {
+        sourceName = caption || eventLabel || "System Event";
+      }
+
+      // Calculate timestamp in ms
+      let timestampMs: number | null = normalizeEpochMs(ev.timestampMs) ??
+        normalizeEpochMs(ev.actionData?.timestamp || ev.eventData?.timestamp) ??
+        normalizeEpochMs(ev.timestamp);
+
+      // Determine severity matching Alarm Console
+      const rawLevel = String(ev.actionData?.level ?? ev.level ?? ev.severity ?? "info").toLowerCase();
+      let severity = rawLevel;
+      if (eventType === "cameraDisconnectEvent" || eventType === "deviceDisconnected") {
+        if (timestampMs) {
+          const ageHours = (Date.now() - timestampMs) / (1000 * 60 * 60);
+          severity = ageHours > 24 ? "critical" : "info";
+        } else {
+          severity = "warning";
+        }
+      } else if (
+        ["error", "critical", "fatal", "serverfailure", "serverfailureevent"].includes(eventType.toLowerCase()) ||
+        ["error", "critical", "fatal"].includes(rawLevel)
+      ) {
+        severity = "critical";
+      } else if (
+        ["warning", "warn", "storagefailureevent", "serverconflictevent", "networkissueevent"].includes(eventType.toLowerCase()) ||
+        ["warning", "warn"].includes(rawLevel)
+      ) {
+        severity = "warning";
+      }
+
+      return {
+        id: ev.id ? `${ev.id}-${idx}` : `${eventType}-${timestampMs || "0"}-${idx}`,
+        eventType,
+        eventLabel,
+        sourceName: sourceName.toUpperCase(),
+        systemName: String(systemName).toUpperCase(),
+        caption,
+        description: description || caption || "No additional description available",
+        severity: severity.toUpperCase(),
+        timestampMs,
+        formattedTime: formatTimestamp(timestampMs),
+      };
+    });
+  }, [rawAlarmList, cameraMap, serverMap, selectedSystemId, selectedServerLabel]);
+
+  // Period / Date Range filter
+  const fromTime = useMemo(() => (dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : 0), [dateFrom]);
+  const toTime = useMemo(() => (dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Infinity), [dateTo]);
+
+  const targetAlarmEvents = useMemo(() => {
+    const periodFiltered = parsedAlarmList.filter((a) => {
+      if (!a.timestampMs || isNaN(a.timestampMs)) return true;
+      return a.timestampMs >= fromTime && a.timestampMs <= toTime;
+    });
+    return periodFiltered.length > 0 ? periodFiltered : parsedAlarmList;
+  }, [parsedAlarmList, fromTime, toTime]);
+
+  // Filter for Tab 6 search & severity dropdown
+  const displayedTabAlarms = useMemo(() => {
+    return targetAlarmEvents.filter((a) => {
+      if (alarmSeverityFilter !== "all" && a.severity !== alarmSeverityFilter) {
+        return false;
+      }
+      if (alarmSearch.trim()) {
+        const q = alarmSearch.toLowerCase();
+        return (
+          a.sourceName.toLowerCase().includes(q) ||
+          a.systemName.toLowerCase().includes(q) ||
+          a.description.toLowerCase().includes(q) ||
+          a.caption.toLowerCase().includes(q) ||
+          a.eventType.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [targetAlarmEvents, alarmSeverityFilter, alarmSearch]);
+
+  const totalAlarms = targetAlarmEvents.length;
+
+  const criticalAlarms = useMemo(() => {
+    return targetAlarmEvents.filter((a) => a.severity === "CRITICAL").length;
+  }, [targetAlarmEvents]);
+
+  const warningAlarms = useMemo(() => {
+    return targetAlarmEvents.filter((a) => a.severity === "WARNING").length;
+  }, [targetAlarmEvents]);
+
+  const infoAlarms = useMemo(() => {
+    return targetAlarmEvents.filter((a) => a.severity === "INFO").length;
+  }, [targetAlarmEvents]);
 
   // Dynamic Offline Camera Summary Title
   const offlineSummaryTitle = useMemo(() => {
@@ -587,16 +939,12 @@ export default function ReportingManagement() {
       storageUsage: srv.totalGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB (${srv.usedPct}%)` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
     }));
 
-    const formattedAlarms: AlarmReportItem[] = alarmList.map((a: any) => ({
-      id: a.id || "DATA NOT AVAILABLE FROM SOURCE",
-      source: (a.name || a.caption || a.source || "SYSTEM LOG").toUpperCase(),
-      severity: String(a.level ?? a.severity ?? a.type ?? "INFO").toUpperCase(),
-      timestamp: a.timestampMs
-        ? new Date(a.timestampMs).toLocaleString("en-US")
-        : a.eventTimestampUsec
-        ? new Date(Math.floor(a.eventTimestampUsec / 1000)).toLocaleString("en-US")
-        : a.createdAt || "DATA NOT AVAILABLE FROM SOURCE",
-      description: a.description || a.resourceName || "NO DESCRIPTION AVAILABLE",
+    const formattedAlarms: AlarmReportItem[] = targetAlarmEvents.map((a: any) => ({
+      id: String(a.id || "EVENT"),
+      source: a.systemName ? `${a.sourceName} (${a.systemName})` : a.sourceName,
+      severity: a.severity || "INFO",
+      timestamp: a.formattedTime || "DATA NOT AVAILABLE FROM SOURCE",
+      description: a.description || "NO DESCRIPTION AVAILABLE",
     }));
 
     return {
@@ -632,7 +980,7 @@ export default function ReportingManagement() {
     cameras,
     serverStorageStats,
     formattedServerDisks,
-    alarmList,
+    targetAlarmEvents,
     offlineCamerasSummary,
     s3PerformanceData,
     period,
@@ -827,6 +1175,14 @@ export default function ReportingManagement() {
                   <SelectItem value="all" className="text-[12px] font-bold uppercase text-blue-600 dark:text-blue-400">
                     ALL (CENTRALIZED REPORTING)
                   </SelectItem>
+                  {hasLocalServer && (
+                    <SelectItem value="local" className="text-[12px] font-semibold uppercase">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span>LOCAL SERVER</span>
+                      </div>
+                    </SelectItem>
+                  )}
                   {cloudSystems.map((sys) => (
                     <SelectItem key={sys.id} value={sys.id} className="text-[12px] font-semibold uppercase">
                       <div className="flex items-center gap-2">
@@ -1143,6 +1499,93 @@ export default function ReportingManagement() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Quick Alarm Incidents Summary in Overview */}
+            <Card className="lg:col-span-3 bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 uppercase">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    RECENT ALARM INCIDENTS &amp; SECURITY EVENTS ({period.toUpperCase()})
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-[11px] font-mono border-slate-300 dark:border-slate-700">
+                      TOTAL: {totalAlarms}
+                    </Badge>
+                    <Badge className="text-[11px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                      {criticalAlarms} CRITICAL
+                    </Badge>
+                  </div>
+                </div>
+                <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase">
+                  LATEST RECORDED SYSTEM ALARMS ACROSS ALL MONITORED HARDWARE
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {targetAlarmEvents.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-6 text-slate-400 gap-2 font-bold uppercase text-xs">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                    <span>NO ALARM INCIDENTS LOGGED IN THIS PERIOD</span>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-[12px]">
+                      <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <th className="p-2.5">#</th>
+                          <th className="p-2.5">EVENT</th>
+                          <th className="p-2.5">SOURCE / DEVICE</th>
+                          <th className="p-2.5">SYSTEM</th>
+                          <th className="p-2.5">SEVERITY</th>
+                          <th className="p-2.5">TIME</th>
+                          <th className="p-2.5">DESCRIPTION</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                        {targetAlarmEvents.slice(0, 5).map((a: any, i: number) => {
+                          const isCrit = a.severity === "CRITICAL";
+                          const isWarn = a.severity === "WARNING";
+                          return (
+                            <tr key={a.id ? `ov-${a.id}` : `ov-${i}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                              <td className="p-2.5 text-slate-400 font-mono">{i + 1}</td>
+                              <td className="p-2.5 font-bold uppercase text-slate-900 dark:text-white">
+                                {a.eventLabel || a.eventType}
+                              </td>
+                              <td className="p-2.5 font-bold uppercase text-blue-600 dark:text-blue-400">
+                                {a.sourceName}
+                              </td>
+                              <td className="p-2.5 text-[11px] text-slate-500 uppercase">
+                                {a.systemName}
+                              </td>
+                              <td className="p-2.5">
+                                <Badge
+                                  className={cn(
+                                    "text-[10px] font-bold uppercase",
+                                    isCrit
+                                      ? "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                                      : isWarn
+                                      ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                                      : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                                  )}
+                                >
+                                  {a.severity}
+                                </Badge>
+                              </td>
+                              <td className="p-2.5 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                                {a.formattedTime}
+                              </td>
+                              <td className="p-2.5 text-slate-600 dark:text-slate-300 max-w-md truncate">
+                                {a.description}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
@@ -1269,7 +1712,7 @@ export default function ReportingManagement() {
                         const isCamOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
                         const serverName = (cam._systemName || cam.serverName || "SERVER 01").toUpperCase();
                         return (
-                          <tr key={cam.id || index} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          <tr key={cam.id ? `cam-${cam.id}-${index}` : `cam-${index}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                             <td className="p-3 text-slate-400 font-mono">{index + 1}</td>
                             <td className="p-3 font-bold text-slate-900 dark:text-white uppercase">
                               {cam.name || `CAMERA_${index + 1}`}
@@ -1488,16 +1931,67 @@ export default function ReportingManagement() {
         {/* ============================================ */}
         <TabsContent value="alarms" className="space-y-4">
           <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" /> ALARM EVENTS &amp; SECURITY INCIDENTS ({period.toUpperCase()})
-              </CardTitle>
+            <CardHeader className="pb-3">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" /> ALARM EVENTS &amp; SECURITY INCIDENTS ({period.toUpperCase()})
+                </CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="text-[11px] font-bold border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
+                    TOTAL: {totalAlarms}
+                  </Badge>
+                  <Badge className="text-[11px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                    {criticalAlarms} CRITICAL
+                  </Badge>
+                  <Badge className="text-[11px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                    {warningAlarms} WARNINGS
+                  </Badge>
+                  <Badge className="text-[11px] font-bold bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                    {infoAlarms} INFO
+                  </Badge>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 pt-3">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    placeholder="Filter by device, system location, description..."
+                    value={alarmSearch}
+                    onChange={(e) => setAlarmSearch(e.target.value)}
+                    className="h-8 pl-8 text-xs rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <Select value={alarmSeverityFilter} onValueChange={setAlarmSeverityFilter}>
+                  <SelectTrigger className="h-8 w-40 text-xs rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold">
+                    <SelectValue placeholder="All Severities" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Severities</SelectItem>
+                    <SelectItem value="CRITICAL">Critical Only</SelectItem>
+                    <SelectItem value="WARNING">Warning Only</SelectItem>
+                    <SelectItem value="INFO">Info Only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </CardHeader>
             <CardContent>
-              {alarmList.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+              {systemOffline && (
+                <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-2 text-[12px]">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>
+                    SYSTEM &ldquo;{selectedServerLabel}&rdquo; IS CURRENTLY OFFLINE / UNREACHABLE VIA CLOUD RELAY (HTTP 503).
+                  </span>
+                </div>
+              )}
+              {displayedTabAlarms.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2 font-bold uppercase">
                   <CheckCircle2 className="w-8 h-8 text-emerald-500" />
                   <span>NO ALARM EVENTS LOGGED IN THIS PERIOD</span>
+                  <p className="text-[11px] text-slate-400 normal-case font-normal">
+                    {rawAlarmList.length === 0
+                      ? "No events received from VMS event logs."
+                      : "Try adjusting your date period or search query."}
+                  </p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -1505,38 +1999,60 @@ export default function ReportingManagement() {
                     <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
                       <tr>
                         <th className="p-3">#</th>
-                        <th className="p-3">EVENT SOURCE / NAME</th>
+                        <th className="p-3">EVENT TYPE</th>
+                        <th className="p-3">EVENT SOURCE / DEVICE</th>
+                        <th className="p-3">SYSTEM / LOCATION</th>
                         <th className="p-3">SEVERITY</th>
                         <th className="p-3">TIMESTAMP</th>
                         <th className="p-3">DESCRIPTION</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
-                      {alarmList.slice(0, 100).map((a: any, i: number) => {
-                        const sev = String(a.level ?? a.severity ?? a.type ?? "INFO").toUpperCase();
-                        const isCrit = ["ERROR", "CRITICAL", "FATAL"].includes(sev);
-                        const isWarn = ["WARNING", "WARN"].includes(sev);
-                        const ts = a.timestampMs
-                          ? new Date(a.timestampMs).toLocaleString("en-US")
-                          : a.eventTimestampUsec
-                          ? new Date(Math.floor(a.eventTimestampUsec / 1000)).toLocaleString("en-US")
-                          : a.createdAt || "DATA NOT AVAILABLE";
+                      {displayedTabAlarms.slice(0, 100).map((a: any, i: number) => {
+                        const isCrit = a.severity === "CRITICAL";
+                        const isWarn = a.severity === "WARNING";
                         return (
-                          <tr key={a.id || i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <tr key={a.id ? `tab-${a.id}` : `tab-${i}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                             <td className="p-3 text-slate-400 font-mono">{i + 1}</td>
-                            <td className="p-3 font-bold uppercase">{a.name || a.caption || a.source || "SYSTEM LOG"}</td>
+                            <td className="p-3 font-bold uppercase text-slate-900 dark:text-white">
+                              {a.eventLabel || a.eventType}
+                            </td>
+                            <td className="p-3 font-bold uppercase text-blue-600 dark:text-blue-400">
+                              {a.sourceName}
+                            </td>
+                            <td className="p-3 font-semibold text-[11px] text-slate-500 uppercase">
+                              {a.systemName}
+                            </td>
                             <td className="p-3">
-                              <Badge className={cn("text-[10px] font-bold uppercase", isCrit ? "bg-rose-500/10 text-rose-500" : isWarn ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500")}>
-                                {sev}
+                              <Badge
+                                className={cn(
+                                  "text-[10px] font-bold uppercase",
+                                  isCrit
+                                    ? "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                                    : isWarn
+                                    ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                                    : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                                )}
+                              >
+                                {a.severity}
                               </Badge>
                             </td>
-                            <td className="p-3 font-mono text-[11px] text-slate-500">{ts}</td>
-                            <td className="p-3 text-slate-600 dark:text-slate-400">{a.description || a.resourceName || "NO DESCRIPTION AVAILABLE"}</td>
+                            <td className="p-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                              {a.formattedTime}
+                            </td>
+                            <td className="p-3 text-slate-600 dark:text-slate-300 max-w-md">
+                              {a.description}
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
+                  {displayedTabAlarms.length > 100 && (
+                    <p className="text-[11px] text-slate-400 p-2 text-center">
+                      Showing first 100 of {displayedTabAlarms.length} events
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>

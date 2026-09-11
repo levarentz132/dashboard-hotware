@@ -716,7 +716,7 @@ export default function AlarmConsole() {
   const [selectedCloudSystemId, setSelectedCloudSystemId] = useState<string>("all");
   const [selectedCloudServerId, setSelectedCloudServerId] = useState<string>("all");
   const { servers, loading: loadingServers } = useServers(selectedCloudSystemId !== "all" ? selectedCloudSystemId : undefined);
-  const { cameras } = useCameras(selectedCloudSystemId);
+  const { cameras } = useCameras(selectedCloudSystemId !== "all" ? selectedCloudSystemId : undefined);
   const [events, setEvents] = useState<EventLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

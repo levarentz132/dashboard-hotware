@@ -66,6 +66,63 @@ let lastReadTime = 0;
 const CACHE_TTL = 2000; // Cache for 2 seconds to avoid excessive disk I/O
 
 /**
+ * Resolves the configuration file path (.env.local or .env).
+ * Priority:
+ * 1. process.env.EXT_CONFIG_PATH (if set)
+ * 2. AppData fallback path (if it exists)
+ * 3. Local workspace files: .env.local, then .env (in process.cwd() or parent dirs)
+ * 4. When forWriting is true, defaults to path.join(process.cwd(), '.env.local')
+ */
+export function getConfigFilePath(forWriting = false): string | null {
+  if (typeof window !== 'undefined') return null;
+
+  const fs = require('fs');
+  const path = require('path');
+  const extConfigPath = process.env.EXT_CONFIG_PATH;
+
+  if (extConfigPath) {
+    if (forWriting || fs.existsSync(extConfigPath)) {
+      return extConfigPath;
+    }
+  }
+
+  // AppData fallback path (used in Electron environment if EXT_CONFIG_PATH not passed)
+  const home = process.env.APPDATA || (process.platform === 'darwin' ? process.env.HOME + '/Library/Application Support' : (process.env.HOME ? process.env.HOME + '/.config' : ''));
+  const appDataPath = home ? path.join(home, 'hotware-dashboard', '.env.local') : null;
+  if (appDataPath && fs.existsSync(appDataPath)) {
+    return appDataPath;
+  }
+
+  // Workspace / project candidate paths (prefer .env.local over .env)
+  const candidatePaths = [
+    path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '..', '.env.local'),
+    path.join(process.cwd(), '..', '.env'),
+    path.join(process.cwd(), '..', '..', '.env.local'),
+    path.join(process.cwd(), '..', '..', '.env'),
+  ];
+
+  for (const candidate of candidatePaths) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  // If writing and no existing file found, default to local project .env.local
+  if (forWriting) {
+    return path.join(process.cwd(), '.env.local');
+  }
+
+  return null;
+}
+
+export function invalidateConfigCache(): void {
+  cachedConfig = null;
+  lastReadTime = 0;
+}
+
+/**
  * Server-side helper to read persistent config from .env.local on disk.
  * This ensures that even remote browsers receive the configuration set up by the host.
  */
@@ -78,35 +135,7 @@ function getServerSideConfig(): Record<string, string> {
   }
 
   const fs = require('fs');
-  const path = require('path');
-  let configPath = process.env.EXT_CONFIG_PATH;
-  
-  // Dev Fallback: Try to find the Electron config file in the default AppData folder if running in dev mode
-  if (!configPath) {
-    const home = process.env.APPDATA || (process.platform === 'darwin' ? process.env.HOME + '/Library/Application Support' : process.env.HOME + '/.config');
-    const fallbackPath = path.join(home, 'hotware-dashboard', '.env.local');
-    if (fs.existsSync(fallbackPath)) {
-      configPath = fallbackPath;
-      // console.log(`[Config] Using fallback config path: ${configPath}`);
-    } else {
-      // console.warn(`[Config] Fallback config path NOT found: ${fallbackPath}`);
-    }
-  }
-
-  // If no Electron config file exists, fallback to standard project .env in current workspace directory or parent directories!
-  if (!configPath || !fs.existsSync(configPath)) {
-    const projectEnvPath = path.join(process.cwd(), '.env');
-    const parentEnvPath = path.join(process.cwd(), '..', '.env');
-    const grandParentEnvPath = path.join(process.cwd(), '..', '..', '.env');
-
-    if (fs.existsSync(projectEnvPath)) {
-      configPath = projectEnvPath;
-    } else if (fs.existsSync(parentEnvPath)) {
-      configPath = parentEnvPath;
-    } else if (fs.existsSync(grandParentEnvPath)) {
-      configPath = grandParentEnvPath;
-    }
-  }
+  const configPath = getConfigFilePath(false);
 
   if (!configPath || !fs.existsSync(configPath)) {
     const envConfig = {

@@ -29,8 +29,8 @@ export function getRedisClient(): Redis | null {
     connectTimeout: 2000,
   });
 
-  client.on("error", (err) => {
-    lastConnectError = err.message;
+  client.on("error", (err: any) => {
+    lastConnectError = err?.message || String(err);
   });
 
   return client;

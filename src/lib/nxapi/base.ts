@@ -240,6 +240,12 @@ export class NxWitnessAPIBase {
             console.debug(`[apiRequest] ${endpoint}: 404 Not Found`);
           } else if (response.status === 403) {
             console.warn(`[apiRequest 403 FORBIDDEN] Endpoint: ${endpoint} | SystemID: ${this.systemId} | HeadersSent:`, Object.keys(configHeaders), "| Response:", errorText);
+          } else if ([502, 503, 504].includes(response.status)) {
+            console.warn(`[apiRequest UNREACHABLE] Endpoint: ${endpoint} | SystemID: ${this.systemId} | Status: ${response.status} (System offline or unreachable)`);
+            // Gracefully return null for GET queries to offline/unreachable systems so callers get empty arrays instead of uncaught fatal errors
+            if (!options.method || options.method === "GET") {
+              return null as unknown as T;
+            }
           } else {
             console.error(`[apiRequest ERROR] ${endpoint}: ${response.status}`, errorText);
           }
@@ -266,9 +272,9 @@ export class NxWitnessAPIBase {
 
         return result;
       } catch (error) {
-        // Don't re-log 404 errors as they've already been logged above
+        // Don't re-log 404/502/503/504 errors as they've already been logged above
         const errorMsg = String(error);
-        if (!errorMsg.includes('HTTP_404')) {
+        if (!errorMsg.includes('HTTP_404') && !errorMsg.includes('HTTP_502') && !errorMsg.includes('HTTP_503') && !errorMsg.includes('HTTP_504')) {
           console.error(`[apiRequest] ${endpoint}: Request failed:`, error);
         }
         throw error;

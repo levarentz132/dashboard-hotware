@@ -30,7 +30,7 @@ export function useNxConfig() {
                 setConfig(data.config);
                 return data.config;
             } else {
-                throw new Error(data.message || "Failed to parse configuration");
+                throw new Error(data.message || data.error || "Failed to parse configuration");
             }
         } catch (e: any) {
             console.error("[useNxConfig] Failed to fetch config:", e);
@@ -55,7 +55,7 @@ export function useNxConfig() {
                 setConfig(prev => prev ? { ...prev, ...updates } : (updates as NxConfig));
                 return true;
             } else {
-                throw new Error(data.message || "Failed to save configuration");
+                throw new Error(data.message || data.error || "Failed to save configuration");
             }
         } catch (e: any) {
             console.error("[useNxConfig] Failed to save config:", e);

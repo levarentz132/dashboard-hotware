@@ -27,8 +27,9 @@ function useNxSystemQuery<T>(
   const query = useQuery({
     queryKey,
     queryFn,
-    enabled: !!systemId,
+    enabled: !!systemId && systemId !== "all",
     staleTime,
+    retry: false,
   });
 
   return {
@@ -36,7 +37,9 @@ function useNxSystemQuery<T>(
     loading: query.isLoading,
     error: query.error ? parseError(query.error) : null,
     refetch: async () => {
-      await query.refetch();
+      try {
+        await query.refetch();
+      } catch (_) {}
     },
   };
 }
@@ -44,9 +47,10 @@ function useNxSystemQuery<T>(
 export function useEventsQuery(limit: number = 50) {
   const query = useQuery({
     queryKey: queryKeys.nx.events(limit),
-    queryFn: () => nxAPI.getEvents(limit),
+    queryFn: () => nxAPI.getEvents(limit).catch(() => []),
     refetchInterval: EVENTS_REFETCH_MS,
     staleTime: EVENTS_REFETCH_MS,
+    retry: false,
   });
 
   return {
@@ -54,7 +58,9 @@ export function useEventsQuery(limit: number = 50) {
     loading: query.isLoading,
     error: query.error ? parseError(query.error) : null,
     refetch: async () => {
-      await query.refetch();
+      try {
+        await query.refetch();
+      } catch (_) {}
     },
   };
 }
@@ -86,15 +92,18 @@ export function useModulesQuery() {
   const query = useQuery({
     queryKey: queryKeys.nx.modules(),
     queryFn: async () => {
-      const data = await nxAPI.getModuleInformation();
-      if (data?.modules?.length) {
-        return data.modules;
+      try {
+        const data = await nxAPI.getModuleInformation();
+        if (data?.modules?.length) {
+          return data.modules;
+        }
+        return [];
+      } catch (_) {
+        return [];
       }
-      throw new Error(
-        "Server connected but no modules found. Check your Nx Witness system status.",
-      );
     },
     staleTime: NX_MODULES_STALE_MS,
+    retry: false,
   });
 
   return {
@@ -109,8 +118,12 @@ export function useCamerasQuery(systemId?: string) {
     systemId,
     queryKeys.nx.cameras(systemId ?? ""),
     async () => {
-      nxAPI.setSystemId(systemId!);
-      return nxAPI.getCameras();
+      try {
+        nxAPI.setSystemId(systemId!);
+        return (await nxAPI.getCameras()) || [];
+      } catch (_) {
+        return [];
+      }
     },
     [],
   );
@@ -121,8 +134,12 @@ export function useDeviceTypeQuery(systemId?: string) {
     systemId,
     queryKeys.nx.deviceTypes(systemId ?? ""),
     async () => {
-      nxAPI.setSystemId(systemId!);
-      return nxAPI.getDeviceTypes();
+      try {
+        nxAPI.setSystemId(systemId!);
+        return (await nxAPI.getDeviceTypes()) || [];
+      } catch (_) {
+        return [];
+      }
     },
     [],
     NX_DEVICE_TYPES_STALE_MS,
@@ -134,8 +151,12 @@ export function useDevicesQuery(systemId?: string) {
     systemId,
     queryKeys.nx.devices(systemId ?? ""),
     async () => {
-      nxAPI.setSystemId(systemId!);
-      return nxAPI.getDevices();
+      try {
+        nxAPI.setSystemId(systemId!);
+        return (await nxAPI.getDevices()) || [];
+      } catch (_) {
+        return [];
+      }
     },
     [],
   );
@@ -146,15 +167,19 @@ export function useServersQuery(systemId?: string) {
     systemId,
     queryKeys.nx.servers(systemId ?? ""),
     async () => {
-      nxAPI.setSystemId(systemId!);
-      const data = await nxAPI.getServers();
-      if (Array.isArray(data) && data.length > 0) {
-        return data;
+      try {
+        nxAPI.setSystemId(systemId!);
+        const data = await nxAPI.getServers();
+        if (Array.isArray(data) && data.length > 0) {
+          return data;
+        }
+        if (data && typeof data === "object" && "servers" in data) {
+          return (data as { servers: unknown[] }).servers as Record<string, unknown>[];
+        }
+        return [];
+      } catch (_) {
+        return [];
       }
-      if (data && typeof data === "object" && "servers" in data) {
-        return (data as { servers: unknown[] }).servers;
-      }
-      return [];
     },
     [],
     NX_SERVERS_STALE_MS,

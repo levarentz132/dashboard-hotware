@@ -45,6 +45,9 @@ const UserManagement = dynamic(() => import("@/components/users/UserManagement")
 const SubAccountManagement = dynamic(() => import("@/components/rolemanagement/RoleManagement"), {
   loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Role Management...</div>
 });
+const ReportingManagement = dynamic(() => import("@/components/reporting/ReportingManagement"), {
+  loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading Reporting...</div>
+});
 const VideoXwareDashboard = dynamic(() => import("@/components/dashboard/VideoXwareDashboard"), {
   loading: () => <div className="h-full flex items-center justify-center p-8 text-slate-400">Loading VideoXware...</div>
 });
@@ -145,6 +148,8 @@ function PageContent() {
         return <UserManagement />;
       case "subaccounts":
         return <SubAccountManagement />;
+      case "reporting":
+        return <ReportingManagement />;
       case "unauthorized":
         return (
           <div className="h-full flex flex-col items-center justify-center p-8 bg-white rounded-2xl shadow-sm border border-slate-200">
