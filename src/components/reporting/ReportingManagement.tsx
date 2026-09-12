@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   FileText,
   Calendar,
@@ -30,6 +30,9 @@ import {
   Search,
   WifiOff,
   Wifi,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
 } from "lucide-react";
 import Cookies from "js-cookie";
 import {
@@ -57,6 +60,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { normalizeNxEvents } from "@/lib/nx-normalization";
 import {
@@ -65,11 +69,13 @@ import {
   type FullReportData,
   type CameraReportItem,
   type OfflineCameraItem,
+  type OfflineCameraIncident,
   type ServerHealthItem,
   type ServerStorageDiskItem,
   type AlarmReportItem,
   type S3LogItem,
 } from "./export-utils";
+import { getOfflineExactTime, formatExactTimestamp } from "@/lib/camera-offline-tracker";
 import { ORIX_LOGO_BASE64_PNG } from "@/assets/orix-logo";
 
 // ============================================
@@ -93,6 +99,25 @@ function formatDateLocal(d: Date): string {
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatDuration(diffMs: number): string {
+  if (!diffMs || diffMs <= 0 || isNaN(diffMs)) return "< 1s";
+  const totalSeconds = Math.floor(diffMs / 1000);
+  if (totalSeconds < 1) return "< 1s";
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  if (days === 0 && hours === 0 && seconds > 0) parts.push(`${seconds}s`);
+  return parts.join(" ");
 }
 
 const normalizeEpochMs = (value: string | number | null | undefined): number | null => {
@@ -187,7 +212,19 @@ export default function ReportingManagement() {
   
   const [isExportingWord, setIsExportingWord] = useState<boolean>(false);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(5000);
+  const [offlineSummaryFilter, setOfflineSummaryFilter] = useState<"incidents" | "all">("incidents");
+  const [showExecutiveAlarmSummary, setShowExecutiveAlarmSummary] = useState<boolean>(true);
+
+  // State for expanding camera incident details in Offline Camera Summary
+  const [expandedCameras, setExpandedCameras] = useState<Record<string, boolean>>({});
+  const [selectedCameraForModal, setSelectedCameraForModal] = useState<OfflineCameraItem | null>(null);
+
+  const toggleCameraExpand = (camId: string) => {
+    setExpandedCameras((prev) => ({
+      ...prev,
+      [camId]: !prev[camId],
+    }));
+  };
 
   // Raw fetched arrays for aggregated system resources
   const [cameras, setCameras] = useState<NxCamera[]>([]);
@@ -348,17 +385,41 @@ export default function ReportingManagement() {
           localEventPromise,
         ]);
 
-        const allCams: NxCamera[] = [...(Array.isArray(localDevices) ? localDevices : [])];
+        const seenCamIds = new Set<string>();
+        const allCams: NxCamera[] = [];
+        const addCamIfUnique = (cam: any) => {
+          if (!cam) return;
+          const cleanId = String(cam.id || "").replace(/[{}]/g, "").toLowerCase();
+          if (cleanId) {
+            if (seenCamIds.has(cleanId)) return;
+            seenCamIds.add(cleanId);
+          }
+          allCams.push(cam);
+        };
+
+        (Array.isArray(localDevices) ? localDevices : []).forEach(addCamIfUnique);
         deviceResults.forEach((res) => {
           if (res.status === "fulfilled" && Array.isArray(res.value)) {
-            allCams.push(...res.value);
+            res.value.forEach(addCamIfUnique);
           }
         });
 
-        const allSrvs: any[] = [...(Array.isArray(localServers) ? localServers : [])];
+        const seenSrvIds = new Set<string>();
+        const allSrvs: any[] = [];
+        const addSrvIfUnique = (srv: any) => {
+          if (!srv) return;
+          const cleanId = String(srv.id || srv.serverId || srv.name || "").replace(/[{}]/g, "").toLowerCase();
+          if (cleanId) {
+            if (seenSrvIds.has(cleanId)) return;
+            seenSrvIds.add(cleanId);
+          }
+          allSrvs.push(srv);
+        };
+
+        (Array.isArray(localServers) ? localServers : []).forEach(addSrvIfUnique);
         serverResults.forEach((res) => {
           if (res.status === "fulfilled" && Array.isArray(res.value)) {
-            allSrvs.push(...res.value);
+            res.value.forEach(addSrvIfUnique);
           }
         });
 
@@ -466,15 +527,6 @@ export default function ReportingManagement() {
     fetchAggregatedData();
   }, [refetchCloudSystems, refetchAlarms, refetchEvents, fetchAggregatedData]);
 
-  // Auto-Refresh Polling Effect
-  useEffect(() => {
-    if (!autoRefreshInterval || autoRefreshInterval <= 0) return;
-    const timer = setInterval(() => {
-      handleRefresh();
-    }, autoRefreshInterval);
-    return () => clearInterval(timer);
-  }, [autoRefreshInterval, handleRefresh]);
-
   // Date Period Change Handler (ACCURATE PERIOD FIX — NO FUTURE DATES)
   const handlePeriodChange = (newPeriod: ReportPeriod) => {
     setPeriod(newPeriod);
@@ -510,7 +562,7 @@ export default function ReportingManagement() {
     ["online", "Online", "recording", "Recording"].includes(String(c.status))
   ).length;
   const offlineCamerasCount = totalCameras - onlineCameras;
-  const cameraOnlineRate = totalCameras > 0 ? Number(((onlineCameras / totalCameras) * 100).toFixed(1)) : 0;
+  const instantCameraOnlineRate = totalCameras > 0 ? Number(((onlineCameras / totalCameras) * 100).toFixed(1)) : 0;
 
   const totalServers = servers.length;
   const onlineServers = servers.filter((s: any) =>
@@ -758,41 +810,281 @@ export default function ReportingManagement() {
   }, [storages]);
 
   // ============================================
-  // OFFLINE CAMERA SUMMARY CALCULATOR (REQUIREMENT 2 & 3)
+  // OFFLINE CAMERA SUMMARY CALCULATOR (WHEN OFFLINE & HAS BEEN ONLINE AUDIT)
   // ============================================
   const offlineCamerasSummary = useMemo<OfflineCameraItem[]>(() => {
     if (!cameras || cameras.length === 0) return [];
 
-    return cameras.map((cam: any) => {
-      const isOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
-      const camEvents = eventList.filter(
-        (e: any) =>
-          String(e.resourceId || e.cameraId || e.source || "").includes(String(cam.id)) ||
-          String(e.caption || e.description || "").toLowerCase().includes(String(cam.name || "").toLowerCase())
-      );
+    const seenIds = new Set<string>();
+    const uniqueCameras = cameras.filter((cam: any) => {
+      const cleanId = String(cam.id || "").replace(/[{}]/g, "").toLowerCase();
+      if (!cleanId) return true;
+      if (seenIds.has(cleanId)) return false;
+      seenIds.add(cleanId);
+      return true;
+    });
 
-      const disconnectEvents = camEvents.filter((e: any) => {
-        const txt = String(e.caption || e.description || e.type || "").toLowerCase();
-        return txt.includes("offline") || txt.includes("disconnect") || txt.includes("lost");
+    return uniqueCameras.map((cam: any) => {
+      const isOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+      const cleanCamId = String(cam.id || "").replace(/[{}]/g, "").toLowerCase();
+      const camNameLower = String(cam.name || "").toLowerCase();
+
+      // Find events matching this camera
+      const camEvents = eventList.filter((e: any) => {
+        if (cleanCamId) {
+          const devIds = (e.actionData?.deviceIds || []).map((id: string) => String(id).replace(/[{}]/g, "").toLowerCase());
+          if (devIds.includes(cleanCamId)) return true;
+          const resId = String(e.resourceId || e.cameraId || e.eventData?.resourceId || e.source || "").replace(/[{}]/g, "").toLowerCase();
+          if (resId.includes(cleanCamId)) return true;
+        }
+        if (camNameLower) {
+          const txt = String(e.actionData?.caption || e.actionData?.description || e.actionData?.sourceName || e.caption || e.description || e.sourceName || "").toLowerCase();
+          if (txt.includes(camNameLower)) return true;
+        }
+        return false;
       });
 
-      const incidentCount = !isOnline ? Math.max(1, disconnectEvents.length) : disconnectEvents.length;
+      // 1. Filter Disconnect Events sorted earliest to latest
+      const rawDisconnectEvents = camEvents.filter((e: any) => {
+        const type = String(e.eventData?.type || e.type || e.eventType || "").toLowerCase();
+        const caption = String(e.actionData?.caption || e.caption || "").toLowerCase();
+        const desc = String(e.actionData?.description || e.description || "").toLowerCase();
+
+        // Must NOT be an online/reconnect event
+        if (
+          caption.includes("online") ||
+          desc.includes("back online") ||
+          desc.includes("reconnected") ||
+          type.includes("reconnect")
+        ) {
+          return false;
+        }
+
+        return (
+          type.includes("disconnect") ||
+          type.includes("offline") ||
+          caption.includes("disconnect") ||
+          caption.includes("offline") ||
+          desc.includes("lost connection") ||
+          desc.includes("is now offline") ||
+          desc.includes("has lost connection") ||
+          desc.includes("disconnected")
+        );
+      }).sort((a: any, b: any) => {
+        const timeA = normalizeEpochMs(a.timestampMs) ?? normalizeEpochMs(a.actionData?.timestamp || a.eventData?.timestamp) ?? normalizeEpochMs(a.timestamp) ?? 0;
+        const timeB = normalizeEpochMs(b.timestampMs) ?? normalizeEpochMs(b.actionData?.timestamp || b.eventData?.timestamp) ?? normalizeEpochMs(b.timestamp) ?? 0;
+        return timeA - timeB;
+      });
+
+      // 2. Filter Recovery / Reconnect Events from alarm/event stream
+      const rawRecoveryEvents = camEvents.filter((e: any) => {
+        const type = String(e.eventData?.type || e.type || e.eventType || "").toLowerCase();
+        const caption = String(e.actionData?.caption || e.caption || "").toLowerCase();
+        const desc = String(e.actionData?.description || e.description || "").toLowerCase();
+
+        // Critical: MUST NOT be a disconnect event (note: "disconnected" contains substring "connected")
+        const isDisconnect =
+          type.includes("disconnect") ||
+          type.includes("offline") ||
+          caption.includes("disconnect") ||
+          caption.includes("offline") ||
+          desc.includes("lost connection") ||
+          desc.includes("is now offline") ||
+          desc.includes("has lost connection");
+
+        if (isDisconnect) {
+          return false;
+        }
+
+        return (
+          type.includes("online") ||
+          type.includes("reconnect") ||
+          type === "cameraconnectedevent" ||
+          type === "deviceconnected" ||
+          caption.includes("camera online") ||
+          caption.includes("back online") ||
+          caption.includes("reconnect") ||
+          desc.includes("reconnected") ||
+          desc.includes("back online") ||
+          desc.includes("is now back online") ||
+          desc.includes("connection restored")
+        );
+      }).sort((a: any, b: any) => {
+        const timeA = normalizeEpochMs(a.timestampMs) ?? normalizeEpochMs(a.actionData?.timestamp || a.eventData?.timestamp) ?? normalizeEpochMs(a.timestamp) ?? 0;
+        const timeB = normalizeEpochMs(b.timestampMs) ?? normalizeEpochMs(b.actionData?.timestamp || b.eventData?.timestamp) ?? normalizeEpochMs(b.timestamp) ?? 0;
+        return timeA - timeB;
+      });
+
+      // 3. Build chronological outage sessions by pairing each disconnect with its subsequent recovery from the alarms
+      type OutageSession = {
+        discTimeMs: number;
+        discEvent: any;
+        recTimeMs: number | null;
+        recEvent: any | null;
+      };
+
+      const sessions: OutageSession[] = [];
+      let currentSession: OutageSession | null = null;
+
+      type CombinedEvent = {
+        kind: "disconnect" | "recovery";
+        timeMs: number;
+        event: any;
+      };
+
+      const allTimeline: CombinedEvent[] = [];
+      rawDisconnectEvents.forEach((ev: any) => {
+        const t = normalizeEpochMs(ev.timestampMs) ??
+          normalizeEpochMs(ev.actionData?.timestamp || ev.eventData?.timestamp) ??
+          normalizeEpochMs(ev.timestamp);
+        if (t) allTimeline.push({ kind: "disconnect", timeMs: t, event: ev });
+      });
+
+      rawRecoveryEvents.forEach((ev: any) => {
+        const t = normalizeEpochMs(ev.timestampMs) ??
+          normalizeEpochMs(ev.actionData?.timestamp || ev.eventData?.timestamp) ??
+          normalizeEpochMs(ev.timestamp);
+        if (t) allTimeline.push({ kind: "recovery", timeMs: t, event: ev });
+      });
+
+      // Sort chronologically. If identical time, disconnect is processed before recovery.
+      allTimeline.sort((a, b) => {
+        if (a.timeMs !== b.timeMs) return a.timeMs - b.timeMs;
+        if (a.kind === "disconnect" && b.kind === "recovery") return -1;
+        if (a.kind === "recovery" && b.kind === "disconnect") return 1;
+        return 0;
+      });
+
+      allTimeline.forEach((item) => {
+        if (item.kind === "disconnect") {
+          if (!currentSession) {
+            // New outage session starts
+            currentSession = {
+              discTimeMs: item.timeMs,
+              discEvent: item.event,
+              recTimeMs: null,
+              recEvent: null,
+            };
+          } else {
+            // Already in an active outage session.
+            // Clustered disconnects or retries belong to the same physical outage.
+          }
+        } else if (item.kind === "recovery") {
+          if (currentSession) {
+            // Recovery event ends the current outage session
+            if (item.timeMs >= currentSession.discTimeMs) {
+              currentSession.recTimeMs = item.timeMs;
+              currentSession.recEvent = item.event;
+              sessions.push(currentSession);
+              currentSession = null;
+            }
+          }
+        }
+      });
+
+      // If an outage session was opened and never recovered:
+      if (currentSession) {
+        sessions.push(currentSession);
+      }
+
+      // 4. Transform outage sessions into user-facing incidents
+      const incidents: OfflineCameraIncident[] = [];
+      if (sessions.length > 0) {
+        sessions.forEach((sess, idx) => {
+          const offlineTime = formatExactTimestamp(sess.discTimeMs);
+          let onlineTime = "";
+          let duration = "";
+          let incStatus: "RECOVERED" | "STILL OFFLINE" = "RECOVERED";
+          let onlineTimestampMs: number | null = null;
+
+          if (sess.recTimeMs) {
+            onlineTimestampMs = sess.recTimeMs;
+            onlineTime = `BACK ONLINE: ${formatExactTimestamp(sess.recTimeMs)}`;
+            const diffMs = Math.max(0, sess.recTimeMs - sess.discTimeMs);
+            duration = formatDuration(diffMs);
+            incStatus = "RECOVERED";
+          } else {
+            const isLatest = idx === sessions.length - 1;
+            if (isLatest && !isOnline) {
+              onlineTime = "OFFLINE UNTIL NOW";
+              const diffMs = Math.max(0, Date.now() - sess.discTimeMs);
+              duration = `${formatDuration(diffMs)} (Until now)`;
+              incStatus = "STILL OFFLINE";
+            } else {
+              onlineTime = "YES — BACK ONLINE (CURRENT)";
+              duration = "TEMPORARY (RECOVERED)";
+              incStatus = "RECOVERED";
+            }
+          }
+
+          const eventReason = String(
+            sess.discEvent.actionData?.caption ||
+            sess.discEvent.caption ||
+            sess.discEvent.actionData?.description ||
+            sess.discEvent.description ||
+            sess.discEvent.eventData?.type ||
+            sess.discEvent.eventType ||
+            "Camera Disconnected"
+          );
+
+          incidents.push({
+            incidentNumber: idx + 1,
+            offlineTime,
+            offlineTimestampMs: sess.discTimeMs,
+            onlineTime,
+            onlineTimestampMs,
+            duration,
+            status: incStatus,
+            reason: eventReason,
+          });
+        });
+      } else if (!isOnline) {
+        // Fallback for camera that is currently offline with no disconnect events in current window
+        const resolved = getOfflineExactTime(cam);
+        const durationMs = resolved.timestampMs ? Math.max(0, Date.now() - resolved.timestampMs) : 0;
+        incidents.push({
+          incidentNumber: 1,
+          offlineTime: resolved.exactTime,
+          offlineTimestampMs: resolved.timestampMs,
+          onlineTime: "OFFLINE UNTIL NOW",
+          onlineTimestampMs: null,
+          duration: durationMs > 0 ? `${formatDuration(durationMs)} (Until now)` : "Offline until now",
+          status: "STILL OFFLINE",
+          reason: "Current Offline State",
+        });
+      }
+
+      const incidentCount = incidents.length;
 
       let firstOffline = "ONLINE — NO OFFLINE EVENTS RECORDED";
       let lastOffline = "ONLINE — NO OFFLINE EVENTS RECORDED";
-      let offlineDuration = "N/A — HISTORICAL DATA NOT AVAILABLE";
-      let availabilityRate = "ONLINE";
+      let offlineDuration = "0s (100% Uptime)";
+      let availabilityRate = "100% ONLINE";
 
-      if (!isOnline) {
-        firstOffline = `CURRENTLY OFFLINE`;
-        lastOffline = `CURRENTLY OFFLINE (STILL OFFLINE)`;
-        offlineDuration = "N/A — HISTORICAL DATA NOT AVAILABLE";
-        availabilityRate = "N/A — HISTORICAL DATA NOT AVAILABLE";
-      } else if (incidentCount > 0) {
-        firstOffline = `HISTORICAL OFFLINE EVENT (${dateFrom})`;
-        lastOffline = `HISTORICAL OFFLINE EVENT (${dateTo})`;
-        offlineDuration = "N/A — HISTORICAL DATA NOT AVAILABLE";
-        availabilityRate = "ONLINE (RECOVERED)";
+      if (incidentCount > 0) {
+        // Latest incident represents the most recent state
+        const latestInc = incidents[incidents.length - 1];
+        firstOffline = latestInc.offlineTime;
+        lastOffline = latestInc.onlineTime;
+
+        let totalDowntimeMs = 0;
+        let hasUnrecovered = false;
+        incidents.forEach((inc) => {
+          if (inc.offlineTimestampMs && inc.onlineTimestampMs) {
+            totalDowntimeMs += Math.max(0, inc.onlineTimestampMs - inc.offlineTimestampMs);
+          } else if (inc.offlineTimestampMs && inc.status === "STILL OFFLINE") {
+            totalDowntimeMs += Math.max(0, Date.now() - inc.offlineTimestampMs);
+            hasUnrecovered = true;
+          }
+        });
+
+        if (hasUnrecovered || !isOnline) {
+          availabilityRate = "OFFLINE UNTIL NOW";
+          offlineDuration = `${formatDuration(totalDowntimeMs)} (Until now)`;
+        } else {
+          availabilityRate = "ONLINE (RECOVERED)";
+          offlineDuration = totalDowntimeMs > 0 ? formatDuration(totalDowntimeMs) : latestInc.duration;
+        }
       }
 
       const serverName = (cam._systemName || cam.serverName || "SERVER 01").toUpperCase();
@@ -807,14 +1099,146 @@ export default function ReportingManagement() {
         offlineDuration,
         incidentCount,
         availabilityRate,
+        incidents,
       };
     });
-  }, [cameras, eventList, dateFrom, dateTo]);
+  }, [cameras, eventList, dateFrom]);
+
+  // Filtered Offline Cameras for display
+  const displayedOfflineCameras = useMemo(() => {
+    if (offlineSummaryFilter === "all") return offlineCamerasSummary;
+    return offlineCamerasSummary.filter(
+      (c) => c.status === "OFFLINE" || c.incidentCount > 0
+    );
+  }, [offlineCamerasSummary, offlineSummaryFilter]);
 
   // Aggregate Total Offline Incidents Count
   const totalOfflineIncidents = useMemo(() => {
     return offlineCamerasSummary.reduce((acc, curr) => acc + curr.incidentCount, 0);
   }, [offlineCamerasSummary]);
+
+  // ============================================
+  // COMPREHENSIVE ALARM EVENT SUMMARY & PERIOD UPTIME RATE
+  // ============================================
+  const alarmEventMetrics = useMemo(() => {
+    const totalAlarms = targetAlarmEvents.length;
+    let criticalAlarms = 0;
+    let warningAlarms = 0;
+    let infoAlarms = 0;
+
+    let disconnectAlarms = 0;
+    let reconnectAlarms = 0;
+    let serverAlarms = 0;
+    let storageAlarms = 0;
+    let networkAlarms = 0;
+
+    targetAlarmEvents.forEach((a: any) => {
+      const sev = (a.severity || "INFO").toUpperCase();
+      if (sev === "CRITICAL") criticalAlarms++;
+      else if (sev === "WARNING") warningAlarms++;
+      else infoAlarms++;
+
+      const type = String(a.eventType || "").toLowerCase();
+      const label = String(a.eventLabel || "").toLowerCase();
+      const cap = String(a.caption || "").toLowerCase();
+      const desc = String(a.description || "").toLowerCase();
+
+      if (
+        type.includes("disconnect") ||
+        cap.includes("disconnect") ||
+        desc.includes("lost connection") ||
+        desc.includes("is now offline") ||
+        desc.includes("disconnected")
+      ) {
+        disconnectAlarms++;
+      } else if (
+        type.includes("reconnect") ||
+        type.includes("cameraconnected") ||
+        type.includes("deviceconnected") ||
+        cap.includes("back online") ||
+        cap.includes("camera online") ||
+        cap.includes("reconnect") ||
+        desc.includes("reconnected") ||
+        desc.includes("back online") ||
+        desc.includes("connection restored")
+      ) {
+        reconnectAlarms++;
+      }
+
+      if (type.includes("server") || label.includes("server") || desc.includes("server failure")) {
+        serverAlarms++;
+      }
+      if (type.includes("storage") || label.includes("storage") || desc.includes("storage") || desc.includes("disk")) {
+        storageAlarms++;
+      }
+      if (type.includes("network") || label.includes("network") || desc.includes("network")) {
+        networkAlarms++;
+      }
+    });
+
+    let resolvedIncidents = 0;
+    let activeIncidents = 0;
+    let totalDowntimeMs = 0;
+
+    offlineCamerasSummary.forEach((cam) => {
+      (cam.incidents || []).forEach((inc) => {
+        if (inc.status === "RECOVERED") {
+          resolvedIncidents++;
+          if (inc.offlineTimestampMs && inc.onlineTimestampMs) {
+            totalDowntimeMs += Math.max(0, inc.onlineTimestampMs - inc.offlineTimestampMs);
+          }
+        } else {
+          activeIncidents++;
+          if (inc.offlineTimestampMs) {
+            totalDowntimeMs += Math.max(0, Date.now() - inc.offlineTimestampMs);
+          }
+        }
+      });
+    });
+
+    const effectiveToTime = Math.min(toTime === Infinity ? Date.now() : toTime, Date.now());
+    const effectiveFromTime = Math.min(fromTime || effectiveToTime, effectiveToTime);
+    const periodDurationMs = Math.max(1000 * 60 * 60, effectiveToTime - effectiveFromTime);
+
+    const avgDowntimeMs = totalCameras > 0 ? totalDowntimeMs / totalCameras : totalDowntimeMs;
+    const computedUptime = periodDurationMs > 0
+      ? Math.max(0, Math.min(100, ((periodDurationMs - avgDowntimeMs) / periodDurationMs) * 100))
+      : 100;
+    const periodCameraUptimeRate = Number(computedUptime.toFixed(1));
+
+    const criticalPct = totalAlarms > 0 ? `${Math.round((criticalAlarms / totalAlarms) * 100)}%` : "0%";
+    const warningPct = totalAlarms > 0 ? `${Math.round((warningAlarms / totalAlarms) * 100)}%` : "0%";
+    const infoPct = totalAlarms > 0 ? `${Math.round((infoAlarms / totalAlarms) * 100)}%` : "0%";
+
+    const totalOfflineIncidentsCount = resolvedIncidents + activeIncidents;
+
+    const auditVerdict = `During the ${period.toUpperCase()} period (${dateFrom} to ${dateTo}), ${totalAlarms} total alarm event(s) were recorded for ${selectedServerLabel}. ${criticalAlarms} critical event(s) (${criticalPct}) and ${warningAlarms} warning(s) (${warningPct}) were logged. A total of ${totalOfflineIncidentsCount} camera disconnection incident(s) occurred: ${resolvedIncidents} successfully restored upon reconnection, and ${activeIncidents} active outage(s). Overall camera uptime index calculated from alarm logs is ${periodCameraUptimeRate}% with ${formatDuration(totalDowntimeMs)} total recorded downtime.`;
+
+    return {
+      totalAlarms,
+      criticalAlarms,
+      criticalPct,
+      warningAlarms,
+      warningPct,
+      infoAlarms,
+      infoPct,
+      disconnectAlarms,
+      reconnectAlarms,
+      serverAlarms,
+      storageAlarms,
+      networkAlarms,
+      resolvedIncidents,
+      activeIncidents,
+      totalOfflineIncidents: totalOfflineIncidentsCount,
+      totalDowntimeMs,
+      totalDowntimeFormatted: formatDuration(totalDowntimeMs),
+      periodCameraUptimeRate,
+      auditVerdict,
+    };
+  }, [targetAlarmEvents, offlineCamerasSummary, totalCameras, fromTime, toTime, period, dateFrom, dateTo, selectedServerLabel]);
+
+  // Period Camera Uptime Rate (calculated from historical alarm events)
+  const cameraOnlineRate = alarmEventMetrics.periodCameraUptimeRate;
 
   // Storage Stats per Server
   const serverStorageStats = useMemo(() => {
@@ -917,16 +1341,21 @@ export default function ReportingManagement() {
     });
     const now = `${dateStr} AT ${timeStr}`.toUpperCase();
 
-    const formattedCameras: CameraReportItem[] = cameras.map((cam: any) => ({
-      id: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
-      name: cam.name || "UNNAMED CAMERA",
-      serverName: (cam._systemName || cam.serverName || "SERVER 01").toUpperCase(),
-      status: ["online", "Online", "recording", "Recording"].includes(String(cam.status)) ? "ONLINE" : "OFFLINE",
-      ipAddress: cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE FROM SOURCE",
-      vendorModel: [cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA",
-      resolutionFps: cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE FROM SOURCE",
-      uptimeRate: ["online", "Online", "recording", "Recording"].includes(String(cam.status)) ? "ONLINE (LIVE)" : "N/A — HISTORICAL DATA NOT AVAILABLE",
-    }));
+    const formattedCameras: CameraReportItem[] = cameras.map((cam: any) => {
+      const isCamOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+      const offlineInfo = !isCamOnline ? getOfflineExactTime(cam, eventList) : null;
+      return {
+        id: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
+        name: cam.name || "UNNAMED CAMERA",
+        serverName: (cam._systemName || cam.serverName || "SERVER 01").toUpperCase(),
+        status: isCamOnline ? "ONLINE" : "OFFLINE",
+        ipAddress: cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE FROM SOURCE",
+        vendorModel: [cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA",
+        resolutionFps: cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE FROM SOURCE",
+        uptimeRate: isCamOnline ? "ONLINE (LIVE)" : `OFFLINE (Since: ${offlineInfo?.exactTime || "RECENT"})`,
+        exactOfflineTime: offlineInfo?.exactTime || "",
+      };
+    });
 
     const formattedServers: ServerHealthItem[] = serverStorageStats.map((srv) => ({
       serverName: srv.name,
@@ -945,6 +1374,9 @@ export default function ReportingManagement() {
       severity: a.severity || "INFO",
       timestamp: a.formattedTime || "DATA NOT AVAILABLE FROM SOURCE",
       description: a.description || "NO DESCRIPTION AVAILABLE",
+      eventType: a.eventType,
+      eventLabel: a.eventLabel,
+      systemName: a.systemName,
     }));
 
     return {
@@ -970,7 +1402,9 @@ export default function ReportingManagement() {
       totalOfflineIncidents,
       offlineSummaryTitle,
       cameras: formattedCameras,
-      offlineCameras: offlineCamerasSummary,
+      offlineCameras: offlineSummaryFilter === "all"
+        ? offlineCamerasSummary
+        : offlineCamerasSummary.filter((c) => c.status === "OFFLINE" || c.incidentCount > 0),
       servers: formattedServers,
       serverDisks: formattedServerDisks,
       alarms: formattedAlarms,
@@ -1047,12 +1481,6 @@ export default function ReportingManagement() {
                 {DASHBOARD_TITLE}
               </h1>
               <Badge className="bg-blue-600/10 text-blue-600 dark:text-blue-400 border-blue-500/20 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5">
-                {autoRefreshInterval > 0 && (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                )}
                 <span>EXECUTIVE REPORTING</span>
               </Badge>
             </div>
@@ -1064,33 +1492,6 @@ export default function ReportingManagement() {
 
         {/* Action Controls & Export Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Polling Interval */}
-          <Select
-            value={String(autoRefreshInterval)}
-            onValueChange={(val) => setAutoRefreshInterval(Number(val))}
-          >
-            <SelectTrigger className="h-9 px-3 text-[12px] font-semibold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl focus:ring-1 focus:ring-blue-500">
-              <div className="flex items-center gap-2">
-                {autoRefreshInterval > 0 ? (
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                ) : (
-                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                )}
-                <SelectValue placeholder="POLLING" />
-              </div>
-            </SelectTrigger>
-            <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
-              <SelectItem value="0" className="text-[12px]">LIVE DATA: OFF (MANUAL)</SelectItem>
-              <SelectItem value="5000" className="text-[12px] font-bold text-emerald-600 dark:text-emerald-400">⚡ LIVE DATA — AUTO REFRESH EVERY 5S</SelectItem>
-              <SelectItem value="10000" className="text-[12px]">⏱️ AUTO REFRESH EVERY 10S</SelectItem>
-              <SelectItem value="30000" className="text-[12px]">⏱️ AUTO REFRESH EVERY 30S</SelectItem>
-              <SelectItem value="60000" className="text-[12px]">⏱️ AUTO REFRESH EVERY 1 MIN</SelectItem>
-            </SelectContent>
-          </Select>
-
           {/* Refresh Button */}
           <Button
             variant="outline"
@@ -1262,12 +1663,19 @@ export default function ReportingManagement() {
               </span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-slate-900 dark:text-white">{cameraOnlineRate}%</span>
-                <Badge className={cn("text-[10px] font-bold uppercase", cameraOnlineRate >= 90 ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
-                  {cameraOnlineRate >= 90 ? "OPTIMAL" : "ATTENTION"}
+                <Badge className={cn(
+                  "text-[10px] font-bold uppercase",
+                  cameraOnlineRate >= 98
+                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    : cameraOnlineRate >= 90
+                    ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                    : "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                )}>
+                  {cameraOnlineRate >= 98 ? "OPTIMAL" : cameraOnlineRate >= 90 ? "ACCEPTABLE" : "ATTENTION"}
                 </Badge>
               </div>
               <p className="text-[11px] font-semibold text-slate-400 uppercase">
-                {onlineCameras} ONLINE / {offlineCamerasCount} OFFLINE ({totalCameras} TOTAL)
+                {alarmEventMetrics.totalDowntimeFormatted} DOWNTIME &bull; {alarmEventMetrics.totalOfflineIncidents} INCIDENTS ({onlineCameras}/{totalCameras} ONLINE NOW)
               </p>
             </div>
             <div className="p-3 bg-blue-500/10 rounded-2xl text-blue-600">
@@ -1313,7 +1721,9 @@ export default function ReportingManagement() {
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-slate-400 uppercase">
-                HOST HARDWARE HEALTH OPERATIONAL
+                {alarmEventMetrics.serverAlarms > 0
+                  ? `${alarmEventMetrics.serverAlarms} SERVER ALERTS LOGGED`
+                  : "HOST HARDWARE HEALTH OPERATIONAL"}
               </p>
             </div>
             <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-600">
@@ -1331,13 +1741,26 @@ export default function ReportingManagement() {
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> ALARM EVENTS
               </span>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-black text-slate-900 dark:text-white">{totalAlarms}</span>
-                <span className="text-[11px] font-bold text-rose-500 uppercase">
-                  {criticalAlarms} CRITICAL
-                </span>
+                <span className="text-2xl font-black text-slate-900 dark:text-white">{alarmEventMetrics.totalAlarms}</span>
+                {alarmEventMetrics.criticalAlarms > 0 ? (
+                  <Badge className="text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20 uppercase">
+                    {alarmEventMetrics.criticalAlarms} CRITICAL
+                  </Badge>
+                ) : alarmEventMetrics.warningAlarms > 0 ? (
+                  <Badge className="text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 uppercase">
+                    {alarmEventMetrics.warningAlarms} WARNINGS
+                  </Badge>
+                ) : (
+                  <Badge className="text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 uppercase">
+                    SYSTEM NORMAL
+                  </Badge>
+                )}
               </div>
               <p className="text-[11px] font-semibold text-slate-400 uppercase">
-                {warningAlarms} WARNINGS &bull; {totalOfflineIncidents} OFFLINE INCIDENTS
+                {alarmEventMetrics.criticalAlarms} CRIT &bull; {alarmEventMetrics.warningAlarms} WARN &bull; {alarmEventMetrics.infoAlarms} INFO
+              </p>
+              <p className="text-[10px] font-medium text-slate-400 uppercase">
+                {alarmEventMetrics.totalOfflineIncidents} DROPS ({alarmEventMetrics.resolvedIncidents} RESOLVED &bull; {alarmEventMetrics.activeIncidents} ACTIVE)
               </p>
             </div>
             <div className="p-3 bg-amber-500/10 rounded-2xl text-amber-600">
@@ -1345,6 +1768,118 @@ export default function ReportingManagement() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* ============================================ */}
+      {/* ALARM EVENTS EXECUTIVE SUMMARY BANNER        */}
+      {/* ============================================ */}
+      <div className="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-500">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                  ALARM EVENTS &amp; AVAILABILITY EXECUTIVE SUMMARY
+                </h3>
+                <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20 text-[10px] font-bold uppercase">
+                  {period.toUpperCase()}
+                </Badge>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Derived directly from {alarmEventMetrics.totalAlarms} alarm events recorded for {selectedServerLabel} ({dateFrom} to {dateTo})
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className="text-[10px] font-bold border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
+              TOTAL: {alarmEventMetrics.totalAlarms}
+            </Badge>
+            <Badge className="text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20">
+              {alarmEventMetrics.criticalAlarms} CRITICAL ({alarmEventMetrics.criticalPct})
+            </Badge>
+            <Badge className="text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
+              {alarmEventMetrics.warningAlarms} WARNINGS ({alarmEventMetrics.warningPct})
+            </Badge>
+            <Badge className="text-[10px] font-bold bg-blue-500/10 text-blue-500 border border-blue-500/20">
+              {alarmEventMetrics.infoAlarms} INFO ({alarmEventMetrics.infoPct})
+            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowExecutiveAlarmSummary((prev) => !prev)}
+              className="h-7 px-2 text-[11px] font-bold uppercase text-slate-500 hover:text-slate-900 dark:hover:text-white gap-1"
+            >
+              <span>{showExecutiveAlarmSummary ? "COLLAPSE" : "EXPAND"}</span>
+              <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", showExecutiveAlarmSummary ? "rotate-180" : "rotate-0")} />
+            </Button>
+          </div>
+        </div>
+
+        {showExecutiveAlarmSummary && (
+          <>
+            {/* 4 Mini Insight Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                  CAMERA CONNECTIVITY
+                </span>
+                <div className="font-bold text-slate-900 dark:text-white">
+                  {alarmEventMetrics.disconnectAlarms} Drops &bull; {alarmEventMetrics.reconnectAlarms} Reconnects
+                </div>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                  {alarmEventMetrics.resolvedIncidents} Resolved Sessions
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                  OUTAGE &amp; RESOLUTION
+                </span>
+                <div className={cn("font-bold", alarmEventMetrics.activeIncidents === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
+                  {alarmEventMetrics.activeIncidents === 0 ? "100% RESOLVED" : `${alarmEventMetrics.activeIncidents} ACTIVE ISSUE(S)`}
+                </div>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                  {alarmEventMetrics.totalDowntimeFormatted} Total Outage Time
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                  EFFECTIVE UPTIME RATE
+                </span>
+                <div className="font-bold text-blue-600 dark:text-blue-400">
+                  {cameraOnlineRate}% Period Uptime
+                </div>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Derived from historical alarm events
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                  SYSTEM &amp; STORAGE HEALTH
+                </span>
+                <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                  {alarmEventMetrics.serverAlarms === 0 && alarmEventMetrics.storageAlarms === 0
+                    ? "100% HARDWARE STABLE"
+                    : `${alarmEventMetrics.serverAlarms + alarmEventMetrics.storageAlarms} System Alerts`}
+                </div>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Host hardware operational
+                </span>
+              </div>
+            </div>
+
+            {/* Audit Statement */}
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-700/50 leading-relaxed">
+              <strong className="text-slate-900 dark:text-white uppercase font-bold">AUDIT VERDICT: </strong>
+              {alarmEventMetrics.auditVerdict}
+            </div>
+          </>
+        )}
       </div>
 
       {/* ============================================ */}
@@ -1458,7 +1993,7 @@ export default function ReportingManagement() {
                     <span>{cameraOnlineRate}%</span>
                   </div>
                   <p className="text-[11px] text-slate-500 uppercase">
-                    {onlineCameras} ACTIVE UNITS OUT OF {totalCameras} TOTAL CAMERAS.
+                    {onlineCameras}/{totalCameras} ACTIVE UNITS NOW &bull; {alarmEventMetrics.totalDowntimeFormatted} DOWNTIME IN PERIOD
                   </p>
                 </div>
 
@@ -1469,6 +2004,30 @@ export default function ReportingManagement() {
                       {offlineCamerasCount} UNITS
                     </span>
                   </div>
+
+                  {offlineCamerasCount > 0 && (
+                    <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl space-y-1.5 mt-2">
+                      <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                        <span>DISCONNECTED CAMERAS (EXACT TIME DOWN):</span>
+                      </div>
+                      <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                        {cameras
+                          .filter((c: any) => !["online", "Online", "recording", "Recording"].includes(String(c.status)))
+                          .map((cam: any, i: number) => {
+                            const exactTime = getOfflineExactTime(cam, eventList).exactTime;
+                            return (
+                              <div key={i} className="flex items-center justify-between text-[11px] font-mono bg-white/60 dark:bg-slate-800/80 px-2 py-1 rounded border border-rose-500/10">
+                                <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[140px]">
+                                  {cam.name || `Camera ${i + 1}`}
+                                </span>
+                                <span className="text-rose-600 dark:text-rose-400 font-bold text-[10px]">{exactTime}</span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between font-semibold">
                     <span className="text-slate-500">SERVERS ONLINE:</span>
                     <span className="font-bold text-emerald-500">{onlineServers} / {totalServers}</span>
@@ -1701,6 +2260,7 @@ export default function ReportingManagement() {
                         <th className="p-3">CAMERA NAME</th>
                         <th className="p-3">SERVER</th>
                         <th className="p-3">STATUS</th>
+                        <th className="p-3">OFFLINE EXACT TIME</th>
                         <th className="p-3">IP ADDRESS</th>
                         <th className="p-3">VENDOR / MODEL</th>
                         <th className="p-3">RESOLUTION / FPS</th>
@@ -1710,6 +2270,7 @@ export default function ReportingManagement() {
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
                       {cameras.map((cam: any, index: number) => {
                         const isCamOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+                        const offlineInfo = !isCamOnline ? getOfflineExactTime(cam, eventList) : null;
                         const serverName = (cam._systemName || cam.serverName || "SERVER 01").toUpperCase();
                         return (
                           <tr key={cam.id ? `cam-${cam.id}-${index}` : `cam-${index}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
@@ -1725,13 +2286,30 @@ export default function ReportingManagement() {
                                 {isCamOnline ? "ONLINE" : "OFFLINE"}
                               </Badge>
                             </td>
+                            <td className="p-3">
+                              {isCamOnline ? (
+                                <span className="text-slate-400 font-mono text-[11px]">—</span>
+                              ) : (
+                                <div className="flex items-center gap-1.5 font-mono text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                                  <Clock className="w-3.5 h-3.5 shrink-0 text-rose-500" />
+                                  <span>{offlineInfo?.exactTime}</span>
+                                </div>
+                              )}
+                            </td>
                             <td className="p-3 font-mono text-slate-500">{cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE"}</td>
                             <td className="p-3 uppercase">{[cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA"}</td>
                             <td className="p-3 font-mono">{cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE"}</td>
                             <td className="p-3 text-right font-bold">
-                              <span className={isCamOnline ? "text-emerald-500" : "text-rose-500"}>
-                                {isCamOnline ? "ONLINE" : "OFFLINE"}
-                              </span>
+                              {isCamOnline ? (
+                                <span className="text-emerald-500">100% ONLINE</span>
+                              ) : (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-rose-500">OFFLINE</span>
+                                  <span className="text-[10px] font-mono font-normal text-rose-500">
+                                    Since: {offlineInfo?.exactTime}
+                                  </span>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1750,17 +2328,47 @@ export default function ReportingManagement() {
         <TabsContent value="offline" className="space-y-4">
           <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-500" /> {offlineSummaryTitle}
-                </span>
-                <Badge className="bg-rose-500/10 text-rose-500 border-rose-500/20 text-[11px] font-bold uppercase">
-                  HISTORICAL INCIDENTS AUDIT ({period.toUpperCase()})
-                </Badge>
-              </CardTitle>
-              <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase">
-                COMPREHENSIVE AUDIT OF ALL CAMERAS THAT EXPERIENCED OFFLINE DISCONNECT EVENTS DURING THE SELECTED PERIOD
-              </CardDescription>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-500" /> {offlineSummaryTitle}
+                  </CardTitle>
+                  <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase mt-0.5">
+                    AUDIT OF CAMERAS EXPERIENCING OFFLINE DISCONNECT EVENTS &amp; DOWNTIME DURATION
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setOfflineSummaryFilter("incidents")}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md transition-all uppercase",
+                        offlineSummaryFilter === "incidents"
+                          ? "bg-rose-600 text-white shadow-sm"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                      )}
+                    >
+                      Offline / Incidents ({offlineCamerasSummary.filter((c) => c.status === "OFFLINE" || c.incidentCount > 0).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOfflineSummaryFilter("all")}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md transition-all uppercase",
+                        offlineSummaryFilter === "all"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                      )}
+                    >
+                      All Cameras ({offlineCamerasSummary.length})
+                    </button>
+                  </div>
+                  <Badge className="bg-rose-500/10 text-rose-500 border-rose-500/20 text-[11px] font-bold uppercase">
+                    {period.toUpperCase()}
+                  </Badge>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               {loadingData ? (
@@ -1768,7 +2376,7 @@ export default function ReportingManagement() {
                   <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
                   <span>CALCULATING HISTORICAL CAMERA OFFLINE INCIDENTS...</span>
                 </div>
-              ) : offlineCamerasSummary.length === 0 ? (
+              ) : displayedOfflineCameras.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
                   <CheckCircle2 className="w-8 h-8 text-emerald-500" />
                   <span>NO OFFLINE CAMERA INCIDENTS RECORDED IN THIS PERIOD</span>
@@ -1783,36 +2391,185 @@ export default function ReportingManagement() {
                         <th className="p-3">CAMERA NAME</th>
                         <th className="p-3">CAMERA ID</th>
                         <th className="p-3">CURRENT STATUS</th>
-                        <th className="p-3">FIRST OFFLINE</th>
-                        <th className="p-3">LAST OFFLINE</th>
+                        <th className="p-3">WHEN OFFLINE (EXACT TIME)</th>
+                        <th className="p-3">HAS IT BEEN ONLINE</th>
                         <th className="p-3">OFFLINE DURATION</th>
                         <th className="p-3 text-center">OFFLINE INCIDENTS</th>
                         <th className="p-3 text-right">AVAILABILITY RATE</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
-                      {offlineCamerasSummary.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                          <td className="p-3 text-slate-400 font-mono">{idx + 1}</td>
-                          <td className="p-3 font-bold text-slate-700 dark:text-slate-300 uppercase">{item.serverName}</td>
-                          <td className="p-3 font-bold text-slate-900 dark:text-white uppercase">{item.cameraName}</td>
-                          <td className="p-3 font-mono text-[11px] text-slate-500">{item.cameraId}</td>
-                          <td className="p-3">
-                            <Badge className={cn("text-[10px] font-bold uppercase", item.status === "ONLINE" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
-                              {item.status}
-                            </Badge>
-                          </td>
-                          <td className="p-3 font-mono text-slate-500">{item.firstOffline}</td>
-                          <td className="p-3 font-mono text-slate-500">{item.lastOffline}</td>
-                          <td className="p-3 font-mono font-bold text-amber-600 dark:text-amber-400">{item.offlineDuration}</td>
-                          <td className="p-3 text-center font-black text-rose-600 dark:text-rose-400">{item.incidentCount}</td>
-                          <td className="p-3 text-right font-black">
-                            <span className={item.availabilityRate === "100%" ? "text-emerald-500" : "text-rose-500"}>
-                              {item.availabilityRate}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {displayedOfflineCameras.map((item, idx) => {
+                        const isExpanded = !!expandedCameras[item.cameraId];
+                        const hasIncidents = item.incidents && item.incidents.length > 0;
+                        const hasMultiple = item.incidents && item.incidents.length > 1;
+
+                        return (
+                          <React.Fragment key={`offline-cam-${item.cameraId || "unk"}-${idx}`}>
+                            <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                              <td className="p-3 text-slate-400 font-mono">
+                                <div className="flex items-center gap-1">
+                                  {hasIncidents ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleCameraExpand(item.cameraId)}
+                                      className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                                      title={isExpanded ? "Collapse incident details" : "Expand incident details"}
+                                    >
+                                      {isExpanded ? (
+                                        <ChevronDown className="w-3.5 h-3.5 text-rose-500" />
+                                      ) : (
+                                        <ChevronRight className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  ) : (
+                                    <span className="w-3.5 h-3.5 inline-block" />
+                                  )}
+                                  <span>{idx + 1}</span>
+                                </div>
+                              </td>
+                              <td className="p-3 font-bold text-slate-700 dark:text-slate-300 uppercase">{item.serverName}</td>
+                              <td className="p-3 font-bold text-slate-900 dark:text-white uppercase">
+                                <div className="flex items-center gap-2">
+                                  <span>{item.cameraName}</span>
+                                  {hasMultiple && (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleCameraExpand(item.cameraId)}
+                                      className="text-[10px] text-rose-500 hover:underline font-normal normal-case shrink-0"
+                                    >
+                                      ({item.incidentCount} incidents)
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-3 font-mono text-[11px] text-slate-500">{item.cameraId}</td>
+                              <td className="p-3">
+                                <Badge className={cn("text-[10px] font-bold uppercase", item.status === "ONLINE" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                                  {item.status}
+                                </Badge>
+                              </td>
+                              <td className="p-3">
+                                <div className="flex flex-col gap-0.5">
+                                  <div className="flex items-center gap-1.5 font-mono text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                                    <Clock className="w-3.5 h-3.5 shrink-0 text-rose-500" />
+                                    <span>{item.firstOffline}</span>
+                                  </div>
+                                  {hasMultiple && (
+                                    <span className="text-[10px] text-slate-400 font-sans font-medium pl-5">
+                                      Latest of {item.incidentCount} incidents
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-3">
+                                {item.lastOffline === "OFFLINE UNTIL NOW" ? (
+                                  <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase px-2 py-0.5">
+                                    OFFLINE UNTIL NOW
+                                  </Badge>
+                                ) : item.status === "ONLINE" ? (
+                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                                    {item.lastOffline}
+                                  </span>
+                                ) : (
+                                  <span className="font-mono text-slate-500">{item.lastOffline}</span>
+                                )}
+                              </td>
+                              <td className="p-3 font-mono font-bold text-amber-600 dark:text-amber-400">{item.offlineDuration}</td>
+                              <td className="p-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedCameraForModal(item)}
+                                  className={cn(
+                                    "px-2.5 py-1 rounded-md text-xs font-black transition-all hover:scale-105 inline-flex items-center gap-1 cursor-pointer",
+                                    item.incidentCount > 1
+                                      ? "bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-sm"
+                                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                  )}
+                                  title="Click to view full incident history"
+                                >
+                                  <span>{item.incidentCount}</span>
+                                  {hasMultiple && (
+                                    <span className="text-[9px] uppercase font-bold opacity-80">(View Both)</span>
+                                  )}
+                                </button>
+                              </td>
+                              <td className="p-3 text-right font-black">
+                                <span className={item.availabilityRate === "100% ONLINE" || item.availabilityRate === "ONLINE" || item.availabilityRate === "ONLINE (RECOVERED)" ? "text-emerald-500" : "text-rose-500"}>
+                                  {item.availabilityRate}
+                                </span>
+                              </td>
+                            </tr>
+
+                            {/* Inline Incident History Accordion */}
+                            {isExpanded && item.incidents && item.incidents.length > 0 && (
+                              <tr className="bg-slate-50/75 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800">
+                                <td colSpan={10} className="p-3 pl-8">
+                                  <div className="bg-white dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 p-3.5 shadow-inner space-y-2">
+                                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 text-[11px]">
+                                      <span className="font-bold text-slate-700 dark:text-slate-300 uppercase flex items-center gap-1.5">
+                                        <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+                                        Historical Incident Breakdown for {item.cameraName} ({item.incidents.length} recorded {item.incidents.length === 1 ? 'incident' : 'incidents'})
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedCameraForModal(item)}
+                                        className="text-[10px] text-rose-500 hover:underline font-bold inline-flex items-center gap-1"
+                                      >
+                                        <span>Open in Dialog</span>
+                                        <ExternalLink className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-left text-[11px]">
+                                        <thead className="bg-slate-100/70 dark:bg-slate-800/50 text-slate-500 uppercase font-bold text-[10px]">
+                                          <tr>
+                                            <th className="p-2">Incident #</th>
+                                            <th className="p-2">When Offline (Exact Time)</th>
+                                            <th className="p-2">When Back Online</th>
+                                            <th className="p-2">Downtime Duration</th>
+                                            <th className="p-2">Status</th>
+                                            <th className="p-2">Trigger Event</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                          {item.incidents.map((inc) => (
+                                            <tr key={inc.incidentNumber} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                                              <td className="p-2 font-bold text-slate-600 dark:text-slate-400">Incident #{inc.incidentNumber}</td>
+                                              <td className="p-2 font-mono font-bold text-rose-600 dark:text-rose-400">
+                                                <div className="flex items-center gap-1.5">
+                                                  <Clock className="w-3 h-3 text-rose-500 shrink-0" />
+                                                  <span>{inc.offlineTime}</span>
+                                                </div>
+                                              </td>
+                                              <td className="p-2 font-mono">
+                                                {inc.onlineTime.includes("BACK ONLINE") ? (
+                                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{inc.onlineTime}</span>
+                                                ) : (
+                                                  <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase">
+                                                    {inc.onlineTime}
+                                                  </Badge>
+                                                )}
+                                              </td>
+                                              <td className="p-2 font-mono font-bold text-amber-600 dark:text-amber-400">{inc.duration}</td>
+                                              <td className="p-2">
+                                                <Badge className={cn("text-[9px] font-bold uppercase", inc.status === "RECOVERED" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                                                  {inc.status}
+                                                </Badge>
+                                              </td>
+                                              <td className="p-2 text-slate-500 text-[10px] font-mono">{inc.reason}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1973,6 +2730,91 @@ export default function ReportingManagement() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Executive Alarm Events Analytics Strip */}
+              <div className="pt-3 space-y-3">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">TOTAL LOGS</span>
+                      <Badge variant="outline" className="text-[9px] font-bold">ALL EVENTS</Badge>
+                    </div>
+                    <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                      {alarmEventMetrics.totalAlarms}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {alarmEventMetrics.criticalPct} Crit &bull; {alarmEventMetrics.warningPct} Warn &bull; {alarmEventMetrics.infoPct} Info
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">CAMERA CONNECTIVITY</span>
+                      <Badge className="bg-blue-500/10 text-blue-500 border border-blue-500/20 text-[9px] font-bold">DROPS</Badge>
+                    </div>
+                    <div className="text-xl font-black text-blue-600 dark:text-blue-400 mt-1">
+                      {alarmEventMetrics.disconnectAlarms} <span className="text-xs font-normal text-slate-400">/ {alarmEventMetrics.reconnectAlarms} reconnects</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {alarmEventMetrics.resolvedIncidents} Resolved Sessions
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">INCIDENT RESOLUTION</span>
+                      <Badge className={cn("text-[9px] font-bold", alarmEventMetrics.activeIncidents === 0 ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border border-rose-500/20")}>
+                        {alarmEventMetrics.activeIncidents === 0 ? "RECOVERED" : "ATTENTION"}
+                      </Badge>
+                    </div>
+                    <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                      {alarmEventMetrics.activeIncidents === 0 ? "100% RESOLVED" : `${alarmEventMetrics.activeIncidents} ACTIVE`}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {alarmEventMetrics.totalDowntimeFormatted} Outage Duration
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">EFFECTIVE UPTIME</span>
+                      <Badge className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[9px] font-bold">ALARM DERIVED</Badge>
+                    </div>
+                    <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                      {cameraOnlineRate}%
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      Period availability rate
+                    </div>
+                  </div>
+                </div>
+
+                {/* Event Category Distribution Indicators */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase mr-1">EVENT CATEGORIES:</span>
+                  <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                    📷 Camera Disconnects: {alarmEventMetrics.disconnectAlarms}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                    🔄 Camera Reconnects: {alarmEventMetrics.reconnectAlarms}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                    🖥️ Server &amp; Host: {alarmEventMetrics.serverAlarms}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                    💾 Storage Alerts: {alarmEventMetrics.storageAlarms}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] font-semibold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                    🌐 Network / Relay: {alarmEventMetrics.networkAlarms}
+                  </Badge>
+                </div>
+
+                {/* Dynamic Audit Verdict */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-700/50 text-[11px] text-slate-600 dark:text-slate-300">
+                  <strong className="text-slate-900 dark:text-white font-bold uppercase">ALARM AUDIT SUMMARY: </strong>
+                  {alarmEventMetrics.auditVerdict}
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               {systemOffline && (
@@ -2012,7 +2854,7 @@ export default function ReportingManagement() {
                         const isCrit = a.severity === "CRITICAL";
                         const isWarn = a.severity === "WARNING";
                         return (
-                          <tr key={a.id ? `tab-${a.id}` : `tab-${i}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <tr key={`tab-${a.id || "alarm"}-${i}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                             <td className="p-3 text-slate-400 font-mono">{i + 1}</td>
                             <td className="p-3 font-bold uppercase text-slate-900 dark:text-white">
                               {a.eventLabel || a.eventType}
@@ -2127,6 +2969,101 @@ export default function ReportingManagement() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* ========================================================= */}
+      {/* MODAL DIALOG: DETAILED INCIDENT BREAKDOWN FOR CAMERA     */}
+      {/* ========================================================= */}
+      <Dialog open={!!selectedCameraForModal} onOpenChange={(open) => !open && setSelectedCameraForModal(null)}>
+        <DialogContent className="max-w-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 shadow-2xl p-6">
+          <DialogHeader className="pb-3 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-start justify-between">
+              <div>
+                <DialogTitle className="text-base font-bold flex items-center gap-2 text-slate-900 dark:text-white uppercase tracking-wider">
+                  <AlertCircle className="w-5 h-5 text-rose-500" />
+                  Historical Offline Incidents Audit
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Camera: <span className="font-bold text-slate-800 dark:text-slate-200 uppercase">{selectedCameraForModal?.cameraName}</span> • Server: <span className="font-semibold text-slate-700 dark:text-slate-300 uppercase">{selectedCameraForModal?.serverName}</span>
+                </DialogDescription>
+              </div>
+              <Badge className={cn("text-[11px] font-bold uppercase", selectedCameraForModal?.status === "ONLINE" ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/30" : "bg-rose-500/10 text-rose-500 border border-rose-500/30")}>
+                {selectedCameraForModal?.status}
+              </Badge>
+            </div>
+          </DialogHeader>
+
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-3 gap-3 my-4">
+            <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-lg border border-slate-100 dark:border-slate-800 text-center">
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Total Incidents</span>
+              <span className="text-xl font-black text-rose-600 dark:text-rose-400">{selectedCameraForModal?.incidentCount || 0}</span>
+            </div>
+            <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-lg border border-slate-100 dark:border-slate-800 text-center">
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Combined Downtime</span>
+              <span className="text-xl font-black text-amber-600 dark:text-amber-400">{selectedCameraForModal?.offlineDuration || "0s"}</span>
+            </div>
+            <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-lg border border-slate-100 dark:border-slate-800 text-center">
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Availability</span>
+              <span className={cn("text-sm font-black block mt-1", selectedCameraForModal?.availabilityRate?.includes("ONLINE") ? "text-emerald-500" : "text-rose-500")}>
+                {selectedCameraForModal?.availabilityRate || "N/A"}
+              </span>
+            </div>
+          </div>
+
+          {/* Incidents Table */}
+          <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
+            <table className="w-full text-left text-[11px]">
+              <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="p-2.5">#</th>
+                  <th className="p-2.5">WHEN OFFLINE (EXACT TIME)</th>
+                  <th className="p-2.5">WHEN BACK ONLINE</th>
+                  <th className="p-2.5">DURATION</th>
+                  <th className="p-2.5">STATUS</th>
+                  <th className="p-2.5">TRIGGER / EVENT</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {selectedCameraForModal?.incidents && selectedCameraForModal.incidents.length > 0 ? (
+                  selectedCameraForModal.incidents.map((inc) => (
+                    <tr key={inc.incidentNumber} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="p-2.5 font-bold text-slate-400">Incident #{inc.incidentNumber}</td>
+                      <td className="p-2.5 font-mono font-bold text-rose-600 dark:text-rose-400">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3 h-3 text-rose-500 shrink-0" />
+                          <span>{inc.offlineTime}</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 font-mono">
+                        {inc.onlineTime.includes("BACK ONLINE") ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{inc.onlineTime}</span>
+                        ) : (
+                          <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase">
+                            {inc.onlineTime}
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="p-2.5 font-mono font-bold text-amber-600 dark:text-amber-400">{inc.duration}</td>
+                      <td className="p-2.5">
+                        <Badge className={cn("text-[9px] font-bold uppercase", inc.status === "RECOVERED" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                          {inc.status}
+                        </Badge>
+                      </td>
+                      <td className="p-2.5 text-slate-500 font-mono text-[10px] truncate max-w-[180px]" title={inc.reason}>
+                        {inc.reason}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="p-4 text-center text-slate-400">No individual incidents recorded</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

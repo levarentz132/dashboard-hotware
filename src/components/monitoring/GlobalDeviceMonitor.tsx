@@ -182,6 +182,7 @@ export function GlobalDeviceMonitor() {
 
       const response = await fetch("/api/nx/create-event", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           ...getElectronHeaders()
@@ -249,6 +250,7 @@ export function GlobalDeviceMonitor() {
       
       const response = await fetch("/api/nx/create-event", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           ...getElectronHeaders()

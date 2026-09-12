@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
     // Normalize if array
     if (Array.isArray(data)) {
       const normalized = data.map((d: any) => ({
+        ...d,
         id: d.id || d.guid || "",
         name: d.name || d.userDefinedName || "Camera",
         status: d.status || d.state || "Offline",
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
         vendor: d.vendor || d.manufacturer || "Generic",
         model: d.model || "IP Camera",
         deviceType: d.deviceType || d.type || "Camera",
+        lastSeen: d.lastSeen || d.offlineTime || d.updatedAt,
       }));
       return NextResponse.json(normalized);
     }

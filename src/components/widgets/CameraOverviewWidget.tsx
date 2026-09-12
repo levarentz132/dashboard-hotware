@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, Wifi, WifiOff, Activity, AlertCircle, Circle, RefreshCw } from "lucide-react";
+import { Camera, Wifi, WifiOff, Activity, AlertCircle, Circle, RefreshCw, Clock } from "lucide-react";
 import { useInventorySync, SyncData } from "@/hooks/use-inventory-sync";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import { NxCamera } from "@/lib/nxapi";
 import Link from "next/link";
 import { useCallback, useMemo } from "react";
 import Cookies from "js-cookie";
+import { getOfflineExactTime } from "@/lib/camera-offline-tracker";
 
 export default function CameraOverviewWidget({ systemId: propSystemId }: { systemId?: string }) {
   // 1. Define Fetchers to match CameraInventory logic
@@ -115,9 +116,17 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
     fetchCloudCamerasForSystem
   );
 
-  // 3. Consolidated cameras array
+  // 3. Consolidated cameras array (deduplicated by camera ID)
   const cameras = useMemo(() => {
-    return dataBySystem.flatMap(sys => sys.items);
+    const raw = dataBySystem.flatMap((sys) => sys.items);
+    const seen = new Set<string>();
+    return raw.filter((c: any) => {
+      const cleanId = String(c?.id || "").replace(/[{}]/g, "").toLowerCase();
+      if (!cleanId) return true;
+      if (seen.has(cleanId)) return false;
+      seen.add(cleanId);
+      return true;
+    });
   }, [dataBySystem]);
 
   // Count cameras by status
@@ -293,10 +302,10 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
         <TabsContent value="list" className="flex-1 mt-0 min-h-0">
           <ScrollArea className="h-full pr-1 sm:pr-2">
             <div className="space-y-1.5 sm:space-y-2">
-              {sortedCameras.slice(0, 10).map((camera) => {
+              {sortedCameras.slice(0, 10).map((camera, index) => {
                 const isOffline = camera.status?.toLowerCase() === "offline";
                 return (
-                  <Link href="/?section=cameras" key={camera.id}>
+                  <Link href="/?section=cameras" key={`overview-cam-${camera.id || "unk"}-${index}`}>
                     <div
                       className={`flex items-center justify-between p-1.5 sm:p-2 rounded-lg border transition-colors cursor-pointer ${isOffline ? "border-destructive/50 bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent"
                         }`}
@@ -314,7 +323,12 @@ export default function CameraOverviewWidget({ systemId: propSystemId }: { syste
                           <p className="text-xs sm:text-sm font-medium truncate text-foreground">
                             {camera.name || `Camera ${camera.id}`}
                           </p>
-                          {isOffline && <p className="text-[10px] sm:text-xs text-destructive">Requires attention</p>}
+                          {isOffline && (
+                            <p className="text-[10px] sm:text-xs text-destructive font-mono flex items-center gap-1 mt-0.5">
+                              <Clock className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">Offline: {getOfflineExactTime(camera).exactTime}</span>
+                            </p>
+                          )}
                         </div>
                       </div>
                       <Badge

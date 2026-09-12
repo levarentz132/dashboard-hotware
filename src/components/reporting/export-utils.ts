@@ -11,6 +11,18 @@ export interface CameraReportItem {
   vendorModel: string;
   resolutionFps: string;
   uptimeRate: string;
+  exactOfflineTime?: string;
+}
+
+export interface OfflineCameraIncident {
+  incidentNumber: number;
+  offlineTime: string;
+  offlineTimestampMs?: number | null;
+  onlineTime: string;
+  onlineTimestampMs?: number | null;
+  duration: string;
+  status: "RECOVERED" | "STILL OFFLINE";
+  reason?: string;
 }
 
 export interface OfflineCameraItem {
@@ -23,6 +35,7 @@ export interface OfflineCameraItem {
   offlineDuration: string;
   incidentCount: number;
   availabilityRate: string;
+  incidents?: OfflineCameraIncident[];
 }
 
 export interface ServerHealthItem {
@@ -52,6 +65,9 @@ export interface AlarmReportItem {
   severity: string;
   timestamp: string;
   description: string;
+  eventType?: string;
+  eventLabel?: string;
+  systemName?: string;
 }
 
 export interface S3LogItem {
@@ -97,6 +113,213 @@ export interface FullReportData {
   serverDisks: ServerStorageDiskItem[];
   alarms: AlarmReportItem[];
   s3Logs: S3LogItem[];
+}
+
+export interface EventSummaryAnalysis {
+  total: number;
+  criticalCount: number;
+  criticalPct: string;
+  warningCount: number;
+  warningPct: string;
+  infoCount: number;
+  infoPct: string;
+  topCategory: string;
+  severityRows: Array<{
+    level: string;
+    count: number;
+    pct: string;
+    impact: string;
+  }>;
+  categoryRows: Array<{
+    category: string;
+    severity: string;
+    count: number;
+    pct: string;
+    sources: string;
+  }>;
+  sourceRows: Array<{
+    source: string;
+    critical: number;
+    warnings: number;
+    total: number;
+    pct: string;
+  }>;
+}
+
+export function analyzeEvents(alarms: AlarmReportItem[]): EventSummaryAnalysis {
+  const total = alarms.length;
+  if (total === 0) {
+    return {
+      total: 0,
+      criticalCount: 0,
+      criticalPct: "0%",
+      warningCount: 0,
+      warningPct: "0%",
+      infoCount: 0,
+      infoPct: "0%",
+      topCategory: "NO EVENTS LOGGED",
+      severityRows: [],
+      categoryRows: [],
+      sourceRows: [],
+    };
+  }
+
+  let criticalCount = 0;
+  let warningCount = 0;
+  let infoCount = 0;
+
+  const categoryMap = new Map<string, { count: number; severities: string[]; sources: Set<string> }>();
+  const sourceMap = new Map<string, { total: number; critical: number; warning: number }>();
+
+  alarms.forEach((a) => {
+    const sev = (a.severity || "INFO").toUpperCase();
+    if (sev === "CRITICAL" || sev.includes("CRIT") || sev.includes("ERROR") || sev.includes("FATAL")) {
+      criticalCount++;
+    } else if (sev === "WARNING" || sev.includes("WARN")) {
+      warningCount++;
+    } else {
+      infoCount++;
+    }
+
+    // Categorize
+    const desc = (a.description || "").toLowerCase();
+    const source = (a.source || "UNKNOWN").trim();
+    const type = (a.eventType || "").toLowerCase();
+    const label = (a.eventLabel || "").toLowerCase();
+
+    let cat = "GENERAL SYSTEM & OPERATIONAL";
+    if (
+      type.includes("disconnect") ||
+      type.includes("offline") ||
+      label.includes("disconnect") ||
+      desc.includes("disconnect") ||
+      desc.includes("offline") ||
+      desc.includes("lost connection")
+    ) {
+      cat = "CAMERA DISCONNECTION / OFFLINE";
+    } else if (
+      type.includes("storage") ||
+      label.includes("storage") ||
+      desc.includes("storage") ||
+      desc.includes("disk") ||
+      desc.includes("hard drive")
+    ) {
+      cat = "STORAGE & HARD DRIVE FAILURE";
+    } else if (
+      type.includes("server") ||
+      label.includes("server") ||
+      desc.includes("server")
+    ) {
+      cat = "SERVER FAILURE & SYSTEM CONFLICT";
+    } else if (
+      type.includes("network") ||
+      type.includes("ipconflict") ||
+      label.includes("network") ||
+      desc.includes("network") ||
+      desc.includes("ip conflict")
+    ) {
+      cat = "NETWORK & CONNECTIVITY ISSUES";
+    } else if (
+      type.includes("motion") ||
+      type.includes("input") ||
+      label.includes("motion") ||
+      desc.includes("motion")
+    ) {
+      cat = "MOTION DETECTION & VIDEO ANALYTICS";
+    }
+
+    if (!categoryMap.has(cat)) {
+      categoryMap.set(cat, { count: 0, severities: [], sources: new Set() });
+    }
+    const catEntry = categoryMap.get(cat)!;
+    catEntry.count++;
+    catEntry.severities.push(sev);
+    if (source) catEntry.sources.add(source);
+
+    // Source stats
+    if (!sourceMap.has(source)) {
+      sourceMap.set(source, { total: 0, critical: 0, warning: 0 });
+    }
+    const srcEntry = sourceMap.get(source)!;
+    srcEntry.total++;
+    if (sev === "CRITICAL" || sev.includes("CRIT") || sev.includes("ERROR")) {
+      srcEntry.critical++;
+    } else if (sev === "WARNING" || sev.includes("WARN")) {
+      srcEntry.warning++;
+    }
+  });
+
+  const criticalPct = `${Math.round((criticalCount / total) * 100)}%`;
+  const warningPct = `${Math.round((warningCount / total) * 100)}%`;
+  const infoPct = `${Math.round((infoCount / total) * 100)}%`;
+
+  const severityRows = [
+    {
+      level: "CRITICAL",
+      count: criticalCount,
+      pct: criticalPct,
+      impact: "Immediate Action Required — Hardware offline, server unreachable or storage failure",
+    },
+    {
+      level: "WARNING",
+      count: warningCount,
+      pct: warningPct,
+      impact: "Operational Warning — Performance alerts, high storage usage or network warnings",
+    },
+    {
+      level: "INFO",
+      count: infoCount,
+      pct: infoPct,
+      impact: "Operational Audit — Standard system events, analytics alerts, and routine logs",
+    },
+  ];
+
+  const categoryRows = Array.from(categoryMap.entries())
+    .map(([cat, data]) => {
+      const isCrit = data.severities.includes("CRITICAL");
+      const isWarn = data.severities.includes("WARNING");
+      const dominantSeverity = isCrit ? "CRITICAL" : isWarn ? "WARNING" : "INFO";
+      const srcList = Array.from(data.sources);
+      const sourcesText =
+        srcList.length <= 2
+          ? srcList.join(", ")
+          : `${srcList.slice(0, 2).join(", ")} (+${srcList.length - 2} more)`;
+      return {
+        category: cat,
+        severity: dominantSeverity,
+        count: data.count,
+        pct: `${Math.round((data.count / total) * 100)}%`,
+        sources: sourcesText || "N/A",
+      };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  const topCategory = categoryRows.length > 0 ? categoryRows[0].category : "NO EVENTS";
+
+  const sourceRows = Array.from(sourceMap.entries())
+    .map(([source, stats]) => ({
+      source,
+      critical: stats.critical,
+      warnings: stats.warning,
+      total: stats.total,
+      pct: `${Math.round((stats.total / total) * 100)}%`,
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8);
+
+  return {
+    total,
+    criticalCount,
+    criticalPct,
+    warningCount,
+    warningPct,
+    infoCount,
+    infoPct,
+    topCategory,
+    severityRows,
+    categoryRows,
+    sourceRows,
+  };
 }
 
 /**
@@ -190,7 +413,7 @@ export function exportToWord(data: FullReportData) {
           <tr>
             <td>
               <div class="card-val" style="color: #2563eb;">${data.cameraOnlineRate}%</div>
-              <div class="card-lbl">CURRENT CAMERA ONLINE RATE</div>
+              <div class="card-lbl">CAMERA UPTIME RATE (PERIOD)</div>
               <div class="card-sub">${data.onlineCameras} / ${data.totalCameras} CAMERAS ONLINE</div>
             </td>
             <td>
@@ -262,8 +485,8 @@ export function exportToWord(data: FullReportData) {
               <th>CAMERA NAME</th>
               <th>CAMERA ID</th>
               <th>STATUS</th>
-              <th>FIRST OFFLINE</th>
-              <th>LAST OFFLINE</th>
+              <th>WHEN OFFLINE</th>
+              <th>HAS IT BEEN ONLINE</th>
               <th>OFFLINE DURATION</th>
               <th>INCIDENTS</th>
               <th>AVAILABILITY RATE</th>
@@ -281,11 +504,23 @@ export function exportToWord(data: FullReportData) {
                 <td><strong>${item.cameraName}</strong></td>
                 <td><code>${item.cameraId}</code></td>
                 <td><span class="${item.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}">${item.status}</span></td>
-                <td>${item.firstOffline}</td>
-                <td>${item.lastOffline}</td>
+                <td>
+                  ${item.firstOffline}
+                  ${item.incidents && item.incidents.length > 1 
+                    ? `<div style="font-size: 9.5px; color: #64748b; margin-top: 4px; line-height: 1.3;">
+                        ${item.incidents.map(inc => `• Inc #${inc.incidentNumber}: ${inc.offlineTime} → ${inc.onlineTime.replace('BACK ONLINE: ', '')} (${inc.duration})`).join('<br/>')}
+                       </div>`
+                    : ''
+                  }
+                </td>
+                <td>${
+                  item.lastOffline === "OFFLINE UNTIL NOW"
+                    ? `<span class="badge-offline" style="font-weight: 800; background-color: #fee2e2; color: #b91c1c; padding: 3px 6px;">OFFLINE UNTIL NOW</span>`
+                    : item.lastOffline
+                }</td>
                 <td>${item.offlineDuration}</td>
                 <td style="text-align: center; font-weight: bold;">${item.incidentCount}</td>
-                <td style="font-weight: bold; color: ${item.availabilityRate === '100%' ? '#16a34a' : '#dc2626'};">${item.availabilityRate}</td>
+                <td style="font-weight: bold; color: ${item.availabilityRate === '100% ONLINE' || item.availabilityRate === 'ONLINE' || item.availabilityRate === 'ONLINE (RECOVERED)' ? '#16a34a' : '#dc2626'};">${item.availabilityRate}</td>
               </tr>
             `
                     )
@@ -345,6 +580,7 @@ export function exportToWord(data: FullReportData) {
               <th>CAMERA NAME</th>
               <th>SERVER</th>
               <th>STATUS</th>
+              <th>OFFLINE EXACT TIME</th>
               <th>ENDPOINT / IP</th>
               <th>VENDOR / MODEL</th>
               <th>RESOLUTION / FPS</th>
@@ -361,52 +597,168 @@ export function exportToWord(data: FullReportData) {
                 <td>${idx + 1}</td>
                 <td><strong>${cam.name}</strong></td>
                 <td>${cam.serverName}</td>
-                <td><span class="${cam.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}">${cam.status}</span></td>
+                <td>
+                  <span class="${cam.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}">${cam.status}</span>
+                </td>
+                <td>
+                  ${cam.status === 'OFFLINE' ? `<strong style="font-family:Consolas,monospace; color:#e11d48;">${cam.exactOfflineTime || 'N/A'}</strong>` : '—'}
+                </td>
                 <td><code>${cam.ipAddress}</code></td>
                 <td>${cam.vendorModel}</td>
                 <td>${cam.resolutionFps}</td>
-                <td><strong>${cam.uptimeRate}</strong></td>
+                <td><strong>${cam.status === 'OFFLINE' && cam.exactOfflineTime ? `OFFLINE (Since: ${cam.exactOfflineTime})` : cam.uptimeRate}</strong></td>
               </tr>
             `
                     )
                     .join("")
-                : `<tr><td colspan="8" style="text-align: center; color: #64748b;">NO CAMERA DATA AVAILABLE</td></tr>`
+                : `<tr><td colspan="9" style="text-align: center; color: #64748b;">NO CAMERA DATA AVAILABLE</td></tr>`
             }
           </tbody>
         </table>
 
-        <!-- SECTION 5: ALARM EVENTS -->
-        <h3>ALARM EVENTS &amp; SECURITY INCIDENTS (${data.alarms.length} EVENTS)</h3>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>EVENT SOURCE / NAME</th>
-              <th>SEVERITY</th>
-              <th>TIMESTAMP</th>
-              <th>DESCRIPTION</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              data.alarms.length > 0
-                ? data.alarms
-                    .map(
-                      (a, idx) => `
+        <!-- SECTION 5: ALARM EVENTS & EXECUTIVE SUMMARY -->
+        <h3>SECURITY &amp; ALARM EVENT EXECUTIVE SUMMARY (${data.alarms.length} TOTAL EVENTS)</h3>
+        ${(() => {
+          const analysis = analyzeEvents(data.alarms);
+          if (analysis.total === 0) {
+            return `<div style="padding:12px; background-color:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; color:#166534; font-weight:bold; margin-bottom:15px;">
+              NO SECURITY ALARMS OR UNEXPECTED HARDWARE DISCONNECTIONS LOGGED IN THIS REPORTING PERIOD.
+            </div>`;
+          }
+          return `
+            <!-- KPI Summary Cards -->
+            <table class="meta-table" style="margin-bottom:12px;">
               <tr>
-                <td>${idx + 1}</td>
-                <td><strong>${a.source}</strong></td>
-                <td><span class="${a.severity.toLowerCase().includes('error') || a.severity.toLowerCase().includes('crit') ? 'badge-offline' : 'badge-warning'}">${a.severity}</span></td>
-                <td>${a.timestamp}</td>
-                <td>${a.description}</td>
+                <td style="text-align:center; padding:10px; border:1px solid #cbd5e1; background-color:#fef2f2;">
+                  <div style="font-size:16px; font-weight:bold; color:#dc2626;">${analysis.criticalCount} (${analysis.criticalPct})</div>
+                  <div style="font-size:10px; color:#64748b; text-transform:uppercase;">Critical Severity</div>
+                </td>
+                <td style="text-align:center; padding:10px; border:1px solid #cbd5e1; background-color:#fffbeb;">
+                  <div style="font-size:16px; font-weight:bold; color:#d97706;">${analysis.warningCount} (${analysis.warningPct})</div>
+                  <div style="font-size:10px; color:#64748b; text-transform:uppercase;">Warning Alerts</div>
+                </td>
+                <td style="text-align:center; padding:10px; border:1px solid #cbd5e1; background-color:#eff6ff;">
+                  <div style="font-size:16px; font-weight:bold; color:#2563eb;">${analysis.infoCount} (${analysis.infoPct})</div>
+                  <div style="font-size:10px; color:#64748b; text-transform:uppercase;">Info / Normal Logs</div>
+                </td>
+                <td style="text-align:center; padding:10px; border:1px solid #cbd5e1; background-color:#f8fafc;">
+                  <div style="font-size:14px; font-weight:bold; color:#0f172a;">${analysis.topCategory}</div>
+                  <div style="font-size:10px; color:#64748b; text-transform:uppercase;">Primary Incident Type</div>
+                </td>
               </tr>
-            `
-                    )
-                    .join("")
-                : `<tr><td colspan="5" style="text-align: center; color: #64748b;">NO ALARM EVENTS LOGGED IN THIS PERIOD</td></tr>`
-            }
-          </tbody>
-        </table>
+            </table>
+
+            <!-- Table 1: Severity Breakdown -->
+            <div style="font-size:11px; font-weight:bold; color:#002B66; margin-top:10px; margin-bottom:4px; text-transform:uppercase;">
+              5.1 INCIDENT SUMMARY BY SEVERITY LEVEL
+            </div>
+            <table class="data-table" style="margin-bottom:15px;">
+              <thead>
+                <tr>
+                  <th>SEVERITY LEVEL</th>
+                  <th>TOTAL EVENTS</th>
+                  <th>% OF TOTAL</th>
+                  <th>OPERATIONAL STATUS &amp; IMPACT</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${analysis.severityRows.map((r) => `
+                  <tr>
+                    <td><strong style="color:${r.level === 'CRITICAL' ? '#dc2626' : r.level === 'WARNING' ? '#d97706' : '#2563eb'};">${r.level}</strong></td>
+                    <td><strong>${r.count}</strong></td>
+                    <td>${r.pct}</td>
+                    <td>${r.impact}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+
+            <!-- Table 2: Category Breakdown -->
+            <div style="font-size:11px; font-weight:bold; color:#002B66; margin-top:10px; margin-bottom:4px; text-transform:uppercase;">
+              5.2 INCIDENT SUMMARY BY EVENT CATEGORY
+            </div>
+            <table class="data-table" style="margin-bottom:15px;">
+              <thead>
+                <tr>
+                  <th>INCIDENT CATEGORY</th>
+                  <th>PRIMARY SEVERITY</th>
+                  <th>OCCURRENCES</th>
+                  <th>% SHARE</th>
+                  <th>AFFECTED DEVICES / HARDWARE</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${analysis.categoryRows.map((cat) => `
+                  <tr>
+                    <td><strong>${cat.category}</strong></td>
+                    <td><span class="${cat.severity === 'CRITICAL' ? 'badge-offline' : cat.severity === 'WARNING' ? 'badge-warning' : 'badge-online'}">${cat.severity}</span></td>
+                    <td><strong>${cat.count}</strong></td>
+                    <td>${cat.pct}</td>
+                    <td>${cat.sources}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+
+            <!-- Table 3: Top Affected Hardware -->
+            ${analysis.sourceRows.length > 0 ? `
+              <div style="font-size:11px; font-weight:bold; color:#002B66; margin-top:10px; margin-bottom:4px; text-transform:uppercase;">
+                5.3 TOP AFFECTED HARDWARE &amp; EVENT SOURCES
+              </div>
+              <table class="data-table" style="margin-bottom:15px;">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>SOURCE / HARDWARE NAME</th>
+                    <th>CRITICAL</th>
+                    <th>WARNINGS</th>
+                    <th>TOTAL INCIDENTS</th>
+                    <th>% SHARE</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${analysis.sourceRows.map((src, i) => `
+                    <tr>
+                      <td>${i + 1}</td>
+                      <td><strong>${src.source}</strong></td>
+                      <td style="color:#dc2626; font-weight:bold;">${src.critical}</td>
+                      <td style="color:#d97706; font-weight:bold;">${src.warnings}</td>
+                      <td><strong>${src.total}</strong></td>
+                      <td>${src.pct}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            ` : ""}
+
+            <!-- Table 4: Chronological Event Log -->
+            <div style="font-size:11px; font-weight:bold; color:#002B66; margin-top:10px; margin-bottom:4px; text-transform:uppercase;">
+              5.4 DETAILED SECURITY EVENT &amp; ALARM LOG (${data.alarms.length} EVENTS)
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>EVENT SOURCE / NAME</th>
+                  <th>SEVERITY</th>
+                  <th>TIMESTAMP</th>
+                  <th>DESCRIPTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${data.alarms.map((a, idx) => `
+                  <tr>
+                    <td>${idx + 1}</td>
+                    <td><strong>${a.source}</strong></td>
+                    <td><span class="${a.severity.toLowerCase().includes('error') || a.severity.toLowerCase().includes('crit') ? 'badge-offline' : a.severity.toLowerCase().includes('warn') ? 'badge-warning' : 'badge-online'}">${a.severity}</span></td>
+                    <td style="font-family:Consolas,monospace;">${a.timestamp}</td>
+                    <td>${a.description}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `;
+        })()}
 
         <!-- SECTION 6: S3 CLOUD BRIDGE LOGS -->
         <h3>S3 CLOUD BRIDGE STORAGE SYNC AUDIT LOGS</h3>
@@ -526,7 +878,7 @@ export function exportToPdf(data: FullReportData) {
   doc.text(`${data.cameraOnlineRate}%`, 15, startY + 8);
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
-  doc.text("CURRENT CAMERA ONLINE RATE", 15, startY + 13);
+  doc.text("CAMERA UPTIME RATE (PERIOD)", 15, startY + 13);
 
   // Card 2: Server Health
   doc.setFontSize(12);
@@ -606,7 +958,7 @@ export function exportToPdf(data: FullReportData) {
   autoTable(doc, {
     startY,
     head: [
-      ["#", "SERVER", "CAMERA NAME", "CAMERA ID", "STATUS", "FIRST OFFLINE", "LAST OFFLINE", "DURATION", "INCIDENTS", "AVAILABILITY"],
+      ["#", "SERVER", "CAMERA NAME", "CAMERA ID", "STATUS", "WHEN OFFLINE", "HAS BEEN ONLINE", "DURATION", "INCIDENTS", "AVAILABILITY"],
     ],
     body: data.offlineCameras.map((item, index) => [
       index + 1,
@@ -679,17 +1031,18 @@ export function exportToPdf(data: FullReportData) {
   autoTable(doc, {
     startY,
     head: [
-      ["#", "CAMERA NAME", "SERVER", "STATUS", "ENDPOINT / IP", "VENDOR / MODEL", "RESOLUTION / FPS", "HISTORICAL AVAILABILITY"],
+      ["#", "CAMERA NAME", "SERVER", "STATUS", "OFFLINE EXACT TIME", "ENDPOINT / IP", "VENDOR / MODEL", "RESOLUTION / FPS", "HISTORICAL AVAILABILITY"],
     ],
     body: data.cameras.map((cam, index) => [
       index + 1,
       cam.name,
       cam.serverName,
       cam.status,
+      cam.status === "OFFLINE" ? (cam.exactOfflineTime || "N/A") : "—",
       cam.ipAddress,
       cam.vendorModel,
       cam.resolutionFps,
-      cam.uptimeRate,
+      cam.status === "OFFLINE" && cam.exactOfflineTime ? `OFFLINE (Since: ${cam.exactOfflineTime})` : cam.uptimeRate,
     ]),
     theme: "striped",
     headStyles: { fillColor: [0, 43, 102], fontSize: 8, fontStyle: "bold" },
@@ -699,35 +1052,207 @@ export function exportToPdf(data: FullReportData) {
 
   startY = (doc as any).lastAutoTable.finalY + 10;
 
-  // Section 5: ALARM EVENTS
-  if (startY > doc.internal.pageSize.getHeight() - 40) {
+  // Section 5: ALARM EVENTS & EXECUTIVE EVENT SUMMARY
+  if (startY > doc.internal.pageSize.getHeight() - 60) {
     doc.addPage();
     startY = 15;
   }
 
+  const analysis = analyzeEvents(data.alarms);
+
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(0, 43, 102);
-  doc.text(`ALARM EVENTS & SECURITY INCIDENTS (${data.alarms.length} EVENTS)`, 10, startY);
-  startY += 3;
+  doc.text(`SECURITY & ALARM EVENT EXECUTIVE SUMMARY (${data.alarms.length} TOTAL EVENTS)`, 10, startY);
+  startY += 4;
 
-  autoTable(doc, {
-    startY,
-    head: [["#", "SOURCE / NAME", "SEVERITY", "TIMESTAMP", "DESCRIPTION"]],
-    body: data.alarms.map((a, index) => [
-      index + 1,
-      a.source,
-      a.severity,
-      a.timestamp,
-      a.description,
-    ]),
-    theme: "striped",
-    headStyles: { fillColor: [0, 43, 102], fontSize: 8, fontStyle: "bold" },
-    bodyStyles: { fontSize: 7 },
-    margin: { left: 10, right: 10 },
-  });
+  if (analysis.total === 0) {
+    doc.setFillColor(240, 253, 244);
+    doc.setDrawColor(187, 247, 208);
+    doc.roundedRect(10, startY, pageWidth - 20, 14, 2, 2, "FD");
+    doc.setFontSize(8);
+    doc.setTextColor(22, 101, 52);
+    doc.setFont("helvetica", "bold");
+    doc.text("NO SECURITY ALARMS OR UNEXPECTED HARDWARE DISCONNECTIONS LOGGED IN THIS REPORTING PERIOD.", 15, startY + 9);
+    startY += 20;
+  } else {
+    // 1. KPI Metric Summary Cards
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(10, startY, pageWidth - 20, 16, 2, 2, "FD");
 
-  startY = (doc as any).lastAutoTable.finalY + 10;
+    const kpiWidth = (pageWidth - 20) / 4;
+
+    // KPI 1: Critical
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(220, 38, 38);
+    doc.text(`${analysis.criticalCount} (${analysis.criticalPct})`, 15, startY + 7);
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("CRITICAL SEVERITY INCIDENTS", 15, startY + 12);
+
+    // KPI 2: Warnings
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(217, 119, 6);
+    doc.text(`${analysis.warningCount} (${analysis.warningPct})`, 15 + kpiWidth, startY + 7);
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("WARNING SEVERITY ALERTS", 15 + kpiWidth, startY + 12);
+
+    // KPI 3: Info
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(37, 99, 235);
+    doc.text(`${analysis.infoCount} (${analysis.infoPct})`, 15 + kpiWidth * 2, startY + 7);
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("INFORMATIONAL / NORMAL LOGS", 15 + kpiWidth * 2, startY + 12);
+
+    // KPI 4: Top Category
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(15, 23, 42);
+    doc.text(analysis.topCategory.length > 25 ? `${analysis.topCategory.slice(0, 25)}...` : analysis.topCategory, 15 + kpiWidth * 3, startY + 7);
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("PRIMARY INCIDENT CATEGORY", 15 + kpiWidth * 3, startY + 12);
+
+    startY += 20;
+
+    // 2. Table: Event Summary by Severity
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 43, 102);
+    doc.text("5.1 INCIDENT SUMMARY BY SEVERITY LEVEL", 10, startY);
+    startY += 2;
+
+    autoTable(doc, {
+      startY,
+      head: [["SEVERITY LEVEL", "TOTAL EVENTS", "% OF TOTAL", "OPERATIONAL STATUS & IMPACT"]],
+      body: analysis.severityRows.map((row) => [
+        row.level,
+        row.count,
+        row.pct,
+        row.impact,
+      ]),
+      theme: "striped",
+      headStyles: { fillColor: [0, 43, 102], fontSize: 7.5, fontStyle: "bold" },
+      bodyStyles: { fontSize: 7 },
+      margin: { left: 10, right: 10 },
+      didParseCell: (hookData) => {
+        if (hookData.section === "body" && hookData.column.index === 0) {
+          const val = String(hookData.cell.raw);
+          if (val === "CRITICAL") {
+            hookData.cell.styles.textColor = [220, 38, 38];
+            hookData.cell.styles.fontStyle = "bold";
+          } else if (val === "WARNING") {
+            hookData.cell.styles.textColor = [217, 119, 6];
+            hookData.cell.styles.fontStyle = "bold";
+          } else {
+            hookData.cell.styles.textColor = [37, 99, 235];
+            hookData.cell.styles.fontStyle = "bold";
+          }
+        }
+      },
+    });
+
+    startY = (doc as any).lastAutoTable.finalY + 8;
+
+    // 3. Table: Incident Summary by Category
+    if (startY > doc.internal.pageSize.getHeight() - 50) {
+      doc.addPage();
+      startY = 15;
+    }
+
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 43, 102);
+    doc.text("5.2 INCIDENT SUMMARY BY EVENT CATEGORY", 10, startY);
+    startY += 2;
+
+    autoTable(doc, {
+      startY,
+      head: [["INCIDENT CATEGORY", "SEVERITY", "OCCURRENCES", "% SHARE", "AFFECTED DEVICES / HARDWARE"]],
+      body: analysis.categoryRows.map((cat) => [
+        cat.category,
+        cat.severity,
+        cat.count,
+        cat.pct,
+        cat.sources,
+      ]),
+      theme: "striped",
+      headStyles: { fillColor: [0, 43, 102], fontSize: 7.5, fontStyle: "bold" },
+      bodyStyles: { fontSize: 7 },
+      margin: { left: 10, right: 10 },
+    });
+
+    startY = (doc as any).lastAutoTable.finalY + 8;
+
+    // 4. Table: Top Affected Sources
+    if (analysis.sourceRows.length > 0) {
+      if (startY > doc.internal.pageSize.getHeight() - 50) {
+        doc.addPage();
+        startY = 15;
+      }
+
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0, 43, 102);
+      doc.text("5.3 TOP AFFECTED HARDWARE & EVENT SOURCES", 10, startY);
+      startY += 2;
+
+      autoTable(doc, {
+        startY,
+        head: [["#", "SOURCE / HARDWARE NAME", "CRITICAL", "WARNINGS", "TOTAL INCIDENTS", "% SHARE"]],
+        body: analysis.sourceRows.map((src, i) => [
+          i + 1,
+          src.source,
+          src.critical,
+          src.warnings,
+          src.total,
+          src.pct,
+        ]),
+        theme: "striped",
+        headStyles: { fillColor: [0, 43, 102], fontSize: 7.5, fontStyle: "bold" },
+        bodyStyles: { fontSize: 7 },
+        margin: { left: 10, right: 10 },
+      });
+
+      startY = (doc as any).lastAutoTable.finalY + 8;
+    }
+
+    // 5. Detailed Chronological Event Log
+    if (startY > doc.internal.pageSize.getHeight() - 50) {
+      doc.addPage();
+      startY = 15;
+    }
+
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 43, 102);
+    doc.text(`5.4 DETAILED SECURITY EVENT & ALARM LOG (${data.alarms.length} EVENTS)`, 10, startY);
+    startY += 2;
+
+    autoTable(doc, {
+      startY,
+      head: [["#", "SOURCE / NAME", "SEVERITY", "TIMESTAMP", "DESCRIPTION"]],
+      body: data.alarms.map((a, index) => [
+        index + 1,
+        a.source,
+        a.severity,
+        a.timestamp,
+        a.description,
+      ]),
+      theme: "striped",
+      headStyles: { fillColor: [0, 43, 102], fontSize: 7.5, fontStyle: "bold" },
+      bodyStyles: { fontSize: 7 },
+      margin: { left: 10, right: 10 },
+    });
+
+    startY = (doc as any).lastAutoTable.finalY + 10;
+  }
 
   // Section 6: S3 LOGS
   if (startY > doc.internal.pageSize.getHeight() - 40) {

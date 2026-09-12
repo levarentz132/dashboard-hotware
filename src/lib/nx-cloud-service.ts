@@ -21,6 +21,9 @@ export interface NormalizedDevice {
   vendor: string;
   model: string;
   deviceType: string;
+  lastSeen?: string | number;
+  offlineTime?: string | number;
+  [key: string]: any;
 }
 
 // In-memory cache for system-scoped access tokens to minimize token requests
@@ -220,6 +223,7 @@ export async function getNxDevices(cloudSystemId: string, systemAccessToken: str
     }
 
     return {
+      ...d,
       id: String(d.id || d.guid || ""),
       name: String(d.name || d.userDefinedName || "Camera"),
       status: statusStr,
@@ -227,6 +231,7 @@ export async function getNxDevices(cloudSystemId: string, systemAccessToken: str
       vendor: String(d.vendor || d.manufacturer || "Generic"),
       model: String(d.model || "IP Camera"),
       deviceType: String(d.deviceType || d.type || "Camera"),
+      lastSeen: d.lastSeen || d.offlineTime || d.updatedAt,
     };
   });
 }
@@ -278,3 +283,134 @@ export async function getNxEvents(cloudSystemId: string, systemAccessToken: stri
 
   return [];
 }
+
+/**
+ * 8. Create / Trigger Generic Event on Nx Witness System via Relay
+ * - Attempts modern REST v4 Generic Event trigger first: POST https://{cloudSystemId}.relay.vmsproxy.com/rest/v4/events/generic
+ * - Falls back to legacy trigger: GET https://{cloudSystemId}.relay.vmsproxy.com/api/createEvent?...
+ * - Handles 301/302/307/308 redirects while preserving Authorization headers.
+ */
+export async function createNxEvent(
+  cloudSystemId: string,
+  systemAccessToken: string,
+  eventPayload: {
+    caption: string;
+    description?: string;
+    source?: string;
+    timestamp?: string;
+    metadata?: any;
+    cameraId?: string;
+  }
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  const cleanId = cloudSystemId.trim().replace(/[{}]/g, "");
+  const serverTimestamp = eventPayload.timestamp || Date.now().toString();
+
+  // 1. Try modern REST v4 API Generic Events
+  try {
+    const initialUrl = `https://${cleanId}.relay.vmsproxy.com/rest/v4/events/generic`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${systemAccessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    };
+
+    const restPayload: any = {
+      caption: eventPayload.caption,
+      description: eventPayload.description || eventPayload.caption,
+      source: eventPayload.source || "VMS Server",
+      timestamp: serverTimestamp,
+    };
+
+    if (eventPayload.metadata) {
+      restPayload.metadata = eventPayload.metadata;
+    } else if (eventPayload.cameraId) {
+      restPayload.metadata = { cameraRefs: [eventPayload.cameraId] };
+    }
+
+    const bodyString = JSON.stringify(restPayload);
+
+    let response = await fetch(initialUrl, {
+      method: "POST",
+      headers,
+      body: bodyString,
+      redirect: "manual",
+    });
+
+    if ([301, 302, 307, 308].includes(response.status)) {
+      const redirectUrl = response.headers.get("location");
+      if (redirectUrl) {
+        console.log(`[NxRelay CreateEvent] Following HTTP ${response.status} redirect to: ${redirectUrl}`);
+        const prevTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+        try {
+          response = await fetch(redirectUrl, {
+            method: "POST",
+            headers,
+            body: bodyString,
+          });
+        } finally {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTls;
+        }
+      }
+    }
+
+    if (response.ok) {
+      const data = await response.json().catch(() => ({ success: true }));
+      console.log(`[NxRelay CreateEvent] ✅ Successfully created event via Cloud REST v4: ${eventPayload.caption}`);
+      return { success: true, data };
+    }
+
+    console.warn(`[NxRelay CreateEvent] REST v4 returned status ${response.status}, attempting legacy API fallback...`);
+  } catch (err: any) {
+    console.warn(`[NxRelay CreateEvent] REST v4 error: ${err.message}, attempting legacy API fallback...`);
+  }
+
+  // 2. Fallback to legacy API: /api/createEvent
+  try {
+    const queryParams = new URLSearchParams();
+    queryParams.set("timestamp", serverTimestamp);
+    queryParams.set("caption", eventPayload.caption);
+    if (eventPayload.description) queryParams.set("description", eventPayload.description);
+    if (eventPayload.source) queryParams.set("source", eventPayload.source);
+
+    const legacyUrl = `https://${cleanId}.relay.vmsproxy.com/api/createEvent?${queryParams.toString()}`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${systemAccessToken}`,
+      Accept: "application/json",
+    };
+
+    let response = await fetch(legacyUrl, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+    });
+
+    if ([301, 302, 307, 308].includes(response.status)) {
+      const redirectUrl = response.headers.get("location");
+      if (redirectUrl) {
+        const prevTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+        try {
+          response = await fetch(redirectUrl, {
+            method: "GET",
+            headers,
+          });
+        } finally {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTls;
+        }
+      }
+    }
+
+    if (response.ok) {
+      const data = await response.json().catch(() => ({ success: true }));
+      console.log(`[NxRelay CreateEvent] ✅ Successfully created event via Cloud legacy API: ${eventPayload.caption}`);
+      return { success: true, data };
+    }
+
+    const errText = await response.text();
+    return { success: false, error: `Cloud event creation failed: HTTP ${response.status} - ${errText}` };
+  } catch (err: any) {
+    return { success: false, error: `Cloud legacy event error: ${err.message}` };
+  }
+}
+

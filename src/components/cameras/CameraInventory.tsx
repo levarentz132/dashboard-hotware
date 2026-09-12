@@ -19,6 +19,7 @@ import {
   Video,
   FileSpreadsheet,
   FileText,
+  Clock,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useCameras } from "@/hooks/useNxAPI-camera";
@@ -33,6 +34,7 @@ import { hasCameraViewPermission } from "@/lib/auth";
 import { useInventorySync } from "@/hooks/use-inventory-sync";
 import Cookies from "js-cookie";
 import { getElectronHeaders } from "@/lib/config";
+import { getOfflineExactTime } from "@/lib/camera-offline-tracker";
 
 interface CloudSystem {
   id: string;
@@ -63,6 +65,9 @@ interface CameraDevice {
   credentials?: { user: string; password: string };
   systemId?: string;
   systemName?: string;
+  lastSeen?: string | number;
+  offlineTime?: string | number;
+  [key: string]: any;
 }
 
 export default function CameraInventory() {
@@ -284,9 +289,17 @@ export default function CameraInventory() {
   };
 
   const displayCameras = useMemo(() => {
-    return (camerasBySystem || []).flatMap((sys: any) =>
+    const raw = (camerasBySystem || []).flatMap((sys: any) =>
       (sys.cameras || []).map((c: any) => ({ ...c, systemId: sys.systemId }))
     );
+    const seen = new Set<string>();
+    return raw.filter((c: any) => {
+      const cleanId = String(c?.id || "").replace(/[{}]/g, "").toLowerCase();
+      if (!cleanId) return true;
+      if (seen.has(cleanId)) return false;
+      seen.add(cleanId);
+      return true;
+    });
   }, [camerasBySystem]);
 
   const uniqueVendors = Array.from(new Set(displayCameras.map((c) => c.vendor).filter(Boolean))).sort() as string[];
@@ -945,24 +958,37 @@ export default function CameraInventory() {
                                     </div>
 
                                     {/* Bottom Status Pill */}
-                                    <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800">
-                                      <div className="group relative">
-                                        <span
-                                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border cursor-help ${getStatusBadgeStyle(
-                                            camera.status || ""
-                                          )}`}
-                                        >
-                                          {camera.status || "Unknown"}
-                                        </span>
-                                        <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-20">
-                                          <div className="bg-slate-900 text-white text-[11px] rounded-xl py-2 px-3 max-w-xs shadow-xl border border-slate-800">
-                                            <div className="font-bold mb-0.5">{camera.status || "Unknown"}</div>
-                                            <div className="text-slate-300">
-                                              {getStatusDescription(camera.status || "")}
+                                    <div className="flex flex-col gap-1.5 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800">
+                                      <div className="flex items-center justify-between">
+                                        <div className="group relative">
+                                          <span
+                                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border cursor-help ${getStatusBadgeStyle(
+                                              camera.status || ""
+                                            )}`}
+                                          >
+                                            {camera.status || "Unknown"}
+                                          </span>
+                                          <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-20">
+                                            <div className="bg-slate-900 text-white text-[11px] rounded-xl py-2 px-3 max-w-xs shadow-xl border border-slate-800">
+                                              <div className="font-bold mb-0.5">{camera.status || "Unknown"}</div>
+                                              <div className="text-slate-300">
+                                                {getStatusDescription(camera.status || "")}
+                                              </div>
+                                              {camera.status?.toLowerCase() === "offline" && (
+                                                <div className="text-rose-400 font-mono text-[10px] mt-1 pt-1 border-t border-slate-800">
+                                                  Offline: {getOfflineExactTime(camera).exactTime}
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         </div>
                                       </div>
+                                      {camera.status?.toLowerCase() === "offline" && (
+                                        <div className="flex items-center gap-1 text-[10px] font-mono text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                                          <Clock className="w-3 h-3 shrink-0" />
+                                          <span className="truncate">Offline: {getOfflineExactTime(camera).exactTime}</span>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 ))}
@@ -980,9 +1006,9 @@ export default function CameraInventory() {
             {/* View Mode 2: Grid View */}
             {!loading && viewMode === "grid" && filteredCameras.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-4">
-                {filteredCameras.map((camera) => (
+                {filteredCameras.map((camera, index) => (
                   <div
-                    key={camera.id}
+                    key={`grid-${camera.systemId || "sys"}-${camera.id || "cam"}-${index}`}
                     className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 hover:shadow-md hover:border-blue-500/40 transition-all flex flex-col justify-between h-full"
                   >
                     <div>
@@ -1018,15 +1044,23 @@ export default function CameraInventory() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border cursor-help ${getStatusBadgeStyle(
-                          camera.status
-                        )}`}
-                        title={`${camera.status}: ${getStatusDescription(camera.status)}`}
-                      >
-                        {camera.status}
-                      </span>
+                    <div className="flex flex-col gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border cursor-help ${getStatusBadgeStyle(
+                            camera.status
+                          )}`}
+                          title={`${camera.status}: ${getStatusDescription(camera.status)}`}
+                        >
+                          {camera.status}
+                        </span>
+                      </div>
+                      {camera.status?.toLowerCase() === "offline" && (
+                        <div className="flex items-center gap-1 text-[10px] font-mono text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                          <Clock className="w-3 h-3 shrink-0" />
+                          <span className="truncate">Offline: {getOfflineExactTime(camera).exactTime}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1047,8 +1081,8 @@ export default function CameraInventory() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                    {filteredCameras.map((camera) => (
-                      <tr key={camera.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                    {filteredCameras.map((camera, index) => (
+                      <tr key={`list-${camera.systemId || "sys"}-${camera.id || "cam"}-${index}`} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center space-x-2.5">
                             <Video className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
@@ -1068,16 +1102,24 @@ export default function CameraInventory() {
                           {camera.ip || camera.url || "-"}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center space-x-2">
-                            {getStatusIcon(camera.status)}
-                            <span
-                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border cursor-help ${getStatusBadgeStyle(
-                                camera.status
-                              )}`}
-                              title={`${camera.status}: ${getStatusDescription(camera.status)}`}
-                            >
-                              {camera.status}
-                            </span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center space-x-2">
+                              {getStatusIcon(camera.status)}
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border cursor-help ${getStatusBadgeStyle(
+                                  camera.status
+                                )}`}
+                                title={`${camera.status}: ${getStatusDescription(camera.status)}`}
+                              >
+                                {camera.status}
+                              </span>
+                            </div>
+                            {camera.status?.toLowerCase() === "offline" && (
+                              <div className="flex items-center gap-1 text-[10px] font-mono text-rose-600 dark:text-rose-400">
+                                <Clock className="w-2.5 h-2.5 shrink-0" />
+                                <span>Since: {getOfflineExactTime(camera).exactTime}</span>
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
