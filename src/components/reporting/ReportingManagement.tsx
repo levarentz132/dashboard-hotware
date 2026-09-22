@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   FileText,
   Calendar,
@@ -53,6 +53,9 @@ import { useAlarmsQuery, useEventsQuery } from "@/hooks/use-nx-queries";
 import nxAPI, { type NxCamera } from "@/lib/nxapi";
 import { fetchFromCloudRelay } from "@/hooks/use-async-data";
 import { getElectronHeaders } from "@/lib/config";
+import { computeCanonicalEventMetrics } from "@/lib/canonical-event-metrics";
+import { buildAnalystRelevantEventLog } from "@/lib/s3-event-presentation";
+import { calculateTimestampTrend } from "@/lib/timestamp-trend-calculator";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -69,14 +72,20 @@ import {
   type FullReportData,
   type CameraReportItem,
   type OfflineCameraItem,
-  type OfflineCameraIncident,
   type ServerHealthItem,
   type ServerStorageDiskItem,
+  type ServerUptimeItem,
   type AlarmReportItem,
   type S3LogItem,
 } from "./export-utils";
-import { getOfflineExactTime, formatExactTimestamp } from "@/lib/camera-offline-tracker";
+import { getOfflineExactTime } from "@/lib/camera-offline-tracker";
+import { calculateDowntimeResult } from "@/lib/downtime-calculator";
+import { calculateServerUptimeFromEvents, type SystemServerUptimeSummary } from "@/lib/server-uptime-calculator";
 import { ORIX_LOGO_BASE64_PNG } from "@/assets/orix-logo";
+
+function cleanId(id?: string | null): string {
+  return String(id || "").replace(/[{}]/g, "").toLowerCase();
+}
 
 // ============================================
 // CONSTANTS & BRANDING
@@ -238,8 +247,12 @@ export default function ReportingManagement() {
   const [systemOffline, setSystemOffline] = useState<boolean>(false);
 
   // Check if local NX user session is present
-  const hasLocalServer = useMemo(() => {
-    return typeof window !== "undefined" && (!!Cookies.get("local_nx_user") || !!Cookies.get("nx_server_id"));
+  const [hasLocalServer, setHasLocalServer] = useState(false);
+  useEffect(() => {
+    setHasLocalServer(
+      !!Cookies.get("local_nx_user") ||
+      !!Cookies.get("nx_server_id")
+    );
   }, []);
 
   // Live Cloud Systems list & events queries
@@ -276,6 +289,8 @@ export default function ReportingManagement() {
         Accept: "application/json",
         ...getElectronHeaders(),
       };
+
+      const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
 
       const localUserStr = Cookies.get("local_nx_user");
       let localSid = "local";
@@ -314,7 +329,7 @@ export default function ReportingManagement() {
             .catch(() => [])
         );
         const eventPromises = targetSystems.map((sys) =>
-          fetch(`/api/cloud/events?systemId=${encodeURIComponent(sys.id)}`, { headers })
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(sys.id)}&from=${fromMs}&limit=2000`, { headers })
             .then((res) => (res.ok ? res.json() : []))
             .then((list) => {
               const normalized = normalizeNxEvents(Array.isArray(list) ? list : []);
@@ -351,7 +366,7 @@ export default function ReportingManagement() {
           : Promise.resolve([]);
 
         const localEventPromise = localUserStr
-          ? fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}`, { headers })
+          ? fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}&from=${fromMs}&limit=2000`, { headers })
               .then((res) => (res.ok ? res.json() : []))
               .catch(() => [])
               .then((evts) => {
@@ -423,6 +438,22 @@ export default function ReportingManagement() {
           }
         });
 
+        // Step Implementation 1: Synthesize offline server placeholders for offline cloud systems without calling /servers
+        cloudSystems.forEach((sys) => {
+          if (!sys.isOnline) {
+            addSrvIfUnique({
+              id: sys.id,
+              name: sys.name,
+              status: "OFFLINE",
+              stateOfHealth: "offline",
+              isOnline: false,
+              _systemName: sys.name,
+              _systemId: sys.id,
+              isOfflinePlaceholder: true,
+            });
+          }
+        });
+
         const allStrs: any[] = [...(Array.isArray(localStorages) ? localStorages : [])];
         storageResults.forEach((res) => {
           if (res.status === "fulfilled" && Array.isArray(res.value)) {
@@ -449,7 +480,7 @@ export default function ReportingManagement() {
           fetch(`/api/cloud/storages?systemId=${encodeURIComponent(localSid)}`)
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => nxAPI.getStorages().catch(() => [])),
-          fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}`, { headers })
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}&from=${fromMs}&limit=2000`, { headers })
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => []),
         ]);
@@ -474,7 +505,7 @@ export default function ReportingManagement() {
           fetchFromCloudRelay<NxCamera[]>(selectedSystemId, "/devices"),
           fetchFromCloudRelay<any[]>(selectedSystemId, "/servers"),
           fetch(`/api/cloud/storages?systemId=${encodeURIComponent(selectedSystemId)}`).then((r) => (r.ok ? r.json() : [])),
-          fetch(`/api/cloud/events?systemId=${encodeURIComponent(selectedSystemId)}`, { headers }).then(async (r) => {
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(selectedSystemId)}&from=${fromMs}&limit=2000`, { headers }).then(async (r) => {
             if (!r.ok) {
               if (r.status === 503 || r.status === 502 || r.status === 504) {
                 setSystemOffline(true);
@@ -495,7 +526,21 @@ export default function ReportingManagement() {
         }
 
         setCameras(sysCams.map((c: any) => ({ ...c, _systemName: sysName })));
-        setServers(sysSrvs.map((s: any) => ({ ...s, _systemName: sysName })));
+        const effectiveSysSrvs = sysSrvs.length > 0
+          ? sysSrvs.map((s: any) => ({ ...s, _systemName: sysName }))
+          : targetSys
+            ? [{
+                id: targetSys.id,
+                name: targetSys.name,
+                status: "OFFLINE",
+                stateOfHealth: "offline",
+                isOnline: false,
+                _systemName: sysName,
+                _systemId: selectedSystemId,
+                isOfflinePlaceholder: true,
+              }]
+            : [];
+        setServers(effectiveSysSrvs);
         setStorages(sysStrs.map((st: any) => ({ ...st, _systemName: sysName })));
         const normalized = normalizeNxEvents(sysEvents);
         setAlarmEvents(
@@ -512,7 +557,7 @@ export default function ReportingManagement() {
     } finally {
       setLoadingData(false);
     }
-  }, [selectedSystemId, cloudSystems]);
+  }, [selectedSystemId, cloudSystems, dateFrom]);
 
   // Initial & Dependency Trigger for Data Aggregation
   useEffect(() => {
@@ -688,6 +733,8 @@ export default function ReportingManagement() {
         ["warning", "warn"].includes(rawLevel)
       ) {
         severity = "warning";
+      } else {
+        severity = "info";
       }
 
       return {
@@ -711,10 +758,22 @@ export default function ReportingManagement() {
 
   const targetAlarmEvents = useMemo(() => {
     const periodFiltered = parsedAlarmList.filter((a) => {
-      if (!a.timestampMs || isNaN(a.timestampMs)) return true;
-      return a.timestampMs >= fromTime && a.timestampMs <= toTime;
+      const timestampMs = a.timestampMs;
+
+      if (
+        timestampMs === null ||
+        timestampMs === undefined ||
+        !Number.isFinite(timestampMs)
+      ) {
+        return false;
+      }
+
+      return timestampMs >= fromTime && timestampMs <= toTime;
     });
-    return periodFiltered.length > 0 ? periodFiltered : parsedAlarmList;
+
+    return [...periodFiltered].sort(
+      (a, b) => (b.timestampMs ?? 0) - (a.timestampMs ?? 0)
+    );
   }, [parsedAlarmList, fromTime, toTime]);
 
   // Filter for Tab 6 search & severity dropdown
@@ -737,19 +796,9 @@ export default function ReportingManagement() {
     });
   }, [targetAlarmEvents, alarmSeverityFilter, alarmSearch]);
 
-  const totalAlarms = targetAlarmEvents.length;
-
-  const criticalAlarms = useMemo(() => {
-    return targetAlarmEvents.filter((a) => a.severity === "CRITICAL").length;
-  }, [targetAlarmEvents]);
-
-  const warningAlarms = useMemo(() => {
-    return targetAlarmEvents.filter((a) => a.severity === "WARNING").length;
-  }, [targetAlarmEvents]);
-
-  const infoAlarms = useMemo(() => {
-    return targetAlarmEvents.filter((a) => a.severity === "INFO").length;
-  }, [targetAlarmEvents]);
+  const analystPresentationLog = useMemo(() => {
+    return buildAnalystRelevantEventLog(displayedTabAlarms);
+  }, [displayedTabAlarms]);
 
   // Dynamic Offline Camera Summary Title
   const offlineSummaryTitle = useMemo(() => {
@@ -810,299 +859,333 @@ export default function ReportingManagement() {
   }, [storages]);
 
   // ============================================
-  // OFFLINE CAMERA SUMMARY CALCULATOR (WHEN OFFLINE & HAS BEEN ONLINE AUDIT)
+  // CANONICAL DOWNTIME CALCULATION (single source of truth)
   // ============================================
-  const offlineCamerasSummary = useMemo<OfflineCameraItem[]>(() => {
-    if (!cameras || cameras.length === 0) return [];
+  type CalculationSource = "LOADING" | "LIVE_CALCULATION" | "CACHE_HIT" | "CACHE_MISS";
 
-    const seenIds = new Set<string>();
-    const uniqueCameras = cameras.filter((cam: any) => {
-      const cleanId = String(cam.id || "").replace(/[{}]/g, "").toLowerCase();
-      if (!cleanId) return true;
-      if (seenIds.has(cleanId)) return false;
-      seenIds.add(cleanId);
-      return true;
-    });
+  const defaultAggregate = {
+    totalAlarms: 0, criticalAlarms: 0, criticalPct: "0%", warningAlarms: 0, warningPct: "0%",
+    infoAlarms: 0, infoPct: "0%", disconnectAlarms: 0, reconnectAlarms: 0, serverAlarms: 0,
+    storageAlarms: 0, networkAlarms: 0, resolvedIncidents: 0, activeIncidents: 0,
+    totalOfflineIncidents: 0, totalDowntimeMs: 0, totalDowntimeFormatted: "0s",
+    periodCameraUptimeRate: 100, auditVerdict: "",
+  };
 
-    return uniqueCameras.map((cam: any) => {
-      const isOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
-      const cleanCamId = String(cam.id || "").replace(/[{}]/g, "").toLowerCase();
-      const camNameLower = String(cam.name || "").toLowerCase();
+  const [downtimeResult, setDowntimeResult] = useState<{ cameras: OfflineCameraItem[]; aggregate: typeof defaultAggregate } | null>(null);
+  const [calculationSource, setCalculationSource] = useState<CalculationSource>("LOADING");
 
-      // Find events matching this camera
-      const camEvents = eventList.filter((e: any) => {
-        if (cleanCamId) {
-          const devIds = (e.actionData?.deviceIds || []).map((id: string) => String(id).replace(/[{}]/g, "").toLowerCase());
-          if (devIds.includes(cleanCamId)) return true;
-          const resId = String(e.resourceId || e.cameraId || e.eventData?.resourceId || e.source || "").replace(/[{}]/g, "").toLowerCase();
-          if (resId.includes(cleanCamId)) return true;
-        }
-        if (camNameLower) {
-          const txt = String(e.actionData?.caption || e.actionData?.description || e.actionData?.sourceName || e.caption || e.description || e.sourceName || "").toLowerCase();
-          if (txt.includes(camNameLower)) return true;
-        }
-        return false;
-      });
+  const isHistorical = useMemo(() => {
+    if (!dateTo) return false;
+    const toTimeMs = new Date(`${dateTo}T23:59:59.999`).getTime();
+    return toTimeMs < Date.now();
+  }, [dateTo]);
 
-      // 1. Filter Disconnect Events sorted earliest to latest
-      const rawDisconnectEvents = camEvents.filter((e: any) => {
-        const type = String(e.eventData?.type || e.type || e.eventType || "").toLowerCase();
-        const caption = String(e.actionData?.caption || e.caption || "").toLowerCase();
-        const desc = String(e.actionData?.description || e.description || "").toLowerCase();
+  // ============================================
+  // CACHE READ + PERSISTENCE (unified effect)
+  // ============================================
+  const lastSavedKeyRef = useRef<string>("");
+  const lastCacheRequestRef = useRef<string>("");
 
-        // Must NOT be an online/reconnect event
-        if (
-          caption.includes("online") ||
-          desc.includes("back online") ||
-          desc.includes("reconnected") ||
-          type.includes("reconnect")
-        ) {
-          return false;
-        }
+  useEffect(() => {
+    const periodTypeMap: Record<ReportPeriod, string> = {
+      daily: "DAILY", weekly: "WEEKLY", monthly: "MONTHLY", yearly: "YEARLY", custom: "CUSTOM",
+    };
+    const scopeKey = `${periodTypeMap[period]}_${selectedServerLabel}_${dateFrom}_${dateTo}`;
 
-        return (
-          type.includes("disconnect") ||
-          type.includes("offline") ||
-          caption.includes("disconnect") ||
-          caption.includes("offline") ||
-          desc.includes("lost connection") ||
-          desc.includes("is now offline") ||
-          desc.includes("has lost connection") ||
-          desc.includes("disconnected")
-        );
-      }).sort((a: any, b: any) => {
-        const timeA = normalizeEpochMs(a.timestampMs) ?? normalizeEpochMs(a.actionData?.timestamp || a.eventData?.timestamp) ?? normalizeEpochMs(a.timestamp) ?? 0;
-        const timeB = normalizeEpochMs(b.timestampMs) ?? normalizeEpochMs(b.actionData?.timestamp || b.eventData?.timestamp) ?? normalizeEpochMs(b.timestamp) ?? 0;
-        return timeA - timeB;
-      });
+    if (!isHistorical || !dateFrom || !dateTo) {
+      // CURRENT/LIVE: always calculate
+      const result = calculateDowntimeResult({ cameras, events: targetAlarmEvents, dateFrom, dateTo, selectedServerLabel });
+      setDowntimeResult(result);
+      setCalculationSource("LIVE_CALCULATION");
 
-      // 2. Filter Recovery / Reconnect Events from alarm/event stream
-      const rawRecoveryEvents = camEvents.filter((e: any) => {
-        const type = String(e.eventData?.type || e.type || e.eventType || "").toLowerCase();
-        const caption = String(e.actionData?.caption || e.caption || "").toLowerCase();
-        const desc = String(e.actionData?.description || e.description || "").toLowerCase();
+      // Persist live calculation
+      if (scopeKey !== lastSavedKeyRef.current) {
+        let cancelled = false;
+        const formattedAlarmsList = targetAlarmEvents.map((a: any) => ({
+          id: String(a.id || "EVENT"),
+          source: a.systemName ? `${a.sourceName} (${a.systemName})` : a.sourceName,
+          severity: a.severity || "INFO",
+          timestamp: a.formattedTime || "DATA NOT AVAILABLE FROM SOURCE",
+          description: a.description || "NO DESCRIPTION AVAILABLE",
+          eventType: a.eventType,
+          eventLabel: a.eventLabel,
+          systemName: a.systemName,
+          sourceName: a.sourceName,
+          timestampMs: typeof a.timestampMs === "number" ? a.timestampMs : undefined,
+        }));
+        const analystPresentation = buildAnalystRelevantEventLog(targetAlarmEvents);
 
-        // Critical: MUST NOT be a disconnect event (note: "disconnected" contains substring "connected")
-        const isDisconnect =
-          type.includes("disconnect") ||
-          type.includes("offline") ||
-          caption.includes("disconnect") ||
-          caption.includes("offline") ||
-          desc.includes("lost connection") ||
-          desc.includes("is now offline") ||
-          desc.includes("has lost connection");
+        const formattedCameras: CameraReportItem[] = cameras.map((cam: any) => {
+          const isCamOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+          const offlineInfo = !isCamOnline ? getOfflineExactTime(cam, eventList) : null;
+          return {
+            id: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
+            name: cam.name || "UNNAMED CAMERA",
+            serverName: (cam._systemName || cam.serverName || "SERVER 01").toUpperCase(),
+            status: isCamOnline ? "ONLINE" : "OFFLINE",
+            ipAddress: cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE FROM SOURCE",
+            vendorModel: [cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA",
+            resolutionFps: cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE FROM SOURCE",
+            uptimeRate: isCamOnline ? "ONLINE (LIVE)" : `OFFLINE (Since: ${offlineInfo?.exactTime || "RECENT"})`,
+            exactOfflineTime: offlineInfo?.exactTime || "",
+          };
+        });
 
-        if (isDisconnect) {
-          return false;
-        }
-
-        return (
-          type.includes("online") ||
-          type.includes("reconnect") ||
-          type === "cameraconnectedevent" ||
-          type === "deviceconnected" ||
-          caption.includes("camera online") ||
-          caption.includes("back online") ||
-          caption.includes("reconnect") ||
-          desc.includes("reconnected") ||
-          desc.includes("back online") ||
-          desc.includes("is now back online") ||
-          desc.includes("connection restored")
-        );
-      }).sort((a: any, b: any) => {
-        const timeA = normalizeEpochMs(a.timestampMs) ?? normalizeEpochMs(a.actionData?.timestamp || a.eventData?.timestamp) ?? normalizeEpochMs(a.timestamp) ?? 0;
-        const timeB = normalizeEpochMs(b.timestampMs) ?? normalizeEpochMs(b.actionData?.timestamp || b.eventData?.timestamp) ?? normalizeEpochMs(b.timestamp) ?? 0;
-        return timeA - timeB;
-      });
-
-      // 3. Build chronological outage sessions by pairing each disconnect with its subsequent recovery from the alarms
-      type OutageSession = {
-        discTimeMs: number;
-        discEvent: any;
-        recTimeMs: number | null;
-        recEvent: any | null;
-      };
-
-      const sessions: OutageSession[] = [];
-      let currentSession: OutageSession | null = null;
-
-      type CombinedEvent = {
-        kind: "disconnect" | "recovery";
-        timeMs: number;
-        event: any;
-      };
-
-      const allTimeline: CombinedEvent[] = [];
-      rawDisconnectEvents.forEach((ev: any) => {
-        const t = normalizeEpochMs(ev.timestampMs) ??
-          normalizeEpochMs(ev.actionData?.timestamp || ev.eventData?.timestamp) ??
-          normalizeEpochMs(ev.timestamp);
-        if (t) allTimeline.push({ kind: "disconnect", timeMs: t, event: ev });
-      });
-
-      rawRecoveryEvents.forEach((ev: any) => {
-        const t = normalizeEpochMs(ev.timestampMs) ??
-          normalizeEpochMs(ev.actionData?.timestamp || ev.eventData?.timestamp) ??
-          normalizeEpochMs(ev.timestamp);
-        if (t) allTimeline.push({ kind: "recovery", timeMs: t, event: ev });
-      });
-
-      // Sort chronologically. If identical time, disconnect is processed before recovery.
-      allTimeline.sort((a, b) => {
-        if (a.timeMs !== b.timeMs) return a.timeMs - b.timeMs;
-        if (a.kind === "disconnect" && b.kind === "recovery") return -1;
-        if (a.kind === "recovery" && b.kind === "disconnect") return 1;
-        return 0;
-      });
-
-      allTimeline.forEach((item) => {
-        if (item.kind === "disconnect") {
-          if (!currentSession) {
-            // New outage session starts
-            currentSession = {
-              discTimeMs: item.timeMs,
-              discEvent: item.event,
-              recTimeMs: null,
-              recEvent: null,
+        const formattedStorageStats = (servers || []).map((srv: any) => {
+          if (srv.isOfflinePlaceholder) {
+            return {
+              name: (srv._systemName || srv.name || "SERVER").toUpperCase(),
+              isOnline: false,
+              status: "OFFLINE",
+              totalGb: "N/A",
+              usedGb: "N/A",
+              freeGb: "N/A",
+              usedPct: 0,
+              diskCount: "N/A",
+              cpuText: "N/A",
+              ramText: "N/A",
+              version: "N/A",
+              osName: "N/A",
+              isOfflinePlaceholder: true,
             };
-          } else {
-            // Already in an active outage session.
-            // Clustered disconnects or retries belong to the same physical outage.
           }
-        } else if (item.kind === "recovery") {
-          if (currentSession) {
-            // Recovery event ends the current outage session
-            if (item.timeMs >= currentSession.discTimeMs) {
-              currentSession.recTimeMs = item.timeMs;
-              currentSession.recEvent = item.event;
-              sessions.push(currentSession);
-              currentSession = null;
-            }
-          }
-        }
-      });
+          const diskList: any[] = srv.hddList || srv.storages || [];
+          const totalMb = diskList.reduce((sum: number, d: any) => sum + (d.totalSpaceMb || d.totalSpace || 0), 0);
+          const usedMb = diskList.reduce((sum: number, d: any) => sum + (d.reservedSpaceMb || d.usedSpace || 0), 0);
+          const freeMb = totalMb - usedMb;
+          const usedPct = totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0;
+          const rawCpu = srv.cpuUsagePercent ?? srv.cpuUsage ?? srv.cpu;
+          const cpuText = typeof rawCpu === "number" && rawCpu >= 0 ? `${Math.round(rawCpu)}%` : "N/A — DATA NOT AVAILABLE FROM CONFIGURED SOURCE";
+          const rawRamUsed = srv.ramUsageMb ?? srv.ramUsedMb;
+          const rawRamTotal = srv.totalRamMb ?? srv.ramTotalMb;
+          const ramText =
+            typeof rawRamUsed === "number" && typeof rawRamTotal === "number" && rawRamTotal > 0
+              ? `${(rawRamUsed / 1024).toFixed(1)} GB / ${(rawRamTotal / 1024).toFixed(1)} GB`
+              : "N/A — DATA NOT AVAILABLE FROM CONFIGURED SOURCE";
+          return {
+            name: (srv._systemName || srv.name || "SERVER").toUpperCase(),
+            isOnline: ["online", "Online"].includes(String(srv.status ?? srv.stateOfHealth ?? "")),
+            totalGb: totalMb > 0 ? (totalMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+            usedGb: usedMb > 0 ? (usedMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+            freeGb: freeMb > 0 ? (freeMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+            usedPct,
+            diskCount: diskList.length > 0 ? String(diskList.length) : "1 DISK",
+            cpuText,
+            ramText,
+            version: srv.version || srv.softwareVersion || "DATA NOT AVAILABLE FROM SOURCE",
+            osName: srv.osName || srv.osInfo?.name || "DATA NOT AVAILABLE FROM SOURCE",
+            isOfflinePlaceholder: false,
+          };
+        });
 
-      // If an outage session was opened and never recovered:
-      if (currentSession) {
-        sessions.push(currentSession);
-      }
+        const formattedServers: ServerHealthItem[] = formattedStorageStats.map((srv: any) => ({
+          serverName: srv.name,
+          status: srv.isOnline ? "ONLINE" : "OFFLINE",
+          version: srv.isOfflinePlaceholder ? "N/A" : srv.version,
+          osName: srv.isOfflinePlaceholder ? "N/A" : srv.osName,
+          cpuUsage: srv.isOfflinePlaceholder ? "N/A" : srv.cpuText,
+          ramUsage: srv.isOfflinePlaceholder ? "N/A" : srv.ramText,
+          diskCount: srv.isOfflinePlaceholder ? "N/A" : srv.diskCount,
+          storageUsage: srv.isOfflinePlaceholder ? "N/A" : srv.totalGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB (${srv.usedPct}%)` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+        }));
 
-      // 4. Transform outage sessions into user-facing incidents
-      const incidents: OfflineCameraIncident[] = [];
-      if (sessions.length > 0) {
-        sessions.forEach((sess, idx) => {
-          const offlineTime = formatExactTimestamp(sess.discTimeMs);
-          let onlineTime = "";
-          let duration = "";
-          let incStatus: "RECOVERED" | "STILL OFFLINE" = "RECOVERED";
-          let onlineTimestampMs: number | null = null;
+        const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
+        const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Date.now();
+        const perSystemCounts = new Map<string, number>();
+        targetAlarmEvents.forEach((ev: any) => {
+          const sysId = ev._systemId || "default";
+          perSystemCounts.set(sysId, (perSystemCounts.get(sysId) || 0) + 1);
+        });
+        const maxSingleSystemCount = perSystemCounts.size > 0
+          ? Math.max(...Array.from(perSystemCounts.values()))
+          : targetAlarmEvents.length;
 
-          if (sess.recTimeMs) {
-            onlineTimestampMs = sess.recTimeMs;
-            onlineTime = `BACK ONLINE: ${formatExactTimestamp(sess.recTimeMs)}`;
-            const diffMs = Math.max(0, sess.recTimeMs - sess.discTimeMs);
-            duration = formatDuration(diffMs);
-            incStatus = "RECOVERED";
-          } else {
-            const isLatest = idx === sessions.length - 1;
-            if (isLatest && !isOnline) {
-              onlineTime = "OFFLINE UNTIL NOW";
-              const diffMs = Math.max(0, Date.now() - sess.discTimeMs);
-              duration = `${formatDuration(diffMs)} (Until now)`;
-              incStatus = "STILL OFFLINE";
-            } else {
-              onlineTime = "YES — BACK ONLINE (CURRENT)";
-              duration = "TEMPORARY (RECOVERED)";
-              incStatus = "RECOVERED";
-            }
-          }
+        const uptimeSummary = calculateServerUptimeFromEvents({
+          servers,
+          events: targetAlarmEvents,
+          fromMs,
+          toMs,
+          nowMs: Date.now(),
+          requestedLimit: 2000,
+          returnedEventCount: maxSingleSystemCount,
+          isFetchFailed: systemOffline,
+        });
 
-          const eventReason = String(
-            sess.discEvent.actionData?.caption ||
-            sess.discEvent.caption ||
-            sess.discEvent.actionData?.description ||
-            sess.discEvent.description ||
-            sess.discEvent.eventData?.type ||
-            sess.discEvent.eventType ||
-            "Camera Disconnected"
+        const serverUptimeResults: ServerUptimeItem[] = uptimeSummary.serverResults.map((res: any) => {
+          const matchSrv = (servers || []).find(
+            (s: any) =>
+              cleanId(s.id || s.serverId || s.name) === cleanId(res.serverId) ||
+              s.name === res.serverName ||
+              (s._systemId && s._systemId === res.serverId)
+          );
+          const isOfflinePlaceholder = Boolean(
+            (res as any).isOfflinePlaceholder ||
+            matchSrv?.isOfflinePlaceholder ||
+            (res.currentStatus === "offline" && matchSrv?.isOfflinePlaceholder)
           );
 
-          incidents.push({
-            incidentNumber: idx + 1,
-            offlineTime,
-            offlineTimestampMs: sess.discTimeMs,
-            onlineTime,
-            onlineTimestampMs,
-            duration,
-            status: incStatus,
-            reason: eventReason,
-          });
-        });
-      } else if (!isOnline) {
-        // Fallback for camera that is currently offline with no disconnect events in current window
-        const resolved = getOfflineExactTime(cam);
-        const durationMs = resolved.timestampMs ? Math.max(0, Date.now() - resolved.timestampMs) : 0;
-        incidents.push({
-          incidentNumber: 1,
-          offlineTime: resolved.exactTime,
-          offlineTimestampMs: resolved.timestampMs,
-          onlineTime: "OFFLINE UNTIL NOW",
-          onlineTimestampMs: null,
-          duration: durationMs > 0 ? `${formatDuration(durationMs)} (Until now)` : "Offline until now",
-          status: "STILL OFFLINE",
-          reason: "Current Offline State",
-        });
-      }
-
-      const incidentCount = incidents.length;
-
-      let firstOffline = "ONLINE — NO OFFLINE EVENTS RECORDED";
-      let lastOffline = "ONLINE — NO OFFLINE EVENTS RECORDED";
-      let offlineDuration = "0s (100% Uptime)";
-      let availabilityRate = "100% ONLINE";
-
-      if (incidentCount > 0) {
-        // Latest incident represents the most recent state
-        const latestInc = incidents[incidents.length - 1];
-        firstOffline = latestInc.offlineTime;
-        lastOffline = latestInc.onlineTime;
-
-        let totalDowntimeMs = 0;
-        let hasUnrecovered = false;
-        incidents.forEach((inc) => {
-          if (inc.offlineTimestampMs && inc.onlineTimestampMs) {
-            totalDowntimeMs += Math.max(0, inc.onlineTimestampMs - inc.offlineTimestampMs);
-          } else if (inc.offlineTimestampMs && inc.status === "STILL OFFLINE") {
-            totalDowntimeMs += Math.max(0, Date.now() - inc.offlineTimestampMs);
-            hasUnrecovered = true;
+          if (isOfflinePlaceholder) {
+            return {
+              serverId: res.serverId,
+              serverName: res.serverName,
+              currentStatus: "OFFLINE",
+              firstOffline: "N/A",
+              lastRecovery: "OFFLINE UNTIL NOW",
+              totalDowntime: "N/A",
+              incidentCount: "N/A" as any,
+              uptimeRate: null,
+              periodUptime: "N/A — SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE",
+              dataCompleteness: res.dataCompleteness,
+              isOfflinePlaceholder: true,
+              outageSessions: [],
+            };
           }
+
+          return {
+            serverId: res.serverId,
+            serverName: res.serverName,
+            currentStatus: res.currentStatus === "online" ? "ONLINE" : "OFFLINE",
+            firstOffline: res.firstOffline,
+            lastRecovery: res.lastRecovery,
+            totalDowntime: res.totalDowntime,
+            incidentCount: res.incidentCount,
+            uptimeRate: res.uptimeRate,
+            periodUptime: res.periodUptime,
+            dataCompleteness: res.dataCompleteness,
+            isOfflinePlaceholder: false,
+            outageSessions: res.outageSessions || [],
+          };
         });
 
-        if (hasUnrecovered || !isOnline) {
-          availabilityRate = "OFFLINE UNTIL NOW";
-          offlineDuration = `${formatDuration(totalDowntimeMs)} (Until now)`;
-        } else {
-          availabilityRate = "ONLINE (RECOVERED)";
-          offlineDuration = totalDowntimeMs > 0 ? formatDuration(totalDowntimeMs) : latestInc.duration;
+        const body = {
+          version: 2,
+          periodType: periodTypeMap[period],
+          dateFrom,
+          dateTo,
+          label: periodLabel,
+          selectedServerLabel,
+          calculatedAt: new Date().toISOString(),
+          metrics: {
+            periodCameraUptimeRate: result.aggregate.periodCameraUptimeRate,
+            metricDescription: "AVERAGE PER-CAMERA UPTIME INDEX",
+            totalDowntimeMs: result.aggregate.totalDowntimeMs,
+            totalDowntimeFormatted: result.aggregate.totalDowntimeFormatted,
+            totalOfflineIncidents: result.aggregate.totalOfflineIncidents,
+            resolvedIncidents: result.aggregate.resolvedIncidents,
+            activeIncidents: result.aggregate.activeIncidents,
+          },
+          cameras: result.cameras,
+          cameraInventory: formattedCameras,
+          server: {
+            health: formattedServers,
+            uptimeResults: serverUptimeResults,
+            storageStats: formattedStorageStats,
+            disks: formattedServerDisks,
+          },
+          alarms: {
+            canonicalCount: targetAlarmEvents.length,
+            rawAlarms: formattedAlarmsList,
+            presentationItems: analystPresentation.presentationItems,
+          },
+        };
+        (async () => {
+          try {
+            const response = await fetch("/api/downtime-results", {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!cancelled) lastSavedKeyRef.current = scopeKey;
+          } catch (error) {
+            console.warn("[Reporting] Downtime result persistence failed:", error);
+          }
+        })();
+        return () => { cancelled = true; };
+      }
+      return;
+    }
+
+    // HISTORICAL: try cache first
+    if (scopeKey === lastCacheRequestRef.current) return;
+    lastCacheRequestRef.current = scopeKey;
+    setCalculationSource("LOADING");
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const params = new URLSearchParams({
+          periodType: periodTypeMap[period], dateFrom, dateTo, selectedServerLabel,
+        });
+        const response = await fetch(`/api/downtime-results?${params}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const json = await response.json();
+        if (!json.success || !json.data) throw new Error("Invalid response");
+
+        const d = json.data;
+        if (d.periodType !== periodTypeMap[period]) throw new Error("Scope mismatch");
+        if (d.dateFrom !== dateFrom) throw new Error("Scope mismatch");
+        if (d.dateTo !== dateTo) throw new Error("Scope mismatch");
+        if (d.selectedServerLabel !== selectedServerLabel) throw new Error("Scope mismatch");
+        if (typeof d.version !== "number") throw new Error("Invalid version");
+        if (!d.calculatedAt) throw new Error("Missing calculatedAt");
+        if (!d.metrics || typeof d.metrics.periodCameraUptimeRate !== "number") throw new Error("Invalid metrics");
+        if (typeof d.metrics.totalDowntimeMs !== "number") throw new Error("Invalid metrics");
+        if (typeof d.metrics.totalOfflineIncidents !== "number") throw new Error("Invalid metrics");
+        if (typeof d.metrics.resolvedIncidents !== "number") throw new Error("Invalid metrics");
+        if (typeof d.metrics.activeIncidents !== "number") throw new Error("Invalid metrics");
+        if (!Array.isArray(d.cameras)) throw new Error("Invalid cameras");
+        if (d.metrics.metricDescription !== "AVERAGE PER-CAMERA UPTIME INDEX") throw new Error("Invalid metricDescription");
+
+        // VALID CACHE HIT — use cached result, no calculation, no POST
+        if (!cancelled) {
+          setDowntimeResult({ cameras: d.cameras, aggregate: d.metrics });
+          setCalculationSource("CACHE_HIT");
+        }
+      } catch (error) {
+        // CACHE MISS — calculate fallback
+        console.warn("[Reporting] Downtime result cache miss:", error);
+        if (!cancelled) {
+          const result = calculateDowntimeResult({ cameras, events: targetAlarmEvents, dateFrom, dateTo, selectedServerLabel });
+          setDowntimeResult(result);
+          setCalculationSource("CACHE_MISS");
+
+          // Persist fallback calculation
+          if (scopeKey !== lastSavedKeyRef.current) {
+            const body = {
+              version: 1, periodType: periodTypeMap[period], dateFrom, dateTo, label: periodLabel,
+              selectedServerLabel, calculatedAt: new Date().toISOString(),
+              metrics: {
+                periodCameraUptimeRate: result.aggregate.periodCameraUptimeRate,
+                metricDescription: "AVERAGE PER-CAMERA UPTIME INDEX",
+                totalDowntimeMs: result.aggregate.totalDowntimeMs,
+                totalDowntimeFormatted: result.aggregate.totalDowntimeFormatted,
+                totalOfflineIncidents: result.aggregate.totalOfflineIncidents,
+                resolvedIncidents: result.aggregate.resolvedIncidents,
+                activeIncidents: result.aggregate.activeIncidents,
+              },
+              cameras: result.cameras,
+            };
+            fetch("/api/downtime-results", {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+            }).then((r) => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              if (!cancelled) lastSavedKeyRef.current = scopeKey;
+            }).catch((err) => {
+              console.warn("[Reporting] Downtime result persistence failed:", err);
+            });
+          }
         }
       }
+    })();
 
-      const serverName = (cam._systemName || cam.serverName || "SERVER 01").toUpperCase();
+    return () => { cancelled = true; };
+  }, [isHistorical, period, dateFrom, dateTo, selectedServerLabel, cameras, targetAlarmEvents, periodLabel]);
 
-      return {
-        serverName,
-        cameraName: cam.name || `CAMERA_${cam.id?.slice(0, 6) || "UNK"}`,
-        cameraId: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
-        status: isOnline ? "ONLINE" : "OFFLINE",
-        firstOffline,
-        lastOffline,
-        offlineDuration,
-        incidentCount,
-        availabilityRate,
-        incidents,
-      };
-    });
-  }, [cameras, eventList, dateFrom]);
+  // resolvedResult: use calculated when available, fallback defaults while loading
+  const resolvedResult = downtimeResult ?? { cameras: [] as OfflineCameraItem[], aggregate: defaultAggregate };
+
+  const offlineCamerasSummary = resolvedResult.cameras;
 
   // Filtered Offline Cameras for display
   const displayedOfflineCameras = useMemo(() => {
@@ -1117,125 +1200,51 @@ export default function ReportingManagement() {
     return offlineCamerasSummary.reduce((acc, curr) => acc + curr.incidentCount, 0);
   }, [offlineCamerasSummary]);
 
+  // Canonical Reporting Events & Metrics (Single Source of Truth)
+  const canonicalReportingEvents = targetAlarmEvents;
+
+  const canonicalMetrics = useMemo(() => {
+    return computeCanonicalEventMetrics({
+      events: canonicalReportingEvents,
+      dateFrom,
+      dateTo,
+      selectedServerLabel,
+      totalOfflineIncidents,
+      resolvedIncidents: resolvedResult.aggregate.resolvedIncidents,
+      activeIncidents: resolvedResult.aggregate.activeIncidents,
+      periodCameraUptimeRate: resolvedResult.aggregate.periodCameraUptimeRate,
+      totalDowntimeFormatted: resolvedResult.aggregate.totalDowntimeFormatted,
+    });
+  }, [
+    canonicalReportingEvents,
+    dateFrom,
+    dateTo,
+    selectedServerLabel,
+    totalOfflineIncidents,
+    resolvedResult.aggregate,
+  ]);
+
+  const totalAlarms = canonicalMetrics.totalEvents;
+  const criticalAlarms = canonicalMetrics.criticalEvents;
+  const warningAlarms = canonicalMetrics.warningEvents;
+  const infoAlarms = canonicalMetrics.infoEvents;
+
   // ============================================
-  // COMPREHENSIVE ALARM EVENT SUMMARY & PERIOD UPTIME RATE
+  // ALARM EVENT METRICS (derived from canonical calculation)
   // ============================================
   const alarmEventMetrics = useMemo(() => {
-    const totalAlarms = targetAlarmEvents.length;
-    let criticalAlarms = 0;
-    let warningAlarms = 0;
-    let infoAlarms = 0;
-
-    let disconnectAlarms = 0;
-    let reconnectAlarms = 0;
-    let serverAlarms = 0;
-    let storageAlarms = 0;
-    let networkAlarms = 0;
-
-    targetAlarmEvents.forEach((a: any) => {
-      const sev = (a.severity || "INFO").toUpperCase();
-      if (sev === "CRITICAL") criticalAlarms++;
-      else if (sev === "WARNING") warningAlarms++;
-      else infoAlarms++;
-
-      const type = String(a.eventType || "").toLowerCase();
-      const label = String(a.eventLabel || "").toLowerCase();
-      const cap = String(a.caption || "").toLowerCase();
-      const desc = String(a.description || "").toLowerCase();
-
-      if (
-        type.includes("disconnect") ||
-        cap.includes("disconnect") ||
-        desc.includes("lost connection") ||
-        desc.includes("is now offline") ||
-        desc.includes("disconnected")
-      ) {
-        disconnectAlarms++;
-      } else if (
-        type.includes("reconnect") ||
-        type.includes("cameraconnected") ||
-        type.includes("deviceconnected") ||
-        cap.includes("back online") ||
-        cap.includes("camera online") ||
-        cap.includes("reconnect") ||
-        desc.includes("reconnected") ||
-        desc.includes("back online") ||
-        desc.includes("connection restored")
-      ) {
-        reconnectAlarms++;
-      }
-
-      if (type.includes("server") || label.includes("server") || desc.includes("server failure")) {
-        serverAlarms++;
-      }
-      if (type.includes("storage") || label.includes("storage") || desc.includes("storage") || desc.includes("disk")) {
-        storageAlarms++;
-      }
-      if (type.includes("network") || label.includes("network") || desc.includes("network")) {
-        networkAlarms++;
-      }
-    });
-
-    let resolvedIncidents = 0;
-    let activeIncidents = 0;
-    let totalDowntimeMs = 0;
-
-    offlineCamerasSummary.forEach((cam) => {
-      (cam.incidents || []).forEach((inc) => {
-        if (inc.status === "RECOVERED") {
-          resolvedIncidents++;
-          if (inc.offlineTimestampMs && inc.onlineTimestampMs) {
-            totalDowntimeMs += Math.max(0, inc.onlineTimestampMs - inc.offlineTimestampMs);
-          }
-        } else {
-          activeIncidents++;
-          if (inc.offlineTimestampMs) {
-            totalDowntimeMs += Math.max(0, Date.now() - inc.offlineTimestampMs);
-          }
-        }
-      });
-    });
-
-    const effectiveToTime = Math.min(toTime === Infinity ? Date.now() : toTime, Date.now());
-    const effectiveFromTime = Math.min(fromTime || effectiveToTime, effectiveToTime);
-    const periodDurationMs = Math.max(1000 * 60 * 60, effectiveToTime - effectiveFromTime);
-
-    const avgDowntimeMs = totalCameras > 0 ? totalDowntimeMs / totalCameras : totalDowntimeMs;
-    const computedUptime = periodDurationMs > 0
-      ? Math.max(0, Math.min(100, ((periodDurationMs - avgDowntimeMs) / periodDurationMs) * 100))
-      : 100;
-    const periodCameraUptimeRate = Number(computedUptime.toFixed(1));
-
-    const criticalPct = totalAlarms > 0 ? `${Math.round((criticalAlarms / totalAlarms) * 100)}%` : "0%";
-    const warningPct = totalAlarms > 0 ? `${Math.round((warningAlarms / totalAlarms) * 100)}%` : "0%";
-    const infoPct = totalAlarms > 0 ? `${Math.round((infoAlarms / totalAlarms) * 100)}%` : "0%";
-
-    const totalOfflineIncidentsCount = resolvedIncidents + activeIncidents;
-
-    const auditVerdict = `During the ${period.toUpperCase()} period (${dateFrom} to ${dateTo}), ${totalAlarms} total alarm event(s) were recorded for ${selectedServerLabel}. ${criticalAlarms} critical event(s) (${criticalPct}) and ${warningAlarms} warning(s) (${warningPct}) were logged. A total of ${totalOfflineIncidentsCount} camera disconnection incident(s) occurred: ${resolvedIncidents} successfully restored upon reconnection, and ${activeIncidents} active outage(s). Overall camera uptime index calculated from alarm logs is ${periodCameraUptimeRate}% with ${formatDuration(totalDowntimeMs)} total recorded downtime.`;
-
     return {
-      totalAlarms,
-      criticalAlarms,
-      criticalPct,
-      warningAlarms,
-      warningPct,
-      infoAlarms,
-      infoPct,
-      disconnectAlarms,
-      reconnectAlarms,
-      serverAlarms,
-      storageAlarms,
-      networkAlarms,
-      resolvedIncidents,
-      activeIncidents,
-      totalOfflineIncidents: totalOfflineIncidentsCount,
-      totalDowntimeMs,
-      totalDowntimeFormatted: formatDuration(totalDowntimeMs),
-      periodCameraUptimeRate,
-      auditVerdict,
+      ...resolvedResult.aggregate,
+      totalAlarms: canonicalMetrics.totalEvents,
+      criticalAlarms: canonicalMetrics.criticalEvents,
+      criticalPct: canonicalMetrics.criticalPct,
+      warningAlarms: canonicalMetrics.warningEvents,
+      warningPct: canonicalMetrics.warningPct,
+      infoAlarms: canonicalMetrics.infoEvents,
+      infoPct: canonicalMetrics.infoPct,
+      auditVerdict: canonicalMetrics.auditVerdict,
     };
-  }, [targetAlarmEvents, offlineCamerasSummary, totalCameras, fromTime, toTime, period, dateFrom, dateTo, selectedServerLabel]);
+  }, [resolvedResult.aggregate, canonicalMetrics]);
 
   // Period Camera Uptime Rate (calculated from historical alarm events)
   const cameraOnlineRate = alarmEventMetrics.periodCameraUptimeRate;
@@ -1244,6 +1253,24 @@ export default function ReportingManagement() {
   const serverStorageStats = useMemo(() => {
     if (!servers || servers.length === 0) return [];
     return servers.map((srv: any) => {
+      if (srv.isOfflinePlaceholder) {
+        return {
+          name: (srv._systemName || srv.name || "SERVER").toUpperCase(),
+          isOnline: false,
+          status: "OFFLINE",
+          totalGb: "N/A",
+          usedGb: "N/A",
+          freeGb: "N/A",
+          usedPct: 0,
+          diskCount: "N/A",
+          cpuText: "N/A",
+          ramText: "N/A",
+          version: "N/A",
+          osName: "N/A",
+          isOfflinePlaceholder: true,
+        };
+      }
+
       const diskList: any[] = srv.hddList || srv.storages || [];
       const totalMb = diskList.reduce((sum: number, d: any) => sum + (d.totalSpaceMb || d.totalSpace || 0), 0);
       const usedMb = diskList.reduce((sum: number, d: any) => sum + (d.reservedSpaceMb || d.usedSpace || 0), 0);
@@ -1272,55 +1299,69 @@ export default function ReportingManagement() {
         ramText,
         version: srv.version || srv.softwareVersion || "DATA NOT AVAILABLE FROM SOURCE",
         osName: srv.osName || srv.osInfo?.name || "DATA NOT AVAILABLE FROM SOURCE",
+        isOfflinePlaceholder: false,
       };
     });
   }, [servers]);
-
-  // Trend Chart Data
-  const trendData = useMemo(() => {
-    const liveCam = onlineCameras;
-    const liveAlarms = totalAlarms;
-    const liveHealth = serverOnlineRate;
-
-    if (period === "daily") {
-      return Array.from({ length: 8 }, (_, i) => ({
-        label: `${i * 3}:00`,
-        cameras: liveCam,
-        alarms: Math.round(liveAlarms / 8),
-        healthScore: liveHealth || 100,
-      }));
-    } else if (period === "weekly") {
-      return Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - (6 - i));
-        return {
-          label: d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase(),
-          cameras: liveCam,
-          alarms: Math.round(liveAlarms / 7),
-          healthScore: liveHealth || 100,
-        };
-      });
-    } else if (period === "yearly") {
-      return ["Q1", "Q2", "Q3", "Q4"].map((q) => ({
-        label: q,
-        cameras: liveCam,
-        alarms: Math.round(liveAlarms / 4),
-        healthScore: liveHealth || 100,
-      }));
-    } else {
-      return ["WEEK 1", "WEEK 2", "WEEK 3", "WEEK 4"].map((w) => ({
-        label: w,
-        cameras: liveCam,
-        alarms: Math.round(liveAlarms / 4),
-        healthScore: liveHealth || 100,
-      }));
-    }
-  }, [period, onlineCameras, totalAlarms, serverOnlineRate]);
 
   // S3 Cloud Bridge — No live S3 API endpoint exists in this deployment.
   const s3PerformanceData: S3LogItem[] = useMemo(() => {
     return [];
   }, []);
+
+  // Server Historical Period Uptime Summary (Calculated from serverFailure/serverStarted events)
+  const serverUptimeSummary = useMemo<SystemServerUptimeSummary>(() => {
+    const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
+    const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Date.now();
+
+    // STEP 2.7: Evaluate completeness PER SYSTEM (max single-system count) to eliminate false positive warnings
+    // when total merged events across multiple systems exceeds 2000 while no single system reached 2000.
+    const perSystemCounts = new Map<string, number>();
+    alarmEvents.forEach((ev: any) => {
+      const sysId = ev._systemId || "default";
+      perSystemCounts.set(sysId, (perSystemCounts.get(sysId) || 0) + 1);
+    });
+    const maxSingleSystemCount = perSystemCounts.size > 0
+      ? Math.max(...Array.from(perSystemCounts.values()))
+      : alarmEvents.length;
+
+    return calculateServerUptimeFromEvents({
+      servers,
+      events: alarmEvents,
+      fromMs,
+      toMs,
+      nowMs: Date.now(),
+      requestedLimit: 2000,
+      returnedEventCount: maxSingleSystemCount,
+      isFetchFailed: systemOffline,
+    });
+  }, [servers, alarmEvents, dateFrom, dateTo, systemOffline]);
+
+  // Trend Chart Data (Pure Timestamp-Based Bucketing)
+  const trendResult = useMemo(() => {
+    const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
+    const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Date.now();
+
+    return calculateTimestampTrend({
+      events: targetAlarmEvents,
+      fromMs,
+      toMs,
+      period,
+      totalCameras,
+      overallServerUptimeRate: serverUptimeSummary.overallServerUptimeRate,
+      dataCompleteness: serverUptimeSummary.dataCompleteness,
+    });
+  }, [
+    targetAlarmEvents,
+    dateFrom,
+    dateTo,
+    period,
+    totalCameras,
+    serverUptimeSummary.overallServerUptimeRate,
+    serverUptimeSummary.dataCompleteness,
+  ]);
+
+  const trendData = trendResult.trendData;
 
   // ============================================
   // EXPORT HANDLERS (WORD & PDF)
@@ -1360,13 +1401,72 @@ export default function ReportingManagement() {
     const formattedServers: ServerHealthItem[] = serverStorageStats.map((srv) => ({
       serverName: srv.name,
       status: srv.isOnline ? "ONLINE" : "OFFLINE",
-      version: srv.version,
-      osName: srv.osName,
-      cpuUsage: srv.cpuText,
-      ramUsage: srv.ramText,
-      diskCount: srv.diskCount,
-      storageUsage: srv.totalGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB (${srv.usedPct}%)` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+      version: srv.isOfflinePlaceholder ? "N/A" : srv.version,
+      osName: srv.isOfflinePlaceholder ? "N/A" : srv.osName,
+      cpuUsage: srv.isOfflinePlaceholder ? "N/A" : srv.cpuText,
+      ramUsage: srv.isOfflinePlaceholder ? "N/A" : srv.ramText,
+      diskCount: srv.isOfflinePlaceholder ? "N/A" : srv.diskCount,
+      storageUsage: srv.isOfflinePlaceholder ? "N/A" : srv.totalGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB (${srv.usedPct}%)` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
     }));
+
+    const formattedServerUptime: ServerUptimeItem[] = serverUptimeSummary.serverResults.map((res) => {
+      const matchSrv = servers.find(
+        (s: any) =>
+          cleanId(s.id || s.serverId || s.name) === cleanId(res.serverId) ||
+          s.name === res.serverName ||
+          (s._systemId && s._systemId === res.serverId)
+      );
+      const isOfflinePlaceholder = Boolean(
+        (res as any).isOfflinePlaceholder ||
+        matchSrv?.isOfflinePlaceholder ||
+        (res.currentStatus === "offline" && matchSrv?.isOfflinePlaceholder)
+      );
+
+      if (isOfflinePlaceholder) {
+        return {
+          serverId: res.serverId,
+          serverName: res.serverName,
+          currentStatus: "OFFLINE",
+          firstOffline: "N/A",
+          lastRecovery: "OFFLINE UNTIL NOW",
+          totalDowntime: "N/A",
+          incidentCount: "N/A" as any,
+          uptimeRate: null,
+          periodUptime: "N/A — SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE",
+          dataCompleteness: res.dataCompleteness,
+          isOfflinePlaceholder: true,
+          outageSessions: [],
+        };
+      }
+
+      return {
+        serverId: res.serverId,
+        serverName: res.serverName,
+        currentStatus: res.currentStatus === "online" ? "ONLINE" : "OFFLINE",
+        firstOffline: res.firstOfflineMs ? formatTimestamp(res.firstOfflineMs) : "NO OFFLINE INCIDENTS",
+        lastRecovery: res.activeOutage
+          ? "OFFLINE UNTIL NOW"
+          : res.lastRecoveryMs
+          ? formatTimestamp(res.lastRecoveryMs)
+          : res.currentStatus === "online"
+          ? "ONLINE"
+          : "OFFLINE UNTIL NOW",
+        totalDowntime: res.totalDowntimeFormatted,
+        incidentCount: res.incidentCount,
+        uptimeRate: res.uptimeRate,
+        periodUptime: res.uptimeRate !== null ? `${res.uptimeRate}%` : "N/A",
+        dataCompleteness: res.dataCompleteness,
+        isOfflinePlaceholder: false,
+        outageSessions: res.outageSessions
+          ? res.outageSessions.map((s) => ({
+              startTimeMs: s.startTimeMs,
+              endTimeMs: s.endTimeMs,
+              durationMs: s.durationMs,
+              isActive: s.isActive,
+            }))
+          : [],
+      };
+    });
 
     const formattedAlarms: AlarmReportItem[] = targetAlarmEvents.map((a: any) => ({
       id: String(a.id || "EVENT"),
@@ -1377,6 +1477,8 @@ export default function ReportingManagement() {
       eventType: a.eventType,
       eventLabel: a.eventLabel,
       systemName: a.systemName,
+      sourceName: a.sourceName,
+      timestampMs: typeof a.timestampMs === "number" ? a.timestampMs : undefined,
     }));
 
     return {
@@ -1396,11 +1498,16 @@ export default function ReportingManagement() {
       onlineServers,
       offlineServers: totalServers - onlineServers,
       serverOnlineRate,
+      overallServerPeriodUptime: serverUptimeSummary.overallServerUptimeRate,
       totalAlarms,
       criticalAlarms,
       warningAlarms,
       totalOfflineIncidents,
       offlineSummaryTitle,
+      alarmEventMetrics,
+      trendData,
+      serverStorageStats,
+      serverUptimeResults: formattedServerUptime,
       cameras: formattedCameras,
       offlineCameras: offlineSummaryFilter === "all"
         ? offlineCamerasSummary
@@ -1413,6 +1520,7 @@ export default function ReportingManagement() {
   }, [
     cameras,
     serverStorageStats,
+    serverUptimeSummary,
     formattedServerDisks,
     targetAlarmEvents,
     offlineCamerasSummary,
@@ -1690,7 +1798,7 @@ export default function ReportingManagement() {
           <CardContent className="p-4 flex items-center justify-between">
             <div className="space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-indigo-500" /> STORAGE SERVERS
+                <Database className="w-3.5 h-3.5 text-indigo-500" /> RECORDING SERVERS
               </span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-slate-900 dark:text-white">{totalServers}</span>
@@ -1706,7 +1814,7 @@ export default function ReportingManagement() {
           </CardContent>
         </Card>
 
-        {/* Card 3: Server Health Index */}
+        {/* Card 3: Server Health Index (Historical Period Uptime) */}
         <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
           <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-600" />
           <CardContent className="p-4 flex items-center justify-between">
@@ -1715,15 +1823,17 @@ export default function ReportingManagement() {
                 <Activity className="w-3.5 h-3.5 text-emerald-500" /> SERVER HEALTH INDEX
               </span>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-black text-slate-900 dark:text-white">{serverOnlineRate}%</span>
+                <span className="text-2xl font-black text-slate-900 dark:text-white">
+                  {serverUptimeSummary.overallServerUptimeRate !== null
+                    ? `${serverUptimeSummary.overallServerUptimeRate}%`
+                    : "N/A"}
+                </span>
                 <span className="text-[11px] font-bold text-emerald-500 uppercase flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> {onlineServers}/{totalServers} ONLINE
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {onlineServers}/{totalServers} ONLINE NOW
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-slate-400 uppercase">
-                {alarmEventMetrics.serverAlarms > 0
-                  ? `${alarmEventMetrics.serverAlarms} SERVER ALERTS LOGGED`
-                  : "HOST HARDWARE HEALTH OPERATIONAL"}
+                PERIOD UPTIME &bull; {serverUptimeSummary.totalServerIncidents} INCIDENTS ({serverUptimeSummary.totalServerDowntimeFormatted} DOWNTIME)
               </p>
             </div>
             <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-600">
@@ -1940,18 +2050,24 @@ export default function ReportingManagement() {
                       <div className="flex items-center justify-between text-[12px] font-bold text-slate-700 dark:text-slate-300">
                         <span>{item.label}</span>
                         <div className="flex items-center gap-4 text-[11px] font-mono">
-                          <span className="text-blue-500 font-bold">{item.cameras} ONLINE CAMERAS</span>
+                          <span className="text-blue-500 font-bold">
+                            {item.cameras !== null && item.cameras !== undefined ? `${item.cameras} ONLINE CAMERAS` : "CAMERAS: N/A"}
+                          </span>
                           <span className="text-amber-500 font-bold">{item.alarms} ALARMS</span>
-                          <span className="text-emerald-500 font-bold">{item.healthScore}% HEALTH</span>
+                          <span className="text-emerald-500 font-bold">
+                            {item.healthScore !== null && item.healthScore !== undefined ? `${item.healthScore}% HEALTH` : "HEALTH: N/A"}
+                          </span>
                         </div>
                       </div>
                       <div className="h-3 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
+                        {item.cameras !== null && item.cameras !== undefined && (
+                          <div
+                            style={{ width: `${Math.min(100, (item.cameras / Math.max(totalCameras, 1)) * 100)}%` }}
+                            className="bg-gradient-to-r from-blue-600 to-cyan-500 h-full"
+                          />
+                        )}
                         <div
-                          style={{ width: `${Math.min(100, (item.cameras / Math.max(totalCameras, 1)) * 100)}%` }}
-                          className="bg-gradient-to-r from-blue-600 to-cyan-500 h-full"
-                        />
-                        <div
-                          style={{ width: `${Math.min(30, (item.alarms / Math.max(totalAlarms, 1)) * 30)}%` }}
+                          style={{ width: `${Math.min(100, (item.alarms / Math.max(totalAlarms, 1)) * 100)}%` }}
                           className="bg-amber-500 h-full"
                         />
                       </div>
@@ -2263,7 +2379,6 @@ export default function ReportingManagement() {
                         <th className="p-3">OFFLINE EXACT TIME</th>
                         <th className="p-3">IP ADDRESS</th>
                         <th className="p-3">VENDOR / MODEL</th>
-                        <th className="p-3">RESOLUTION / FPS</th>
                         <th className="p-3 text-right">UPTIME RATE</th>
                       </tr>
                     </thead>
@@ -2298,7 +2413,6 @@ export default function ReportingManagement() {
                             </td>
                             <td className="p-3 font-mono text-slate-500">{cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE"}</td>
                             <td className="p-3 uppercase">{[cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA"}</td>
-                            <td className="p-3 font-mono">{cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE"}</td>
                             <td className="p-3 text-right font-bold">
                               {isCamOnline ? (
                                 <span className="text-emerald-500">100% ONLINE</span>
@@ -2587,7 +2701,7 @@ export default function ReportingManagement() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center justify-between">
                 <span className="flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-indigo-500" /> SERVER STORAGE &amp; HARD DRIVE BREAKDOWN
+                  <HardDrive className="w-4 h-4 text-indigo-500" /> RECORDING SERVER STORAGE &amp; HARD DRIVE BREAKDOWN
                 </span>
                 <Badge variant="outline" className="text-[11px] font-bold uppercase">
                   TOTAL DISKS: {formattedServerDisks.length}
@@ -2850,7 +2964,38 @@ export default function ReportingManagement() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
-                      {displayedTabAlarms.slice(0, 100).map((a: any, i: number) => {
+                      {analystPresentationLog.presentationItems.slice(0, 100).map((a: any, i: number) => {
+                        if (a.isSummary) {
+                          const isCrit = a.severity === "CRITICAL";
+                          const isWarn = a.severity === "WARNING";
+                          return (
+                            <tr key={`tab-summary-${a.patternKey}-${i}`} className="bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50 dark:hover:bg-amber-950/40">
+                              <td className="p-3 text-amber-600 font-mono font-bold">#{i + 1}</td>
+                              <td className="p-3 font-bold uppercase text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                                <Activity className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                                SUMMARY ({a.count} LOGS)
+                              </td>
+                              <td className="p-3 font-bold uppercase text-slate-700 dark:text-slate-300">
+                                {a.sourceName || "S3 CLOUD BRIDGE"}
+                              </td>
+                              <td className="p-3 font-semibold text-[11px] text-slate-500 uppercase">
+                                {a.systemName || selectedServerLabel}
+                              </td>
+                              <td className="p-3">
+                                <Badge className={cn("text-[10px] font-bold uppercase", isCrit ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : isWarn ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "bg-blue-500/10 text-blue-500 border border-blue-500/20")}>
+                                  {a.severity}
+                                </Badge>
+                              </td>
+                              <td className="p-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                                {a.firstFormattedTime && a.lastFormattedTime ? `${a.firstFormattedTime} → ${a.lastFormattedTime}` : "TELEMETRY WINDOW"}
+                              </td>
+                              <td className="p-3 text-slate-700 dark:text-slate-200 max-w-md font-medium">
+                                <span className="font-bold text-amber-600">[REPEATED TELEMETRY x{a.count}]</span> {a.representativeCaption} — {a.representativeDescription}
+                              </td>
+                            </tr>
+                          );
+                        }
+
                         const isCrit = a.severity === "CRITICAL";
                         const isWarn = a.severity === "WARNING";
                         return (
@@ -2963,6 +3108,213 @@ export default function ReportingManagement() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ============================================ */}
+          {/* SERVER INCIDENT DETAIL                       */}
+          {/* Consumes: serverUptimeSummary.serverResults  */}
+          {/*           .outageSessions[]                  */}
+          {/* NO NEW CALCULATION — display layer only      */}
+          {/* ============================================ */}
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-rose-500" /> SERVER INCIDENT DETAIL
+                  </CardTitle>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Historical server outage incidents for the selected reporting period. Source: canonical server uptime calculator.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge className="text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 uppercase">
+                    {serverUptimeSummary.totalServerIncidents} TOTAL INCIDENTS
+                  </Badge>
+                  <Badge className="text-[10px] font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20 uppercase">
+                    {serverUptimeSummary.totalServerDowntimeFormatted} TOTAL DOWNTIME
+                  </Badge>
+                  {serverUptimeSummary.dataCompleteness === "POTENTIALLY_TRUNCATED" && (
+                    <Badge className="text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase">
+                      ⚠ EVENT DATA POTENTIALLY TRUNCATED
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingData ? (
+                <div className="flex items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
+                  <span>LOADING SERVER INCIDENT DATA...</span>
+                </div>
+              ) : serverUptimeSummary.serverResults.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <Server className="w-8 h-8 text-slate-400" />
+                  <span>NO SERVER DATA AVAILABLE FOR SELECTED PERIOD</span>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {serverUptimeSummary.serverResults.map((srvResult) => {
+                    const matchSrv = servers.find(
+                      (s: any) =>
+                        cleanId(s.id || s.serverId || s.name) === cleanId(srvResult.serverId) ||
+                        s.name === srvResult.serverName ||
+                        (s._systemId && s._systemId === srvResult.serverId)
+                    );
+                    const isOfflinePlaceholder = Boolean(
+                      (srvResult as any).isOfflinePlaceholder ||
+                      matchSrv?.isOfflinePlaceholder ||
+                      (srvResult.currentStatus === "offline" && matchSrv?.isOfflinePlaceholder)
+                    );
+
+                    // Sort outage sessions chronologically ascending — non-mutating copy
+                    const sortedSessions = [...srvResult.outageSessions].sort(
+                      (a, b) => a.startTimeMs - b.startTimeMs
+                    );
+
+                    return (
+                      <div key={srvResult.serverId || srvResult.serverName} className="space-y-2">
+                        {/* Per-server header */}
+                        <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <div className={cn(
+                              "p-1.5 rounded-lg",
+                              srvResult.currentStatus === "online"
+                                ? "bg-emerald-500/10 text-emerald-600"
+                                : "bg-rose-500/10 text-rose-600"
+                            )}>
+                              <Server className="w-3.5 h-3.5" />
+                            </div>
+                            <div>
+                              <span className="text-[12px] font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                                {srvResult.serverName || srvResult.serverId || "UNKNOWN SERVER"}
+                              </span>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <Badge className={cn(
+                                  "text-[9px] font-bold uppercase",
+                                  srvResult.currentStatus === "online"
+                                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                                    : "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                                )}>
+                                  {srvResult.currentStatus === "online" ? "ONLINE NOW" : "OFFLINE NOW"}
+                                </Badge>
+                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">
+                                  {isOfflinePlaceholder ? (
+                                    "N/A INCIDENTS • N/A DOWNTIME • N/A — SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE"
+                                  ) : (
+                                    `${srvResult.incidentCount} incident${srvResult.incidentCount !== 1 ? "s" : ""} • ${srvResult.totalDowntimeFormatted} downtime • ${srvResult.uptimeRate !== null ? `${srvResult.uptimeRate}% period uptime` : "N/A"}`
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Incident table for this server */}
+                        {isOfflinePlaceholder ? (
+                          <div className="py-4 text-center text-[11px] font-bold text-slate-400 uppercase">
+                            SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE
+                          </div>
+                        ) : sortedSessions.length === 0 ? (
+                          <div className="py-4 text-center text-[11px] font-bold text-slate-400 uppercase">
+                            NO OUTAGE INCIDENTS RECORDED FOR THIS SERVER IN THE SELECTED PERIOD
+                          </div>
+                        ) : (
+                          <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                            <table className="w-full text-left text-[11px]">
+                              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
+                                <tr>
+                                  <th className="p-2.5">#</th>
+                                  <th className="p-2.5">DATE</th>
+                                  <th className="p-2.5">OFFLINE TIME</th>
+                                  <th className="p-2.5">RECOVERY TIME</th>
+                                  <th className="p-2.5">DURATION</th>
+                                  <th className="p-2.5">STATUS</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {sortedSessions.map((sess, idx) => {
+                                  // Format offline start timestamp
+                                  const offlineDate = new Intl.DateTimeFormat("en-GB", {
+                                    timeZone: "Asia/Jakarta",
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                  }).format(new Date(sess.startTimeMs));
+                                  const offlineTime = new Intl.DateTimeFormat("en-GB", {
+                                    timeZone: "Asia/Jakarta",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    second: "2-digit",
+                                    hour12: false,
+                                  }).format(new Date(sess.startTimeMs));
+
+                                  // Format recovery timestamp
+                                  const recoveryTime = sess.isActive
+                                    ? null
+                                    : new Intl.DateTimeFormat("en-GB", {
+                                        timeZone: "Asia/Jakarta",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                        second: "2-digit",
+                                        hour12: false,
+                                      }).format(new Date(sess.endTimeMs));
+
+                                  // Duration from canonical durationMs — no recalculation
+                                  const durationDisplay = formatDuration(sess.durationMs);
+
+                                  return (
+                                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                      <td className="p-2.5 font-bold text-slate-400">
+                                        #{idx + 1}
+                                      </td>
+                                      <td className="p-2.5 font-mono font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                                        {offlineDate}
+                                      </td>
+                                      <td className="p-2.5 font-mono font-bold text-rose-600 dark:text-rose-400 whitespace-nowrap">
+                                        <div className="flex items-center gap-1.5">
+                                          <Clock className="w-3 h-3 text-rose-500 shrink-0" />
+                                          <span>{offlineTime}</span>
+                                        </div>
+                                      </td>
+                                      <td className="p-2.5 font-mono whitespace-nowrap">
+                                        {sess.isActive ? (
+                                          <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase">
+                                            ACTIVE / NOT RECOVERED
+                                          </Badge>
+                                        ) : (
+                                          <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                            {recoveryTime}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="p-2.5 font-mono font-bold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                                        {durationDisplay}
+                                      </td>
+                                      <td className="p-2.5">
+                                        <Badge className={cn(
+                                          "text-[9px] font-bold uppercase",
+                                          sess.isActive
+                                            ? "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                                            : "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                                        )}>
+                                          {sess.isActive ? "ACTIVE" : "RECOVERED"}
+                                        </Badge>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

@@ -241,15 +241,22 @@ export async function getNxDevices(cloudSystemId: string, systemAccessToken: str
  * - Target: https://{cloudSystemId}.relay.vmsproxy.com/api/getEvents
  * - Manually handles HTTP 307/301/302/308 redirects preserving Authorization header.
  */
-export async function getNxEvents(cloudSystemId: string, systemAccessToken: string): Promise<any[]> {
+export async function getNxEvents(
+  cloudSystemId: string,
+  systemAccessToken: string,
+  options?: { fromMs?: number; limit?: number }
+): Promise<any[]> {
   const cleanId = cloudSystemId.trim().replace(/[{}]/g, "");
   const headers = {
     Authorization: `Bearer ${systemAccessToken}`,
     Accept: "application/json",
   };
 
+  const limit = options?.limit ?? 2000;
+  const timestampParam = options?.fromMs ? `&timestamp=${Math.floor(options.fromMs * 1000)}` : "";
+
   const endpointsToTry = [
-    `https://${cleanId}.relay.vmsproxy.com/api/getEvents?limit=200`,
+    `https://${cleanId}.relay.vmsproxy.com/api/getEvents?limit=${limit}${timestampParam}`,
     `https://${cleanId}.relay.vmsproxy.com/rest/v4/events`,
     `https://${cleanId}.relay.vmsproxy.com/rest/v3/events`,
   ];

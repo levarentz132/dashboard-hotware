@@ -22,12 +22,21 @@ export async function GET(request: NextRequest) {
     }
   } catch (_) {}
 
+  const serverId = searchParams.get("serverId");
+  const from = searchParams.get("from") || searchParams.get("timestamp");
+  const limitStr = searchParams.get("_limit") || searchParams.get("limit") || "2000";
+  const limit = parseInt(limitStr, 10) || 2000;
+  const fromMs = from ? parseInt(from, 10) : undefined;
+
   // 1. Primary Flow: Use System-Scoped Token via nx-cloud-service for Cloud systems
   if (refreshToken && systemId && systemId !== "all" && systemId !== "localhost") {
     try {
       console.log(`[Cloud Events Proxy] Generating system-scoped token for systemId=${systemId}`);
       const systemAccessToken = await getNxSystemToken(refreshToken, systemId);
-      const eventsData = await getNxEvents(systemId, systemAccessToken);
+      const eventsData = await getNxEvents(systemId, systemAccessToken, {
+        fromMs: !isNaN(fromMs as number) ? fromMs : undefined,
+        limit,
+      });
       return NextResponse.json(normalizeNxEvents(eventsData));
     } catch (err: any) {
       console.warn(`[Cloud Events Proxy] Scoped token flow failed for system ${systemId}, falling back:`, err.message);
@@ -35,18 +44,13 @@ export async function GET(request: NextRequest) {
   }
 
   // 2. Fallback Flow: Standard cloud API fetcher
-  const serverId = searchParams.get("serverId");
-  const from = searchParams.get("from");
-  const limit = searchParams.get("_limit") || searchParams.get("limit") || "100";
-
   try {
     const legacyParams = new URLSearchParams();
-    if (from) {
-      const fromMs = parseInt(from);
-      if (!isNaN(fromMs)) legacyParams.set("timestamp", (fromMs * 1000).toString());
+    if (fromMs && !isNaN(fromMs)) {
+      legacyParams.set("timestamp", (fromMs * 1000).toString());
     }
     if (serverId) legacyParams.set("serverId", serverId);
-    legacyParams.set("limit", limit);
+    legacyParams.set("limit", limitStr);
 
     const response = await fetchFromCloudApi(request, {
       systemId,
