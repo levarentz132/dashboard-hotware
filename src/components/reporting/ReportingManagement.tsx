@@ -93,7 +93,7 @@ function cleanId(id?: string | null): string {
 const COMPANY_NAME = "PT ORIX FINANCE INDONESIA";
 const DASHBOARD_TITLE = "ORIX INDONESIA FINANCE";
 
-type ReportPeriod = "daily" | "weekly" | "monthly" | "yearly" | "custom";
+type ReportPeriod = "current" | "daily" | "weekly" | "monthly" | "yearly" | "custom";
 type ReportCategory = "all" | "cameras" | "recordings" | "health" | "alarms" | "s3bridge";
 
 function formatBytesToReadable(bytes: number): string {
@@ -803,6 +803,8 @@ export default function ReportingManagement() {
   // Dynamic Offline Camera Summary Title
   const offlineSummaryTitle = useMemo(() => {
     switch (period) {
+      case "current":
+        return "CURRENT OFFLINE CAMERA SUMMARY";
       case "daily":
         return "DAILY OFFLINE CAMERA SUMMARY";
       case "weekly":
@@ -818,7 +820,9 @@ export default function ReportingManagement() {
 
   // Dynamic Period Description Label
   const periodLabel = useMemo(() => {
-    if (period === "daily") {
+    if (period === "current") {
+      return `CURRENT SNAPSHOT • ${formatDateLocal(new Date())}`;
+    } else if (period === "daily") {
       return `DAILY • ${dateTo} (00:00 - 23:59)`;
     } else if (period === "weekly") {
       return `WEEKLY • ${dateFrom} TO ${dateTo} (7 DAYS)`;
@@ -887,8 +891,14 @@ export default function ReportingManagement() {
   const lastCacheRequestRef = useRef<string>("");
 
   useEffect(() => {
+    if (period === "current") {
+      setDowntimeResult(null);
+      setCalculationSource("LIVE_CALCULATION");
+      return;
+    }
+
     const periodTypeMap: Record<ReportPeriod, string> = {
-      daily: "DAILY", weekly: "WEEKLY", monthly: "MONTHLY", yearly: "YEARLY", custom: "CUSTOM",
+      current: "CURRENT", daily: "DAILY", weekly: "WEEKLY", monthly: "MONTHLY", yearly: "YEARLY", custom: "CUSTOM",
     };
     const scopeKey = `${periodTypeMap[period]}_${selectedServerLabel}_${dateFrom}_${dateTo}`;
 
@@ -1246,8 +1256,8 @@ export default function ReportingManagement() {
     };
   }, [resolvedResult.aggregate, canonicalMetrics]);
 
-  // Period Camera Uptime Rate (calculated from historical alarm events)
-  const cameraOnlineRate = alarmEventMetrics.periodCameraUptimeRate;
+  // Period Camera Uptime Rate (calculated from historical alarm events) or Instant Camera Online Rate for CURRENT
+  const cameraOnlineRate = period === "current" ? instantCameraOnlineRate : alarmEventMetrics.periodCameraUptimeRate;
 
   // Storage Stats per Server
   const serverStorageStats = useMemo(() => {
@@ -1656,7 +1666,7 @@ export default function ReportingManagement() {
               <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300 px-2.5 flex items-center gap-1.5 uppercase">
                 <Calendar className="w-3.5 h-3.5 text-blue-500" /> REPORTING PERIOD:
               </span>
-              {(["daily", "weekly", "monthly", "yearly", "custom"] as ReportPeriod[]).map((p) => (
+              {(["current", "daily", "weekly", "monthly", "custom"] as ReportPeriod[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => handlePeriodChange(p)}
@@ -1767,7 +1777,7 @@ export default function ReportingManagement() {
           <CardContent className="p-4 flex items-center justify-between">
             <div className="space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Camera className="w-3.5 h-3.5 text-blue-500" /> CAMERA UPTIME RATE
+                <Camera className="w-3.5 h-3.5 text-blue-500" /> {period === "current" ? "INSTANT CAMERA ONLINE RATE" : "CAMERA UPTIME RATE"}
               </span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-slate-900 dark:text-white">{cameraOnlineRate}%</span>
@@ -1783,7 +1793,9 @@ export default function ReportingManagement() {
                 </Badge>
               </div>
               <p className="text-[11px] font-semibold text-slate-400 uppercase">
-                {alarmEventMetrics.totalDowntimeFormatted} DOWNTIME &bull; {alarmEventMetrics.totalOfflineIncidents} INCIDENTS ({onlineCameras}/{totalCameras} ONLINE NOW)
+                {period === "current"
+                  ? `${onlineCameras}/${totalCameras} CAMERAS ONLINE NOW`
+                  : `${alarmEventMetrics.totalDowntimeFormatted} DOWNTIME • ${alarmEventMetrics.totalOfflineIncidents} INCIDENTS (${onlineCameras}/${totalCameras} ONLINE NOW)`}
               </p>
             </div>
             <div className="p-3 bg-blue-500/10 rounded-2xl text-blue-600">
@@ -1820,20 +1832,24 @@ export default function ReportingManagement() {
           <CardContent className="p-4 flex items-center justify-between">
             <div className="space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-emerald-500" /> SERVER HEALTH INDEX
+                <Activity className="w-3.5 h-3.5 text-emerald-500" /> {period === "current" ? "INSTANT SERVER ONLINE RATE" : "SERVER HEALTH INDEX"}
               </span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-slate-900 dark:text-white">
-                  {serverUptimeSummary.overallServerUptimeRate !== null
-                    ? `${serverUptimeSummary.overallServerUptimeRate}%`
-                    : "N/A"}
+                  {period === "current"
+                    ? (totalServers > 0 ? `${((onlineServers / totalServers) * 100).toFixed(1)}%` : "100%")
+                    : (serverUptimeSummary.overallServerUptimeRate !== null
+                      ? `${serverUptimeSummary.overallServerUptimeRate}%`
+                      : "N/A")}
                 </span>
                 <span className="text-[11px] font-bold text-emerald-500 uppercase flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" /> {onlineServers}/{totalServers} ONLINE NOW
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-slate-400 uppercase">
-                PERIOD UPTIME &bull; {serverUptimeSummary.totalServerIncidents} INCIDENTS ({serverUptimeSummary.totalServerDowntimeFormatted} DOWNTIME)
+                {period === "current"
+                  ? `${onlineServers}/${totalServers} SERVERS ONLINE NOW`
+                  : `PERIOD UPTIME • ${serverUptimeSummary.totalServerIncidents} INCIDENTS (${serverUptimeSummary.totalServerDowntimeFormatted} DOWNTIME)`}
               </p>
             </div>
             <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-600">
@@ -1870,7 +1886,9 @@ export default function ReportingManagement() {
                 {alarmEventMetrics.criticalAlarms} CRIT &bull; {alarmEventMetrics.warningAlarms} WARN &bull; {alarmEventMetrics.infoAlarms} INFO
               </p>
               <p className="text-[10px] font-medium text-slate-400 uppercase">
-                {alarmEventMetrics.totalOfflineIncidents} DROPS ({alarmEventMetrics.resolvedIncidents} RESOLVED &bull; {alarmEventMetrics.activeIncidents} ACTIVE)
+                {period === "current"
+                  ? `${onlineCameras}/${totalCameras} CAMERAS ONLINE • ${onlineServers}/${totalServers} SERVERS ONLINE`
+                  : `${alarmEventMetrics.totalOfflineIncidents} DROPS (${alarmEventMetrics.resolvedIncidents} RESOLVED • ${alarmEventMetrics.activeIncidents} ACTIVE)`}
               </p>
             </div>
             <div className="p-3 bg-amber-500/10 rounded-2xl text-amber-600">
@@ -1892,14 +1910,16 @@ export default function ReportingManagement() {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                  ALARM EVENTS &amp; AVAILABILITY EXECUTIVE SUMMARY
+                  {period === "current" ? "LIVE ALARM & SYSTEM EVENT SUMMARY" : "ALARM EVENTS & AVAILABILITY EXECUTIVE SUMMARY"}
                 </h3>
                 <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20 text-[10px] font-bold uppercase">
                   {period.toUpperCase()}
                 </Badge>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Derived directly from {alarmEventMetrics.totalAlarms} alarm events recorded for {selectedServerLabel} ({dateFrom} to {dateTo})
+                {period === "current"
+                  ? `As of ${formatDateLocal(new Date())} • Real-time event log for ${selectedServerLabel}`
+                  : `Derived directly from ${alarmEventMetrics.totalAlarms} alarm events recorded for ${selectedServerLabel} (${dateFrom} to ${dateTo})`}
               </p>
             </div>
           </div>
@@ -1948,23 +1968,27 @@ export default function ReportingManagement() {
                 <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
                   OUTAGE &amp; RESOLUTION
                 </span>
-                <div className={cn("font-bold", alarmEventMetrics.activeIncidents === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
-                  {alarmEventMetrics.activeIncidents === 0 ? "100% RESOLVED" : `${alarmEventMetrics.activeIncidents} ACTIVE ISSUE(S)`}
+                <div className={cn("font-bold", period === "current" ? (offlineCamerasCount === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400") : (alarmEventMetrics.activeIncidents === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"))}>
+                  {period === "current"
+                    ? (offlineCamerasCount === 0 ? "ALL CAMERAS ONLINE" : `${offlineCamerasCount} CAMERAS OFFLINE NOW`)
+                    : (alarmEventMetrics.activeIncidents === 0 ? "100% RESOLVED" : `${alarmEventMetrics.activeIncidents} ACTIVE ISSUE(S)`)}
                 </div>
                 <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                  {alarmEventMetrics.totalDowntimeFormatted} Total Outage Time
+                  {period === "current"
+                    ? `${onlineServers} / ${totalServers} Servers Active`
+                    : `${alarmEventMetrics.totalDowntimeFormatted} Total Outage Time`}
                 </span>
               </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
                 <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
-                  EFFECTIVE UPTIME RATE
+                  {period === "current" ? "INSTANT CAMERA ONLINE RATE" : "EFFECTIVE UPTIME RATE"}
                 </span>
                 <div className="font-bold text-blue-600 dark:text-blue-400">
-                  {cameraOnlineRate}% Period Uptime
+                  {period === "current" ? `${cameraOnlineRate}% Instant Online` : `${cameraOnlineRate}% Period Uptime`}
                 </div>
                 <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                  Derived from historical alarm events
+                  {period === "current" ? `${onlineCameras} / ${totalCameras} Cameras Online Now` : "Derived from historical alarm events"}
                 </span>
               </div>
 
@@ -1986,7 +2010,9 @@ export default function ReportingManagement() {
             {/* Audit Statement */}
             <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-700/50 leading-relaxed">
               <strong className="text-slate-900 dark:text-white uppercase font-bold">AUDIT VERDICT: </strong>
-              {alarmEventMetrics.auditVerdict}
+              {period === "current"
+                ? "LIVE SNAPSHOT AUDIT: System monitoring active. Current snapshot operational status recorded."
+                : alarmEventMetrics.auditVerdict}
             </div>
           </>
         )}
@@ -2026,65 +2052,79 @@ export default function ReportingManagement() {
         <TabsContent value="overview" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Visual Trend Breakdown */}
-            <Card className="lg:col-span-2 bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 uppercase">
-                      <TrendingUp className="w-4 h-4 text-blue-500" />
-                      PERFORMANCE TREND ANALYSIS ({period.toUpperCase()})
-                    </CardTitle>
-                    <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase">
-                      ONLINE CAMERA RATIO VS ALARM FREQUENCY FOR {selectedServerLabel}
-                    </CardDescription>
-                  </div>
-                  <Badge variant="outline" className="text-[11px] font-mono border-slate-300 dark:border-slate-700">
-                    {dateFrom} TO {dateTo}
-                  </Badge>
+            {period === "current" ? (
+              <Card className="lg:col-span-2 bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm p-8 text-center space-y-3">
+                <div className="p-3 bg-blue-500/10 rounded-2xl w-fit mx-auto text-blue-500">
+                  <TrendingUp className="w-8 h-8" />
                 </div>
-              </CardHeader>
-              <CardContent className="pt-4">
-                <div className="space-y-5">
-                  {trendData.map((item, idx) => (
-                    <div key={idx} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[12px] font-bold text-slate-700 dark:text-slate-300">
-                        <span>{item.label}</span>
-                        <div className="flex items-center gap-4 text-[11px] font-mono">
-                          <span className="text-blue-500 font-bold">
-                            {item.cameras !== null && item.cameras !== undefined ? `${item.cameras} ONLINE CAMERAS` : "CAMERAS: N/A"}
-                          </span>
-                          <span className="text-amber-500 font-bold">{item.alarms} ALARMS</span>
-                          <span className="text-emerald-500 font-bold">
-                            {item.healthScore !== null && item.healthScore !== undefined ? `${item.healthScore}% HEALTH` : "HEALTH: N/A"}
-                          </span>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  CURRENT SNAPSHOT
+                </h3>
+                <p className="text-[12px] font-semibold text-slate-500 max-w-md mx-auto uppercase">
+                  Trend analysis requires a historical reporting period. Available for DAILY, WEEKLY, MONTHLY, and CUSTOM modes.
+                </p>
+              </Card>
+            ) : (
+              <Card className="lg:col-span-2 bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 uppercase">
+                        <TrendingUp className="w-4 h-4 text-blue-500" />
+                        PERFORMANCE TREND ANALYSIS ({period.toUpperCase()})
+                      </CardTitle>
+                      <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase">
+                        ONLINE CAMERA RATIO VS ALARM FREQUENCY FOR {selectedServerLabel}
+                      </CardDescription>
+                    </div>
+                    <Badge variant="outline" className="text-[11px] font-mono border-slate-300 dark:border-slate-700">
+                      {dateFrom} TO {dateTo}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="space-y-5">
+                    {trendData.map((item, idx) => (
+                      <div key={idx} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[12px] font-bold text-slate-700 dark:text-slate-300">
+                          <span>{item.label}</span>
+                          <div className="flex items-center gap-4 text-[11px] font-mono">
+                            <span className="text-blue-500 font-bold">
+                              {item.cameras !== null && item.cameras !== undefined ? `${item.cameras} ONLINE CAMERAS` : "CAMERAS: N/A"}
+                            </span>
+                            <span className="text-amber-500 font-bold">{item.alarms} ALARMS</span>
+                            <span className="text-emerald-500 font-bold">
+                              {item.healthScore !== null && item.healthScore !== undefined ? `${item.healthScore}% HEALTH` : "HEALTH: N/A"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="h-3 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
+                          {item.cameras !== null && item.cameras !== undefined && (
+                            <div
+                              style={{ width: `${Math.min(100, (item.cameras / Math.max(totalCameras, 1)) * 100)}%` }}
+                              className="bg-gradient-to-r from-blue-600 to-cyan-500 h-full"
+                            />
+                          )}
+                          <div
+                            style={{ width: `${Math.min(100, (item.alarms / Math.max(totalAlarms, 1)) * 100)}%` }}
+                            className="bg-amber-500 h-full"
+                          />
                         </div>
                       </div>
-                      <div className="h-3 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
-                        {item.cameras !== null && item.cameras !== undefined && (
-                          <div
-                            style={{ width: `${Math.min(100, (item.cameras / Math.max(totalCameras, 1)) * 100)}%` }}
-                            className="bg-gradient-to-r from-blue-600 to-cyan-500 h-full"
-                          />
-                        )}
-                        <div
-                          style={{ width: `${Math.min(100, (item.alarms / Math.max(totalAlarms, 1)) * 100)}%` }}
-                          className="bg-amber-500 h-full"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
 
-                <div className="flex items-center justify-center gap-6 pt-6 border-t border-slate-100 dark:border-slate-800 text-[12px] font-bold text-slate-500 uppercase mt-4">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-blue-500" /> ONLINE CAMERA RATIO
+                  <div className="flex items-center justify-center gap-6 pt-6 border-t border-slate-100 dark:border-slate-800 text-[12px] font-bold text-slate-500 uppercase mt-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-blue-500" /> ONLINE CAMERA RATIO
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-amber-500" /> ALARM INCIDENTS
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-amber-500" /> ALARM INCIDENTS
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
 
             {/* System Integrity Summary */}
             <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
@@ -2105,11 +2145,13 @@ export default function ReportingManagement() {
                     : "bg-rose-500/10 border-rose-500/20"
                 )}>
                   <div className="flex items-center justify-between font-bold uppercase">
-                    <span>CAMERA UPTIME RATE</span>
+                    <span>{period === "current" ? "INSTANT CAMERA ONLINE RATE" : "CAMERA UPTIME RATE"}</span>
                     <span>{cameraOnlineRate}%</span>
                   </div>
                   <p className="text-[11px] text-slate-500 uppercase">
-                    {onlineCameras}/{totalCameras} ACTIVE UNITS NOW &bull; {alarmEventMetrics.totalDowntimeFormatted} DOWNTIME IN PERIOD
+                    {period === "current"
+                      ? `${onlineCameras}/${totalCameras} ACTIVE UNITS ONLINE NOW`
+                      : `${onlineCameras}/${totalCameras} ACTIVE UNITS NOW • ${alarmEventMetrics.totalDowntimeFormatted} DOWNTIME IN PERIOD`}
                   </p>
                 </div>
 
@@ -2506,10 +2548,10 @@ export default function ReportingManagement() {
                         <th className="p-3">CAMERA ID</th>
                         <th className="p-3">CURRENT STATUS</th>
                         <th className="p-3">WHEN OFFLINE (EXACT TIME)</th>
-                        <th className="p-3">HAS IT BEEN ONLINE</th>
-                        <th className="p-3">OFFLINE DURATION</th>
-                        <th className="p-3 text-center">OFFLINE INCIDENTS</th>
-                        <th className="p-3 text-right">AVAILABILITY RATE</th>
+                        {period !== "current" && <th className="p-3">HAS IT BEEN ONLINE</th>}
+                        {period !== "current" && <th className="p-3">OFFLINE DURATION</th>}
+                        {period !== "current" && <th className="p-3 text-center">OFFLINE INCIDENTS</th>}
+                        {period !== "current" && <th className="p-3 text-right">AVAILABILITY RATE</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
@@ -2576,43 +2618,49 @@ export default function ReportingManagement() {
                                   )}
                                 </div>
                               </td>
-                              <td className="p-3">
-                                {item.lastOffline === "OFFLINE UNTIL NOW" ? (
-                                  <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase px-2 py-0.5">
-                                    OFFLINE UNTIL NOW
-                                  </Badge>
-                                ) : item.status === "ONLINE" ? (
-                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                                    {item.lastOffline}
+                              {period !== "current" && (
+                                <td className="p-3">
+                                  {item.lastOffline === "OFFLINE UNTIL NOW" ? (
+                                    <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase px-2 py-0.5">
+                                      OFFLINE UNTIL NOW
+                                    </Badge>
+                                  ) : item.status === "ONLINE" ? (
+                                    <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                                      {item.lastOffline}
+                                    </span>
+                                  ) : (
+                                    <span className="font-mono text-slate-500">{item.lastOffline}</span>
+                                  )}
+                                </td>
+                              )}
+                              {period !== "current" && <td className="p-3 font-mono font-bold text-amber-600 dark:text-amber-400">{item.offlineDuration}</td>}
+                              {period !== "current" && (
+                                <td className="p-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedCameraForModal(item)}
+                                    className={cn(
+                                      "px-2.5 py-1 rounded-md text-xs font-black transition-all hover:scale-105 inline-flex items-center gap-1 cursor-pointer",
+                                      item.incidentCount > 1
+                                        ? "bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-sm"
+                                        : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                    )}
+                                    title="Click to view full incident history"
+                                  >
+                                    <span>{item.incidentCount}</span>
+                                    {hasMultiple && (
+                                      <span className="text-[9px] uppercase font-bold opacity-80">(View Both)</span>
+                                    )}
+                                  </button>
+                                </td>
+                              )}
+                              {period !== "current" && (
+                                <td className="p-3 text-right font-black">
+                                  <span className={item.availabilityRate === "100% ONLINE" || item.availabilityRate === "ONLINE" || item.availabilityRate === "ONLINE (RECOVERED)" ? "text-emerald-500" : "text-rose-500"}>
+                                    {item.availabilityRate}
                                   </span>
-                                ) : (
-                                  <span className="font-mono text-slate-500">{item.lastOffline}</span>
-                                )}
-                              </td>
-                              <td className="p-3 font-mono font-bold text-amber-600 dark:text-amber-400">{item.offlineDuration}</td>
-                              <td className="p-3 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedCameraForModal(item)}
-                                  className={cn(
-                                    "px-2.5 py-1 rounded-md text-xs font-black transition-all hover:scale-105 inline-flex items-center gap-1 cursor-pointer",
-                                    item.incidentCount > 1
-                                      ? "bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-sm"
-                                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                  )}
-                                  title="Click to view full incident history"
-                                >
-                                  <span>{item.incidentCount}</span>
-                                  {hasMultiple && (
-                                    <span className="text-[9px] uppercase font-bold opacity-80">(View Both)</span>
-                                  )}
-                                </button>
-                              </td>
-                              <td className="p-3 text-right font-black">
-                                <span className={item.availabilityRate === "100% ONLINE" || item.availabilityRate === "ONLINE" || item.availabilityRate === "ONLINE (RECOVERED)" ? "text-emerald-500" : "text-rose-500"}>
-                                  {item.availabilityRate}
-                                </span>
-                              </td>
+                                </td>
+                              )}
                             </tr>
 
                             {/* Inline Incident History Accordion */}

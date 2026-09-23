@@ -493,8 +493,8 @@ export function exportToWord(data: FullReportData) {
           <tr>
             <td>
               <div class="card-val" style="color: #2563eb;">${data.cameraOnlineRate}%</div>
-              <div class="card-lbl">CAMERA UPTIME RATE</div>
-              <div class="card-sub">AVERAGE PER-CAMERA UPTIME INDEX</div>
+              <div class="card-lbl">${data.periodType === "current" ? "INSTANT CAMERA ONLINE RATE" : "CAMERA UPTIME RATE"}</div>
+              <div class="card-sub">${data.periodType === "current" ? `${data.onlineCameras} / ${data.totalCameras} CAMERAS ONLINE NOW` : "AVERAGE PER-CAMERA UPTIME INDEX"}</div>
             </td>
             <td>
               <div class="card-val" style="color: #16a34a;">${data.serverOnlineRate}%</div>
@@ -507,8 +507,8 @@ export function exportToWord(data: FullReportData) {
               <div class="card-sub">${data.criticalAlarms} CRITICAL, ${data.warningAlarms} WARNING</div>
             </td>
             <td>
-              <div class="card-val" style="color: #dc2626;">${data.totalOfflineIncidents}</div>
-              <div class="card-lbl">OFFLINE INCIDENTS</div>
+              <div class="card-val" style="color: #dc2626;">${data.periodType === "current" ? data.offlineCamerasCount : data.totalOfflineIncidents}</div>
+              <div class="card-lbl">${data.periodType === "current" ? "CURRENT DISCONNECTED CAMERAS" : "OFFLINE INCIDENTS"}</div>
               <div class="card-sub">${data.offlineCamerasCount} CAMERAS CURRENTLY OFFLINE</div>
             </td>
           </tr>
@@ -555,8 +555,8 @@ export function exportToWord(data: FullReportData) {
         </table>
 
         <!-- SECTION 2: DYNAMIC OFFLINE CAMERA SUMMARY -->
-        <h3>${data.offlineSummaryTitle || "OFFLINE CAMERA SUMMARY"}</h3>
-        <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">HISTORICAL DISCONNECT INCIDENTS &amp; AVAILABILITY AUDIT FOR THE SELECTED PERIOD</p>
+        <h3>${data.periodType === "current" ? "CURRENT OFFLINE CAMERA SUMMARY" : (data.offlineSummaryTitle || "OFFLINE CAMERA SUMMARY")}</h3>
+        <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">${data.periodType === "current" ? "CURRENT CAMERA CONNECTIVITY STATUS ACROSS ALL MONITORED SYSTEMS" : "HISTORICAL DISCONNECT INCIDENTS &amp; AVAILABILITY AUDIT FOR THE SELECTED PERIOD"}</p>
         <table class="data-table">
           <thead>
             <tr>
@@ -566,10 +566,11 @@ export function exportToWord(data: FullReportData) {
               <th>CAMERA ID</th>
               <th>STATUS</th>
               <th>WHEN OFFLINE</th>
+              ${data.periodType !== "current" ? `
               <th>HAS IT BEEN ONLINE</th>
               <th>OFFLINE DURATION</th>
               <th>INCIDENTS</th>
-              <th>AVAILABILITY RATE</th>
+              <th>AVAILABILITY RATE</th>` : ``}
             </tr>
           </thead>
           <tbody>
@@ -586,13 +587,8 @@ export function exportToWord(data: FullReportData) {
                 <td><span class="${item.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}">${item.status}</span></td>
                 <td>
                   ${item.firstOffline}
-                  ${item.incidents && item.incidents.length > 1
-                    ? `<div style="font-size: 9.5px; color: #64748b; margin-top: 4px; line-height: 1.3;">
-                        ${item.incidents.map(inc => `• Inc #${inc.incidentNumber}: ${inc.offlineTime} → ${inc.onlineTime.replace('BACK ONLINE: ', '')} (${inc.duration})`).join('<br/>')}
-                       </div>`
-                    : ''
-                  }
                 </td>
+                ${data.periodType !== "current" ? `
                 <td>${
                   item.lastOffline === "OFFLINE UNTIL NOW"
                     ? `<span class="badge-offline" style="font-weight: 800; background-color: #fee2e2; color: #b91c1c; padding: 3px 6px;">OFFLINE UNTIL NOW</span>`
@@ -601,11 +597,12 @@ export function exportToWord(data: FullReportData) {
                 <td>${item.offlineDuration}</td>
                 <td style="text-align: center; font-weight: bold;">${item.incidentCount}</td>
                 <td style="font-weight: bold; color: ${item.availabilityRate === '100% ONLINE' || item.availabilityRate === 'ONLINE' || item.availabilityRate === 'ONLINE (RECOVERED)' ? '#16a34a' : '#dc2626'};">${item.availabilityRate}</td>
+                ` : ``}
               </tr>
             `
                     )
                     .join("")
-                : `<tr><td colspan="10" style="text-align: center; color: #64748b;">NO OFFLINE INCIDENTS RECORDED IN THIS PERIOD</td></tr>`
+                : `<tr><td colspan="${data.periodType === 'current' ? 6 : 10}" style="text-align: center; color: #64748b;">${data.periodType === 'current' ? 'NO CAMERAS CURRENTLY OFFLINE' : 'NO OFFLINE INCIDENTS RECORDED IN THIS PERIOD'}</td></tr>`
             }
           </tbody>
         </table>
@@ -652,26 +649,43 @@ export function exportToWord(data: FullReportData) {
         </table>
 
         <!-- SECTION 3B: SERVER OUTAGE & DOWNTIME AUDIT -->
-        <h3>SERVER OUTAGE &amp; DOWNTIME AUDIT</h3>
+        <h3>${data.periodType === "current" ? "LIVE SERVER STATUS OVERVIEW" : "SERVER OUTAGE & DOWNTIME AUDIT"}</h3>
         <table class="data-table">
           <thead>
             <tr>
               <th>#</th>
               <th>SERVER NAME</th>
               <th>CURRENT STATUS</th>
+              ${data.periodType !== "current" ? `
               <th>FIRST OFFLINE</th>
               <th>LAST RECOVERY / STATUS</th>
               <th>TOTAL DOWNTIME</th>
               <th>INCIDENTS</th>
-              <th>PERIOD UPTIME</th>
+              <th>PERIOD UPTIME</th>` : `
+              <th>SOFTWARE VERSION</th>
+              <th>OPERATING SYSTEM</th>
+              <th>CPU USAGE</th>
+              <th>RAM MEMORY</th>`}
             </tr>
           </thead>
           <tbody>
             ${
-              data.serverUptimeResults && data.serverUptimeResults.length > 0
-                ? data.serverUptimeResults.map((item, idx) => {
-                    const isOffline = item.isOfflinePlaceholder || item.periodUptime?.includes("HISTORICAL UPTIME NOT AVAILABLE") || (item.periodUptime === "N/A" && item.currentStatus === "OFFLINE");
-                    return `
+              data.periodType === "current"
+                ? data.servers.map((srv, idx) => `
+              <tr>
+                <td>${idx + 1}</td>
+                <td><strong>${srv.serverName}</strong></td>
+                <td><span class="${srv.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}">${srv.status}</span></td>
+                <td>${srv.version || 'N/A'}</td>
+                <td>${srv.osName || 'N/A'}</td>
+                <td>${srv.cpuUsage || 'N/A'}</td>
+                <td>${srv.ramUsage || 'N/A'}</td>
+              </tr>
+            `).join("")
+                : (data.serverUptimeResults && data.serverUptimeResults.length > 0
+                    ? data.serverUptimeResults.map((item, idx) => {
+                        const isOffline = item.isOfflinePlaceholder || item.periodUptime?.includes("HISTORICAL UPTIME NOT AVAILABLE") || (item.periodUptime === "N/A" && item.currentStatus === "OFFLINE");
+                        return `
               <tr>
                 <td>${idx + 1}</td>
                 <td><strong>${item.serverName}</strong></td>
@@ -683,8 +697,8 @@ export function exportToWord(data: FullReportData) {
                 <td>${isOffline ? (item.periodUptime || 'N/A — SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE') : item.periodUptime}</td>
               </tr>
             `;
-                  }).join("")
-                : `<tr><td colspan="8" style="text-align: center; color: #64748b;">NO SERVER OUTAGE DATA AVAILABLE</td></tr>`
+                      }).join("")
+                    : `<tr><td colspan="8" style="text-align: center; color: #64748b;">NO SERVER OUTAGE DATA AVAILABLE</td></tr>`)
             }
           </tbody>
         </table>
@@ -1145,20 +1159,20 @@ export function exportToPdf(data: FullReportData) {
   const cardW = (contentWidth - cardGap * (cardCount - 1)) / cardCount;
   const cardH = 20;
   const cardColors: [number, number, number][] = [BLUE_600, GREEN_600, AMBER_600, RED_600];
+  const cardLabels = [
+    data.periodType === "current" ? "INSTANT CAMERA ONLINE RATE" : "CAMERA UPTIME RATE",
+    "LIVE SERVER ONLINE RATE",
+    "TOTAL ALARM EVENTS",
+    data.periodType === "current" ? "CURRENT DISCONNECTED CAMERAS" : "OFFLINE INCIDENTS",
+  ];
   const cardValues = [
     `${data.cameraOnlineRate}%`,
     `${data.serverOnlineRate}%`,
     `${data.totalAlarms}`,
-    `${data.totalOfflineIncidents}`,
-  ];
-  const cardLabels = [
-    "CAMERA UPTIME RATE",
-    "LIVE SERVER ONLINE RATE",
-    "TOTAL ALARM EVENTS",
-    "OFFLINE INCIDENTS",
+    data.periodType === "current" ? `${data.offlineCamerasCount}` : `${data.totalOfflineIncidents}`,
   ];
   const cardSubs = [
-    "AVERAGE PER-CAMERA UPTIME INDEX",
+    data.periodType === "current" ? `${data.onlineCameras} / ${data.totalCameras} CAMERAS ONLINE NOW` : "AVERAGE PER-CAMERA UPTIME INDEX",
     `${data.onlineServers} / ${data.totalServers} SERVERS ONLINE`,
     `${data.criticalAlarms} CRITICAL  •  ${data.warningAlarms} WARNING`,
     `${data.offlineCamerasCount} CAMERAS CURRENTLY OFFLINE`,
@@ -1194,67 +1208,83 @@ export function exportToPdf(data: FullReportData) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(...ORIX_NAVY);
-    doc.text("ALARM EVENTS & AVAILABILITY EXECUTIVE SUMMARY", margin.left + 4, y + 5);
+    doc.text(
+      data.periodType === "current" ? "LIVE ALARM & SYSTEM EVENT SUMMARY" : "ALARM EVENTS & AVAILABILITY EXECUTIVE SUMMARY",
+      margin.left + 4,
+      y + 5
+    );
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(...SLATE_700);
     doc.text(
-      `RAW CAMERA SOURCE EVENTS: ${m.disconnectAlarms}  •  Reconnects: ${m.reconnectAlarms}  •  Resolved Sessions: ${m.resolvedIncidents}  •  Active Issues: ${m.activeIncidents}  •  Total Outage: ${m.totalDowntimeFormatted}`,
+      data.periodType === "current"
+        ? `CURRENT EVENT LOG: Raw Alarm Events: ${data.totalAlarms}  •  Critical: ${data.criticalAlarms}  •  Warnings: ${data.warningAlarms}  •  Cameras Online: ${data.onlineCameras}/${data.totalCameras}`
+        : `RAW CAMERA SOURCE EVENTS: ${m.disconnectAlarms}  •  Reconnects: ${m.reconnectAlarms}  •  Resolved Sessions: ${m.resolvedIncidents}  •  Active Issues: ${m.activeIncidents}  •  Total Outage: ${m.totalDowntimeFormatted}`,
       margin.left + 4,
       y + 11
     );
 
-    if (m.auditVerdict) {
+    const verdictText = data.periodType === "current"
+      ? "LIVE SNAPSHOT AUDIT: System monitoring active. Current snapshot operational status recorded."
+      : m.auditVerdict;
+
+    if (verdictText) {
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...SLATE_900);
       doc.text(`AUDIT VERDICT: `, margin.left + 4, y + 16);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(...SLATE_700);
-      const verdictLines = doc.splitTextToSize(m.auditVerdict, contentWidth - 32);
+      const verdictLines = doc.splitTextToSize(verdictText, contentWidth - 32);
       doc.text(verdictLines, margin.left + 28, y + 16);
     }
     y += 26;
   }
 
-  // Downtime Summary Table
-  sectionTitle("DOWNTIME SUMMARY");
-  subLabel("Sum of downtime across camera incidents; not elapsed fleet outage time.");
+  // Downtime Summary Table (Historical Only)
+  if (data.periodType !== "current") {
+    sectionTitle("DOWNTIME SUMMARY");
+    subLabel("Sum of downtime across camera incidents; not elapsed fleet outage time.");
 
-  const dtRows = [
-    ["TOTAL OFFLINE INCIDENTS", String(data.totalOfflineIncidents)],
-    [
-      "AGGREGATED CAMERA DOWNTIME",
-      data.alarmEventMetrics?.totalDowntimeFormatted || (data.totalOfflineIncidents > 0 ? "SEE OFFLINE DETAIL BELOW" : "0s (NO INCIDENTS)"),
-    ],
-    ["EFFECTIVE CAMERA UPTIME INDEX", `${data.cameraOnlineRate}%`],
-  ];
+    const dtRows = [
+      ["TOTAL OFFLINE INCIDENTS", String(data.totalOfflineIncidents)],
+      [
+        "AGGREGATED CAMERA DOWNTIME",
+        data.alarmEventMetrics?.totalDowntimeFormatted || (data.totalOfflineIncidents > 0 ? "SEE OFFLINE DETAIL BELOW" : "0s (NO INCIDENTS)"),
+      ],
+      ["EFFECTIVE CAMERA UPTIME INDEX", `${data.cameraOnlineRate}%`],
+    ];
 
-  autoTable(doc, {
-    startY: y,
-    head: [],
-    body: dtRows,
-    theme: "plain",
-    styles: {
-      fontSize: 8.5,
-      cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
-      textColor: [...SLATE_700],
-    },
-    columnStyles: {
-      0: { fontStyle: "bold", cellWidth: 70, textColor: [...SLATE_900] },
-      1: { cellWidth: contentWidth - 70 },
-    },
-    margin: { left: margin.left, right: margin.right },
-    tableWidth: contentWidth,
-  });
-  y = (doc as any).lastAutoTable.finalY + 8;
+    autoTable(doc, {
+      startY: y,
+      head: [],
+      body: dtRows,
+      theme: "plain",
+      styles: {
+        fontSize: 8.5,
+        cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
+        textColor: [...SLATE_700],
+      },
+      columnStyles: {
+        0: { fontStyle: "bold", cellWidth: 70, textColor: [...SLATE_900] },
+        1: { cellWidth: contentWidth - 70 },
+      },
+      margin: { left: margin.left, right: margin.right },
+      tableWidth: contentWidth,
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  }
 
   // ─── 1. PERFORMANCE TREND ──────────────────────────────────
   checkPage(40);
-  sectionTitle(`1. PERFORMANCE TREND ANALYSIS (${data.periodType.toUpperCase()})`);
-  subLabel(`Online camera ratio vs alarm frequency dataset for ${data.selectedServerLabel}`);
+  if (data.periodType === "current") {
+    sectionTitle("1. PERFORMANCE TREND ANALYSIS (CURRENT)");
+    subLabel("Trend analysis is available for historical reporting periods only: DAILY / WEEKLY / MONTHLY / CUSTOM.");
+    y += 8;
+  } else if (data.trendData && data.trendData.length > 0) {
+    sectionTitle(`1. PERFORMANCE TREND ANALYSIS (${data.periodType.toUpperCase()})`);
+    subLabel(`Online camera ratio vs alarm frequency dataset for ${data.selectedServerLabel}`);
 
-  if (data.trendData && data.trendData.length > 0) {
     autoTable(doc, {
       startY: y,
       head: [["#", "TIME / INTERVAL", "ONLINE CAMERAS", "ALARM INCIDENTS", "HEALTH SCORE"]],
@@ -1275,6 +1305,9 @@ export function exportToPdf(data: FullReportData) {
     });
     y = (doc as any).lastAutoTable.finalY + 8;
   } else {
+    sectionTitle(`1. PERFORMANCE TREND ANALYSIS (${data.periodType.toUpperCase()})`);
+    subLabel(`Online camera ratio vs alarm frequency dataset for ${data.selectedServerLabel}`);
+
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(...SLATE_200);
     doc.roundedRect(margin.left, y, contentWidth, 14, 1.5, 1.5, "FD");
@@ -1332,79 +1365,128 @@ export function exportToPdf(data: FullReportData) {
 
   // ─── 3. OFFLINE CAMERA SUMMARY ──────────────────────────────
   checkPage(45);
-  sectionTitle(`3. ${data.offlineSummaryTitle || "OFFLINE CAMERA SUMMARY"}`);
-  subLabel("Historical disconnect incidents and availability audit for the selected period.");
+  if (data.periodType === "current") {
+    sectionTitle("3. CURRENT OFFLINE CAMERA SUMMARY");
+    subLabel("Current camera connectivity status across all monitored systems.");
 
-  if (data.offlineCameras.length > 0) {
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "CAMERA NAME", "CAMERA ID", "SERVER", "STATUS", "WHEN OFFLINE (EXACT TIME)", "LAST RECOVERY / STATUS", "DURATION", "INCIDENTS", "AVAILABILITY RATE"]],
-      body: data.offlineCameras.map((item, idx) => {
-        let whenOffline = item.firstOffline;
-        if (item.incidents && item.incidents.length > 1) {
-          whenOffline += ` (${item.incidents.length} inc)`;
-        }
-        return [
+    if (data.offlineCameras.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [["#", "CAMERA NAME", "CAMERA ID", "SERVER", "STATUS", "WHEN OFFLINE (EXACT TIME)"]],
+        body: data.offlineCameras.map((item, idx) => [
           idx + 1,
           item.cameraName,
           item.cameraId || "N/A",
           item.serverName,
           item.status,
-          whenOffline,
-          item.lastOffline === "OFFLINE UNTIL NOW" ? "OFFLINE UNTIL NOW" : item.lastOffline,
-          item.offlineDuration,
-          String(item.incidentCount),
-          item.availabilityRate,
-        ];
-      }),
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-      didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index === 4) {
-          const val = String(hookData.cell.raw);
-          if (val === "ONLINE") {
-            hookData.cell.styles.textColor = [...GREEN_600];
-            hookData.cell.styles.fontStyle = "bold";
-          } else {
-            hookData.cell.styles.textColor = [...RED_600];
-            hookData.cell.styles.fontStyle = "bold";
+          item.firstOffline || "N/A",
+        ]),
+        theme: "striped",
+        showHead: "everyPage",
+        headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
+        bodyStyles: { fontSize: 7.5, cellPadding: 2 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: margin.left, right: margin.right },
+        tableWidth: contentWidth,
+        didParseCell: (hookData) => {
+          if (hookData.section === "body" && hookData.column.index === 4) {
+            const val = String(hookData.cell.raw);
+            if (val === "ONLINE") {
+              hookData.cell.styles.textColor = [...GREEN_600];
+              hookData.cell.styles.fontStyle = "bold";
+            } else {
+              hookData.cell.styles.textColor = [...RED_600];
+              hookData.cell.styles.fontStyle = "bold";
+            }
           }
-        }
-        if (hookData.section === "body" && hookData.column.index === 9) {
-          const val = String(hookData.cell.raw);
-          if (val.includes("100%") || val.includes("ONLINE")) {
-            hookData.cell.styles.textColor = [...GREEN_600];
-            hookData.cell.styles.fontStyle = "bold";
-          } else {
-            hookData.cell.styles.textColor = [...RED_600];
-            hookData.cell.styles.fontStyle = "bold";
-          }
-        }
-      },
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
+        },
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    } else {
+      doc.setFillColor(...LIGHT_GREEN);
+      doc.setDrawColor(187, 247, 208);
+      doc.roundedRect(margin.left, y, contentWidth, 12, 1.5, 1.5, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(22, 101, 52);
+      doc.text("NO CAMERAS CURRENTLY OFFLINE.", margin.left + 4, y + 7);
+      y += 18;
+    }
   } else {
-    doc.setFillColor(...LIGHT_GREEN);
-    doc.setDrawColor(187, 247, 208);
-    doc.roundedRect(margin.left, y, contentWidth, 12, 1.5, 1.5, "FD");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
-    doc.setTextColor(22, 101, 52);
-    doc.text("NO OFFLINE CAMERA INCIDENTS RECORDED IN THIS PERIOD.", margin.left + 4, y + 7);
-    y += 18;
+    sectionTitle(`3. ${data.offlineSummaryTitle || "OFFLINE CAMERA SUMMARY"}`);
+    subLabel("Historical disconnect incidents and availability audit for the selected period.");
+
+    if (data.offlineCameras.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [["#", "CAMERA NAME", "CAMERA ID", "SERVER", "STATUS", "WHEN OFFLINE (EXACT TIME)", "LAST RECOVERY / STATUS", "DURATION", "INCIDENTS", "AVAILABILITY RATE"]],
+        body: data.offlineCameras.map((item, idx) => {
+          let whenOffline = item.firstOffline;
+          if (item.incidents && item.incidents.length > 1) {
+            whenOffline += ` (${item.incidents.length} inc)`;
+          }
+          return [
+            idx + 1,
+            item.cameraName,
+            item.cameraId || "N/A",
+            item.serverName,
+            item.status,
+            whenOffline,
+            item.lastOffline === "OFFLINE UNTIL NOW" ? "OFFLINE UNTIL NOW" : item.lastOffline,
+            item.offlineDuration,
+            String(item.incidentCount),
+            item.availabilityRate,
+          ];
+        }),
+        theme: "striped",
+        showHead: "everyPage",
+        headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
+        bodyStyles: { fontSize: 7.5, cellPadding: 2 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: margin.left, right: margin.right },
+        tableWidth: contentWidth,
+        didParseCell: (hookData) => {
+          if (hookData.section === "body" && hookData.column.index === 4) {
+            const val = String(hookData.cell.raw);
+            if (val === "ONLINE") {
+              hookData.cell.styles.textColor = [...GREEN_600];
+              hookData.cell.styles.fontStyle = "bold";
+            } else {
+              hookData.cell.styles.textColor = [...RED_600];
+              hookData.cell.styles.fontStyle = "bold";
+            }
+          }
+          if (hookData.section === "body" && hookData.column.index === 9) {
+            const val = String(hookData.cell.raw);
+            if (val.includes("100%") || val.includes("ONLINE")) {
+              hookData.cell.styles.textColor = [...GREEN_600];
+              hookData.cell.styles.fontStyle = "bold";
+            } else {
+              hookData.cell.styles.textColor = [...RED_600];
+              hookData.cell.styles.fontStyle = "bold";
+            }
+          }
+        },
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    } else {
+      doc.setFillColor(...LIGHT_GREEN);
+      doc.setDrawColor(187, 247, 208);
+      doc.roundedRect(margin.left, y, contentWidth, 12, 1.5, 1.5, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(22, 101, 52);
+      doc.text("NO OFFLINE CAMERA INCIDENTS RECORDED IN THIS PERIOD.", margin.left + 4, y + 7);
+      y += 18;
+    }
   }
 
-  // ─── 3b. CAMERA INCIDENT DETAIL (INDIVIDUAL INCIDENTS PER CAMERA) ───
+  // ─── 3b. CAMERA INCIDENT DETAIL (INDIVIDUAL INCIDENTS PER CAMERA — Historical Only) ───
   const camerasWithIncidents = (data.offlineCameras || []).filter(
     (cam) => cam.incidents && cam.incidents.length > 0
   );
 
-  if (camerasWithIncidents.length > 0) {
+  if (data.periodType !== "current" && camerasWithIncidents.length > 0) {
     checkPage(30);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
@@ -1650,110 +1732,155 @@ export function exportToPdf(data: FullReportData) {
     y += 8;
   }
 
-  // ─── 6. SERVER OUTAGE & DOWNTIME AUDIT (DEDICATED SECTION) ───
+  // ─── 6. SERVER OUTAGE & DOWNTIME AUDIT / LIVE SERVER OVERVIEW ───
   checkPage(45);
-  sectionTitle("6. SERVER OUTAGE & DOWNTIME AUDIT");
-  subLabel("Host server live status and historical period uptime audit derived from VMS server failure and recovery events.");
+  if (data.periodType === "current") {
+    sectionTitle("6. LIVE SERVER STATUS OVERVIEW");
+    subLabel("Host server live status and resource metrics.");
 
-  const hasUptimeData = data.serverUptimeResults && data.serverUptimeResults.length > 0;
+    const liveServerRows = data.servers.map((srv, idx) => [
+      idx + 1,
+      srv.serverName,
+      srv.status,
+      srv.version || "N/A",
+      srv.osName || "N/A",
+      srv.storageUsage || "N/A",
+      srv.cpuUsage || "N/A",
+      srv.ramUsage || "N/A",
+    ]);
 
-  const serverOutageRows = hasUptimeData
-    ? data.serverUptimeResults!.map((item, idx) => {
-        if (item.dataCompleteness === "DATA_NOT_AVAILABLE") {
+    if (liveServerRows.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [["#", "SERVER NAME", "CURRENT STATUS", "SOFTWARE VERSION", "OPERATING SYSTEM", "STORAGE CONSUMED", "CPU USAGE", "RAM MEMORY"]],
+        body: liveServerRows,
+        theme: "striped",
+        showHead: "everyPage",
+        headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
+        bodyStyles: { fontSize: 8, cellPadding: 2.5 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: margin.left, right: margin.right },
+        tableWidth: contentWidth,
+        didParseCell: (hookData) => {
+          if (hookData.section === "body" && hookData.column.index === 2) {
+            const val = String(hookData.cell.raw);
+            if (val === "ONLINE") {
+              hookData.cell.styles.textColor = [...GREEN_600];
+              hookData.cell.styles.fontStyle = "bold";
+            } else {
+              hookData.cell.styles.textColor = [...RED_600];
+              hookData.cell.styles.fontStyle = "bold";
+            }
+          }
+        },
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    } else {
+      subLabel("No live server data available.");
+      y += 8;
+    }
+  } else {
+    sectionTitle("6. SERVER OUTAGE & DOWNTIME AUDIT");
+    subLabel("Host server live status and historical period uptime audit derived from VMS server failure and recovery events.");
+
+    const serverOutageRows = data.serverUptimeResults && data.serverUptimeResults.length > 0
+      ? data.serverUptimeResults!.map((item, idx) => {
+          if (item.dataCompleteness === "DATA_NOT_AVAILABLE") {
+            return [
+              idx + 1,
+              item.serverName,
+              item.currentStatus,
+              "DATA NOT AVAILABLE / INCOMPLETE SOURCE DATA",
+              "DATA NOT AVAILABLE / INCOMPLETE SOURCE DATA",
+              "DATA NOT AVAILABLE / INCOMPLETE SOURCE DATA",
+              "0",
+              "N/A",
+            ];
+          }
+          if (
+            item.isOfflinePlaceholder ||
+            item.periodUptime?.includes("HISTORICAL UPTIME NOT AVAILABLE") ||
+            (item.periodUptime === "N/A" && item.currentStatus === "OFFLINE")
+          ) {
+            return [
+              idx + 1,
+              item.serverName,
+              "OFFLINE",
+              "N/A",
+              "OFFLINE UNTIL NOW",
+              "N/A",
+              "N/A",
+              item.periodUptime || "N/A — SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE",
+            ];
+          }
           return [
             idx + 1,
             item.serverName,
             item.currentStatus,
-            "DATA NOT AVAILABLE / INCOMPLETE SOURCE DATA",
-            "DATA NOT AVAILABLE / INCOMPLETE SOURCE DATA",
-            "DATA NOT AVAILABLE / INCOMPLETE SOURCE DATA",
-            "0",
-            "N/A",
+            item.firstOffline || "NO OFFLINE INCIDENTS",
+            item.lastRecovery || (item.currentStatus === "ONLINE" ? "ONLINE" : "OFFLINE UNTIL NOW"),
+            item.totalDowntime || "0m",
+            String(item.incidentCount),
+            item.periodUptime,
           ];
-        }
-        if (
-          item.isOfflinePlaceholder ||
-          item.periodUptime?.includes("HISTORICAL UPTIME NOT AVAILABLE") ||
-          (item.periodUptime === "N/A" && item.currentStatus === "OFFLINE")
-        ) {
-          return [
-            idx + 1,
-            item.serverName,
-            "OFFLINE",
-            "N/A",
-            "OFFLINE UNTIL NOW",
-            "N/A",
-            "N/A",
-            item.periodUptime || "N/A — SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE",
-          ];
-        }
-        return [
+        })
+      : (data.servers.length > 0 ? data.servers : (data.serverStorageStats || [])).map((srv: any, idx: number) => [
           idx + 1,
-          item.serverName,
-          item.currentStatus,
-          item.firstOffline || "NO OFFLINE INCIDENTS",
-          item.lastRecovery || (item.currentStatus === "ONLINE" ? "ONLINE" : "OFFLINE UNTIL NOW"),
-          item.totalDowntime || "0m",
-          String(item.incidentCount),
-          item.periodUptime,
-        ];
-      })
-    : (data.servers.length > 0 ? data.servers : (data.serverStorageStats || [])).map((srv: any, idx: number) => [
-        idx + 1,
-        srv.serverName || srv.name || `SERVER ${idx + 1}`,
-        srv.status || (srv.isOnline ? "ONLINE" : "OFFLINE"),
-        "DATA NOT AVAILABLE FROM SOURCE",
-        "DATA NOT AVAILABLE FROM SOURCE",
-        "DATA NOT AVAILABLE FROM SOURCE",
-        "0",
-        "N/A",
-      ]);
+          srv.serverName || srv.name || `SERVER ${idx + 1}`,
+          srv.status || (srv.isOnline ? "ONLINE" : "OFFLINE"),
+          "DATA NOT AVAILABLE FROM SOURCE",
+          "DATA NOT AVAILABLE FROM SOURCE",
+          "DATA NOT AVAILABLE FROM SOURCE",
+          "0",
+          "N/A",
+        ]);
 
-  if (serverOutageRows.length > 0) {
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "SERVER NAME", "CURRENT STATUS", "FIRST OFFLINE", "LAST RECOVERY / STATUS", "TOTAL DOWNTIME", "INCIDENTS", "PERIOD UPTIME"]],
-      body: serverOutageRows,
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 8, cellPadding: 2.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-      didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index === 2) {
-          const val = String(hookData.cell.raw);
-          if (val === "ONLINE") {
-            hookData.cell.styles.textColor = [...GREEN_600];
-            hookData.cell.styles.fontStyle = "bold";
-          } else {
-            hookData.cell.styles.textColor = [...RED_600];
-            hookData.cell.styles.fontStyle = "bold";
+    if (serverOutageRows.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [["#", "SERVER NAME", "CURRENT STATUS", "FIRST OFFLINE", "LAST RECOVERY / STATUS", "TOTAL DOWNTIME", "INCIDENTS", "PERIOD UPTIME"]],
+        body: serverOutageRows,
+        theme: "striped",
+        showHead: "everyPage",
+        headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
+        bodyStyles: { fontSize: 8, cellPadding: 2.5 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: margin.left, right: margin.right },
+        tableWidth: contentWidth,
+        didParseCell: (hookData) => {
+          if (hookData.section === "body" && hookData.column.index === 2) {
+            const val = String(hookData.cell.raw);
+            if (val === "ONLINE") {
+              hookData.cell.styles.textColor = [...GREEN_600];
+              hookData.cell.styles.fontStyle = "bold";
+            } else {
+              hookData.cell.styles.textColor = [...RED_600];
+              hookData.cell.styles.fontStyle = "bold";
+            }
           }
-        }
-        if (hookData.section === "body" && hookData.column.index === 7) {
-          const val = String(hookData.cell.raw);
-          if (val.includes("100%") || val.includes("99")) {
-            hookData.cell.styles.textColor = [...GREEN_600];
-            hookData.cell.styles.fontStyle = "bold";
-          } else if (val.includes("N/A") || val.includes("DATA NOT AVAILABLE")) {
-            hookData.cell.styles.textColor = [...SLATE_500];
-          } else {
-            hookData.cell.styles.textColor = [...AMBER_600];
-            hookData.cell.styles.fontStyle = "bold";
+          if (hookData.section === "body" && hookData.column.index === 7) {
+            const val = String(hookData.cell.raw);
+            if (val.includes("100%") || val.includes("99")) {
+              hookData.cell.styles.textColor = [...GREEN_600];
+              hookData.cell.styles.fontStyle = "bold";
+            } else if (val.includes("N/A") || val.includes("DATA NOT AVAILABLE")) {
+              hookData.cell.styles.textColor = [...SLATE_500];
+            } else {
+              hookData.cell.styles.textColor = [...AMBER_600];
+              hookData.cell.styles.fontStyle = "bold";
+            }
           }
-        }
-      },
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  } else {
-    subLabel("No server outage information available for the selected scope.");
-    y += 8;
+        },
+      });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    } else {
+      subLabel("No server outage data available.");
+      y += 8;
+    }
   }
 
-  // ─── SERVER INCIDENT DETAIL (INDIVIDUAL INCIDENTS PER SERVER) ───
-  if (hasUptimeData) {
+  // ─── SERVER INCIDENT DETAIL (INDIVIDUAL INCIDENTS PER SERVER — Historical Only) ───
+  if (data.periodType !== "current" && data.serverUptimeResults && data.serverUptimeResults.length > 0) {
     const serversWithSessions = data.serverUptimeResults!.filter(
       (s) => s.outageSessions && s.outageSessions.length > 0
     );
