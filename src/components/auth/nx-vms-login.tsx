@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Server,
   LogOut,
@@ -100,11 +100,14 @@ export function NxVmsLogin() {
     if (savedPort) setNxLocation((prev) => ({ ...prev, port: savedPort }));
   }, []);
 
+  const codeProcessedRef = useRef<string | null>(null);
+
   // Handle OAuth redirection search parameters code exchange
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
-    if (code) {
+    if (code && codeProcessedRef.current !== code) {
+      codeProcessedRef.current = code;
       exchangeCloudCode(code);
       const url = new URL(window.location.href);
       url.searchParams.delete("code");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Cookies from "js-cookie";
 
 const LOCAL_NX_URL = "/nx/rest/v3/login/sessions";
@@ -36,6 +36,7 @@ export function useNxVmsAuth() {
   const [cloudSession, setCloudSession] = useState<CloudSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasHydratedRef = useRef(false);
 
   // Refresh Cloud Access Token using Refresh Token
   const refreshCloudSession = useCallback(async (refreshToken: string) => {
@@ -283,6 +284,9 @@ export function useNxVmsAuth() {
 
   // Hydrate & Sync initial cookies on mount
   useEffect(() => {
+    if (hasHydratedRef.current) return;
+    hasHydratedRef.current = true;
+
     const storedLocal = Cookies.get("local_nx_user");
     if (storedLocal) {
       try {

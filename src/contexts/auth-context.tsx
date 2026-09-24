@@ -279,6 +279,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           if (sysId) {
             nxAPI.setSystemId(sysId);
           } else {
+            setState((prev) => (prev.user ? { ...prev, user: { ...prev.user, vmsPermissions: "none" } } : prev));
             return; // Skip if no systemId available
           }
         }
@@ -290,7 +291,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               ...prev,
               user: {
                 ...prev.user,
-                vmsPermissions: vmsPerms.permissions,
+                vmsPermissions: vmsPerms.permissions || "none",
                 vmsResourceAccessRights: vmsPerms.resourceAccessRights,
               },
             };
@@ -298,9 +299,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
           console.log(
             `[Auth] VMS permissions loaded for ${state.user?.username}`,
           );
+        } else {
+          setState((prev) => (prev.user ? { ...prev, user: { ...prev.user, vmsPermissions: "none" } } : prev));
         }
       } catch (error) {
         console.warn("[Auth] Failed to fetch VMS permissions:", error);
+        setState((prev) => (prev.user ? { ...prev, user: { ...prev.user, vmsPermissions: "none" } } : prev));
       }
     };
 
