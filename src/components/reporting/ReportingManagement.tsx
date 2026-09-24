@@ -161,10 +161,10 @@ const formatTimestamp = (timestampValue: string | number | null | undefined): st
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
   }).format(date);
 };
+
+const formatExactTimestamp = formatTimestamp;
 
 const getEventTypeLabel = (eventType: string, caption?: string): string => {
   if (eventType === "userDefinedEvent" && caption) return caption;
@@ -1880,6 +1880,9 @@ export default function ReportingManagement() {
           <TabsTrigger value="offline" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-rose-600 data-[state=active]:text-white">
             <AlertCircle className="w-3.5 h-3.5 text-rose-400" /> {offlineSummaryTitle}
           </TabsTrigger>
+          <TabsTrigger value="server-downtime" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-amber-600 data-[state=active]:text-white">
+            <Server className="w-3.5 h-3.5 text-amber-400" /> SERVER DOWNTIME REPORT
+          </TabsTrigger>
           <TabsTrigger value="recordings" className="rounded-lg text-[12px] font-bold uppercase gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
             <Video className="w-3.5 h-3.5" /> RECORDING &amp; STORAGE
           </TabsTrigger>
@@ -2575,6 +2578,272 @@ export default function ReportingManagement() {
                               </tr>
                             )}
                           </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============================================ */}
+        {/* TAB 4.5: SERVER DOWNTIME & OUTAGE REPORT     */}
+        {/* ============================================ */}
+        <TabsContent value="server-downtime" className="space-y-4">
+          {/* Executive Server Uptime KPIs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-600" />
+              <CardContent className="p-4">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">SERVER HEALTH INDEX</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-slate-900 dark:text-white">
+                    {serverUptimeSummary.overallServerUptimeRate !== null ? `${serverUptimeSummary.overallServerUptimeRate}%` : "N/A"}
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-500 uppercase">
+                    {period === "current" ? "LIVE" : "PERIOD UPTIME"}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1 uppercase">
+                  {serverUptimeSummary.onlineServerCount}/{serverUptimeSummary.totalServerCount} SERVERS ONLINE NOW
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-600" />
+              <CardContent className="p-4">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">TOTAL SERVER DOWNTIME</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                    {serverUptimeSummary.totalServerDowntimeFormatted}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1 uppercase">
+                  RECORDED IN SELECTED PERIOD
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-600" />
+              <CardContent className="p-4">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">SERVER OUTAGE INCIDENTS</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-rose-600 dark:text-rose-400">
+                    {serverUptimeSummary.totalServerIncidents}
+                  </span>
+                  <span className="text-[10px] font-bold text-rose-500 uppercase">
+                    TOTAL INCIDENTS
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1 uppercase">
+                  SYSTEM FAILURE &amp; DISCONNECT LOGS
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-600" />
+              <CardContent className="p-4">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">MONITORED SERVERS</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-slate-900 dark:text-white">
+                    {serverUptimeSummary.totalServerCount}
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-500 uppercase">
+                    ACTIVE NODES
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1 uppercase">
+                  VMS CORE INSTANCES
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Table 1: Server Availability Summary */}
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                    <Server className="w-4 h-4 text-amber-500" /> SERVER DOWNTIME &amp; AVAILABILITY AUDIT
+                  </CardTitle>
+                  <CardDescription className="text-[11px] font-semibold text-slate-500 uppercase mt-0.5">
+                    PER-SERVER HISTORICAL AVAILABILITY, TOTAL DOWNTIME, AND INCIDENT FREQUENCY
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="text-[11px] font-bold uppercase self-start sm:self-auto">
+                  SERVERS: {serverUptimeSummary.totalServerCount} | INCIDENTS: {serverUptimeSummary.totalServerIncidents}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {serverUptimeSummary.serverResults.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <Server className="w-8 h-8 text-slate-400" />
+                  <span>NO SERVER DATA AVAILABLE FOR SELECTED PERIOD</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[12px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-3">#</th>
+                        <th className="p-3">SERVER NAME</th>
+                        <th className="p-3">CURRENT STATUS</th>
+                        <th className="p-3">FIRST OFFLINE RECORDED</th>
+                        <th className="p-3">LAST RECOVERY RECORDED</th>
+                        <th className="p-3">TOTAL DOWNTIME</th>
+                        <th className="p-3">INCIDENTS</th>
+                        <th className="p-3 text-right">PERIOD UPTIME</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                      {serverUptimeSummary.serverResults.map((srvResult, idx) => {
+                        const isSrvOnline = srvResult.currentStatus === "online";
+                        const firstOfflineStr = srvResult.firstOfflineMs
+                          ? formatExactTimestamp(srvResult.firstOfflineMs)
+                          : "NO OFFLINE INCIDENTS";
+                        const lastRecoveryStr = srvResult.activeOutage
+                          ? "OFFLINE UNTIL NOW"
+                          : srvResult.lastRecoveryMs
+                          ? formatExactTimestamp(srvResult.lastRecoveryMs)
+                          : isSrvOnline
+                          ? "ONLINE"
+                          : "OFFLINE UNTIL NOW";
+
+                        return (
+                          <tr key={srvResult.serverId || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="p-3 text-slate-400 font-mono">{idx + 1}</td>
+                            <td className="p-3 font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                              <Server className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{srvResult.serverName}</span>
+                            </td>
+                            <td className="p-3">
+                              <Badge className={cn("text-[10px] font-bold uppercase", isSrvOnline ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border-rose-500/20")}>
+                                {isSrvOnline ? "ONLINE NOW" : "OFFLINE NOW"}
+                              </Badge>
+                            </td>
+                            <td className="p-3 font-mono text-[11px]">
+                              {srvResult.firstOfflineMs ? (
+                                <div className="flex items-center gap-1.5 font-bold text-rose-600 dark:text-rose-400">
+                                  <Clock className="w-3 h-3 shrink-0 text-rose-500" />
+                                  <span>{firstOfflineStr}</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">{firstOfflineStr}</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-[11px]">
+                              {lastRecoveryStr === "OFFLINE UNTIL NOW" ? (
+                                <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase">
+                                  OFFLINE UNTIL NOW
+                                </Badge>
+                              ) : (
+                                <span className="font-semibold text-slate-700 dark:text-slate-300">{lastRecoveryStr}</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono font-bold text-amber-600 dark:text-amber-400">
+                              {srvResult.totalDowntimeFormatted}
+                            </td>
+                            <td className="p-3">
+                              <Badge variant="outline" className="text-[10px] font-bold">
+                                {srvResult.incidentCount}
+                              </Badge>
+                            </td>
+                            <td className="p-3 text-right font-black">
+                              <span className={cn(srvResult.uptimeRate !== null && srvResult.uptimeRate >= 99 ? "text-emerald-500" : srvResult.uptimeRate !== null && srvResult.uptimeRate >= 95 ? "text-amber-500" : "text-rose-500")}>
+                                {srvResult.uptimeRate !== null ? `${srvResult.uptimeRate}%` : "N/A"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Table 2: Chronological Server Outage Incidents Log */}
+          <Card className="bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold text-slate-900 dark:text-white uppercase flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-rose-500" /> DETAILED SERVER OUTAGE INCIDENTS LOG
+                </span>
+                <span className="text-[11px] text-slate-400 font-semibold uppercase">
+                  EXACT DISCONNECT &amp; RECONNECTION TIMELINES
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {serverUptimeSummary.serverResults.every((s) => s.outageSessions.length === 0) ? (
+                <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2 font-bold uppercase">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                  <span>NO SERVER OUTAGE INCIDENTS RECORDED IN THIS PERIOD (100% UPTIME)</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[12px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-3">#</th>
+                        <th className="p-3">SERVER NAME</th>
+                        <th className="p-3">OFFLINE START (EXACT)</th>
+                        <th className="p-3">BACK ONLINE / RECOVERY</th>
+                        <th className="p-3">DURATION</th>
+                        <th className="p-3">STATUS</th>
+                        <th className="p-3">TRIGGER REASON</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                      {serverUptimeSummary.serverResults.flatMap((s) => s.outageSessions).map((sess, idx) => {
+                        const offlineStr = formatExactTimestamp(sess.startTimeMs);
+                        const recoveryStr = sess.isActive
+                          ? "OFFLINE UNTIL NOW"
+                          : formatExactTimestamp(sess.endTimeMs);
+                        const durationStr = formatDuration(sess.durationMs);
+
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="p-3 text-slate-400 font-mono">#{idx + 1}</td>
+                            <td className="p-3 font-bold uppercase text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <Server className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{sess.serverName}</span>
+                            </td>
+                            <td className="p-3 font-mono font-bold text-rose-600 dark:text-rose-400">
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="w-3 h-3 text-rose-500 shrink-0" />
+                                <span>{offlineStr}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono">
+                              {sess.isActive ? (
+                                <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[9px] font-black uppercase">
+                                  ACTIVE / NOT RECOVERED
+                                </Badge>
+                              ) : (
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400">{recoveryStr}</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono font-bold text-amber-600 dark:text-amber-400">
+                              {durationStr}
+                            </td>
+                            <td className="p-3">
+                              <Badge className={cn("text-[10px] font-bold uppercase", sess.isActive ? "bg-rose-500/10 text-rose-500 border-rose-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20")}>
+                                {sess.isActive ? "ACTIVE OUTAGE" : "RECOVERED"}
+                              </Badge>
+                            </td>
+                            <td className="p-3 font-mono text-slate-500 text-[11px]">
+                              Server Disconnected / Process Failure
+                            </td>
+                          </tr>
                         );
                       })}
                     </tbody>
