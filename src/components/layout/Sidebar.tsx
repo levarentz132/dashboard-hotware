@@ -26,7 +26,7 @@ import {
   MonitorPlay
 } from "lucide-react";
 import Cookies from "js-cookie";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ORIX_LOGO_BASE64_PNG } from "@/assets/orix-logo";
 import { Privilege, isAdmin, getDisplayRole } from "@/lib/auth";
@@ -81,6 +81,7 @@ const navigationItems: NavItem[] = [
 
 export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose, hideHeader = false, className, disableCollapse = false }: SidebarProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, logout, isLoading: isAuthLoading } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(disableCollapse ? false : true);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -105,6 +106,19 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     }
     setDisplayUsername(user?.username || "Guest User");
   }, [user?.username]);
+
+  const [isVmsAdmin, setIsVmsAdmin] = useState(false);
+  useEffect(() => {
+    try {
+      const nxUserStr = Cookies.get("local_nx_user");
+      if (nxUserStr) {
+        const nxUser = JSON.parse(nxUserStr) as { role?: string };
+        setIsVmsAdmin(nxUser?.role === "admin" || nxUser?.role === "poweruser");
+      }
+    } catch {
+      /* ignore malformed cookie */
+    }
+  }, []);
 
   const displayInitial = displayUsername[0]?.toUpperCase() || "G";
 
@@ -168,10 +182,6 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
 
   // Filter navigation items based on user privileges
   const filteredItems = navigationItems.filter(item => {
-    // Check if the user is a VMS admin (from cookies)
-    const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
-    const isVmsAdmin = nxUser?.role === 'admin' || nxUser?.role === 'poweruser';
-    
     // Admins see everything
     if (isVmsAdmin || isAdmin(user)) return true;
 
@@ -214,8 +224,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
   const handleNavClick = (item: NavItem) => {
     const isCloud =
       user?.loginSource === "cloud" ||
-      (typeof window !== "undefined" &&
-        window.location.pathname.startsWith("/cloud"));
+      pathname.startsWith("/cloud");
 
     if (isCloud) {
       const targetRoute = CLOUD_ROUTE_MAP[item.id] || `/cloud/${item.id}`;
@@ -247,8 +256,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     const isActive = activeSection === item.id;
     const isCloud =
       user?.loginSource === "cloud" ||
-      (typeof window !== "undefined" &&
-        window.location.pathname.startsWith("/cloud"));
+      pathname.startsWith("/cloud");
 
     return (
       <button
@@ -285,8 +293,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
 
   const isCloudTheme =
     user?.loginSource === "cloud" ||
-    (typeof window !== "undefined" &&
-      window.location.pathname.startsWith("/cloud"));
+    pathname.startsWith("/cloud");
 
   return (
     <TooltipProvider delayDuration={0}>

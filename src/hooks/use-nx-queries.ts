@@ -16,6 +16,8 @@ import {
 
 import Cookies from "js-cookie";
 
+const EMPTY_NX_EVENTS: NxEvent[] = [];
+
 const EVENTS_REFETCH_MS = NX_EVENTS_STALE_MS;
 const ALARMS_REFETCH_MS = NX_ALARMS_STALE_MS;
 
@@ -41,7 +43,7 @@ function useNxSystemQuery<T>(
     refetch: async () => {
       try {
         await query.refetch();
-      } catch (_) {}
+      } catch (_) { }
     },
   };
 }
@@ -62,13 +64,13 @@ export function useEventsQuery(limit: number = 50) {
   });
 
   return {
-    events: query.data ?? [],
+    events: query.data ?? EMPTY_NX_EVENTS,
     loading: query.isLoading,
     error: query.error ? parseError(query.error) : null,
     refetch: async () => {
       try {
         await query.refetch();
-      } catch (_) {}
+      } catch (_) { }
     },
   };
 }
@@ -89,7 +91,7 @@ export function useAlarmsQuery() {
   });
 
   return {
-    alarms: query.data ?? [],
+    alarms: query.data ?? EMPTY_NX_EVENTS,
     loading: query.isLoading,
     error: null,
     refetch: async () => {

@@ -11,6 +11,8 @@ export type { CloudSystem };
 export { fetchCloudSystems, sortCloudSystems };
 export { parseError };
 
+const EMPTY_CLOUD_SYSTEMS: CloudSystem[] = [];
+
 /**
  * State interface for async data fetching hooks
  */
@@ -117,7 +119,7 @@ export function useCloudSystems(): UseAsyncDataReturn<CloudSystem[]> {
   const { data, isLoading, error, refetch } = useCloudSystemsQuery();
 
   return {
-    data: data ?? [],
+    data: data ?? EMPTY_CLOUD_SYSTEMS,
     loading: isLoading,
     error: error ? parseError(error) : null,
     refetch: async () => {
