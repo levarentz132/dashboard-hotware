@@ -58,16 +58,23 @@ export function LicenseLogin() {
             setValue("username", NEXT_PUBLIC_LICENSE_USERNAME);
             setValue("password", NEXT_PUBLIC_LICENSE_PASSWORD); // Will be "******" (masked) from secure server config
             
-            // Sync username to cookies for persistence
+            // Sync username and password to cookies for persistence
             Cookies.set("license_saved_user", NEXT_PUBLIC_LICENSE_USERNAME, { expires: 365, path: '/' });
+            if (NEXT_PUBLIC_LICENSE_PASSWORD) {
+                Cookies.set("license_saved_pass", NEXT_PUBLIC_LICENSE_PASSWORD, { expires: 365, path: '/' });
+            }
             return;
         }
 
-        // Priority 2: Check saved cookies (username only)
+        // Priority 2: Check saved cookies
         const savedUser = Cookies.get("license_saved_user");
+        const savedPass = Cookies.get("license_saved_pass");
         if (savedUser) {
             setHasSaved(true);
             setValue("username", savedUser);
+            if (savedPass) {
+                setValue("password", savedPass);
+            }
             return;
         }
 
@@ -84,8 +91,9 @@ export function LicenseLogin() {
     const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
     const handleSaveCredentials = async (data: LoginFormData) => {
-        // Save username locally for immediate feedback
+        // Save locally in cookies for immediate feedback & local persistence
         Cookies.set("license_saved_user", data.username, { expires: 365, path: '/' });
+        Cookies.set("license_saved_pass", data.password, { expires: 365, path: '/' });
         
         // Save to server for all network users using our reusable hook
         await saveConfig({

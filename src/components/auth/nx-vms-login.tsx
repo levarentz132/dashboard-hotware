@@ -53,13 +53,15 @@ export function NxVmsLogin() {
     port: "7001",
   });
 
-  // Sync NX location settings from loaded server config
+  // Sync NX location and License settings from loaded server config
   useEffect(() => {
     if (!config) return;
     const {
       NEXT_PUBLIC_NX_SERVER_HOST,
       NEXT_PUBLIC_NX_SERVER_PORT,
       NEXT_PUBLIC_NX_SYSTEM_ID,
+      NEXT_PUBLIC_LICENSE_USERNAME,
+      NEXT_PUBLIC_LICENSE_PASSWORD,
     } = config;
 
     const currentIp = Cookies.get("nx_location_ip");
@@ -72,6 +74,18 @@ export function NxVmsLogin() {
     }
     if (!Cookies.get("nx_system_id") && NEXT_PUBLIC_NX_SYSTEM_ID) {
       Cookies.set("nx_system_id", NEXT_PUBLIC_NX_SYSTEM_ID, {
+        expires: 365,
+        path: "/",
+      });
+    }
+    if (!Cookies.get("license_saved_user") && NEXT_PUBLIC_LICENSE_USERNAME) {
+      Cookies.set("license_saved_user", NEXT_PUBLIC_LICENSE_USERNAME, {
+        expires: 365,
+        path: "/",
+      });
+    }
+    if (!Cookies.get("license_saved_pass") && NEXT_PUBLIC_LICENSE_PASSWORD) {
+      Cookies.set("license_saved_pass", NEXT_PUBLIC_LICENSE_PASSWORD, {
         expires: 365,
         path: "/",
       });
@@ -114,19 +128,16 @@ export function NxVmsLogin() {
   const handleDashboardLogin = async (variant: "local" | "cloud") => {
     clearLicenseError?.();
     setActiveVariant(variant);
-    let username = Cookies.get("license_saved_user");
-    let password = Cookies.get("license_saved_pass");
-
-    if (!username || !password) {
-      username =
-        (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME ||
-        process.env.NEXT_PUBLIC_LICENSE_USERNAME ||
-        "";
-      password =
-        (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD ||
-        process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
-        "";
-    }
+    let username =
+      Cookies.get("license_saved_user") ||
+      (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME ||
+      process.env.NEXT_PUBLIC_LICENSE_USERNAME ||
+      "";
+    let password =
+      Cookies.get("license_saved_pass") ||
+      (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD ||
+      process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
+      "";
 
     if (!username || !password) {
       setError(

@@ -53,6 +53,9 @@ export function useNxConfig() {
             const data = await res.json();
             if (data.success) {
                 setConfig(prev => prev ? { ...prev, ...updates } : (updates as NxConfig));
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("nx-config-updated", { detail: updates }));
+                }
                 return true;
             } else {
                 throw new Error(data.message || data.error || "Failed to save configuration");
@@ -68,6 +71,20 @@ export function useNxConfig() {
 
     useEffect(() => {
         fetchConfig();
+
+        const handleConfigUpdate = (event: Event) => {
+            const customEvent = event as CustomEvent<Partial<NxConfig>>;
+            if (customEvent.detail) {
+                setConfig(prev => prev ? { ...prev, ...customEvent.detail } : (customEvent.detail as NxConfig));
+            } else {
+                fetchConfig();
+            }
+        };
+
+        if (typeof window !== "undefined") {
+            window.addEventListener("nx-config-updated", handleConfigUpdate);
+            return () => window.removeEventListener("nx-config-updated", handleConfigUpdate);
+        }
     }, [fetchConfig]);
 
     return {
@@ -78,3 +95,4 @@ export function useNxConfig() {
         saveConfig,
     };
 }
+
