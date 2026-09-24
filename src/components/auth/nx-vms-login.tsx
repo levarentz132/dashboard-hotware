@@ -188,6 +188,18 @@ export function NxVmsLogin() {
     }
   }, [licenseError]);
 
+  const currentLicenseUser =
+    Cookies.get("license_saved_user") ||
+    (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME ||
+    process.env.NEXT_PUBLIC_LICENSE_USERNAME ||
+    "";
+  const currentLicensePass =
+    Cookies.get("license_saved_pass") ||
+    (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD ||
+    process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
+    "";
+  const isLicenseConfigured = Boolean(currentLicenseUser && currentLicensePass);
+
   return (
     <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden transition-all duration-500 animate-in fade-in slide-in-from-bottom-8">
       {/* Header - merah */}
@@ -203,9 +215,41 @@ export function NxVmsLogin() {
         </p>
       </div>
 
-      {/* Banner status */}
-      <div className="p-2 bg-yellow-100 border-b border-yellow-200 text-[10px] font-mono text-yellow-800 text-center">
-        VMS Error: {error || "none"} | License Error: {licenseError || "none"}
+      {/* License Status & Diagnostic Banner */}
+      <div
+        className={`px-6 py-2.5 text-xs font-bold flex items-center justify-between border-b transition-colors ${
+          isLicenseConfigured
+            ? "bg-emerald-50 text-emerald-800 border-emerald-100"
+            : "bg-amber-50 text-amber-800 border-amber-200"
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-2.5 h-2.5 rounded-full ${
+              isLicenseConfigured
+                ? "bg-emerald-500 shadow-sm shadow-emerald-500/50"
+                : "bg-amber-500 animate-pulse"
+            }`}
+          />
+          <span>
+            {isLicenseConfigured
+              ? `License Config: Active (${currentLicenseUser})`
+              : "License Config: Not Configured"}
+          </span>
+        </div>
+        {!isLicenseConfigured && (
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent("open-license-config"));
+              }
+            }}
+            className="text-xs font-black text-amber-900 underline hover:text-amber-950 flex items-center gap-1"
+          >
+            Setup License Config &rarr;
+          </button>
+        )}
       </div>
 
       {(error || licenseError) && (
