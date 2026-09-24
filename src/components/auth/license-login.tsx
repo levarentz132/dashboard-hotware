@@ -128,32 +128,28 @@ export function LicenseLogin() {
                 <DropdownMenuTrigger asChild>
                     <Button
                         variant="outline"
-                        className={`h-16 w-80 px-5 bg-white/90 backdrop-blur-xl transition-all group rounded-2xl border-2 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ${
-                            hasSaved ? "border-emerald-300 hover:border-emerald-400" : "border-amber-300 hover:border-amber-400"
-                        }`}
+                        className="h-16 w-80 px-5 bg-white/80 backdrop-blur-xl border-slate-200/60 hover:bg-white hover:border-blue-400/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all group rounded-2xl border-2"
                     >
                         <div className="flex items-center gap-3 w-full">
                             <div className={`p-2 rounded-xl transition-all duration-300 ${
-                                user ? "bg-blue-50 text-blue-600 shadow-sm" : hasSaved ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                                user ? "bg-blue-50 text-blue-600 shadow-sm" : "bg-slate-50 text-slate-400"
                             }`}>
-                                <ShieldCheck className={`w-4 h-4 ${user || hasSaved ? "animate-pulse" : ""}`} />
+                                <ShieldCheck className={`w-4 h-4 ${user ? "animate-pulse" : ""}`} />
                             </div>
                             <div className="flex flex-col items-start gap-0.5 flex-1 overflow-hidden">
                                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">
                                     {user ? "Authenticated" : "License Config"}
                                 </span>
-                                <span className={`text-sm font-bold leading-tight truncate w-full text-left ${
-                                    user ? "text-blue-700" : hasSaved ? "text-emerald-700" : "text-amber-700"
-                                }`}>
-                                    {user ? user.username : hasSaved ? (Cookies.get("license_saved_user") || config?.NEXT_PUBLIC_LICENSE_USERNAME ? `✓ ${Cookies.get("license_saved_user") || config?.NEXT_PUBLIC_LICENSE_USERNAME}` : "Credentials Active") : "⚠ Setup Credentials"}
+                                <span className="text-sm font-bold leading-tight truncate w-full text-left text-slate-700">
+                                    {user ? user.username : hasSaved ? "Credentials Active" : "Manage Credentials"}
                                 </span>
                             </div>
                             <div className="relative flex h-2.5 w-2.5 ml-2 mr-1">
                                 <div className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                                    user ? "bg-blue-400" : hasSaved ? "bg-emerald-400" : "bg-amber-400"
+                                    user ? "bg-blue-400" : hasSaved ? "bg-green-400" : "bg-slate-300"
                                 }`}></div>
                                 <div className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                                    user ? "bg-blue-500" : hasSaved ? "bg-emerald-500" : "bg-amber-500"
+                                    user ? "bg-blue-500" : hasSaved ? "bg-green-500" : "bg-slate-400"
                                 }`}></div>
                             </div>
                         </div>
