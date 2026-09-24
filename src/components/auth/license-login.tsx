@@ -26,9 +26,14 @@ const loginSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>;
 
 export function LicenseLogin() {
+    const [mounted, setMounted] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const { login, isLoading, error, clearError, user } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     const {
         register,

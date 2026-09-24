@@ -43,6 +43,7 @@ export function NxVmsLogin() {
     setError,
   } = useNxVmsAuth();
 
+  const [mounted, setMounted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [credentials, setCredentials] = useState({
     username: "",
@@ -52,6 +53,10 @@ export function NxVmsLogin() {
     ip: "localhost",
     port: "7001",
   });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Sync NX location and License settings from loaded server config
   useEffect(() => {
@@ -191,16 +196,22 @@ export function NxVmsLogin() {
     }
   }, [licenseError]);
 
-  const currentLicenseUser =
-    Cookies.get("license_saved_user") ||
-    (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME ||
-    process.env.NEXT_PUBLIC_LICENSE_USERNAME ||
-    "";
-  const currentLicensePass =
-    Cookies.get("license_saved_pass") ||
-    (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD ||
-    process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
-    "";
+  const currentLicenseUser = mounted
+    ? Cookies.get("license_saved_user") ||
+      (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME ||
+      process.env.NEXT_PUBLIC_LICENSE_USERNAME ||
+      ""
+    : (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME ||
+      process.env.NEXT_PUBLIC_LICENSE_USERNAME ||
+      "";
+  const currentLicensePass = mounted
+    ? Cookies.get("license_saved_pass") ||
+      (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD ||
+      process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
+      ""
+    : (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD ||
+      process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
+      "";
   const isLicenseConfigured = Boolean(currentLicenseUser && currentLicensePass);
 
   return (
