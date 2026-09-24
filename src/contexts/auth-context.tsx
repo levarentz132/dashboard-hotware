@@ -74,6 +74,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         credentials: "include",
       });
 
+      if (!response.ok && response.status !== 401 && response.status !== 403) {
+        setState({
+          user: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: null,
+        });
+        return { success: false, isAuthenticated: false };
+      }
+
       const data = await response.json();
 
       if (data.success && data.isAuthenticated) {
@@ -145,12 +155,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       return data;
     } catch (error) {
-      console.error("Session check error:", error);
-      // Network error - keep current state, don't logout
+      console.warn("Session check error:", error);
       setState((prev) => ({
         ...prev,
         isLoading: false,
-        error: "Network error",
+        error: null,
       }));
       return { success: false, isAuthenticated: false };
     }
