@@ -6,7 +6,7 @@
  * for downtime/availability calculation used by Dashboard, PDF, and Word exports.
  */
 
-import { getOfflineExactTime, formatExactTimestamp } from "@/lib/camera-offline-tracker";
+import { getOfflineExactTime, formatExactTimestamp, trackOfflineCamera } from "@/lib/camera-offline-tracker";
 import type { OfflineCameraItem, OfflineCameraIncident } from "@/components/reporting/export-utils";
 
 // ============================================
@@ -199,6 +199,7 @@ function pairIncidentSessions(
 export interface DowntimeInput {
   cameras: any[];
   events: any[];
+  allEvents?: any[];
   dateFrom: string;
   dateTo: string;
   selectedServerLabel: string;
@@ -240,11 +241,28 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
   const {
     cameras,
     events: eventList,
+    allEvents = input.events,
     dateFrom,
     dateTo,
     selectedServerLabel,
     nowMs = Date.now(),
   } = input;
+
+  // Compute period boundaries (clamped to now, minimum 1 hour)
+  const dateFromMs = dateFrom
+    ? new Date(`${dateFrom}T00:00:00`).getTime()
+    : 0;
+  const dateToMs = dateTo
+    ? new Date(`${dateTo}T23:59:59.999`).getTime()
+    : Infinity;
+
+  const effectiveToTime = Math.min(dateToMs === Infinity ? nowMs : dateToMs, nowMs);
+  const effectiveFromTime = Math.min(dateFromMs || effectiveToTime, effectiveToTime);
+  const periodDurationMs = Math.max(1000 * 60 * 60, effectiveToTime - effectiveFromTime);
+
+  let totalPeriodDowntimeMs = 0;
+  let resolvedIncidents = 0;
+  let activeIncidents = 0;
 
   // ============================================
   // PER-CAMERA DOWNTIME CALCULATION
@@ -266,88 +284,101 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
           const cleanCamId = String(cam.id || "").replace(/[{}]/g, "").toLowerCase();
           const camNameLower = String(cam.name || "").toLowerCase();
 
-          const camEvents = eventList.filter((e: any) => {
-            if (cleanCamId) {
-              const devIds = (e.actionData?.deviceIds || []).map((id: string) =>
-                String(id).replace(/[{}]/g, "").toLowerCase(),
-              );
-              if (devIds.includes(cleanCamId)) return true;
-              const resId = String(
-                e.resourceId || e.cameraId || e.eventData?.resourceId || e.source || "",
-              )
-                .replace(/[{}]/g, "")
-                .toLowerCase();
-              if (resId.includes(cleanCamId)) return true;
-            }
-            if (camNameLower) {
-              const txt = String(
-                e.actionData?.caption ||
-                  e.actionData?.description ||
-                  e.actionData?.sourceName ||
-                  e.caption ||
-                  e.description ||
-                  e.sourceName ||
-                  "",
-              ).toLowerCase();
-              if (txt.includes(camNameLower)) return true;
-            }
-            return false;
+          const filterCamEvents = (sourceList: any[]) =>
+            sourceList.filter((e: any) => {
+              if (cleanCamId) {
+                const devIds = (e.actionData?.deviceIds || []).map((id: string) =>
+                  String(id).replace(/[{}]/g, "").toLowerCase(),
+                );
+                if (devIds.includes(cleanCamId)) return true;
+                const resId = String(
+                  e.resourceId || e.cameraId || e.eventData?.resourceId || e.source || "",
+                )
+                  .replace(/[{}]/g, "")
+                  .toLowerCase();
+                if (resId.includes(cleanCamId)) return true;
+              }
+              if (camNameLower) {
+                const txt = String(
+                  e.actionData?.caption ||
+                    e.actionData?.description ||
+                    e.actionData?.sourceName ||
+                    e.caption ||
+                    e.description ||
+                    e.sourceName ||
+                    "",
+                ).toLowerCase();
+                if (txt.includes(camNameLower)) return true;
+              }
+              return false;
+            });
+
+          // Always pair lifetime sessions from complete historical events
+          const allCamEvents = filterCamEvents(allEvents);
+          const rawDisconnectEvents = allCamEvents
+            .filter((e: any) => isDisconnectEvent(e))
+            .sort((a: any, b: any) => (getEventTimestampMs(a) ?? 0) - (getEventTimestampMs(b) ?? 0));
+          const rawRecoveryEvents = allCamEvents
+            .filter((e: any) => isRecoveryEvent(e))
+            .sort((a: any, b: any) => (getEventTimestampMs(a) ?? 0) - (getEventTimestampMs(b) ?? 0));
+
+          const lifetimeSessions = pairIncidentSessions(rawDisconnectEvents, rawRecoveryEvents);
+
+          // Find sessions that overlap with the selected reporting period
+          const overlappingSessions = lifetimeSessions.filter((sess) => {
+            return (
+              sess.discTimeMs <= effectiveToTime &&
+              (sess.recTimeMs === null || sess.recTimeMs >= effectiveFromTime)
+            );
           });
 
-          const rawDisconnectEvents = camEvents
-            .filter((e: any) => isDisconnectEvent(e))
-            .sort((a: any, b: any) => {
-              const timeA = getEventTimestampMs(a) ?? 0;
-              const timeB = getEventTimestampMs(b) ?? 0;
-              return timeA - timeB;
-            });
-
-          const rawRecoveryEvents = camEvents
-            .filter((e: any) => isRecoveryEvent(e))
-            .sort((a: any, b: any) => {
-              const timeA = getEventTimestampMs(a) ?? 0;
-              const timeB = getEventTimestampMs(b) ?? 0;
-              return timeA - timeB;
-            });
-
-          const sessions = pairIncidentSessions(rawDisconnectEvents, rawRecoveryEvents);
-
           const incidents: OfflineCameraIncident[] = [];
-          if (sessions.length > 0) {
-            sessions.forEach((sess, idx) => {
+          let camPeriodDowntimeMs = 0;
+
+          if (overlappingSessions.length > 0) {
+            overlappingSessions.forEach((sess, idx) => {
               const offlineTime = formatExactTimestamp(sess.discTimeMs);
               let onlineTime = "";
               let duration = "";
               let incStatus: "RECOVERED" | "STILL OFFLINE" = "RECOVERED";
               let onlineTimestampMs: number | null = null;
 
+              // Calculate period overlap
+              const overlapStart = Math.max(sess.discTimeMs, effectiveFromTime);
+              const overlapEnd = sess.recTimeMs !== null ? Math.min(sess.recTimeMs, effectiveToTime) : effectiveToTime;
+              const incidentDowntimeInPeriod = Math.max(0, overlapEnd - overlapStart);
+              camPeriodDowntimeMs += incidentDowntimeInPeriod;
+
               if (sess.recTimeMs) {
                 onlineTimestampMs = sess.recTimeMs;
                 onlineTime = `BACK ONLINE: ${formatExactTimestamp(sess.recTimeMs)}`;
-                const diffMs = Math.max(0, sess.recTimeMs - sess.discTimeMs);
-                duration = formatDuration(diffMs);
+                const totalOutageMs = Math.max(0, sess.recTimeMs - sess.discTimeMs);
+                duration = formatDuration(totalOutageMs);
                 incStatus = "RECOVERED";
+                resolvedIncidents++;
               } else {
-                const isLatest = idx === sessions.length - 1;
+                const isLatest = idx === overlappingSessions.length - 1;
                 if (isLatest && !isOnline) {
                   onlineTime = "OFFLINE UNTIL NOW";
-                  const diffMs = Math.max(0, nowMs - sess.discTimeMs);
-                  duration = `${formatDuration(diffMs)} (Until now)`;
+                  const totalOutageMs = Math.max(0, nowMs - sess.discTimeMs);
+                  duration = `${formatDuration(totalOutageMs)} (Until now)`;
                   incStatus = "STILL OFFLINE";
+                  activeIncidents++;
                 } else {
                   onlineTime = "YES — BACK ONLINE (CURRENT)";
                   duration = "TEMPORARY (RECOVERED)";
                   incStatus = "RECOVERED";
+                  resolvedIncidents++;
                 }
               }
 
               const eventReason = String(
-                sess.discEvent.actionData?.caption ||
-                  sess.discEvent.caption ||
-                  sess.discEvent.actionData?.description ||
-                  sess.discEvent.description ||
-                  sess.discEvent.eventData?.type ||
-                  sess.discEvent.eventType ||
+                sess.discEvent?.actionData?.caption ||
+                  sess.discEvent?.caption ||
+                  sess.discEvent?.actionData?.description ||
+                  sess.discEvent?.description ||
+                  sess.discEvent?.eventData?.type ||
+                  sess.discEvent?.eventType ||
                   "Camera Disconnected",
               );
 
@@ -363,23 +394,30 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
               });
             });
           } else if (!isOnline) {
-            const resolved = getOfflineExactTime(cam);
-            const durationMs = resolved.timestampMs
-              ? Math.max(0, nowMs - resolved.timestampMs)
-              : 0;
+            // Camera is currently offline but has no explicit event logged
+            const resolved = getOfflineExactTime(cam, allEvents);
+            const offlineMs = resolved.timestampMs || effectiveFromTime;
+            const overlapStart = Math.max(offlineMs, effectiveFromTime);
+            const incidentDowntimeInPeriod = Math.max(0, effectiveToTime - overlapStart);
+            camPeriodDowntimeMs += incidentDowntimeInPeriod;
+            activeIncidents++;
+
+            const totalOutageMs = offlineMs ? Math.max(0, nowMs - offlineMs) : 0;
             incidents.push({
               incidentNumber: 1,
               offlineTime: resolved.exactTime,
-              offlineTimestampMs: resolved.timestampMs,
+              offlineTimestampMs: offlineMs,
               onlineTime: "OFFLINE UNTIL NOW",
               onlineTimestampMs: null,
-              duration: durationMs > 0
-                ? `${formatDuration(durationMs)} (Until now)`
+              duration: totalOutageMs > 0
+                ? `${formatDuration(totalOutageMs)} (Until now)`
                 : "Offline until now",
               status: "STILL OFFLINE",
               reason: "Current Offline State",
             });
           }
+
+          totalPeriodDowntimeMs += camPeriodDowntimeMs;
 
           const incidentCount = incidents.length;
 
@@ -389,28 +427,27 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
           let availabilityRate = "100% ONLINE";
 
           if (incidentCount > 0) {
+            const firstInc = incidents[0];
             const latestInc = incidents[incidents.length - 1];
-            firstOffline = latestInc.offlineTime;
+            firstOffline = firstInc.offlineTime;
             lastOffline = latestInc.onlineTime;
 
-            let totalDowntimeMs = 0;
-            let hasUnrecovered = false;
-            incidents.forEach((inc) => {
-              if (inc.offlineTimestampMs && inc.onlineTimestampMs) {
-                totalDowntimeMs += Math.max(0, inc.onlineTimestampMs - inc.offlineTimestampMs);
-              } else if (inc.offlineTimestampMs && inc.status === "STILL OFFLINE") {
-                totalDowntimeMs += Math.max(0, nowMs - inc.offlineTimestampMs);
-                hasUnrecovered = true;
-              }
-            });
+            const hasUnrecovered = incidents.some((inc) => inc.status === "STILL OFFLINE");
 
             if (hasUnrecovered || !isOnline) {
               availabilityRate = "OFFLINE UNTIL NOW";
-              offlineDuration = `${formatDuration(totalDowntimeMs)} (Until now)`;
+              const totalOutageMs = firstInc.offlineTimestampMs ? Math.max(0, nowMs - firstInc.offlineTimestampMs) : 0;
+              offlineDuration = totalOutageMs > 0 ? `${formatDuration(totalOutageMs)} (Until now)` : latestInc.duration;
             } else {
-              availabilityRate = "ONLINE (RECOVERED)";
-              offlineDuration =
-                totalDowntimeMs > 0 ? formatDuration(totalDowntimeMs) : latestInc.duration;
+              const camUptimePct = Math.max(
+                0,
+                Math.min(
+                  100,
+                  ((periodDurationMs - camPeriodDowntimeMs) / periodDurationMs) * 100,
+                ),
+              ).toFixed(1);
+              availabilityRate = `${camUptimePct}% ONLINE`;
+              offlineDuration = formatDuration(camPeriodDowntimeMs);
             }
           }
 
@@ -435,7 +472,7 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
   // AGGREGATE METRICS CALCULATION
   // ============================================
 
-  // Compute alarm event metrics from the event list
+  // Compute alarm event metrics from the period event list
   let criticalAlarms = 0;
   let warningAlarms = 0;
   let infoAlarms = 0;
@@ -541,41 +578,9 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
     }
   });
 
-  let resolvedIncidents = 0;
-  let activeIncidents = 0;
-  let totalDowntimeMs = 0;
-
-  offlineCamerasSummary.forEach((cam) => {
-    (cam.incidents || []).forEach((inc) => {
-      if (inc.status === "RECOVERED") {
-        resolvedIncidents++;
-        if (inc.offlineTimestampMs && inc.onlineTimestampMs) {
-          totalDowntimeMs += Math.max(0, inc.onlineTimestampMs - inc.offlineTimestampMs);
-        }
-      } else {
-        activeIncidents++;
-        if (inc.offlineTimestampMs) {
-          totalDowntimeMs += Math.max(0, nowMs - inc.offlineTimestampMs);
-        }
-      }
-    });
-  });
-
-  // Compute period boundaries (clamped to now, minimum 1 hour)
-  const dateFromMs = dateFrom
-    ? new Date(`${dateFrom}T00:00:00`).getTime()
-    : 0;
-  const dateToMs = dateTo
-    ? new Date(`${dateTo}T23:59:59.999`).getTime()
-    : Infinity;
-
-  const effectiveToTime = Math.min(dateToMs === Infinity ? nowMs : dateToMs, nowMs);
-  const effectiveFromTime = Math.min(dateFromMs || effectiveToTime, effectiveToTime);
-  const periodDurationMs = Math.max(1000 * 60 * 60, effectiveToTime - effectiveFromTime);
-
   const totalCameras = cameras.length;
   const avgDowntimeMs =
-    totalCameras > 0 ? totalDowntimeMs / totalCameras : totalDowntimeMs;
+    totalCameras > 0 ? totalPeriodDowntimeMs / totalCameras : totalPeriodDowntimeMs;
   const computedUptime =
     periodDurationMs > 0
       ? Math.max(
@@ -598,7 +603,7 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
   const infoPct =
     totalAlarms > 0 ? `${Math.round((infoAlarms / totalAlarms) * 100)}%` : "0%";
 
-  const auditVerdict = `During the period (${dateFrom} to ${dateTo}), ${totalAlarms} total alarm event(s) were recorded for ${selectedServerLabel}. ${criticalAlarms} critical event(s) (${criticalPct}) and ${warningAlarms} warning(s) (${warningPct}) were logged. A total of ${totalOfflineIncidentsCount} camera disconnection incident(s) occurred: ${resolvedIncidents} successfully restored upon reconnection, and ${activeIncidents} active outage(s). Overall camera uptime index calculated from alarm logs is ${periodCameraUptimeRate}% with ${formatDuration(totalDowntimeMs)} total recorded downtime.`;
+  const auditVerdict = `During the period (${dateFrom} to ${dateTo}), ${totalAlarms} total alarm event(s) were recorded for ${selectedServerLabel}. ${criticalAlarms} critical event(s) (${criticalPct}) and ${warningAlarms} warning(s) (${warningPct}) were logged. A total of ${totalOfflineIncidentsCount} camera disconnection incident(s) occurred: ${resolvedIncidents} successfully restored upon reconnection, and ${activeIncidents} active outage(s). Overall camera uptime index calculated from alarm logs is ${periodCameraUptimeRate}% with ${formatDuration(totalPeriodDowntimeMs)} total recorded downtime.`;
 
   return {
     cameras: offlineCamerasSummary,
@@ -618,8 +623,8 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
       resolvedIncidents,
       activeIncidents,
       totalOfflineIncidents: totalOfflineIncidentsCount,
-      totalDowntimeMs,
-      totalDowntimeFormatted: formatDuration(totalDowntimeMs),
+      totalDowntimeMs: totalPeriodDowntimeMs,
+      totalDowntimeFormatted: formatDuration(totalPeriodDowntimeMs),
       periodCameraUptimeRate,
       auditVerdict,
     },

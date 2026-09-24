@@ -60,7 +60,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -86,6 +85,8 @@ import { ORIX_LOGO_BASE64_PNG } from "@/assets/orix-logo";
 function cleanId(id?: string | null): string {
   return String(id || "").replace(/[{}]/g, "").toLowerCase();
 }
+
+const EMPTY_ARRAY: any[] = [];
 
 // ============================================
 // CONSTANTS & BRANDING
@@ -263,6 +264,17 @@ export default function ReportingManagement() {
   const cloudSystemsRef = useRef(cloudSystems);
   cloudSystemsRef.current = cloudSystems;
 
+  const uniqueSelectSystems = useMemo(() => {
+    const seen = new Set<string>();
+    return (cloudSystems || []).filter((sys) => {
+      if (!sys || !sys.id || seen.has(sys.id) || sys.id === "all" || sys.id === "local") {
+        return false;
+      }
+      seen.add(sys.id);
+      return true;
+    });
+  }, [cloudSystems]);
+
   // Global cameras lookup fallback from device monitor
   useEffect(() => {
     const fetchGlobalCameras = async () => {
@@ -293,7 +305,9 @@ export default function ReportingManagement() {
         ...getElectronHeaders(),
       };
 
-      const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
+      const selectedFromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
+      // Look back at least 60 days for events so true disconnect timestamps for currently offline cameras are always discovered
+      const eventsLookbackMs = Math.min(selectedFromMs, Date.now() - 60 * 86400 * 1000);
       const currentCloudSystems = cloudSystemsRef.current || [];
 
       const localUserStr = Cookies.get("local_nx_user");
@@ -333,7 +347,7 @@ export default function ReportingManagement() {
             .catch(() => [])
         );
         const eventPromises = targetSystems.map((sys) =>
-          fetch(`/api/cloud/events?systemId=${encodeURIComponent(sys.id)}&from=${fromMs}&limit=2000`, { headers })
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(sys.id)}&from=${eventsLookbackMs}&limit=2000`, { headers })
             .then((res) => (res.ok ? res.json() : []))
             .then((list) => {
               const normalized = normalizeNxEvents(Array.isArray(list) ? list : []);
@@ -370,7 +384,7 @@ export default function ReportingManagement() {
           : Promise.resolve([]);
 
         const localEventPromise = localUserStr
-          ? fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}&from=${fromMs}&limit=2000`, { headers })
+          ? fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}&from=${eventsLookbackMs}&limit=2000`, { headers })
               .then((res) => (res.ok ? res.json() : []))
               .catch(() => [])
               .then((evts) => {
@@ -484,7 +498,7 @@ export default function ReportingManagement() {
           fetch(`/api/cloud/storages?systemId=${encodeURIComponent(localSid)}`)
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => nxAPI.getStorages().catch(() => [])),
-          fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}&from=${fromMs}&limit=2000`, { headers })
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(localSid)}&from=${eventsLookbackMs}&limit=2000`, { headers })
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => []),
         ]);
@@ -509,7 +523,7 @@ export default function ReportingManagement() {
           fetchFromCloudRelay<NxCamera[]>(selectedSystemId, "/devices"),
           fetchFromCloudRelay<any[]>(selectedSystemId, "/servers"),
           fetch(`/api/cloud/storages?systemId=${encodeURIComponent(selectedSystemId)}`).then((r) => (r.ok ? r.json() : [])),
-          fetch(`/api/cloud/events?systemId=${encodeURIComponent(selectedSystemId)}&from=${fromMs}&limit=2000`, { headers }).then(async (r) => {
+          fetch(`/api/cloud/events?systemId=${encodeURIComponent(selectedSystemId)}&from=${eventsLookbackMs}&limit=2000`, { headers }).then(async (r) => {
             if (!r.ok) {
               if (r.status === 503 || r.status === 502 || r.status === 504) {
                 setSystemOffline(true);
@@ -662,10 +676,10 @@ export default function ReportingManagement() {
 
   // Combine fetched alarm events from Alarm Console endpoint or fallback to queries
   const rawAlarmList = useMemo(() => {
-    if (alarmEvents.length > 0) return normalizeNxEvents(alarmEvents);
-    if (Array.isArray(events) && events.length > 0) return normalizeNxEvents(events);
-    if (Array.isArray(alarms) && alarms.length > 0) return normalizeNxEvents(alarms);
-    return [];
+    if (alarmEvents.length > 0) return alarmEvents;
+    if (Array.isArray(events) && events.length > 0) return events;
+    if (Array.isArray(alarms) && alarms.length > 0) return alarms;
+    return EMPTY_ARRAY;
   }, [alarmEvents, events, alarms]);
 
   const eventList = rawAlarmList;
@@ -879,8 +893,11 @@ export default function ReportingManagement() {
     periodCameraUptimeRate: 100, auditVerdict: "",
   };
 
-  const [downtimeResult, setDowntimeResult] = useState<{ cameras: OfflineCameraItem[]; aggregate: typeof defaultAggregate } | null>(null);
-  const [calculationSource, setCalculationSource] = useState<CalculationSource>("LOADING");
+  const periodTypeMap: Record<ReportPeriod, string> = useMemo(() => ({
+    current: "CURRENT", daily: "DAILY", weekly: "WEEKLY", monthly: "MONTHLY", yearly: "YEARLY", custom: "CUSTOM",
+  }), []);
+
+  const currentScopeKey = `${periodTypeMap[period]}_${selectedServerLabel}_${dateFrom}_${dateTo}`;
 
   const isHistorical = useMemo(() => {
     if (!dateTo) return false;
@@ -888,316 +905,150 @@ export default function ReportingManagement() {
     return toTimeMs < Date.now();
   }, [dateTo]);
 
+  // Direct synchronous memoized calculation — zero setState loop risk
+  const liveCalculationResult = useMemo(() => {
+    if (period === "current" || !dateFrom || !dateTo) return null;
+    return calculateDowntimeResult({
+      cameras,
+      events: targetAlarmEvents,
+      allEvents: parsedAlarmList,
+      dateFrom,
+      dateTo,
+      selectedServerLabel,
+    });
+  }, [period, cameras, targetAlarmEvents, parsedAlarmList, dateFrom, dateTo, selectedServerLabel]);
+
+  // Cached historical result state (only populated when historical cache hits)
+  const [cachedHistoricalResult, setCachedHistoricalResult] = useState<{
+    key: string;
+    data: { cameras: OfflineCameraItem[]; aggregate: typeof defaultAggregate };
+  } | null>(null);
+
+  const resolvedResult = useMemo(() => {
+    if (period === "current") {
+      return { cameras: [] as OfflineCameraItem[], aggregate: defaultAggregate };
+    }
+    if (isHistorical && cachedHistoricalResult && cachedHistoricalResult.key === currentScopeKey) {
+      return cachedHistoricalResult.data;
+    }
+    if (liveCalculationResult) {
+      return liveCalculationResult;
+    }
+    return { cameras: [] as OfflineCameraItem[], aggregate: defaultAggregate };
+  }, [period, isHistorical, cachedHistoricalResult, currentScopeKey, liveCalculationResult]);
+
+  const calculationSource: CalculationSource = useMemo(() => {
+    if (period === "current") return "LIVE_CALCULATION";
+    if (isHistorical && cachedHistoricalResult && cachedHistoricalResult.key === currentScopeKey) {
+      return "CACHE_HIT";
+    }
+    return "LIVE_CALCULATION";
+  }, [period, isHistorical, cachedHistoricalResult, currentScopeKey]);
+
   // ============================================
-  // CACHE READ + PERSISTENCE (unified effect)
+  // CACHE FETCH & BACKGROUND PERSISTENCE
   // ============================================
   const lastSavedKeyRef = useRef<string>("");
   const lastCacheRequestRef = useRef<string>("");
 
   useEffect(() => {
-    if (period === "current") {
-      setDowntimeResult(null);
-      setCalculationSource("LIVE_CALCULATION");
-      return;
-    }
+    if (period === "current" || !dateFrom || !dateTo) return;
 
-    const periodTypeMap: Record<ReportPeriod, string> = {
-      current: "CURRENT", daily: "DAILY", weekly: "WEEKLY", monthly: "MONTHLY", yearly: "YEARLY", custom: "CUSTOM",
-    };
-    const scopeKey = `${periodTypeMap[period]}_${selectedServerLabel}_${dateFrom}_${dateTo}`;
+    // 1. If Historical, fetch cache once per unique scope key
+    if (isHistorical) {
+      if (lastCacheRequestRef.current === currentScopeKey) return;
+      lastCacheRequestRef.current = currentScopeKey;
 
-    if (!isHistorical || !dateFrom || !dateTo) {
-      // CURRENT/LIVE: always calculate
-      const result = calculateDowntimeResult({ cameras, events: targetAlarmEvents, dateFrom, dateTo, selectedServerLabel });
-      setDowntimeResult(result);
-      setCalculationSource("LIVE_CALCULATION");
-
-      // Persist live calculation
-      if (scopeKey !== lastSavedKeyRef.current) {
-        let cancelled = false;
-        const formattedAlarmsList = targetAlarmEvents.map((a: any) => ({
-          id: String(a.id || "EVENT"),
-          source: a.systemName ? `${a.sourceName} (${a.systemName})` : a.sourceName,
-          severity: a.severity || "INFO",
-          timestamp: a.formattedTime || "DATA NOT AVAILABLE FROM SOURCE",
-          description: a.description || "NO DESCRIPTION AVAILABLE",
-          eventType: a.eventType,
-          eventLabel: a.eventLabel,
-          systemName: a.systemName,
-          sourceName: a.sourceName,
-          timestampMs: typeof a.timestampMs === "number" ? a.timestampMs : undefined,
-        }));
-        const analystPresentation = buildAnalystRelevantEventLog(targetAlarmEvents);
-
-        const formattedCameras: CameraReportItem[] = cameras.map((cam: any) => {
-          const isCamOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
-          const offlineInfo = !isCamOnline ? getOfflineExactTime(cam, eventList) : null;
-          return {
-            id: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
-            name: cam.name || "UNNAMED CAMERA",
-            serverName: (cam._systemName || cam.serverName || "SERVER 01").toUpperCase(),
-            status: isCamOnline ? "ONLINE" : "OFFLINE",
-            ipAddress: cam.ipAddr || cam.ip || cam.url || "DATA NOT AVAILABLE FROM SOURCE",
-            vendorModel: [cam.vendor, cam.model].filter(Boolean).join(" / ") || cam.type || "NX CAMERA",
-            resolutionFps: cam.resolution ? `${cam.resolution}${cam.fps ? ` @ ${cam.fps}FPS` : ""}` : "DATA NOT AVAILABLE FROM SOURCE",
-            uptimeRate: isCamOnline ? "ONLINE (LIVE)" : `OFFLINE (Since: ${offlineInfo?.exactTime || "RECENT"})`,
-            exactOfflineTime: offlineInfo?.exactTime || "",
-          };
-        });
-
-        const formattedStorageStats = (servers || []).map((srv: any) => {
-          if (srv.isOfflinePlaceholder) {
-            return {
-              name: (srv._systemName || srv.name || "SERVER").toUpperCase(),
-              isOnline: false,
-              status: "OFFLINE",
-              totalGb: "N/A",
-              usedGb: "N/A",
-              freeGb: "N/A",
-              usedPct: 0,
-              diskCount: "N/A",
-              cpuText: "N/A",
-              ramText: "N/A",
-              version: "N/A",
-              osName: "N/A",
-              isOfflinePlaceholder: true,
-            };
-          }
-          const diskList: any[] = srv.hddList || srv.storages || [];
-          const totalMb = diskList.reduce((sum: number, d: any) => sum + (d.totalSpaceMb || d.totalSpace || 0), 0);
-          const usedMb = diskList.reduce((sum: number, d: any) => sum + (d.reservedSpaceMb || d.usedSpace || 0), 0);
-          const freeMb = totalMb - usedMb;
-          const usedPct = totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0;
-          const rawCpu = srv.cpuUsagePercent ?? srv.cpuUsage ?? srv.cpu;
-          const cpuText = typeof rawCpu === "number" && rawCpu >= 0 ? `${Math.round(rawCpu)}%` : "N/A — DATA NOT AVAILABLE FROM CONFIGURED SOURCE";
-          const rawRamUsed = srv.ramUsageMb ?? srv.ramUsedMb;
-          const rawRamTotal = srv.totalRamMb ?? srv.ramTotalMb;
-          const ramText =
-            typeof rawRamUsed === "number" && typeof rawRamTotal === "number" && rawRamTotal > 0
-              ? `${(rawRamUsed / 1024).toFixed(1)} GB / ${(rawRamTotal / 1024).toFixed(1)} GB`
-              : "N/A — DATA NOT AVAILABLE FROM CONFIGURED SOURCE";
-          return {
-            name: (srv._systemName || srv.name || "SERVER").toUpperCase(),
-            isOnline: ["online", "Online"].includes(String(srv.status ?? srv.stateOfHealth ?? "")),
-            totalGb: totalMb > 0 ? (totalMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
-            usedGb: usedMb > 0 ? (usedMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
-            freeGb: freeMb > 0 ? (freeMb / 1024).toFixed(1) : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
-            usedPct,
-            diskCount: diskList.length > 0 ? String(diskList.length) : "1 DISK",
-            cpuText,
-            ramText,
-            version: srv.version || srv.softwareVersion || "DATA NOT AVAILABLE FROM SOURCE",
-            osName: srv.osName || srv.osInfo?.name || "DATA NOT AVAILABLE FROM SOURCE",
-            isOfflinePlaceholder: false,
-          };
-        });
-
-        const formattedServers: ServerHealthItem[] = formattedStorageStats.map((srv: any) => ({
-          serverName: srv.name,
-          status: srv.isOnline ? "ONLINE" : "OFFLINE",
-          version: srv.isOfflinePlaceholder ? "N/A" : srv.version,
-          osName: srv.isOfflinePlaceholder ? "N/A" : srv.osName,
-          cpuUsage: srv.isOfflinePlaceholder ? "N/A" : srv.cpuText,
-          ramUsage: srv.isOfflinePlaceholder ? "N/A" : srv.ramText,
-          diskCount: srv.isOfflinePlaceholder ? "N/A" : srv.diskCount,
-          storageUsage: srv.isOfflinePlaceholder ? "N/A" : srv.totalGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB (${srv.usedPct}%)` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
-        }));
-
-        const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
-        const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Date.now();
-        const perSystemCounts = new Map<string, number>();
-        targetAlarmEvents.forEach((ev: any) => {
-          const sysId = ev._systemId || "default";
-          perSystemCounts.set(sysId, (perSystemCounts.get(sysId) || 0) + 1);
-        });
-        const maxSingleSystemCount = perSystemCounts.size > 0
-          ? Math.max(...Array.from(perSystemCounts.values()))
-          : targetAlarmEvents.length;
-
-        const uptimeSummary = calculateServerUptimeFromEvents({
-          servers,
-          events: targetAlarmEvents,
-          fromMs,
-          toMs,
-          nowMs: Date.now(),
-          requestedLimit: 2000,
-          returnedEventCount: maxSingleSystemCount,
-          isFetchFailed: systemOffline,
-        });
-
-        const serverUptimeResults: ServerUptimeItem[] = uptimeSummary.serverResults.map((res: any) => {
-          const matchSrv = (servers || []).find(
-            (s: any) =>
-              cleanId(s.id || s.serverId || s.name) === cleanId(res.serverId) ||
-              s.name === res.serverName ||
-              (s._systemId && s._systemId === res.serverId)
-          );
-          const isOfflinePlaceholder = Boolean(
-            (res as any).isOfflinePlaceholder ||
-            matchSrv?.isOfflinePlaceholder ||
-            (res.currentStatus === "offline" && matchSrv?.isOfflinePlaceholder)
-          );
-
-          if (isOfflinePlaceholder) {
-            return {
-              serverId: res.serverId,
-              serverName: res.serverName,
-              currentStatus: "OFFLINE",
-              firstOffline: "N/A",
-              lastRecovery: "OFFLINE UNTIL NOW",
-              totalDowntime: "N/A",
-              incidentCount: "N/A" as any,
-              uptimeRate: null,
-              periodUptime: "N/A — SERVER CURRENTLY OFFLINE / HISTORICAL UPTIME NOT AVAILABLE",
-              dataCompleteness: res.dataCompleteness,
-              isOfflinePlaceholder: true,
-              outageSessions: [],
-            };
-          }
-
-          return {
-            serverId: res.serverId,
-            serverName: res.serverName,
-            currentStatus: res.currentStatus === "online" ? "ONLINE" : "OFFLINE",
-            firstOffline: res.firstOffline,
-            lastRecovery: res.lastRecovery,
-            totalDowntime: res.totalDowntime,
-            incidentCount: res.incidentCount,
-            uptimeRate: res.uptimeRate,
-            periodUptime: res.periodUptime,
-            dataCompleteness: res.dataCompleteness,
-            isOfflinePlaceholder: false,
-            outageSessions: res.outageSessions || [],
-          };
-        });
-
-        const body = {
-          version: 2,
-          periodType: periodTypeMap[period],
+      let cancelled = false;
+      fetch(
+        `/api/downtime-results?${new URLSearchParams({
+          periodType: periodTypeMap[period] || "MONTHLY",
           dateFrom,
           dateTo,
-          label: periodLabel,
           selectedServerLabel,
-          calculatedAt: new Date().toISOString(),
-          metrics: {
-            periodCameraUptimeRate: result.aggregate.periodCameraUptimeRate,
-            metricDescription: "AVERAGE PER-CAMERA UPTIME INDEX",
-            totalDowntimeMs: result.aggregate.totalDowntimeMs,
-            totalDowntimeFormatted: result.aggregate.totalDowntimeFormatted,
-            totalOfflineIncidents: result.aggregate.totalOfflineIncidents,
-            resolvedIncidents: result.aggregate.resolvedIncidents,
-            activeIncidents: result.aggregate.activeIncidents,
-          },
-          cameras: result.cameras,
-          cameraInventory: formattedCameras,
-          server: {
-            health: formattedServers,
-            uptimeResults: serverUptimeResults,
-            storageStats: formattedStorageStats,
-            disks: formattedServerDisks,
-          },
-          alarms: {
-            canonicalCount: targetAlarmEvents.length,
-            rawAlarms: formattedAlarmsList,
-            presentationItems: analystPresentation.presentationItems,
-          },
-        };
-        (async () => {
-          try {
-            const response = await fetch("/api/downtime-results", {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        })}`
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          if (cancelled || !json?.success || !json?.data) return;
+          const d = json.data;
+          if (
+            d.periodType === periodTypeMap[period] &&
+            d.dateFrom === dateFrom &&
+            d.dateTo === dateTo &&
+            d.selectedServerLabel === selectedServerLabel &&
+            Array.isArray(d.cameras) &&
+            d.metrics
+          ) {
+            setCachedHistoricalResult({
+              key: currentScopeKey,
+              data: { cameras: d.cameras, aggregate: d.metrics },
             });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            if (!cancelled) lastSavedKeyRef.current = scopeKey;
-          } catch (error) {
-            console.warn("[Reporting] Downtime result persistence failed:", error);
           }
-        })();
-        return () => { cancelled = true; };
-      }
-      return;
+        })
+        .catch(() => {});
+
+      return () => {
+        cancelled = true;
+      };
     }
 
-    // HISTORICAL: try cache first
-    if (scopeKey === lastCacheRequestRef.current) return;
-    lastCacheRequestRef.current = scopeKey;
-    setCalculationSource("LOADING");
+    // 2. If Live Calculation is ready, asynchronously persist it once per scope key
+    if (liveCalculationResult && lastSavedKeyRef.current !== currentScopeKey) {
+      lastSavedKeyRef.current = currentScopeKey;
 
-    let cancelled = false;
+      const body = {
+        version: 2,
+        periodType: periodTypeMap[period] || "MONTHLY",
+        dateFrom,
+        dateTo,
+        label: periodLabel,
+        selectedServerLabel,
+        calculatedAt: new Date().toISOString(),
+        metrics: {
+          periodCameraUptimeRate: liveCalculationResult.aggregate.periodCameraUptimeRate,
+          metricDescription: "AVERAGE PER-CAMERA UPTIME INDEX",
+          totalDowntimeMs: liveCalculationResult.aggregate.totalDowntimeMs,
+          totalDowntimeFormatted: liveCalculationResult.aggregate.totalDowntimeFormatted,
+          totalOfflineIncidents: liveCalculationResult.aggregate.totalOfflineIncidents,
+          resolvedIncidents: liveCalculationResult.aggregate.resolvedIncidents,
+          activeIncidents: liveCalculationResult.aggregate.activeIncidents,
+        },
+        cameras: liveCalculationResult.cameras,
+        cameraInventory: [],
+        server: {
+          health: [],
+          uptimeResults: [],
+          storageStats: [],
+          disks: [],
+        },
+        alarms: {
+          canonicalCount: targetAlarmEvents.length,
+          rawAlarms: [],
+          presentationItems: [],
+        },
+      };
 
-    (async () => {
-      try {
-        const params = new URLSearchParams({
-          periodType: periodTypeMap[period], dateFrom, dateTo, selectedServerLabel,
-        });
-        const response = await fetch(`/api/downtime-results?${params}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const json = await response.json();
-        if (!json.success || !json.data) throw new Error("Invalid response");
-
-        const d = json.data;
-        if (d.periodType !== periodTypeMap[period]) throw new Error("Scope mismatch");
-        if (d.dateFrom !== dateFrom) throw new Error("Scope mismatch");
-        if (d.dateTo !== dateTo) throw new Error("Scope mismatch");
-        if (d.selectedServerLabel !== selectedServerLabel) throw new Error("Scope mismatch");
-        if (typeof d.version !== "number") throw new Error("Invalid version");
-        if (!d.calculatedAt) throw new Error("Missing calculatedAt");
-        if (!d.metrics || typeof d.metrics.periodCameraUptimeRate !== "number") throw new Error("Invalid metrics");
-        if (typeof d.metrics.totalDowntimeMs !== "number") throw new Error("Invalid metrics");
-        if (typeof d.metrics.totalOfflineIncidents !== "number") throw new Error("Invalid metrics");
-        if (typeof d.metrics.resolvedIncidents !== "number") throw new Error("Invalid metrics");
-        if (typeof d.metrics.activeIncidents !== "number") throw new Error("Invalid metrics");
-        if (!Array.isArray(d.cameras)) throw new Error("Invalid cameras");
-        if (d.metrics.metricDescription !== "AVERAGE PER-CAMERA UPTIME INDEX") throw new Error("Invalid metricDescription");
-
-        // VALID CACHE HIT — use cached result, no calculation, no POST
-        if (!cancelled) {
-          setDowntimeResult({ cameras: d.cameras, aggregate: d.metrics });
-          setCalculationSource("CACHE_HIT");
-        }
-      } catch (error) {
-        // CACHE MISS — calculate fallback
-        console.warn("[Reporting] Downtime result cache miss:", error);
-        if (!cancelled) {
-          const result = calculateDowntimeResult({ cameras, events: targetAlarmEvents, dateFrom, dateTo, selectedServerLabel });
-          setDowntimeResult(result);
-          setCalculationSource("CACHE_MISS");
-
-          // Persist fallback calculation
-          if (scopeKey !== lastSavedKeyRef.current) {
-            const body = {
-              version: 1, periodType: periodTypeMap[period], dateFrom, dateTo, label: periodLabel,
-              selectedServerLabel, calculatedAt: new Date().toISOString(),
-              metrics: {
-                periodCameraUptimeRate: result.aggregate.periodCameraUptimeRate,
-                metricDescription: "AVERAGE PER-CAMERA UPTIME INDEX",
-                totalDowntimeMs: result.aggregate.totalDowntimeMs,
-                totalDowntimeFormatted: result.aggregate.totalDowntimeFormatted,
-                totalOfflineIncidents: result.aggregate.totalOfflineIncidents,
-                resolvedIncidents: result.aggregate.resolvedIncidents,
-                activeIncidents: result.aggregate.activeIncidents,
-              },
-              cameras: result.cameras,
-            };
-            fetch("/api/downtime-results", {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-            }).then((r) => {
-              if (!r.ok) throw new Error(`HTTP ${r.status}`);
-              if (!cancelled) lastSavedKeyRef.current = scopeKey;
-            }).catch((err) => {
-              console.warn("[Reporting] Downtime result persistence failed:", err);
-            });
-          }
-        }
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [isHistorical, period, dateFrom, dateTo, selectedServerLabel, cameras, targetAlarmEvents, periodLabel]);
-
-  // resolvedResult: use calculated when available, fallback defaults while loading
-  const resolvedResult = downtimeResult ?? { cameras: [] as OfflineCameraItem[], aggregate: defaultAggregate };
+      fetch("/api/downtime-results", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).catch((err) => {
+        console.warn("[Reporting] Downtime result persistence failed:", err);
+      });
+    }
+  }, [
+    isHistorical,
+    period,
+    dateFrom,
+    dateTo,
+    selectedServerLabel,
+    currentScopeKey,
+    liveCalculationResult,
+    periodTypeMap,
+    periodLabel,
+    targetAlarmEvents.length,
+  ]);
 
   const offlineCamerasSummary = resolvedResult.cameras;
 
@@ -1398,7 +1249,7 @@ export default function ReportingManagement() {
 
     const formattedCameras: CameraReportItem[] = cameras.map((cam: any) => {
       const isCamOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
-      const offlineInfo = !isCamOnline ? getOfflineExactTime(cam, eventList) : null;
+      const offlineInfo = !isCamOnline ? getOfflineExactTime(cam, parsedAlarmList) : null;
       return {
         id: cam.id || "DATA NOT AVAILABLE FROM SOURCE",
         name: cam.name || "UNNAMED CAMERA",
@@ -1689,33 +1540,23 @@ export default function ReportingManagement() {
             {/* Centralized Server Filter Dropdown */}
             <div className="flex items-center gap-3">
               <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300 uppercase">SERVER:</span>
-              <Select value={selectedSystemId} onValueChange={setSelectedSystemId}>
-                <SelectTrigger className="w-full sm:w-[240px] h-9 text-[12px] font-bold rounded-xl border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 uppercase">
-                  <Server className="h-3.5 w-3.5 mr-2 text-blue-500 shrink-0" />
-                  <SelectValue placeholder="SELECT SERVER..." />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
-                  <SelectItem value="all" className="text-[12px] font-bold uppercase text-blue-600 dark:text-blue-400">
-                    ALL (CENTRALIZED REPORTING)
-                  </SelectItem>
-                  {hasLocalServer && (
-                    <SelectItem value="local" className="text-[12px] font-semibold uppercase">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                        <span>LOCAL SERVER</span>
-                      </div>
-                    </SelectItem>
-                  )}
-                  {cloudSystems.map((sys) => (
-                    <SelectItem key={sys.id} value={sys.id} className="text-[12px] font-semibold uppercase">
-                      <div className="flex items-center gap-2">
-                        <span className={cn("w-2 h-2 rounded-full", sys.isOnline ? "bg-emerald-500" : "bg-slate-400")} />
-                        <span>{sys.name}</span>
-                      </div>
-                    </SelectItem>
+              <div className="relative flex items-center">
+                <Server className="absolute left-3 h-3.5 w-3.5 text-blue-500 pointer-events-none shrink-0" />
+                <select
+                  value={selectedSystemId}
+                  onChange={(e) => setSelectedSystemId(e.target.value)}
+                  className="w-full sm:w-[260px] h-9 pl-9 pr-8 text-[12px] font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 uppercase outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
+                >
+                  <option value="all">ALL (CENTRALIZED REPORTING)</option>
+                  {hasLocalServer && <option value="local">LOCAL SERVER</option>}
+                  {uniqueSelectSystems.map((sys) => (
+                    <option key={sys.id} value={sys.id}>
+                      {sys.name || sys.id} {sys.isOnline ? "(ONLINE)" : "(OFFLINE)"}
+                    </option>
                   ))}
-                </SelectContent>
-              </Select>
+                </select>
+                <ChevronDown className="absolute right-3 h-3.5 w-3.5 text-slate-400 pointer-events-none shrink-0" />
+              </div>
             </div>
           </div>
 
@@ -2884,17 +2725,19 @@ export default function ReportingManagement() {
                     className="h-8 pl-8 text-xs rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
-                <Select value={alarmSeverityFilter} onValueChange={setAlarmSeverityFilter}>
-                  <SelectTrigger className="h-8 w-40 text-xs rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold">
-                    <SelectValue placeholder="All Severities" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Severities</SelectItem>
-                    <SelectItem value="CRITICAL">Critical Only</SelectItem>
-                    <SelectItem value="WARNING">Warning Only</SelectItem>
-                    <SelectItem value="INFO">Info Only</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="relative flex items-center">
+                  <select
+                    value={alarmSeverityFilter}
+                    onChange={(e) => setAlarmSeverityFilter(e.target.value)}
+                    className="h-8 pl-3 pr-8 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer uppercase"
+                  >
+                    <option value="all">ALL SEVERITIES</option>
+                    <option value="CRITICAL">CRITICAL ONLY</option>
+                    <option value="WARNING">WARNING ONLY</option>
+                    <option value="INFO">INFO ONLY</option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 h-3 w-3 text-slate-400 pointer-events-none shrink-0" />
+                </div>
               </div>
 
               {/* Executive Alarm Events Analytics Strip */}

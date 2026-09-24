@@ -26,7 +26,7 @@ import {
   MonitorPlay
 } from "lucide-react";
 import Cookies from "js-cookie";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ORIX_LOGO_BASE64_PNG } from "@/assets/orix-logo";
 import { Privilege, isAdmin, getDisplayRole } from "@/lib/auth";
@@ -211,13 +211,12 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     subaccounts: "/cloud/role-management",
   };
 
-  const handleNavClick = (item: NavItem) => {
-    const isCloud =
-      user?.loginSource === "cloud" ||
-      (typeof window !== "undefined" &&
-        window.location.pathname.startsWith("/cloud"));
+  const pathname = usePathname();
+  const isCloudRoute = pathname?.startsWith("/cloud") ?? false;
+  const isCloudTheme = user?.loginSource === "cloud" || isCloudRoute;
 
-    if (isCloud) {
+  const handleNavClick = (item: NavItem) => {
+    if (isCloudTheme) {
       const targetRoute = CLOUD_ROUTE_MAP[item.id] || `/cloud/${item.id}`;
       router.push(targetRoute);
       onSectionChange(item.id);
@@ -245,17 +244,13 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
   const NavButton = ({ item }: { item: NavItem }) => {
     const Icon = item.icon;
     const isActive = activeSection === item.id;
-    const isCloud =
-      user?.loginSource === "cloud" ||
-      (typeof window !== "undefined" &&
-        window.location.pathname.startsWith("/cloud"));
 
     return (
       <button
         onClick={() => handleNavClick(item)}
         className={cn(
           "flex items-center w-full transition-all duration-200 group no-drag h-12 text-left px-0 select-none",
-          isCloud
+          isCloudTheme
             ? isActive
               ? "bg-blue-600/25 text-cyan-300 border-r-2 border-cyan-400 font-semibold shadow-[0_0_12px_rgba(6,182,212,0.15)]"
               : "text-slate-300 hover:bg-blue-900/30 hover:text-white"
@@ -267,7 +262,7 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
         <div className="w-20 flex justify-center items-center shrink-0 h-full">
           <Icon className={cn(
             "flex-shrink-0 transition-all w-5 h-5",
-            isCloud
+            isCloudTheme
               ? isActive && !isCollapsed ? "text-cyan-400" : "text-slate-400 group-hover:text-slate-200"
               : isActive && !isCollapsed ? "text-blue-600" : "text-gray-500"
           )} />
@@ -282,11 +277,6 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
       </button>
     );
   };
-
-  const isCloudTheme =
-    user?.loginSource === "cloud" ||
-    (typeof window !== "undefined" &&
-      window.location.pathname.startsWith("/cloud"));
 
   return (
     <TooltipProvider delayDuration={0}>

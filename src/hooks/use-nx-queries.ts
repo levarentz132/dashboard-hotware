@@ -46,15 +46,26 @@ function useNxSystemQuery<T>(
   };
 }
 
+const EMPTY_EVENTS: NxEvent[] = [];
+const EMPTY_ALARMS: any[] = [];
+
 export function useEventsQuery(limit: number = 50) {
-  const hasSystem = Boolean(
+  const currentSysId =
     nxAPI.getSystemId() ||
-    (typeof window !== "undefined" ? Cookies.get("nx_system_id") : null)
+    (typeof window !== "undefined" ? Cookies.get("nx_system_id") : null);
+  const hasSystem = Boolean(
+    currentSysId &&
+    currentSysId !== "all" &&
+    currentSysId !== "undefined" &&
+    currentSysId !== "null"
   );
 
   const query = useQuery({
     queryKey: queryKeys.nx.events(limit),
-    queryFn: () => (hasSystem ? nxAPI.getEvents(limit).catch(() => []) : Promise.resolve([])),
+    queryFn: () =>
+      hasSystem
+        ? nxAPI.getEvents(limit).catch(() => EMPTY_EVENTS)
+        : Promise.resolve(EMPTY_EVENTS),
     enabled: hasSystem,
     refetchInterval: hasSystem ? EVENTS_REFETCH_MS : false,
     staleTime: EVENTS_REFETCH_MS,
@@ -62,7 +73,7 @@ export function useEventsQuery(limit: number = 50) {
   });
 
   return {
-    events: query.data ?? [],
+    events: query.data ?? EMPTY_EVENTS,
     loading: query.isLoading,
     error: query.error ? parseError(query.error) : null,
     refetch: async () => {
@@ -74,14 +85,22 @@ export function useEventsQuery(limit: number = 50) {
 }
 
 export function useAlarmsQuery() {
-  const hasSystem = Boolean(
+  const currentSysId =
     nxAPI.getSystemId() ||
-    (typeof window !== "undefined" ? Cookies.get("nx_system_id") : null)
+    (typeof window !== "undefined" ? Cookies.get("nx_system_id") : null);
+  const hasSystem = Boolean(
+    currentSysId &&
+    currentSysId !== "all" &&
+    currentSysId !== "undefined" &&
+    currentSysId !== "null"
   );
 
   const query = useQuery({
     queryKey: queryKeys.nx.alarms(),
-    queryFn: () => (hasSystem ? nxAPI.getAlarms().catch(() => []) : Promise.resolve([])),
+    queryFn: () =>
+      hasSystem
+        ? nxAPI.getAlarms().catch(() => EMPTY_ALARMS)
+        : Promise.resolve(EMPTY_ALARMS),
     enabled: hasSystem,
     refetchInterval: hasSystem ? ALARMS_REFETCH_MS : false,
     staleTime: ALARMS_REFETCH_MS,
@@ -89,7 +108,7 @@ export function useAlarmsQuery() {
   });
 
   return {
-    alarms: query.data ?? [],
+    alarms: query.data ?? EMPTY_ALARMS,
     loading: query.isLoading,
     error: null,
     refetch: async () => {

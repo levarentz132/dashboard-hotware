@@ -27,6 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/hooks/use-auth";
+import { usePathname } from "next/navigation";
 import * as AuthUtils from "@/lib/auth/utils";
 
 interface TopBarProps {
@@ -153,10 +154,10 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
     };
   }, [isElectron]);
 
+  const pathname = usePathname();
   const isCloudTheme =
     user?.loginSource === "cloud" ||
-    (typeof window !== "undefined" &&
-      window.location.pathname.startsWith("/cloud"));
+    (pathname?.startsWith("/cloud") ?? false);
 
   return (
     <header className={cn(

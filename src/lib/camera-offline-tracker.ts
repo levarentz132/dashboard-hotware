@@ -62,13 +62,22 @@ export function formatExactTimestamp(timestampValue: string | number | Date | nu
 /**
  * Persistent tracker in browser storage to record when an offline camera was first observed offline.
  */
-export function trackOfflineCamera(cameraId: string, isOffline: boolean): number | null {
+export function trackOfflineCamera(
+  cameraId: string,
+  isOffline: boolean,
+  explicitTimestampMs?: number | null,
+): number | null {
   if (typeof window === "undefined" || !cameraId) return null;
   const cleanId = String(cameraId).replace(/[{}]/g, "").toLowerCase();
   const storageKey = `nx_offline_ts_${cleanId}`;
 
   try {
     if (isOffline) {
+      if (explicitTimestampMs && explicitTimestampMs > 0) {
+        localStorage.setItem(storageKey, String(explicitTimestampMs));
+        sessionStorage.setItem(storageKey, String(explicitTimestampMs));
+        return explicitTimestampMs;
+      }
       const existing = localStorage.getItem(storageKey) || sessionStorage.getItem(storageKey);
       if (existing) {
         const parsed = parseInt(existing, 10);
@@ -113,11 +122,25 @@ export function getOfflineExactTime(
   // 2. Search related disconnect / offline events
   if (!offlineMs && Array.isArray(events) && events.length > 0) {
     const matchingEvents = events.filter((ev: any) => {
-      const evCamId = (ev.cameraId || ev.resourceId || ev.sourceServerId || ev.id || "").toLowerCase().replace(/[{}]/g, "");
-      const evName = (ev.sourceName || ev.source || "").toLowerCase();
-      const type = (ev.eventType || ev.type || "").toLowerCase();
-      const caption = (ev.caption || "").toLowerCase();
-      const desc = (ev.description || "").toLowerCase();
+      if (!ev) return false;
+      const evCamId = (ev.cameraId || ev.resourceId || ev.eventData?.resourceId || ev.sourceServerId || ev.id || "").toLowerCase().replace(/[{}]/g, "");
+      const devIds = Array.isArray(ev.actionData?.deviceIds)
+        ? ev.actionData.deviceIds.map((id: string) => String(id).replace(/[{}]/g, "").toLowerCase())
+        : [];
+      const evName = (ev.sourceName || ev.actionData?.sourceName || ev.source || "").toLowerCase();
+      const type = String(ev.eventData?.type || ev.eventType || ev.type || "").toLowerCase();
+      const caption = String(ev.actionData?.caption || ev.caption || "").toLowerCase();
+      const desc = String(ev.actionData?.description || ev.description || "").toLowerCase();
+
+      // Check if it is a recovery event
+      if (
+        caption.includes("online") ||
+        desc.includes("back online") ||
+        desc.includes("reconnected") ||
+        type.includes("reconnect")
+      ) {
+        return false;
+      }
 
       const isDisc =
         type.includes("disconnect") ||
@@ -125,26 +148,39 @@ export function getOfflineExactTime(
         caption.includes("disconnect") ||
         caption.includes("offline") ||
         desc.includes("disconnected") ||
+        desc.includes("lost connection") ||
         desc.includes("is now offline") ||
         type === "cameradisconnectevent" ||
         type === "devicedisconnected";
 
-      const matches = (camId && evCamId === camId) || (camName && evName === camName);
-      return isDisc && matches;
+      if (!isDisc) return false;
+
+      const matches =
+        (camId && (evCamId === camId || devIds.includes(camId) || evCamId.includes(camId))) ||
+        (camName && (evName === camName || evName.includes(camName) || caption.includes(camName) || desc.includes(camName)));
+
+      return matches;
     });
 
     if (matchingEvents.length > 0) {
-      // Pick the latest event
-      const latest = matchingEvents[matchingEvents.length - 1];
+      // Sort chronologically ascending to find the initial disconnect timestamp
+      const sorted = matchingEvents.sort((a: any, b: any) => {
+        const timeA = normalizeEpochMs(a.timestampMs) ?? normalizeEpochMs(a.actionData?.timestamp || a.eventData?.timestamp) ?? normalizeEpochMs(a.timestamp) ?? 0;
+        const timeB = normalizeEpochMs(b.timestampMs) ?? normalizeEpochMs(b.actionData?.timestamp || b.eventData?.timestamp) ?? normalizeEpochMs(b.timestamp) ?? 0;
+        return timeA - timeB;
+      });
+      const initial = sorted[0];
       offlineMs =
-        normalizeEpochMs(latest.timestampMs) ??
-        normalizeEpochMs(latest.actionData?.timestamp || latest.eventData?.timestamp) ??
-        normalizeEpochMs(latest.timestamp);
+        normalizeEpochMs(initial.timestampMs) ??
+        normalizeEpochMs(initial.actionData?.timestamp || initial.eventData?.timestamp) ??
+        normalizeEpochMs(initial.timestamp);
     }
   }
 
   // 3. Fall back to client-side tracked observer timestamp
-  if (!offlineMs && camId) {
+  if (offlineMs && camId) {
+    trackOfflineCamera(camId, true, offlineMs);
+  } else if (!offlineMs && camId) {
     offlineMs = trackOfflineCamera(camId, true);
   }
 
@@ -158,7 +194,7 @@ export function getOfflineExactTime(
   // 4. If all else fails, use current timestamp and record it
   const now = Date.now();
   if (camId) {
-    trackOfflineCamera(camId, true);
+    trackOfflineCamera(camId, true, now);
   }
   return {
     exactTime: formatExactTimestamp(now),

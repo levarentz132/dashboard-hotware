@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { isAdmin } from "@/lib/auth";
 
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { ReactGridLayout as GridLayout } from "react-grid-layout/legacy";
 import {
   GripVertical,
@@ -27,11 +27,11 @@ import {
   Square,
   Menu,
   Bell,
+  ChevronDown,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { showNotification } from "@/lib/notifications";
 import { getElectronHeaders } from "@/lib/config";
 
@@ -102,6 +102,16 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
     setSelectedSystemId,
     loadingCloud,
   } = useOwnerCloudSystems();
+
+  const uniqueSelectSystems = useMemo(() => {
+    const map = new Map<string, (typeof cloudSystems)[0]>();
+    for (const sys of cloudSystems) {
+      if (sys && sys.id && !map.has(sys.id)) {
+        map.set(sys.id, sys);
+      }
+    }
+    return Array.from(map.values());
+  }, [cloudSystems]);
 
   const [isConfiguringAlarm, setIsConfiguringAlarm] = useState(false);
 
@@ -497,21 +507,24 @@ export default function ModernDashboard({ userId = "default" }: ModernDashboardP
               </div>
 
               {/* VMS System Picker */}
-              {!loadingCloud && cloudSystems.length > 0 && (
+              {!loadingCloud && uniqueSelectSystems.length > 0 && (
                 <div className="flex items-center gap-2 ml-2 sm:ml-4">
                   <span className="text-xs text-gray-500 font-medium hidden md:inline">VMS:</span>
-                  <Select value={selectedSystemId} onValueChange={setSelectedSystemId}>
-                    <SelectTrigger className="h-9 w-[180px] bg-slate-50 border-slate-200 hover:bg-slate-100 rounded-lg text-xs font-semibold text-slate-700">
-                      <SelectValue placeholder="Select VMS Server" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {cloudSystems.map((sys) => (
-                        <SelectItem key={sys.id} value={sys.id} className="text-xs font-medium">
+                  <div className="relative">
+                    <select
+                      value={selectedSystemId || ""}
+                      onChange={(e) => setSelectedSystemId(e.target.value)}
+                      className="h-9 w-[190px] appearance-none bg-slate-50 border border-slate-200 hover:bg-slate-100 rounded-lg text-xs font-semibold text-slate-700 pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer transition-colors shadow-sm"
+                    >
+                      <option value="" disabled>Select VMS Server</option>
+                      {uniqueSelectSystems.map((sys) => (
+                        <option key={sys.id} value={sys.id} className="text-xs font-medium text-slate-800">
                           {sys.name}
-                        </SelectItem>
+                        </option>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
               )}
             </div>

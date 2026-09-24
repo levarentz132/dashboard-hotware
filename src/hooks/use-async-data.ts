@@ -110,6 +110,8 @@ export async function fetchFromCloudRelay<T>(cloudId: string, endpoint: string):
   }
 }
 
+const EMPTY_CLOUD_SYSTEMS: CloudSystem[] = [];
+
 /**
  * Hook for cloud systems — backed by TanStack Query (shared cache).
  */
@@ -117,7 +119,7 @@ export function useCloudSystems(): UseAsyncDataReturn<CloudSystem[]> {
   const { data, isLoading, error, refetch } = useCloudSystemsQuery();
 
   return {
-    data: data ?? [],
+    data: data ?? EMPTY_CLOUD_SYSTEMS,
     loading: isLoading,
     error: error ? parseError(error) : null,
     refetch: async () => {
