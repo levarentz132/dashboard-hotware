@@ -260,6 +260,9 @@ export default function ReportingManagement() {
   const { alarms, loading: loadingAlarms, refetch: refetchAlarms } = useAlarmsQuery();
   const { events, loading: loadingEvents, refetch: refetchEvents } = useEventsQuery(300);
 
+  const cloudSystemsRef = useRef(cloudSystems);
+  cloudSystemsRef.current = cloudSystems;
+
   // Global cameras lookup fallback from device monitor
   useEffect(() => {
     const fetchGlobalCameras = async () => {
@@ -291,6 +294,7 @@ export default function ReportingManagement() {
       };
 
       const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Date.now() - 30 * 86400 * 1000;
+      const currentCloudSystems = cloudSystemsRef.current || [];
 
       const localUserStr = Cookies.get("local_nx_user");
       let localSid = "local";
@@ -303,8 +307,8 @@ export default function ReportingManagement() {
 
       if (selectedSystemId === "all") {
         // 1. Fetch from all online cloud systems (or all cloud systems)
-        const activeSystems = cloudSystems.filter((s) => s.isOnline);
-        const targetSystems = activeSystems.length > 0 ? activeSystems : cloudSystems;
+        const activeSystems = currentCloudSystems.filter((s) => s.isOnline);
+        const targetSystems = activeSystems.length > 0 ? activeSystems : currentCloudSystems;
 
         const devicePromises = targetSystems.map((sys) =>
           fetchFromCloudRelay<NxCamera[]>(sys.id, "/devices")
@@ -498,7 +502,7 @@ export default function ReportingManagement() {
         );
       } else {
         // Fetch specific single cloud system safely
-        const targetSys = cloudSystems.find((s) => s.id === selectedSystemId);
+        const targetSys = currentCloudSystems.find((s) => s.id === selectedSystemId);
         const sysName = targetSys?.name || selectedSystemId;
 
         const [camsRes, srvsRes, strsRes, evtsRes] = await Promise.allSettled([
@@ -557,7 +561,7 @@ export default function ReportingManagement() {
     } finally {
       setLoadingData(false);
     }
-  }, [selectedSystemId, cloudSystems, dateFrom]);
+  }, [selectedSystemId, dateFrom]);
 
   // Initial & Dependency Trigger for Data Aggregation
   useEffect(() => {

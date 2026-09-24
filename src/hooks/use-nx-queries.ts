@@ -14,6 +14,8 @@ import {
   NX_SERVERS_STALE_MS,
 } from "@/lib/cache-constants";
 
+import Cookies from "js-cookie";
+
 const EVENTS_REFETCH_MS = NX_EVENTS_STALE_MS;
 const ALARMS_REFETCH_MS = NX_ALARMS_STALE_MS;
 
@@ -45,10 +47,16 @@ function useNxSystemQuery<T>(
 }
 
 export function useEventsQuery(limit: number = 50) {
+  const hasSystem = Boolean(
+    nxAPI.getSystemId() ||
+    (typeof window !== "undefined" ? Cookies.get("nx_system_id") : null)
+  );
+
   const query = useQuery({
     queryKey: queryKeys.nx.events(limit),
-    queryFn: () => nxAPI.getEvents(limit).catch(() => []),
-    refetchInterval: EVENTS_REFETCH_MS,
+    queryFn: () => (hasSystem ? nxAPI.getEvents(limit).catch(() => []) : Promise.resolve([])),
+    enabled: hasSystem,
+    refetchInterval: hasSystem ? EVENTS_REFETCH_MS : false,
     staleTime: EVENTS_REFETCH_MS,
     retry: false,
   });
@@ -66,10 +74,16 @@ export function useEventsQuery(limit: number = 50) {
 }
 
 export function useAlarmsQuery() {
+  const hasSystem = Boolean(
+    nxAPI.getSystemId() ||
+    (typeof window !== "undefined" ? Cookies.get("nx_system_id") : null)
+  );
+
   const query = useQuery({
     queryKey: queryKeys.nx.alarms(),
-    queryFn: () => nxAPI.getAlarms().catch(() => []),
-    refetchInterval: ALARMS_REFETCH_MS,
+    queryFn: () => (hasSystem ? nxAPI.getAlarms().catch(() => []) : Promise.resolve([])),
+    enabled: hasSystem,
+    refetchInterval: hasSystem ? ALARMS_REFETCH_MS : false,
     staleTime: ALARMS_REFETCH_MS,
     retry: false,
   });
