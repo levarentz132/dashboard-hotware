@@ -11,6 +11,8 @@ export type { CloudSystem };
 export { fetchCloudSystems, sortCloudSystems };
 export { parseError };
 
+const EMPTY_CLOUD_SYSTEMS: CloudSystem[] = [];
+
 /**
  * State interface for async data fetching hooks
  */
@@ -109,8 +111,6 @@ export async function fetchFromCloudRelay<T>(cloudId: string, endpoint: string):
     return null;
   }
 }
-
-const EMPTY_CLOUD_SYSTEMS: CloudSystem[] = [];
 
 /**
  * Hook for cloud systems — backed by TanStack Query (shared cache).

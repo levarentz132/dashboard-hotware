@@ -81,6 +81,7 @@ const navigationItems: NavItem[] = [
 
 export default function Sidebar({ activeSection, onSectionChange, isOpen = false, onClose, hideHeader = false, className, disableCollapse = false }: SidebarProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, logout, isLoading: isAuthLoading } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(disableCollapse ? false : true);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -105,6 +106,19 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     }
     setDisplayUsername(user?.username || "Guest User");
   }, [user?.username]);
+
+  const [isVmsAdmin, setIsVmsAdmin] = useState(false);
+  useEffect(() => {
+    try {
+      const nxUserStr = Cookies.get("local_nx_user");
+      if (nxUserStr) {
+        const nxUser = JSON.parse(nxUserStr) as { role?: string };
+        setIsVmsAdmin(nxUser?.role === "admin" || nxUser?.role === "poweruser");
+      }
+    } catch {
+      /* ignore malformed cookie */
+    }
+  }, []);
 
   const displayInitial = displayUsername[0]?.toUpperCase() || "G";
 
@@ -168,10 +182,6 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
 
   // Filter navigation items based on user privileges
   const filteredItems = navigationItems.filter(item => {
-    // Check if the user is a VMS admin (from cookies)
-    const nxUser = Cookies.get("local_nx_user") ? JSON.parse(Cookies.get("local_nx_user")!) : null;
-    const isVmsAdmin = nxUser?.role === 'admin' || nxUser?.role === 'poweruser';
-    
     // Admins see everything
     if (isVmsAdmin || isAdmin(user)) return true;
 
@@ -210,8 +220,6 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
     users: "/cloud/user-management",
     subaccounts: "/cloud/role-management",
   };
-
-  const pathname = usePathname();
   const isCloudRoute = pathname?.startsWith("/cloud") ?? false;
   const isCloudTheme = user?.loginSource === "cloud" || isCloudRoute;
 
@@ -277,7 +285,6 @@ export default function Sidebar({ activeSection, onSectionChange, isOpen = false
       </button>
     );
   };
-
   return (
     <TooltipProvider delayDuration={0}>
       {/* Mobile Overlay */}
