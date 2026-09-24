@@ -53,7 +53,13 @@ export async function proxy(request: NextRequest) {
         // No token, redirect to login for page requests
         if (!pathname.startsWith("/api/")) {
             const loginUrl = new URL("/login", request.url);
-            if (pathname !== "/") {
+            
+            // Preserve search query parameters (such as ?code= for NX Cloud OAuth callback)
+            request.nextUrl.searchParams.forEach((val, key) => {
+                loginUrl.searchParams.set(key, val);
+            });
+
+            if (pathname !== "/" && pathname !== "/login") {
                 loginUrl.searchParams.set("callbackUrl", pathname);
             }
             return NextResponse.redirect(loginUrl);
