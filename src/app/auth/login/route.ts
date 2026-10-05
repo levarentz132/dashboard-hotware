@@ -83,10 +83,50 @@ export async function POST(request: NextRequest) {
     // Secure Credentials Interceptor:
     // If the client submits the masked password placeholder "******", resolve and swap in the actual plain-text password securely on the server!
     if (password === "******") {
-      const serverPassword = dynamicConfig?.NEXT_PUBLIC_LICENSE_PASSWORD || process.env.NEXT_PUBLIC_LICENSE_PASSWORD || dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
-      if (serverPassword) {
+      let serverPassword = dynamicConfig?.NEXT_PUBLIC_LICENSE_PASSWORD || process.env.NEXT_PUBLIC_LICENSE_PASSWORD;
+
+      // If serverPassword is empty or bcrypt hash, try decrypting stored credentials
+      if (!serverPassword || serverPassword === "******" || serverPassword.startsWith('$2')) {
+        const encrypted = dynamicConfig?.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED || 
+                          process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD_ENCRYPTED ||
+                          dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED || 
+                          process.env.NEXT_PUBLIC_NX_PASSWORD_ENCRYPTED;
+        if (encrypted) {
+          const crypto = require('crypto');
+          const os = require('os');
+          try {
+            const machineId = "hotware-dashboard-salt-v1-win32-x64-platform-" + os.platform() + os.arch();
+            const key = crypto.createHash('sha256').update(machineId).digest();
+            const parts = encrypted.split(':');
+            if (parts.length === 3) {
+              const iv = Buffer.from(parts[0], 'hex');
+              const authTag = Buffer.from(parts[1], 'hex');
+              const encText = parts[2];
+              const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+              decipher.setAuthTag(authTag);
+              let decrypted = decipher.update(encText, 'hex', 'utf8');
+              decrypted += decipher.final('utf8');
+              serverPassword = decrypted;
+            }
+          } catch (decErr) {
+            console.warn("[Login API] Failed to decrypt stored password:", decErr);
+          }
+        }
+      }
+
+      // Check fallback to plain text VMS password only if it is NOT a bcrypt hash
+      if (!serverPassword || serverPassword.startsWith('$2')) {
+        const rawVmsPass = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+        if (rawVmsPass && !rawVmsPass.startsWith('$2') && rawVmsPass !== "******") {
+          serverPassword = rawVmsPass;
+        }
+      }
+
+      if (serverPassword && !serverPassword.startsWith('$2') && serverPassword !== "******") {
         password = serverPassword;
         console.log("[Login API] Secured Credentials Interceptor: Masked password swapped with actual password on server");
+      } else {
+        console.warn("[Login API] Secured Credentials Interceptor: Could not resolve plain password from stored credentials");
       }
     }
 
@@ -156,6 +196,7 @@ export async function POST(request: NextRequest) {
         server_id,
         access_role,
       });
+      console.log(`[Login] External API Response: success=${externalData?.success}, error_code=${externalData?.error_code || 'none'}, message=${externalData?.message || 'none'}`);
     }
 
     // Check if login was successful (either success=true or we have an access_token)

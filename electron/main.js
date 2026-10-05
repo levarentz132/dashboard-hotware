@@ -1086,7 +1086,9 @@ app.whenReady().then(async () => {
     // Start monitoring only after initial successful launch
     startHealthCheck();
 
-    autoUpdater.checkForUpdates();
+    autoUpdater.checkForUpdates().catch((err) => {
+        logtoFile(`[AutoUpdater] Check for updates failed: ${err.message}`);
+    });
 });
 
 autoUpdater.on('update-available', (info) => {

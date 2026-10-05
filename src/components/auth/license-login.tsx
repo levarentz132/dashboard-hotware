@@ -84,8 +84,11 @@ export function LicenseLogin() {
     const showErrorMessage = !!error || (isSubmitted && (!!errors.username || !!errors.password));
 
     const handleSaveCredentials = async (data: LoginFormData) => {
-        // Save username locally for immediate feedback
+        // Save credentials locally in cookies for immediate use during login
         Cookies.set("license_saved_user", data.username, { expires: 365, path: '/' });
+        if (data.password && data.password !== "******") {
+            Cookies.set("license_saved_pass", data.password, { expires: 365, path: '/' });
+        }
         
         // Save to server for all network users using our reusable hook
         await saveConfig({
