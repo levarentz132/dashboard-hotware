@@ -16,22 +16,48 @@ import { isCloudSystemsEndpoint } from "@/lib/redis/nx-cache-policy";
 import { getVmsSessionToken, invalidateVmsSessionToken } from "@/lib/vms-auth";
 import https from "https";
 import http from "http";
+import zlib from "zlib";
 
 // Stable HTTP client for local/NVR network requests to bypass Undici socket reset issues
-function stableLocalRequest(urlStr: string, options: any): Promise<Response> {
+function stableLocalRequest(urlStr: string, options: any = {}): Promise<Response> {
   return new Promise((resolve, reject) => {
     try {
       const url = new URL(urlStr);
       const isHttps = url.protocol === "https:";
       const lib = isHttps ? https : http;
       
-      const reqHeaders = { ...options.headers };
+      const reqHeaders: Record<string, string> = {};
+      if (options.headers) {
+        if (typeof options.headers.forEach === "function") {
+          options.headers.forEach((v: string, k: string) => {
+            reqHeaders[k.toLowerCase()] = v;
+          });
+        } else if (Array.isArray(options.headers)) {
+          options.headers.forEach(([k, v]: [string, string]) => {
+            reqHeaders[k.toLowerCase()] = v;
+          });
+        } else {
+          Object.entries(options.headers).forEach(([k, v]) => {
+            if (v !== undefined && v !== null) {
+              reqHeaders[k.toLowerCase()] = String(v);
+            }
+          });
+        }
+      }
+
       delete reqHeaders['host'];
-      delete reqHeaders['content-length'];
       delete reqHeaders['connection'];
 
+      let bodyBuffer: Buffer | null = null;
+      if (options.body !== undefined && options.body !== null) {
+        bodyBuffer = Buffer.isBuffer(options.body)
+          ? options.body
+          : Buffer.from(typeof options.body === 'string' ? options.body : JSON.stringify(options.body), 'utf-8');
+        reqHeaders['content-length'] = bodyBuffer.length.toString();
+      }
+
       const reqOptions: https.RequestOptions = {
-        method: options.method || "GET",
+        method: (options.method || "GET").toUpperCase(),
         headers: reqHeaders,
         rejectUnauthorized: false,
         agent: false, // Disable pooling to ensure clean connection closure
@@ -41,9 +67,35 @@ function stableLocalRequest(urlStr: string, options: any): Promise<Response> {
         const chunks: Buffer[] = [];
         res.on("data", (chunk) => chunks.push(chunk));
         res.on("end", () => {
-          const body = Buffer.concat(chunks);
+          let body = Buffer.concat(chunks);
+          const encoding = (res.headers['content-encoding'] || '').toLowerCase();
+          if (encoding === 'gzip') {
+            try {
+              body = zlib.gunzipSync(body);
+            } catch (e) {
+              console.warn('[stableLocalRequest] Failed to gunzip:', e);
+            }
+          } else if (encoding === 'deflate') {
+            try {
+              body = zlib.inflateSync(body);
+            } catch (e) {
+              console.warn('[stableLocalRequest] Failed to inflate:', e);
+            }
+          } else if (encoding === 'br') {
+            try {
+              body = zlib.brotliDecompressSync(body);
+            } catch (e) {
+              console.warn('[stableLocalRequest] Failed to brotli decompress:', e);
+            }
+          }
+
           const responseHeaders = new Headers();
           Object.entries(res.headers).forEach(([k, v]) => {
+            const lowerKey = k.toLowerCase();
+            if (lowerKey === 'content-encoding' || lowerKey === 'content-length') {
+              // Strip compression/length headers since body is now uncompressed in memory
+              return;
+            }
             if (Array.isArray(v)) {
               v.forEach(val => responseHeaders.append(k, val));
             } else if (v) {
@@ -52,8 +104,8 @@ function stableLocalRequest(urlStr: string, options: any): Promise<Response> {
           });
           
           resolve(new Response(body, {
-            status: res.statusCode,
-            statusText: res.statusMessage,
+            status: res.statusCode || 200,
+            statusText: res.statusMessage || 'OK',
             headers: responseHeaders,
           }));
         });
@@ -67,8 +119,8 @@ function stableLocalRequest(urlStr: string, options: any): Promise<Response> {
         req.destroy(new Error("Timeout"));
       });
       
-      if (options.body) {
-        req.write(options.body);
+      if (bodyBuffer) {
+        req.write(bodyBuffer);
       }
       req.end();
     } catch (e) {
