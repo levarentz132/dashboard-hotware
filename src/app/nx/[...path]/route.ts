@@ -16,6 +16,7 @@ import {
 } from "@/lib/redis/nx-cache-policy";
 import { markDevicesCachesStale, syncDevicesFromListResponse } from "@/lib/nx-devices-store";
 import { getVmsSessionToken, invalidateVmsSessionToken } from "@/lib/vms-auth";
+import { stableFetch } from "@/lib/cloud-api";
 
 
 interface CacheEntry {
@@ -88,6 +89,24 @@ async function handleRequest(request: NextRequest, method: string) {
             }
         });
         
+        // Check if client provided session token via cookie or runtime header
+        if (!existingAuth) {
+            const localUserCookie = request.cookies.get("local_nx_user")?.value;
+            let userToken = request.headers.get("x-runtime-guid");
+            if (!userToken && localUserCookie) {
+                try {
+                    const parsed = JSON.parse(decodeURIComponent(localUserCookie));
+                    if (parsed?.token) userToken = parsed.token;
+                } catch (e) { }
+            }
+            if (userToken) {
+                headers['authorization'] = `Bearer ${userToken}`;
+                headers['Authorization'] = `Bearer ${userToken}`;
+                headers['x-runtime-guid'] = userToken;
+                existingAuth = `Bearer ${userToken}`;
+            }
+        }
+
         // Add shared Token auth if no authorization is provided by the client
         if (!existingAuth) {
             const dynamicConfig = getDynamicConfig(request);
@@ -142,7 +161,7 @@ async function handleRequest(request: NextRequest, method: string) {
             }
         }
 
-        let response = await fetch(targetUrl, fetchOptions);
+        let response = await stableFetch(targetUrl, fetchOptions);
 
         // Retry with a fresh session token if 401/403 and we fell back to a cached token
         if ((response.status === 401 || response.status === 403) && !existingAuth) {
@@ -162,7 +181,7 @@ async function handleRequest(request: NextRequest, method: string) {
                     retryHeaders['x-runtime-guid'] = freshToken;
                     delete retryHeaders['x-nx-session'];
                     
-                    response = await fetch(targetUrl, {
+                    response = await stableFetch(targetUrl, {
                         ...fetchOptions,
                         headers: retryHeaders
                     });
@@ -175,7 +194,7 @@ async function handleRequest(request: NextRequest, method: string) {
                     delete retryHeaders['x-runtime-guid'];
                     delete retryHeaders['x-nx-session'];
                     
-                    response = await fetch(targetUrl, {
+                    response = await stableFetch(targetUrl, {
                         ...fetchOptions,
                         headers: retryHeaders
                     });

@@ -78,7 +78,7 @@ function stableLocalRequest(urlStr: string, options: any): Promise<Response> {
 }
 
 // Wrapper to intercept local requests and execute them stably
-async function customFetch(url: string, options: any): Promise<Response> {
+export async function stableFetch(url: string, options: any = {}): Promise<Response> {
   const isLocal = url.includes("localhost") || 
                   url.includes("127.0.0.1") || 
                   /https?:\/\/(?:\d{1,3}\.){3}\d{1,3}/.test(url);
@@ -92,7 +92,7 @@ async function customFetch(url: string, options: any): Promise<Response> {
   return globalThis.fetch(url, options);
 }
 
-const fetch = customFetch;
+const fetch = stableFetch;
 
 // Disable SSL certificate validation for local/VMS requests as they are usually self-signed
 if (process.env.NODE_ENV === "development" || process.env.ALLOW_SELF_SIGNED === "true") {

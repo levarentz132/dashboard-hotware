@@ -948,6 +948,7 @@ function startHealthCheck() {
     }
 
     console.log('[Electron] Starting health check monitor...');
+    let consecutiveFailures = 0;
     healthCheckInterval = setInterval(async () => {
         if (isInstallingUpdate) return;
         if (isServerStopping) return;
@@ -955,9 +956,8 @@ function startHealthCheck() {
 
         // Simple fetch check
         try {
-            // Using a short timeout to detect hangs
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
 
             const res = await fetch(`http://localhost:${currentPort}`, {
                 method: 'HEAD',
@@ -967,17 +967,20 @@ function startHealthCheck() {
 
             if (!res.ok && res.status >= 500) {
                 console.warn(`[Health] Server returned error status ${res.status}`);
+            } else {
+                consecutiveFailures = 0;
             }
         } catch (e) {
-            console.error(`[Health] Check failed: ${e.message}`);
-            // If we can't connect, trigger a restart
-            if (nextProcess && !isServerStopping) {
-                console.log('[Health] Server appears unresponsive. Restarting...');
-                // Kill process, let exit handler restart it
+            consecutiveFailures++;
+            console.error(`[Health] Check failed (${consecutiveFailures}/3): ${e.message}`);
+            // Only restart after 3 consecutive failures
+            if (consecutiveFailures >= 3 && nextProcess && !isServerStopping) {
+                console.log('[Health] Server unresponsive after multiple checks. Restarting...');
+                consecutiveFailures = 0;
                 killProcessTree(nextProcess.pid);
             }
         }
-    }, 15000); // Check every 15 seconds
+    }, 20000); // Check every 20 seconds
 }
 
 async function waitForServer(url, timeout = 30000) {

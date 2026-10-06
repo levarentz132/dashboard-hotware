@@ -2092,10 +2092,25 @@ export default function CloudRecordings() {
     setDevices([]);
     setDevicesReady(false);
     try {
+      const localUserRaw = Cookies.get("local_nx_user");
+      let localToken = "";
+      if (localUserRaw) {
+        try {
+          const u = JSON.parse(decodeURIComponent(localUserRaw));
+          if (u?.token) localToken = u.token;
+        } catch (e) { }
+      }
+
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+      };
+      if (localToken) {
+        headers["x-runtime-guid"] = localToken;
+        headers["Authorization"] = `Bearer ${localToken}`;
+      }
+
       const response = await fetch("/nx/rest/v3/devices", {
-        headers: {
-          Accept: "application/json",
-        },
+        headers,
       });
       if (!response.ok) {
         throw new Error(`Proxy responded with status ${response.status}`);

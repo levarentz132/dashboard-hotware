@@ -1,6 +1,6 @@
 import logger from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest } from "@/lib/cloud-api";
+import { buildCloudUrl, buildCloudHeaders, validateSystemId, getBasicAuthHeaderFromRequest, stableFetch } from "@/lib/cloud-api";
 import { cacheGetJson, cacheSetJson, recordingsCacheKey } from "@/lib/redis/cache";
 import { loadDeviceMapsForSystem } from "@/lib/nx-devices-store";
 import fs from "fs";
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
           request,
           systemName || undefined,
         );
-        const devicesRes = await fetch(devicesUrl, { headers, cache: "no-store" });
+        const devicesRes = await stableFetch(devicesUrl, { headers, cache: "no-store" });
         if (devicesRes.ok) {
           const devicesData = await devicesRes.json();
           const devicesList = Array.isArray(devicesData)
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
 
     let allPeriods: any[] = [];
     try {
-      let response = await fetch(cloudUrl, {
+      let response = await stableFetch(cloudUrl, {
         method: "GET",
         headers,
         cache: 'no-store'
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
         if (basicAuthHeader) {
           const retryHeaders: Record<string, string> = { ...headers, Authorization: basicAuthHeader };
           delete retryHeaders["x-runtime-guid"];
-          response = await fetch(cloudUrl, { method: "GET", headers: retryHeaders, cache: 'no-store' });
+          response = await stableFetch(cloudUrl, { method: "GET", headers: retryHeaders, cache: 'no-store' });
         }
       }
 
