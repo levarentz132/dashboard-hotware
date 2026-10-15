@@ -641,7 +641,9 @@ export default function CloudRecordings() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<any>(null);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
-  const [previewSnapshot, setPreviewSnapshot] = useState<{ url: string; title: string } | null>(null);
+  const [previewSnapshot, setPreviewSnapshot] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
 
   // ---- Schedule state ----
   const [policies, setPolicies] = useState<Policy[]>([]);
@@ -2257,42 +2259,57 @@ export default function CloudRecordings() {
     }
   };
 
-  const handlePreview = (time: number, duration: number, sysId: string, devId: string, isLegacy?: boolean, fileName?: string, dateFolder?: string, cameraFolderName?: string) => {
+  const handlePreview = (
+    time: number,
+    duration: number,
+    sysId: string,
+    devId: string,
+    isLegacy?: boolean,
+    fileName?: string,
+    dateFolder?: string,
+    cameraFolderName?: string,
+    cameraName?: string,
+    systemName?: string
+  ) => {
     const isVideo = fileName?.toLowerCase().endsWith(".mp4");
 
-    if ((duration <= 5000 || isLegacy) && !isVideo) {
-      let url = "";
-      if (isLegacy && fileName && dateFolder) {
-        url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&systemId=${sysId}&deviceId=${devId}&startTimeMs=${time}`;
-        if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
-      } else {
-        url = `/api/cloud/recordings/thumbnail?systemId=${sysId}&deviceId=${devId.replace(/[{}]/g, "")}&timestampMs=${time}`;
-      }
+    setSnapshotLoading(true);
+    setSnapshotError(null);
 
-      const cam = devices.find(d => normalizeId(d.id) === devId);
-      setPreviewSnapshot({ url, title: cam?.name || "Snapshot" });
-      return;
-    }
-
-    // If it's a local video (legacy), open it in a new tab via screenshot/serve
-    if (isLegacy && isVideo && fileName && dateFolder) {
-      let url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}`;
+    // If it's a legacy local screenshot file (not video), serve from disk
+    if (isLegacy && !isVideo && fileName && dateFolder) {
+      let url = `/api/cloud/recordings/screenshot/serve?date=${dateFolder}&file=${encodeURIComponent(fileName)}&systemId=${sysId}&deviceId=${devId}&startTimeMs=${time}`;
       if (cameraFolderName) url += `&camera=${encodeURIComponent(cameraFolderName)}`;
-      window.open(url, "_blank");
+
+      const cam = devices.find(d => normalizeId(d.id) === normalizeId(devId));
+      const timeDate = new Date(time);
+      const subtitle = !isNaN(timeDate.getTime()) ? format(timeDate, "yyyy-MM-dd HH:mm:ss") : undefined;
+      setPreviewSnapshot({ url, title: cam?.name || cameraName || "Snapshot", subtitle });
       return;
     }
 
-    const sys = sysId || selectedSystem;
-    const dev = devId || getOriginalDeviceId(selectedDevice);
-    // Open the video inline in a new browser tab (no download)
-    const params = new URLSearchParams({
-      systemId: sys || "127.0.0.1",
-      deviceId: dev,
-      startTime: String(time),
-      endTime: String(duration !== undefined ? time + duration : time + 300000),
-      preview: "true",  // inline Content-Disposition – browser plays, not saves
-    });
-    window.open(`/api/cloud/recordings/download?${params.toString()}`, "_blank");
+    // For all VMS recordings (video or snapshot): fetch snapshot frame at this timestamp
+    let cleanSysId = (sysId || selectedSystem || "localhost").replace(/[{}]/g, "").trim();
+    if (cleanSysId === "localhost" || cleanSysId === "127.0.0.1") {
+      const cookieId = Cookies.get("nx_system_id")?.replace(/[{}]/g, "").trim();
+      const envId = process.env.NEXT_PUBLIC_NX_SYSTEM_ID?.replace(/[{}]/g, "").trim();
+      if (cookieId) cleanSysId = cookieId;
+      else if (envId) cleanSysId = envId;
+    }
+
+    const resolvedDevId = (devId && devId !== "all") ? getOriginalDeviceId(devId) : getOriginalDeviceId(selectedDevice);
+    const cleanDevId = (resolvedDevId || "").replace(/[{}]/g, "").trim();
+
+    const timestampMs = Math.round(time);
+    let url = `/api/cloud/recordings/thumbnail?systemId=${encodeURIComponent(cleanSysId)}&deviceId=${encodeURIComponent(cleanDevId)}&timestampMs=${timestampMs}`;
+    if (systemName) {
+      url += `&systemName=${encodeURIComponent(systemName)}`;
+    }
+
+    const cam = devices.find(d => normalizeId(d.id) === normalizeId(cleanDevId) || normalizeId(d.id) === normalizeId(devId));
+    const timeDate = new Date(timestampMs);
+    const subtitle = !isNaN(timeDate.getTime()) ? format(timeDate, "yyyy-MM-dd HH:mm:ss") : undefined;
+    setPreviewSnapshot({ url, title: cam?.name || cameraName || "Snapshot Preview", subtitle });
   };
 
   const handleDownload = (startTimeMs: number, durationMs: number, sysId?: string, devId?: string, isLocal?: boolean, fileName?: string, dateFolder?: string, cameraName?: string, cameraFolderName?: string, isScreenshot?: boolean) => {
@@ -3148,19 +3165,28 @@ export default function CloudRecordings() {
                                 </TableCell>
                                 <TableCell className="text-right">
                                   <div className="flex items-center justify-end gap-1">
-                                    {rec.isScreenshot && (
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => {
-                                          handlePreview(rec.startTimeMs, rec.durationMs, rec.systemId, rec.deviceId, rec.isLocal, rec.fileName, rec.dateFolder, rec.cameraFolderName);
-                                        }}
-                                        className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
-                                        title="View Image"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
-                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => {
+                                        handlePreview(
+                                          rec.startTimeMs,
+                                          rec.durationMs,
+                                          rec.systemId,
+                                          rec.deviceId,
+                                          rec.isLocal,
+                                          rec.fileName,
+                                          rec.dateFolder,
+                                          rec.cameraFolderName,
+                                          rec.cameraName,
+                                          rec.systemName
+                                        );
+                                      }}
+                                      className="h-8 w-8 rounded-md border border-slate-200 hover:bg-slate-100 text-black transition-all"
+                                      title="Preview Snapshot"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -3976,21 +4002,66 @@ export default function CloudRecordings() {
           );
         })()}
       </AlertDialog>
-      <Dialog open={!!previewSnapshot} onOpenChange={(open) => !open && setPreviewSnapshot(null)}>
+      <Dialog open={!!previewSnapshot} onOpenChange={(open) => {
+        if (!open) {
+          setPreviewSnapshot(null);
+          setSnapshotLoading(false);
+          setSnapshotError(null);
+        }
+      }}>
         <DialogContent
           className="max-w-[70vw] p-0 border-none overflow-hidden flex flex-col items-center shadow-2xl !gap-0"
           style={{ backgroundColor: '#000000', opacity: 1 }}
           closeButtonClassName="bg-white text-black opacity-100 hover:bg-white/90 border-none rounded-sm translate-y-[-4px]"
         >
           <div className="w-full bg-black p-4 flex justify-between items-center" style={{ backgroundColor: '#000000' }}>
-            <h1 className="text-white font-bold text-sm tracking-tight">PREVIEW</h1>
+            <div className="flex flex-col">
+              <h1 className="text-white font-bold text-sm tracking-tight">{previewSnapshot?.title || "PREVIEW SNAPSHOT"}</h1>
+              {previewSnapshot?.subtitle && (
+                <span className="text-xs text-slate-400 font-normal">{previewSnapshot.subtitle}</span>
+              )}
+            </div>
           </div>
-          <div className="w-full flex justify-center bg-black" style={{ backgroundColor: '#000000' }}>
+          <div className="w-full min-h-[300px] flex items-center justify-center bg-black relative" style={{ backgroundColor: '#000000' }}>
+            {snapshotLoading && !snapshotError && (
+              <div className="flex flex-col items-center justify-center p-12 text-slate-300 gap-3">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm">Loading snapshot preview...</p>
+              </div>
+            )}
+            {snapshotError && (
+              <div className="flex flex-col items-center justify-center p-12 text-slate-300 gap-3 max-w-md text-center">
+                <AlertCircle className="h-10 w-10 text-amber-500" />
+                <p className="font-semibold text-white">Snapshot Unavailable</p>
+                <p className="text-xs text-slate-400">{snapshotError}</p>
+              </div>
+            )}
             {previewSnapshot && (
               <img
+                key={previewSnapshot.url}
                 src={previewSnapshot.url}
                 alt="Snapshot Preview"
-                className="max-h-[85vh] h-auto w-auto shadow-2xl block"
+                className={cn(
+                  "max-h-[85vh] h-auto w-auto shadow-2xl block transition-opacity duration-300",
+                  snapshotLoading || snapshotError ? "hidden" : "block"
+                )}
+                onLoad={() => {
+                  setSnapshotLoading(false);
+                  setSnapshotError(null);
+                }}
+                onError={async () => {
+                  try {
+                    const res = await fetch(previewSnapshot.url, { credentials: "include" });
+                    if (!res.ok) {
+                      const data = await res.json().catch(() => null);
+                      setSnapshotError(data?.error || `Snapshot unavailable (status ${res.status})`);
+                      setSnapshotLoading(false);
+                      return;
+                    }
+                  } catch (_) {}
+                  setSnapshotError("Unable to load snapshot image. The camera may be offline or no image is available for this timestamp.");
+                  setSnapshotLoading(false);
+                }}
               />
             )}
           </div>

@@ -1,6 +1,7 @@
 import logger from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import { API_CONFIG } from "@/lib/config";
+import { API_CONFIG, getDynamicConfig } from "@/lib/config";
+import { getVmsSessionToken, invalidateVmsSessionToken } from "@/lib/vms-auth";
 import fs from "fs/promises";
 import path from "path";
 import { logRecordingEvent, formatAuditDate } from "@/lib/recording-logger";
@@ -74,15 +75,87 @@ async function vmsRequest(
     });
     clearTimeout(timeoutId);
 
-    if (!res.ok) {
-      const text = await res.text();
-      // logger.debug(`[Watchdog] VMS ${method} ${url} failed with status ${res.status}: ${text}`);
-      throw new Error(`VMS ${res.status}: ${text}`);
+    if (res.ok) {
+      const ct = res.headers.get("content-type") || "";
+      return ct.includes("application/json") ? res.json() : res.text();
     }
-    const ct = res.headers.get("content-type") || "";
-    return ct.includes("application/json") ? res.json() : res.text();
+
+    // Refresh VMS session token and retry on 401/403 authentication failures
+    if (res.status === 401 || res.status === 403) {
+      console.log(`[Watchdog] VMS authentication rejected (${res.status}) for ${method} ${endpoint}. Refreshing VMS session.`);
+
+      const dynamicConfig = getDynamicConfig(request);
+      const username = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || API_CONFIG.username || process.env.NEXT_PUBLIC_NX_USERNAME || "";
+      const password = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || API_CONFIG.password || process.env.NEXT_PUBLIC_NX_PASSWORD || "";
+
+      let host = nxIp;
+      let port = nxPort;
+      try {
+        const parsedUrl = new URL(url);
+        if (parsedUrl.hostname) {
+          host = parsedUrl.hostname;
+        }
+        if (parsedUrl.port) {
+          port = parsedUrl.port;
+        }
+      } catch (_) {}
+
+      if (!host || host === "localhost" || host === "127.0.0.1") {
+        host = dynamicConfig?.NEXT_PUBLIC_NX_SERVER_HOST || API_CONFIG.serverHost || nxIp || "localhost";
+      }
+      if (!port) {
+        port = dynamicConfig?.NEXT_PUBLIC_NX_SERVER_PORT || API_CONFIG.serverPort || nxPort || "7001";
+      }
+
+      let retryHeaders: Record<string, string> | null = null;
+
+      if (username) {
+        await invalidateVmsSessionToken(host, port, username);
+        const freshToken = await getVmsSessionToken(host, port, username, password);
+
+        if (freshToken) {
+          console.log(`[Watchdog] Fresh VMS session acquired. Retrying request.`);
+          retryHeaders = {
+            "Content-Type": "application/json",
+            "x-runtime-guid": freshToken,
+            "Authorization": `Bearer ${freshToken}`,
+          };
+        } else if (password) {
+          console.log(`[Watchdog] Could not acquire fresh VMS session token, trying Basic Auth fallback.`);
+          const base64Credentials = Buffer.from(`${username}:${password}`, "utf-8").toString("base64");
+          retryHeaders = {
+            "Content-Type": "application/json",
+            "Authorization": `Basic ${base64Credentials}`,
+          };
+        }
+      }
+
+      if (retryHeaders) {
+        const retryController = new AbortController();
+        const retryTimeoutId = setTimeout(() => retryController.abort(), 4000);
+
+        const retryRes = await fetch(url, {
+          method,
+          headers: retryHeaders,
+          body: body ? JSON.stringify(body) : undefined,
+          signal: retryController.signal,
+        });
+        clearTimeout(retryTimeoutId);
+
+        if (retryRes.ok) {
+          console.log(`[Watchdog] VMS request succeeded after session refresh.`);
+          const ct = retryRes.headers.get("content-type") || "";
+          return ct.includes("application/json") ? retryRes.json() : retryRes.text();
+        }
+
+        const retryText = await retryRes.text();
+        throw new Error(`VMS ${retryRes.status}: ${retryText}`);
+      }
+    }
+
+    const text = await res.text();
+    throw new Error(`VMS ${res.status}: ${text}`);
   } catch (err: any) {
-    // logger.debug(`[Watchdog] Network error for VMS ${method} ${url}:`, err.message);
     throw err;
   }
 }

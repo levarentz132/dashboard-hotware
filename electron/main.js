@@ -867,6 +867,7 @@ function startNextProd() {
             EXT_CONFIG_PATH: serverPath.includes('app.asar') ? path.join(app.getPath('userData'), '.env.local') : CONFIG_PATH,
             NODE_PATH: nodeModulesPath,
             IS_ELECTRON: 'true',
+            PROCESS_RESOURCES_PATH: process.resourcesPath,
             ...redisEnv(),
         };
 

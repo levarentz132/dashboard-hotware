@@ -1,3 +1,4 @@
+import { getFfmpegPath } from "./ffmpeg-path";
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
@@ -13,53 +14,6 @@ import { readAppSettings } from "./server-settings";
 declare global {
   var _ffmpegWorkerInterval: NodeJS.Timeout | undefined;
   var _ffmpegWorkerActive: boolean | undefined;
-}
-
-/**
- * Get the path to ffmpeg executable.
- * In packaged Electron apps, use the bundled ffmpeg.exe from resources.
- * In development, use system PATH.
- */
-function getFfmpegPath(): string {
-  try {
-    // 1. Try process.resourcesPath if available
-    // @ts-ignore
-    const resPath = process.resourcesPath;
-    if (resPath) {
-      const bundledFfmpeg = path.join(resPath, "node-bin", "ffmpeg.exe");
-      if (fs.existsSync(bundledFfmpeg)) {
-        return bundledFfmpeg;
-      }
-    }
-
-    // 2. Try development path or standalone parent directories
-    const cwd = process.cwd();
-    
-    // Dev mode: project root/node-bin/ffmpeg.exe
-    const devPath = path.join(cwd, "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(devPath)) {
-      return devPath;
-    }
-
-    // Standalone mode: check parents (e.g. from .next/standalone to resources)
-    const standalonePath3 = path.join(cwd, "..", "..", "..", "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(standalonePath3)) {
-      return standalonePath3;
-    }
-
-    const standalonePath2 = path.join(cwd, "..", "..", "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(standalonePath2)) {
-      return standalonePath2;
-    }
-
-    const standalonePath1 = path.join(cwd, "..", "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(standalonePath1)) {
-      return standalonePath1;
-    }
-  } catch (e) {
-    logger.error("[FFmpegWorker] Error locating bundled FFmpeg:", e);
-  }
-  return "ffmpeg";
 }
 
 /**

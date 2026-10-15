@@ -53,7 +53,9 @@ function stableLocalRequest(urlStr: string, options: any = {}): Promise<Response
         bodyBuffer = Buffer.isBuffer(options.body)
           ? options.body
           : Buffer.from(typeof options.body === 'string' ? options.body : JSON.stringify(options.body), 'utf-8');
-        reqHeaders['content-length'] = bodyBuffer.length.toString();
+        if (bodyBuffer) {
+          reqHeaders['content-length'] = bodyBuffer.length.toString();
+        }
       }
 
       const reqOptions: https.RequestOptions = {
@@ -103,7 +105,8 @@ function stableLocalRequest(urlStr: string, options: any = {}): Promise<Response
             }
           });
           
-          resolve(new Response(body, {
+          const isNullBodyStatus = res.statusCode === 204 || res.statusCode === 205 || res.statusCode === 304;
+          resolve(new Response(isNullBodyStatus ? null : body, {
             status: res.statusCode || 200,
             statusText: res.statusMessage || 'OK',
             headers: responseHeaders,

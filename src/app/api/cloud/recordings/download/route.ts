@@ -20,6 +20,7 @@ import {
 } from "@/lib/ffmpeg-sanitizer";
 import { readAppSettings } from "@/lib/server-settings";
 import { isValidOutputFile } from "@/lib/schedule-output-files";
+import { getFfmpegPath } from "@/lib/ffmpeg-path";
 
 const writeFile = promisify(fs.writeFile);
 const mkdir = promisify(fs.mkdir);
@@ -62,44 +63,25 @@ function releaseFfmpegSlot(): void {
   }
 }
 
-function getFfmpegPath(): string {
-  try {
-    // 1. Try process.resourcesPath if available (Electron production)
-    // @ts-ignore
-    const resPath = process.resourcesPath;
-    if (resPath) {
-      const bundledFfmpeg = path.join(resPath, "node-bin", "ffmpeg.exe");
-      if (fs.existsSync(bundledFfmpeg)) {
-        return bundledFfmpeg;
-      }
-    }
+interface VideoCodecDetection {
+  detected: boolean;
+  codec?: string;
+  isH264: boolean;
+  isHevc: boolean;
+}
 
-    // 2. Try development path or standalone parent directories
-    const cwd = process.cwd();
-    
-    // Dev mode: project root/node-bin/ffmpeg.exe
-    const devPath = path.join(cwd, "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(devPath)) {
-      return devPath;
-    }
-
-    // Standalone mode: check parents
-    const standalonePath3 = path.join(cwd, "..", "..", "..", "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(standalonePath3)) {
-      return standalonePath3;
-    }
-
-    const standalonePath2 = path.join(cwd, "..", "..", "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(standalonePath2)) {
-      return standalonePath2;
-    }
-
-    const standalonePath1 = path.join(cwd, "..", "node-bin", "ffmpeg.exe");
-    if (fs.existsSync(standalonePath1)) {
-      return standalonePath1;
-    }
-  } catch (e) {}
-  return "ffmpeg";
+function parseVideoCodecFromStderr(stderr: string): VideoCodecDetection {
+  // Typical FFmpeg stream detection lines in stderr:
+  // "Stream #0:0[0x100]: Video: h264 (High) (avc1 / ...)"
+  // "Stream #0:0: Video: hevc (Main) (hev1 / ...)"
+  const match = stderr.match(/Stream\s+#\d+:\d+(?:\[[^\]]+\])?(?:\([^)]*\))?:\s+Video:\s+([a-zA-Z0-9_-]+)/i);
+  if (!match) {
+    return { detected: false, isH264: false, isHevc: false };
+  }
+  const codec = match[1].toLowerCase();
+  const isH264 = codec === "h264" || codec === "avc" || codec === "avc1";
+  const isHevc = codec === "hevc" || codec === "h265";
+  return { detected: true, codec, isH264, isHevc };
 }
 
 async function updateTaskStatus(taskId: string, success: boolean, timeOffsetMs = 0): Promise<void> {
@@ -436,68 +418,383 @@ export async function GET(request: NextRequest) {
       // We skip this for previews to ensure instant playback without server-side processing.
       if (!effectiveIsImage && !isPreview && videoResponse.body) {
         const tempId = Math.random().toString(36).substring(7);
-        const tempPath = path.join(os.tmpdir(), `fixed_recording_${tempId}.mp4`);
+        const tempInputPath = path.join(os.tmpdir(), `raw_recording_${tempId}.bin`);
+        const tempOutputPath = path.join(os.tmpdir(), `fixed_recording_${tempId}.mp4`);
 
-        const ffmpegPath = getFfmpegPath();
-        const ffmpeg = spawn(ffmpegPath, [
-          "-fflags", "+genpts",
-          "-i", "pipe:0",
+        const safeUnlink = (p: string, retries = 3) => {
+          if (!p) return;
+          const attempt = (remaining: number) => {
+            try {
+              if (fs.existsSync(p)) {
+                fs.unlinkSync(p);
+              }
+            } catch (err: any) {
+              if (remaining > 0 && (err.code === "EBUSY" || err.code === "EPERM")) {
+                setTimeout(() => attempt(remaining - 1), 120);
+              }
+            }
+          };
+          attempt(retries);
+        };
 
-          "-c:v", "libx264",
-          "-preset", "ultrafast",
-          "-crf", "23",
-          "-pix_fmt", "yuv420p",
-          "-c:a", "aac",
-          "-b:a", "128k",
-          "-movflags", "+faststart",
-          "-f", "mp4",
-          "-y",
-          tempPath
-        ], { windowsHide: true });
+        let isAborted = Boolean(request.signal?.aborted);
+        if (isAborted) {
+          return new NextResponse("Request aborted", { status: 499 });
+        }
 
-        // Avoid process crash on early stdin close
-        ffmpeg.stdin.on("error", (e) => {
-          console.error("[recordings/download] FFmpeg stdin error:", e);
-        });
+        let activeProcess: ReturnType<typeof spawn> | null = null;
+        let activeWriteStream: fs.WriteStream | null = null;
+        let activeInputStream: Readable | null = null;
 
-        const inputStream = Readable.fromWeb(videoResponse.body as any);
-        
-        await acquireFfmpegSlot(); // Acquire slot for manual remuxing
-        inputStream.pipe(ffmpeg.stdin);
+        const onAbort = () => {
+          isAborted = true;
+          // 1. Abort upstream network/file streams safely
+          if (activeInputStream) {
+            try { activeInputStream.destroy(); } catch (_) {}
+          }
+          if (activeWriteStream) {
+            try { activeWriteStream.destroy(); } catch (_) {}
+          }
+          // 2. Terminate active FFmpeg process if running
+          if (activeProcess && activeProcess.exitCode === null) {
+            try { activeProcess.kill("SIGKILL"); } catch (_) {}
+          }
+        };
 
-        return await new Promise<NextResponse>((resolve) => {
-          ffmpeg.on('close', (code) => {
+        if (request.signal) {
+          request.signal.addEventListener("abort", onAbort, { once: true });
+        }
+
+        const UPSTREAM_DOWNLOAD_TIMEOUT_MS = 120000; // 2-minute safety limit for upstream stream download
+        let upstreamTimedOut = false;
+        let slotAcquired = false;
+        let slotReleased = false;
+
+        const releaseSlotOnce = () => {
+          if (slotAcquired && !slotReleased) {
+            slotReleased = true;
             releaseFfmpegSlot();
+          }
+        };
 
-            if (code !== 0) {
-              resolve(NextResponse.json({ error: "FFmpeg process failed during conversion", code }, { status: 500 }));
-              return;
+        try {
+          // 1. Download upstream stream to tempInputPath on disk
+          const writeStream = fs.createWriteStream(tempInputPath);
+          activeWriteStream = writeStream;
+          const inputStream = Readable.fromWeb(videoResponse.body as any);
+          activeInputStream = inputStream;
+
+          await new Promise<void>((resolve, reject) => {
+            let streamSettled = false;
+            let downloadTimer: NodeJS.Timeout | null = null;
+
+            const cleanupListeners = () => {
+              if (downloadTimer) {
+                clearTimeout(downloadTimer);
+                downloadTimer = null;
+              }
+              writeStream.removeListener("finish", onFinish);
+              writeStream.removeListener("error", onError);
+              writeStream.removeListener("close", onClose);
+              inputStream.removeListener("error", onError);
+            };
+
+            const finishStream = (err?: Error) => {
+              if (streamSettled) return;
+              streamSettled = true;
+              cleanupListeners();
+              if (err) reject(err);
+              else resolve();
+            };
+
+            const onFinish = () => finishStream();
+            const onError = (err: any) => finishStream(err);
+            const onClose = () => {
+              if (isAborted || request.signal?.aborted) {
+                finishStream(new Error("Request aborted during upstream download"));
+              }
+            };
+
+            downloadTimer = setTimeout(() => {
+              upstreamTimedOut = true;
+              const tErr = new Error(`Upstream video stream download timed out after ${UPSTREAM_DOWNLOAD_TIMEOUT_MS}ms`);
+              try { inputStream.destroy(tErr); } catch (_) {}
+              try { writeStream.destroy(tErr); } catch (_) {}
+              finishStream(tErr);
+            }, UPSTREAM_DOWNLOAD_TIMEOUT_MS);
+
+            writeStream.on("finish", onFinish);
+            writeStream.on("error", onError);
+            writeStream.on("close", onClose);
+            inputStream.on("error", onError);
+            inputStream.pipe(writeStream);
+          });
+          activeInputStream = null;
+          activeWriteStream = null;
+
+          if (isAborted || request.signal?.aborted) {
+            safeUnlink(tempInputPath);
+            safeUnlink(tempOutputPath);
+            if (request.signal) {
+              request.signal.removeEventListener("abort", onAbort);
+            }
+            return new NextResponse("Request aborted", { status: 499 });
+          }
+
+          if (upstreamTimedOut) {
+            safeUnlink(tempInputPath);
+            safeUnlink(tempOutputPath);
+            if (request.signal) {
+              request.signal.removeEventListener("abort", onAbort);
+            }
+            return NextResponse.json(
+              { error: "Gateway Timeout: upstream recording stream took too long to download" },
+              { status: 504 }
+            );
+          }
+
+          const ffmpegPath = getFfmpegPath();
+
+          // Helper to execute FFmpeg with robust timeout, stderr draining, and process synchronization
+          const runFfmpeg = (
+            args: string[],
+            timeoutMs: number,
+            onProcSpawn?: (proc: ReturnType<typeof spawn>) => void
+          ): Promise<{
+            code: number | null;
+            error?: Error;
+            stderr: string;
+            timedOut: boolean;
+          }> => {
+            return new Promise((resolve) => {
+              let timer: ReturnType<typeof setTimeout> | null = null;
+              let timedOut = false;
+              let settled = false;
+              let stderrTail = "";
+              const MAX_STDERR_LOG = 50 * 1024; // Keep last 50 KB
+
+              const proc = spawn(ffmpegPath, args, { windowsHide: true });
+              if (onProcSpawn) onProcSpawn(proc);
+
+              proc.stdin?.on("error", () => {});
+
+              // Continuously consume proc.stderr to prevent OS pipe buffer saturation and deadlock
+              proc.stderr?.on("data", (chunk: Buffer | string) => {
+                const str = chunk.toString();
+                stderrTail += str;
+                if (stderrTail.length > MAX_STDERR_LOG) {
+                  stderrTail = stderrTail.slice(-MAX_STDERR_LOG);
+                }
+              });
+
+              const finish = (result: {
+                code: number | null;
+                error?: Error;
+                stderr: string;
+                timedOut: boolean;
+              }) => {
+                if (settled) return;
+                settled = true;
+                if (timer) {
+                  clearTimeout(timer);
+                  timer = null;
+                }
+                resolve(result);
+              };
+
+              timer = setTimeout(() => {
+                if (proc.exitCode === null) {
+                  timedOut = true;
+                  try {
+                    proc.kill("SIGKILL");
+                  } catch (_) {}
+                  // DO NOT call finish() here. Wait for the 'close' event so the OS terminates
+                  // the process and releases file locks on tempOutputPath before any next step runs.
+                }
+              }, timeoutMs);
+
+              proc.on("close", (code) => {
+                if (timedOut) {
+                  finish({
+                    code: -1,
+                    error: new Error(`FFmpeg timed out after ${timeoutMs}ms`),
+                    stderr: stderrTail,
+                    timedOut: true,
+                  });
+                } else {
+                  finish({
+                    code,
+                    stderr: stderrTail,
+                    timedOut: false,
+                  });
+                }
+              });
+
+              proc.on("error", (err) => {
+                finish({
+                  code: -1,
+                  error: err,
+                  stderr: stderrTail,
+                  timedOut: false,
+                });
+              });
+            });
+          };
+
+          await acquireFfmpegSlot();
+          slotAcquired = true;
+
+          let remuxSuccess = false;
+          try {
+            if (isAborted || request.signal?.aborted) {
+              return new NextResponse("Request aborted", { status: 499 });
             }
 
-            const fileStream = fs.createReadStream(tempPath);
+            // Phase 1: Fast Remux (Stream Copy Video + Transcode Audio to AAC for universal MP4 compatibility)
+            // Timeout: 60 seconds (remuxing is pure IO and typically completes in <3 seconds)
+            const remuxArgs = [
+              "-fflags", "+genpts+igndts",
+              "-avoid_negative_ts", "make_zero",
+              "-i", tempInputPath,
+              "-map", "0:v:0",
+              "-c:v", "copy",
+              "-map", "0:a?",
+              "-c:a", "aac",
+              "-b:a", "128k",
+              "-movflags", "+faststart",
+              "-max_muxing_queue_size", "1024",
+              "-f", "mp4",
+              "-y",
+              tempOutputPath,
+            ];
 
-            fileStream.on('close', () => {
-              fs.unlink(tempPath, (err) => {});
-            });
+            const remuxResult = await runFfmpeg(remuxArgs, 60000, (p) => { activeProcess = p; });
+            activeProcess = null;
 
-            resolve(new NextResponse(Readable.toWeb(fileStream) as any, {
-              status: 200,
-              headers: {
-                "Content-Type": "video/mp4",
-                "Content-Disposition": disposition,
-                "Cache-Control": "no-cache",
-              },
-            }));
+            if (isAborted || request.signal?.aborted) {
+              return new NextResponse("Request aborted", { status: 499 });
+            }
+
+            // Analyze diagnostic logs from FFmpeg stderr for codec compatibility
+            const codecInfo = parseVideoCodecFromStderr(remuxResult.stderr);
+
+            if (remuxResult.code === 0 && fs.existsSync(tempOutputPath) && fs.statSync(tempOutputPath).size > 1024) {
+              if (codecInfo.isH264) {
+                // Source is confirmed H.264 video; fast remux is 100% compatible with browsers
+                remuxSuccess = true;
+              } else if (codecInfo.isHevc) {
+                console.warn(
+                  `[recordings/download] Source video is HEVC/H.265 (codec=${codecInfo.codec}). Stream copy MP4 is incompatible with browsers. Triggering fallback libx264 re-encoding...`
+                );
+                safeUnlink(tempOutputPath);
+              } else if (codecInfo.detected) {
+                console.warn(
+                  `[recordings/download] Source video codec (${codecInfo.codec}) is non-standard for web MP4. Triggering fallback libx264 re-encoding...`
+                );
+                safeUnlink(tempOutputPath);
+              } else {
+                // Codec could not be identified with certainty from diagnostic logs
+                // Safe documented fallback decision: re-encode to guarantee universal browser playback
+                console.warn(
+                  `[recordings/download] Video codec could not be verified from diagnostic output. Falling back to safe libx264 re-encoding for guaranteed playback.`
+                );
+                safeUnlink(tempOutputPath);
+              }
+            } else {
+              console.warn(
+                `[recordings/download] Fast stream copy failed (exitCode=${remuxResult.code}, timedOut=${remuxResult.timedOut}). Triggering fallback re-encoding...`
+              );
+              safeUnlink(tempOutputPath);
+            }
+
+            // Phase 2: Fallback re-encoding (libx264 + aac) if remux failed or codec was incompatible
+            if (!remuxSuccess && !isAborted && !request.signal?.aborted) {
+              const fallbackArgs = [
+                "-fflags", "+genpts",
+                "-i", tempInputPath,
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-movflags", "+faststart",
+                "-f", "mp4",
+                "-y",
+                tempOutputPath,
+              ];
+
+              const fallbackResult = await runFfmpeg(fallbackArgs, 300000, (p) => { activeProcess = p; }); // 5-minute safety timeout
+              activeProcess = null;
+
+              if (isAborted || request.signal?.aborted) {
+                return new NextResponse("Request aborted", { status: 499 });
+              }
+
+              if (fallbackResult.code !== 0 || !fs.existsSync(tempOutputPath) || fs.statSync(tempOutputPath).size === 0) {
+                safeUnlink(tempInputPath);
+                safeUnlink(tempOutputPath);
+                return NextResponse.json(
+                  { error: "FFmpeg process failed during conversion", code: fallbackResult.code, details: fallbackResult.error?.message },
+                  { status: 500 }
+                );
+              }
+            }
+          } finally {
+            releaseSlotOnce();
+            // Input file is no longer needed once output is produced
+            safeUnlink(tempInputPath);
+            if (request.signal) {
+              request.signal.removeEventListener("abort", onAbort);
+            }
+          }
+
+          if (isAborted || request.signal?.aborted) {
+            safeUnlink(tempOutputPath);
+            return new NextResponse("Request aborted", { status: 499 });
+          }
+
+          // Stream output file to response; unlink tempOutputPath only after client stream closes
+          const fileStream = fs.createReadStream(tempOutputPath);
+          fileStream.on("close", () => {
+            safeUnlink(tempOutputPath);
+          });
+          fileStream.on("error", () => {
+            safeUnlink(tempOutputPath);
           });
 
-          ffmpeg.on('error', (err) => {
-            releaseFfmpegSlot();
-            resolve(NextResponse.json({
-              error: "FFmpeg process error - verify FFmpeg is installed and in system PATH",
-              details: err.message
-            }, { status: 500 }));
+          return new NextResponse(Readable.toWeb(fileStream) as any, {
+            status: 200,
+            headers: {
+              "Content-Type": "video/mp4",
+              "Content-Disposition": disposition,
+              "Cache-Control": "no-cache",
+            },
           });
-        });
+        } catch (streamErr: any) {
+          releaseSlotOnce();
+          safeUnlink(tempInputPath);
+          safeUnlink(tempOutputPath);
+          if (request.signal) {
+            request.signal.removeEventListener("abort", onAbort);
+          }
+
+          if (isAborted || request.signal?.aborted) {
+            return new NextResponse("Request aborted", { status: 499 });
+          }
+
+          if (upstreamTimedOut) {
+            return NextResponse.json(
+              { error: "Gateway Timeout: upstream recording stream took too long to download" },
+              { status: 504 }
+            );
+          }
+
+          return NextResponse.json(
+            { error: "Video processing error", details: streamErr?.message || String(streamErr) },
+            { status: 500 }
+          );
+        }
       }
 
       // Fragmented MP4 preview (fMP4)
@@ -556,47 +853,6 @@ export async function GET(request: NextRequest) {
       if (contentLengthHeader) responseHeaders["Content-Length"] = contentLengthHeader;
       if (contentRangeHeader) responseHeaders["Content-Range"] = contentRangeHeader;
 
-      // Manual download remuxing
-      if (!isPreview && !effectiveIsImage && videoResponse.body) {
-        await acquireFfmpegSlot();
-        const ffmpegPath = getFfmpegPath();
-        const ffmpegProcess = spawn(ffmpegPath, [
-          "-fflags", "+genpts+igndts",
-          "-avoid_negative_ts", "make_zero",
-          "-analyze_duration", "10000000",
-          "-probesize", "10000000",
-          "-i", "pipe:0",
-          "-c:v", "libx264",
-          "-preset", "ultrafast",
-          "-crf", "23",
-          "-pix_fmt", "yuv420p",
-          "-c:a", "aac",
-          "-b:a", "128k",
-          "-movflags", "+faststart",
-          "-max_muxing_queue_size", "1024",
-          "-f", "mp4",
-          "pipe:1"
-        ], { windowsHide: true });
-
-        ffmpegProcess.stdin.on("error", (e) => {});
-        
-        ffmpegProcess.on("close", () => {
-          releaseFfmpegSlot();
-        });
-
-        const downloadInput = Readable.fromWeb(videoResponse.body as any);
-        downloadInput.pipe(ffmpegProcess.stdin);
-
-        return new NextResponse(Readable.toWeb(ffmpegProcess.stdout) as any, {
-          status: 200,
-          headers: {
-            "Content-Type": "video/mp4",
-            "Content-Disposition": disposition,
-            "Accept-Ranges": "none",
-            "Cache-Control": "no-cache, no-store",
-          },
-        });
-      }
 
       const responseStatus = (upstreamStatus === 206 || (rangeHeader && upstreamStatus === 200)) ? 206 : 200;
 
