@@ -7,7 +7,7 @@
 import path from "path";
 import { readJsonWithCache, writeJsonWithCache } from "@/lib/json-store-cache";
 import { redisKeys } from "@/lib/redis/keys";
-import { refreshNxCloudToken } from "@/lib/nx-cloud-service";
+import { refreshNxCloudToken, loginNxCloudWithPassword } from "@/lib/nx-cloud-service";
 
 export const CLOUD_SESSION_FILE = path.join(
   process.cwd(),
@@ -64,12 +64,13 @@ export async function readServerCloudSession(): Promise<ServerCloudSession | nul
 }
 
 /**
- * Get a valid cloud session, automatically refreshing access_token if expired or missing
+ * Get a valid cloud session, automatically refreshing access_token if expired or missing,
+ * or authenticating directly using cloud credentials if available in environment.
  */
 export async function getValidServerCloudSession(): Promise<ServerCloudSession | null> {
   let session = await readServerCloudSession();
 
-  // Fallback to environment variable if no file exists
+  // 1. Fallback to direct refresh token from environment
   if (!session?.refreshToken) {
     const envToken =
       process.env.NX_CLOUD_REFRESH_TOKEN ||
@@ -80,6 +81,33 @@ export async function getValidServerCloudSession(): Promise<ServerCloudSession |
         refreshToken: envToken,
         updatedAt: 0,
       };
+    }
+  }
+
+  // 2. Fallback to direct username & password authentication
+  if (!session?.refreshToken) {
+    const username =
+      process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME ||
+      process.env.NX_CLOUD_USERNAME;
+    const password =
+      process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD ||
+      process.env.NX_CLOUD_PASSWORD;
+
+    if (username && password) {
+      try {
+        console.log(`[CloudSessionStore] 🔐 Authenticating to Nx Cloud for ${username}...`);
+        const loginData = await loginNxCloudWithPassword(username, password);
+        session = {
+          accessToken: loginData.access_token,
+          refreshToken: loginData.refresh_token,
+          email: username,
+          updatedAt: Date.now(),
+        };
+        await saveServerCloudSession(session);
+        console.log(`[CloudSessionStore] ✅ Successfully authenticated to Nx Cloud for ${username}`);
+      } catch (err: any) {
+        console.error("[CloudSessionStore] ❌ Direct username/password login failed:", err.message);
+      }
     }
   }
 

@@ -73,6 +73,47 @@ export async function exchangeNxAuthorizationCode(code: string, clientId: string
 }
 
 /**
+ * 2b. Direct Login with Username and Password
+ */
+export async function loginNxCloudWithPassword(
+  username: string,
+  password: string,
+  clientId: string = DEFAULT_CLIENT_ID
+): Promise<{
+  access_token: string;
+  refresh_token: string;
+  expires_in?: number;
+  token_type?: string;
+  user_email?: string;
+}> {
+  const response = await fetch(`${CLOUD_HOST}/cdb/oauth2/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      grant_type: "password",
+      response_type: "token",
+      username,
+      password,
+      client_id: clientId,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Failed to authenticate with Nx Cloud: HTTP ${response.status} - ${errorBody}`);
+  }
+
+  const data = await response.json();
+  return {
+    ...data,
+    user_email: username,
+  };
+}
+
+/**
  * 3. Refresh Nx Cloud Token or Request Scoped Token
  */
 export async function refreshNxCloudToken(
