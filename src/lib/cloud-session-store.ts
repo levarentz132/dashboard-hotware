@@ -86,12 +86,41 @@ export async function getValidServerCloudSession(): Promise<ServerCloudSession |
 
   // 2. Fallback to direct username & password authentication
   if (!session?.refreshToken) {
-    const username =
+    let username =
       process.env.NEXT_PUBLIC_NX_CLOUD_USERNAME ||
       process.env.NX_CLOUD_USERNAME;
-    const password =
+    let password =
       process.env.NEXT_PUBLIC_NX_CLOUD_PASSWORD ||
       process.env.NX_CLOUD_PASSWORD;
+
+    // In standalone mode, process.env might not be populated if .env wasn't sourced.
+    // Directly check .env and .env.local on disk as a robust fallback.
+    if (!username || !password) {
+      try {
+        const fs = require("fs");
+        for (const file of [".env.local", ".env"]) {
+          const p = path.join(process.cwd(), file);
+          if (fs.existsSync(p)) {
+            const content = fs.readFileSync(p, "utf-8");
+            for (const line of content.split(/\r?\n/)) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith("#")) continue;
+              const eq = trimmed.indexOf("=");
+              if (eq > 0) {
+                const key = trimmed.substring(0, eq).trim();
+                const val = trimmed.substring(eq + 1).trim().replace(/^['"]|['"]$/g, "");
+                if ((key === "NEXT_PUBLIC_NX_CLOUD_USERNAME" || key === "NX_CLOUD_USERNAME") && !username) {
+                  username = val;
+                }
+                if ((key === "NEXT_PUBLIC_NX_CLOUD_PASSWORD" || key === "NX_CLOUD_PASSWORD") && !password) {
+                  password = val;
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
 
     if (username && password) {
       try {

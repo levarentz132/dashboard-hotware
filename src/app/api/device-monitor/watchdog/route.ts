@@ -34,6 +34,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Direct username/password login via POST
+    if (body.username && body.password) {
+      const { loginNxCloudWithPassword } = await import("@/lib/nx-cloud-service");
+      const loginData = await loginNxCloudWithPassword(body.username, body.password);
+      await saveServerCloudSession({
+        accessToken: loginData.access_token,
+        refreshToken: loginData.refresh_token,
+        email: body.username,
+      });
+    }
+
     if (action === "start") {
       const intervalMs = typeof body.intervalMs === "number" ? body.intervalMs : 30000;
       startDeviceWatchdog(intervalMs);
