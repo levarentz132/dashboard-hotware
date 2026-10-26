@@ -4,16 +4,28 @@
  * Allows the server backend to run 24/7 without needing any active browser tabs.
  */
 
+import fs from "fs";
 import path from "path";
 import { readJsonWithCache, writeJsonWithCache } from "@/lib/json-store-cache";
 import { redisKeys } from "@/lib/redis/keys";
 import { refreshNxCloudToken, loginNxCloudWithPassword } from "@/lib/nx-cloud-service";
 
-export const CLOUD_SESSION_FILE = path.join(
-  process.cwd(),
-  "data",
-  "nx_cloud_session.json",
-);
+export function getCloudSessionFilePath(): string {
+  const candidates = [
+    path.join(process.cwd(), "data", "nx_cloud_session.json"),
+    path.join(process.cwd(), "..", "..", "data", "nx_cloud_session.json"),
+    path.join(process.cwd(), "..", "data", "nx_cloud_session.json"),
+    "/www/wwwroot/108.136.246.113/dashboard-hotware/data/nx_cloud_session.json",
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch (_) {}
+  }
+  return candidates[0];
+}
+
+export const CLOUD_SESSION_FILE = getCloudSessionFilePath();
 
 export interface ServerCloudSession {
   accessToken: string;
@@ -39,6 +51,7 @@ const REDIS_CLOUD_SESSION_KEY = `${redisKeys.deviceMonitorLatest().split(":")[0]
 export async function saveServerCloudSession(
   session: Partial<ServerCloudSession> & { refreshToken: string },
 ): Promise<void> {
+  const filePath = getCloudSessionFilePath();
   const current = (await readServerCloudSession()) || {};
   const updated: ServerCloudSession = {
     accessToken: session.accessToken || current.accessToken || "",
@@ -48,16 +61,17 @@ export async function saveServerCloudSession(
     updatedAt: Date.now(),
   };
 
-  await writeJsonWithCache(CLOUD_SESSION_FILE, REDIS_CLOUD_SESSION_KEY, updated);
-  console.log(`[CloudSessionStore] 💾 Cloud session saved for ${updated.email || "account"}`);
+  await writeJsonWithCache(filePath, REDIS_CLOUD_SESSION_KEY, updated);
+  console.log(`[CloudSessionStore] 💾 Cloud session saved for ${updated.email || "account"} to ${filePath}`);
 }
 
 /**
  * Read the raw session from disk/cache without refreshing
  */
 export async function readServerCloudSession(): Promise<ServerCloudSession | null> {
+  const filePath = getCloudSessionFilePath();
   return readJsonWithCache<ServerCloudSession>({
-    filePath: CLOUD_SESSION_FILE,
+    filePath,
     redisKey: REDIS_CLOUD_SESSION_KEY,
     validate: isServerCloudSession,
   });

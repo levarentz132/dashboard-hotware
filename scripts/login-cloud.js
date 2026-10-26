@@ -32,7 +32,6 @@ async function login() {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    const sessionFile = path.join(dataDir, 'nx_cloud_session.json');
     const session = {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
@@ -40,8 +39,26 @@ async function login() {
       updatedAt: Date.now()
     };
 
-    fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2), 'utf-8');
-    console.log(`✅ Success! Session saved to ${sessionFile}`);
+    const targetDirs = [
+      path.join(process.cwd(), 'data'),
+      path.join(process.cwd(), '.next', 'standalone', 'data'),
+      path.join(process.cwd(), '..', 'data'),
+      '/www/wwwroot/108.136.246.113/dashboard-hotware/data',
+      '/www/wwwroot/108.136.246.113/dashboard-hotware/.next/standalone/data',
+    ];
+
+    for (const d of targetDirs) {
+      try {
+        const parent = path.dirname(d);
+        if (fs.existsSync(parent)) {
+          if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+          const file = path.join(d, 'nx_cloud_session.json');
+          fs.writeFileSync(file, JSON.stringify(session, null, 2), 'utf-8');
+          console.log(`✅ Saved session to: ${file}`);
+        }
+      } catch (_) {}
+    }
+
     console.log(`The 24/7 background watchdog can now monitor cameras headlessly.`);
   } catch (err) {
     console.error('Error during login:', err);

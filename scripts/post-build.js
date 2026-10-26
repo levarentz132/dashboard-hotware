@@ -88,6 +88,9 @@ copyDir(path.join(projectRoot, 'node-bin'), path.join(serverDir, 'node-bin'));
 console.log('Copying redis folder to standalone...');
 copyDir(path.join(projectRoot, 'redis'), path.join(serverDir, 'redis'));
 
+console.log('Copying data folder to standalone...');
+copyDir(path.join(projectRoot, 'data'), path.join(serverDir, 'data'));
+
 // Verify chunks were copied
 const chunksPath = path.join(destStatic, 'chunks');
 if (fs.existsSync(chunksPath)) {
