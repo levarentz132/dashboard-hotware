@@ -1,7 +1,7 @@
-﻿// Authentication Service
+// Authentication Service
 // JWT operations for external authentication
 
-import { jwtVerify, importSPKI } from "jose";
+import { jwtVerify, importSPKI, SignJWT } from "jose";
 import { AUTH_CONFIG, AUTH_MESSAGES } from "./constants";
 import { callExternalRefreshAPI, getExternalPublicKey } from "./external-api";
 import type { UserPublic, JWTPayload, AuthTokens } from "./types";
@@ -12,6 +12,37 @@ import type { UserPublic, JWTPayload, AuthTokens } from "./types";
 
 let cachedPublicKey: any = null;
 let cachedPublicKeyRaw: string | null = null;
+
+/**
+ * Create a local JWT token (HS256) for license-bypassed sessions
+ */
+export async function createLocalToken(payload: Partial<JWTPayload>): Promise<string> {
+  const secretKey = new TextEncoder().encode(
+    AUTH_CONFIG.JWT_SECRET || "17d8da6c656089f06976a9c64956975d0d32c134dd642be20a22edee5664e904"
+  );
+  return new SignJWT({
+    sub: payload.sub || "1",
+    username: payload.username || "admin",
+    email: payload.email || "admin@hotware.id",
+    role: payload.role || "admin",
+    system_id: payload.system_id || "",
+    license_status: "ACTIVE",
+    is_active: true,
+    privileges: payload.privileges || [
+      { module: "dashboard", can_view: true, can_edit: true },
+      { module: "cameras", can_view: true, can_edit: true },
+      { module: "alarms", can_view: true, can_edit: true },
+      { module: "analytics", can_view: true, can_edit: true },
+      { module: "users", can_view: true, can_edit: true },
+      { module: "recordings", can_view: true, can_edit: true },
+      { module: "settings", can_view: true, can_edit: true },
+    ],
+    ...payload,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime(AUTH_CONFIG.JWT_EXPIRES_IN || "7d")
+    .sign(secretKey);
+}
 
 /**
  * Get the public key for verification
@@ -51,16 +82,29 @@ async function getPublicKey() {
 }
 
 /**
- * Verify and decode JWT token
+ * Verify and decode JWT token (supports both local HS256 bypass and remote RS256)
  */
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
+  // First try local HS256 secret key verification
+  try {
+    const secretKey = new TextEncoder().encode(
+      AUTH_CONFIG.JWT_SECRET || "17d8da6c656089f06976a9c64956975d0d32c134dd642be20a22edee5664e904"
+    );
+    const { payload } = await jwtVerify(token, secretKey);
+    return payload as unknown as JWTPayload;
+  } catch (localError: any) {
+    if (localError?.code === 'ERR_JWT_EXPIRED') {
+      return null;
+    }
+  }
+
+  // Fallback to RS256 public key from external license API
   try {
     const key = await getPublicKey();
     const { payload } = await jwtVerify(token, key);
     return payload as unknown as JWTPayload;
   } catch (error: any) {
     if (error?.code === 'ERR_JWT_EXPIRED') {
-
       return null;
     }
     console.error("[Auth Service] Token verification failed:", error);

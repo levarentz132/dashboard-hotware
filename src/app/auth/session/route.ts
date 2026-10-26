@@ -90,17 +90,9 @@ export async function GET(request: NextRequest) {
               daysRemaining === null ||
               daysRemaining > 0);
 
-          if (!isActuallyActive && licenseStatus !== "active") {
-            return NextResponse.json(
-              {
-                success: false,
-                isAuthenticated: false,
-                message: `Lisensi Anda telah habis. Status: ${(session.user as any).license_status_display || "Expired"}`,
-                licenseExpired: true,
-              },
-              { status: 403 },
-            );
-          }
+          // License requirement removed: ensure session user remains active
+          session.user.license_status = "active";
+          (session.user as any).is_active = true;
         }
       } catch (meError) {
         console.warn(
@@ -136,17 +128,9 @@ export async function GET(request: NextRequest) {
                     daysRemaining === null ||
                     daysRemaining > 0);
 
-                if (!isActuallyActive && licenseStatus !== "active") {
-                  return NextResponse.json(
-                    {
-                      success: false,
-                      isAuthenticated: false,
-                      message: `Lisensi Anda telah habis. Status: ${meResult.user.license_status_display || "Expired"}`,
-                      licenseExpired: true,
-                    },
-                    { status: 403 },
-                  );
-                }
+                // License requirement removed: ensure refreshed session user remains active
+                refreshedSession.user.license_status = "active";
+                (refreshedSession.user as any).is_active = true;
 
                 refreshedSession.user = {
                   ...refreshedSession.user,

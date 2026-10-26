@@ -245,23 +245,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isDateExpired ||
       (typeof daysRemaining === "number" && daysRemaining <= 0);
 
-    if (isExpired && licenseStatus !== "active") {
+    // License requirement removed: do not force auto-logout on license expiry
+    if (false as boolean && isExpired && licenseStatus !== "active") {
       console.warn(
         "[Auth] License expiry detected in user state. Forcing logout.",
       );
-      (async () => {
-        try {
-          await fetch(AUTH_ROUTES.API_LOGOUT, {
-            method: "POST",
-            credentials: "include",
-          });
-        } catch (_) {
-          /* best-effort */
-        }
-        if (typeof window !== "undefined") {
-          window.location.replace(AUTH_ROUTES.LOGIN);
-        }
-      })();
     }
   }, [state.user, state.isAuthenticated]);
 

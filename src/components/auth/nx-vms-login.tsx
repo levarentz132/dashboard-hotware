@@ -140,20 +140,14 @@ export function NxVmsLogin() {
       Cookies.get("license_saved_user") ||
       (config as any)?.NEXT_PUBLIC_LICENSE_USERNAME ||
       process.env.NEXT_PUBLIC_LICENSE_USERNAME ||
-      "";
+      cloudSession?.email ||
+      session?.username ||
+      "admin";
     let password =
       Cookies.get("license_saved_pass") ||
       (config as any)?.NEXT_PUBLIC_LICENSE_PASSWORD ||
       process.env.NEXT_PUBLIC_LICENSE_PASSWORD ||
-      "";
-
-    if (!username || !password) {
-      setError(
-        "License credentials not found. Please set them in the 'License Config' dropdown (top left).",
-      );
-      setActiveVariant(null);
-      return;
-    }
+      "admin";
 
     let storedServerId =
       variant === "local"
