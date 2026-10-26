@@ -4,9 +4,34 @@ import {
   writeDeviceMonitorSnapshot,
   type DeviceMonitorSnapshot,
 } from "@/lib/device-monitor-store";
+import {
+  readServerCloudSession,
+  saveServerCloudSession,
+} from "@/lib/cloud-session-store";
+
+async function syncSessionFromCookie(request: NextRequest) {
+  try {
+    const sessionCookie = request.cookies.get("nx_cloud_session")?.value;
+    if (sessionCookie) {
+      const parsed = JSON.parse(decodeURIComponent(sessionCookie));
+      if (parsed?.refreshToken) {
+        const existing = await readServerCloudSession();
+        if (!existing?.refreshToken) {
+          await saveServerCloudSession({
+            accessToken: parsed.accessToken,
+            refreshToken: parsed.refreshToken,
+            email: parsed.email,
+            ownerSystemId: parsed.ownerSystemId,
+          });
+        }
+      }
+    }
+  } catch (_) {}
+}
 
 export async function POST(request: NextRequest) {
   try {
+    await syncSessionFromCookie(request);
     const data = (await request.json()) as DeviceMonitorSnapshot;
     await writeDeviceMonitorSnapshot(data);
 
@@ -24,8 +49,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    await syncSessionFromCookie(request);
     const data = await readDeviceMonitorSnapshot();
     if (!data) {
       return NextResponse.json(
@@ -42,3 +68,4 @@ export async function GET() {
     );
   }
 }
+

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeNxAuthorizationCode, getNxSystems } from "@/lib/nx-cloud-service";
+import { saveServerCloudSession } from "@/lib/cloud-session-store";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -20,6 +21,14 @@ export async function GET(request: NextRequest) {
     const systems = await getNxSystems(tokens.access_token);
 
     const firstSystemId = systems.length > 0 ? systems[0].id : "";
+
+    // Persist cloud credentials to server disk for 24/7 headless background monitoring
+    await saveServerCloudSession({
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      email: tokens.user_email,
+      ownerSystemId: firstSystemId,
+    }).catch((err) => console.warn("[OAuth Callback] Could not persist server session:", err));
 
     const response = NextResponse.redirect(new URL("/cloud/dashboard", request.url));
 
