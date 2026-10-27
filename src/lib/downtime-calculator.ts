@@ -6,8 +6,8 @@
  * for downtime/availability calculation used by Dashboard, PDF, and Word exports.
  */
 
-import { getOfflineExactTime, formatExactTimestamp, trackOfflineCamera } from "@/lib/camera-offline-tracker";
-import type { OfflineCameraItem, OfflineCameraIncident } from "@/components/reporting/export-utils";
+import { getOfflineExactTime, formatExactTimestamp, trackOfflineCamera } from "./camera-offline-tracker";
+import type { OfflineCameraItem, OfflineCameraIncident } from "../components/reporting/export-utils";
 
 // ============================================
 // HELPERS (moved from ReportingManagement.tsx)
@@ -192,6 +192,9 @@ function pairIncidentSessions(
   return sessions;
 }
 
+import { findServerForCamera, isServerDown } from "./server-camera-matcher";
+import { calculateServerUptimeFromEvents, type SystemServerUptimeSummary } from "./server-uptime-calculator";
+
 // ============================================
 // INPUT / OUTPUT TYPES
 // ============================================
@@ -204,6 +207,8 @@ export interface DowntimeInput {
   dateTo: string;
   selectedServerLabel: string;
   nowMs?: number;
+  servers?: any[];
+  serverUptimeSummary?: SystemServerUptimeSummary;
 }
 
 export interface DowntimeAggregate {
@@ -246,6 +251,8 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
     dateTo,
     selectedServerLabel,
     nowMs = Date.now(),
+    servers = [],
+    serverUptimeSummary,
   } = input;
 
   // Compute period boundaries (clamped to now, minimum 1 hour)
@@ -259,6 +266,20 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
   const effectiveToTime = Math.min(dateToMs === Infinity ? nowMs : dateToMs, nowMs);
   const effectiveFromTime = Math.min(dateFromMs || effectiveToTime, effectiveToTime);
   const periodDurationMs = Math.max(1000 * 60 * 60, effectiveToTime - effectiveFromTime);
+
+  // Compute server uptime/outage sessions if not provided
+  const effectiveServerUptimeSummary =
+    serverUptimeSummary ||
+    (servers.length > 0
+      ? calculateServerUptimeFromEvents({
+          servers,
+          events: allEvents || eventList,
+          fromMs: effectiveFromTime,
+          toMs: effectiveToTime,
+          nowMs,
+        })
+      : null);
+  const serverResults = effectiveServerUptimeSummary?.serverResults || [];
 
   let totalPeriodDowntimeMs = 0;
   let resolvedIncidents = 0;
@@ -280,7 +301,14 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
         });
 
         return uniqueCameras.map((cam: any) => {
-          const isOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+          const { server: matchedServer, serverResult: matchedServerResult, serverName: resolvedServerName } =
+            findServerForCamera(cam, servers, serverResults);
+
+          const serverIsDown = isServerDown(matchedServer, matchedServerResult);
+          const isCamStatusOnline = ["online", "Online", "recording", "Recording"].includes(String(cam.status));
+          // If server is down, camera is down
+          const isOnline = isCamStatusOnline && !serverIsDown;
+
           const cleanCamId = String(cam.id || "").replace(/[{}]/g, "").toLowerCase();
           const camNameLower = String(cam.name || "").toLowerCase();
 
@@ -324,8 +352,131 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
 
           const lifetimeSessions = pairIncidentSessions(rawDisconnectEvents, rawRecoveryEvents);
 
+          // Build unified outage intervals: Camera Disconnects + Server Outages
+          interface OutageInterval {
+            startMs: number;
+            endMs: number | null;
+            reason: string;
+            source: "camera" | "server";
+            discEvent?: any;
+            recEvent?: any;
+          }
+
+          const rawIntervals: OutageInterval[] = [];
+
+          // 1. Add camera disconnection sessions
+          for (const sess of lifetimeSessions) {
+            const eventReason = String(
+              sess.discEvent?.actionData?.caption ||
+                sess.discEvent?.caption ||
+                sess.discEvent?.actionData?.description ||
+                sess.discEvent?.description ||
+                sess.discEvent?.eventData?.type ||
+                sess.discEvent?.eventType ||
+                "Camera Disconnected",
+            );
+            rawIntervals.push({
+              startMs: sess.discTimeMs,
+              endMs: sess.recTimeMs,
+              reason: eventReason,
+              source: "camera",
+              discEvent: sess.discEvent,
+              recEvent: sess.recEvent,
+            });
+          }
+
+          // 2. Add server outage sessions for the server of this camera
+          const serverOutages = matchedServerResult?.outageSessions || [];
+          if (serverOutages.length > 0) {
+            for (const srvSess of serverOutages) {
+              const srvReason = `Server Outage (${srvSess.serverName || resolvedServerName || "Server"})`;
+              rawIntervals.push({
+                startMs: srvSess.startTimeMs,
+                endMs: srvSess.isActive ? null : srvSess.endTimeMs,
+                reason: srvReason,
+                source: "server",
+              });
+            }
+          } else if (serverIsDown) {
+            // Server is currently down / offline placeholder with no historical event sessions
+            rawIntervals.push({
+              startMs: effectiveFromTime,
+              endMs: null,
+              reason: `Server Outage (${resolvedServerName || "Server"} Offline)`,
+              source: "server",
+            });
+          }
+
+          // 3. If camera has no events and is currently offline
+          if (rawIntervals.length === 0 && !isCamStatusOnline) {
+            const resolved = getOfflineExactTime(cam, allEvents);
+            const offlineMs = resolved.timestampMs || effectiveFromTime;
+            rawIntervals.push({
+              startMs: offlineMs,
+              endMs: null,
+              reason: "Current Offline State",
+              source: "camera",
+            });
+          }
+
+          // 4. Sort raw intervals chronologically
+          rawIntervals.sort((a, b) => {
+            if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+            const endA = a.endMs ?? Infinity;
+            const endB = b.endMs ?? Infinity;
+            return endA - endB;
+          });
+
+          // 5. Merge overlapping outage intervals to prevent double-counting
+          interface MergedSession {
+            discTimeMs: number;
+            recTimeMs: number | null;
+            reasons: string[];
+            discEvent?: any;
+            recEvent?: any;
+          }
+
+          const mergedSessions: MergedSession[] = [];
+          for (const item of rawIntervals) {
+            if (mergedSessions.length === 0) {
+              mergedSessions.push({
+                discTimeMs: item.startMs,
+                recTimeMs: item.endMs,
+                reasons: [item.reason],
+                discEvent: item.discEvent,
+                recEvent: item.recEvent,
+              });
+              continue;
+            }
+
+            const last = mergedSessions[mergedSessions.length - 1];
+            const lastEnd = last.recTimeMs ?? Infinity;
+
+            if (item.startMs <= lastEnd) {
+              // Overlapping: extend outage interval and merge reasons
+              if (item.endMs === null || last.recTimeMs === null) {
+                last.recTimeMs = null;
+              } else {
+                last.recTimeMs = Math.max(last.recTimeMs, item.endMs);
+              }
+              if (!last.reasons.includes(item.reason)) {
+                last.reasons.push(item.reason);
+              }
+              if (!last.discEvent && item.discEvent) last.discEvent = item.discEvent;
+              if (item.recEvent) last.recEvent = item.recEvent;
+            } else {
+              mergedSessions.push({
+                discTimeMs: item.startMs,
+                recTimeMs: item.endMs,
+                reasons: [item.reason],
+                discEvent: item.discEvent,
+                recEvent: item.recEvent,
+              });
+            }
+          }
+
           // Find sessions that overlap with the selected reporting period
-          const overlappingSessions = lifetimeSessions.filter((sess) => {
+          const overlappingSessions = mergedSessions.filter((sess) => {
             return (
               sess.discTimeMs <= effectiveToTime &&
               (sess.recTimeMs === null || sess.recTimeMs >= effectiveFromTime)
@@ -349,7 +500,7 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
               const incidentDowntimeInPeriod = Math.max(0, overlapEnd - overlapStart);
               camPeriodDowntimeMs += incidentDowntimeInPeriod;
 
-              if (sess.recTimeMs) {
+              if (sess.recTimeMs !== null) {
                 onlineTimestampMs = sess.recTimeMs;
                 onlineTime = `BACK ONLINE: ${formatExactTimestamp(sess.recTimeMs)}`;
                 const totalOutageMs = Math.max(0, sess.recTimeMs - sess.discTimeMs);
@@ -372,15 +523,7 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
                 }
               }
 
-              const eventReason = String(
-                sess.discEvent?.actionData?.caption ||
-                  sess.discEvent?.caption ||
-                  sess.discEvent?.actionData?.description ||
-                  sess.discEvent?.description ||
-                  sess.discEvent?.eventData?.type ||
-                  sess.discEvent?.eventType ||
-                  "Camera Disconnected",
-              );
+              const eventReason = sess.reasons.join(" / ") || "Camera Disconnected";
 
               incidents.push({
                 incidentNumber: idx + 1,
@@ -403,6 +546,10 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
             activeIncidents++;
 
             const totalOutageMs = offlineMs ? Math.max(0, nowMs - offlineMs) : 0;
+            const reason = serverIsDown
+              ? `Server Outage (${resolvedServerName || "Server"} Offline)`
+              : "Current Offline State";
+
             incidents.push({
               incidentNumber: 1,
               offlineTime: resolved.exactTime,
@@ -413,7 +560,7 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
                 ? `${formatDuration(totalOutageMs)} (Until now)`
                 : "Offline until now",
               status: "STILL OFFLINE",
-              reason: "Current Offline State",
+              reason,
             });
           }
 
@@ -451,7 +598,7 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
             }
           }
 
-          const serverName = (cam._systemName || cam.serverName || "SERVER 01").toUpperCase();
+          const serverName = (cam._systemName || cam.serverName || resolvedServerName || "SERVER 01").toUpperCase();
 
           return {
             serverName,
@@ -591,7 +738,10 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
           ),
         )
       : 100;
-  const periodCameraUptimeRate = Number(computedUptime.toFixed(1));
+  let periodCameraUptimeRate = Number(computedUptime.toFixed(1));
+  if (totalPeriodDowntimeMs > 0 && periodCameraUptimeRate >= 100) {
+    periodCameraUptimeRate = 99.9;
+  }
 
   const totalAlarms = eventList.length;
   const totalOfflineIncidentsCount = resolvedIncidents + activeIncidents;
@@ -603,7 +753,7 @@ export function calculateDowntimeResult(input: DowntimeInput): DowntimeResult {
   const infoPct =
     totalAlarms > 0 ? `${Math.round((infoAlarms / totalAlarms) * 100)}%` : "0%";
 
-  const auditVerdict = `During the period (${dateFrom} to ${dateTo}), ${totalAlarms} total alarm event(s) were recorded for ${selectedServerLabel}. ${criticalAlarms} critical event(s) (${criticalPct}) and ${warningAlarms} warning(s) (${warningPct}) were logged. A total of ${totalOfflineIncidentsCount} camera disconnection incident(s) occurred: ${resolvedIncidents} successfully restored upon reconnection, and ${activeIncidents} active outage(s). Overall camera uptime index calculated from alarm logs is ${periodCameraUptimeRate}% with ${formatDuration(totalPeriodDowntimeMs)} total recorded downtime.`;
+  const auditVerdict = `During the period (${dateFrom} to ${dateTo}), ${totalAlarms} total alarm event(s) were recorded for ${selectedServerLabel}. ${criticalAlarms} critical event(s) (${criticalPct}) and ${warningAlarms} warning(s) (${warningPct}) were logged. A total of ${totalOfflineIncidentsCount} camera offline incident(s) occurred (including server outages and disconnections): ${resolvedIncidents} successfully restored, and ${activeIncidents} active outage(s). Overall camera uptime index is ${periodCameraUptimeRate}% with ${formatDuration(totalPeriodDowntimeMs)} total recorded downtime.`;
 
   return {
     cameras: offlineCamerasSummary,

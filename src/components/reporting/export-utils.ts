@@ -1007,6 +1007,7 @@ export function exportToPdf(data: FullReportData) {
   const SLATE_200: [number, number, number] = [226, 232, 240];
   const WHITE: [number, number, number] = [255, 255, 255];
   const BLUE_600: [number, number, number] = [37, 99, 235];
+  const INDIGO_600: [number, number, number] = [79, 70, 229];
   const GREEN_600: [number, number, number] = [22, 163, 74];
   const AMBER_600: [number, number, number] = [217, 119, 6];
   const RED_600: [number, number, number] = [220, 38, 38];
@@ -1158,24 +1159,35 @@ export function exportToPdf(data: FullReportData) {
   const cardCount = 4;
   const cardW = (contentWidth - cardGap * (cardCount - 1)) / cardCount;
   const cardH = 20;
-  const cardColors: [number, number, number][] = [BLUE_600, GREEN_600, AMBER_600, RED_600];
+  const cardColors: [number, number, number][] = [BLUE_600, INDIGO_600, GREEN_600, AMBER_600];
   const cardLabels = [
-    data.periodType === "current" ? "INSTANT CAMERA ONLINE RATE" : "CAMERA UPTIME RATE",
-    "LIVE SERVER ONLINE RATE",
+    data.periodType === "current" ? "CAMERA ONLINE RATE" : "CAMERA UPTIME RATE",
+    "RECORDING SERVERS",
+    data.periodType === "current" ? "INSTANT SERVER ONLINE RATE" : "SERVER HEALTH INDEX",
     "TOTAL ALARM EVENTS",
-    data.periodType === "current" ? "CURRENT DISCONNECTED CAMERAS" : "OFFLINE INCIDENTS",
   ];
+  const serverPeriodUptimeVal =
+    data.overallServerPeriodUptime !== null && data.overallServerPeriodUptime !== undefined
+      ? `${data.overallServerPeriodUptime}%`
+      : `${data.serverOnlineRate}%`;
+  const totalServerIncidents =
+    data.serverUptimeResults?.reduce((sum, s) => sum + (s.incidentCount || 0), 0) ?? 0;
+
   const cardValues = [
     `${data.cameraOnlineRate}%`,
-    `${data.serverOnlineRate}%`,
+    `${data.totalServers}`,
+    serverPeriodUptimeVal,
     `${data.totalAlarms}`,
-    data.periodType === "current" ? `${data.offlineCamerasCount}` : `${data.totalOfflineIncidents}`,
   ];
   const cardSubs = [
-    data.periodType === "current" ? `${data.onlineCameras} / ${data.totalCameras} CAMERAS ONLINE NOW` : "AVERAGE PER-CAMERA UPTIME INDEX",
+    data.periodType === "current"
+      ? `${data.onlineCameras} / ${data.totalCameras} CAMERAS ONLINE NOW`
+      : `${data.alarmEventMetrics?.totalDowntimeFormatted || "0s"} DOWNTIME • ${data.alarmEventMetrics?.totalOfflineIncidents ?? data.totalOfflineIncidents} INCIDENTS`,
     `${data.onlineServers} / ${data.totalServers} SERVERS ONLINE`,
+    data.periodType === "current"
+      ? `${data.onlineServers} / ${data.totalServers} SERVERS ONLINE NOW`
+      : `PERIOD UPTIME • ${totalServerIncidents} INCIDENTS`,
     `${data.criticalAlarms} CRITICAL  •  ${data.warningAlarms} WARNING`,
-    `${data.offlineCamerasCount} CAMERAS CURRENTLY OFFLINE`,
   ];
 
   for (let i = 0; i < cardCount; i++) {
@@ -1198,175 +1210,10 @@ export function exportToPdf(data: FullReportData) {
   }
   y += cardH + 6;
 
-  // Executive Alarm & Availability Summary Box (if alarmEventMetrics available)
-  if (data.alarmEventMetrics) {
-    const m = data.alarmEventMetrics;
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(...SLATE_200);
-    doc.roundedRect(margin.left, y, contentWidth, 22, 1.5, 1.5, "FD");
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.setTextColor(...ORIX_NAVY);
-    doc.text(
-      data.periodType === "current" ? "LIVE ALARM & SYSTEM EVENT SUMMARY" : "ALARM EVENTS & AVAILABILITY EXECUTIVE SUMMARY",
-      margin.left + 4,
-      y + 5
-    );
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...SLATE_700);
-    doc.text(
-      data.periodType === "current"
-        ? `CURRENT EVENT LOG: Raw Alarm Events: ${data.totalAlarms}  •  Critical: ${data.criticalAlarms}  •  Warnings: ${data.warningAlarms}  •  Cameras Online: ${data.onlineCameras}/${data.totalCameras}`
-        : `RAW CAMERA SOURCE EVENTS: ${m.disconnectAlarms}  •  Reconnects: ${m.reconnectAlarms}  •  Resolved Sessions: ${m.resolvedIncidents}  •  Active Issues: ${m.activeIncidents}  •  Total Outage: ${m.totalDowntimeFormatted}`,
-      margin.left + 4,
-      y + 11
-    );
-
-    const verdictText = data.periodType === "current"
-      ? "LIVE SNAPSHOT AUDIT: System monitoring active. Current snapshot operational status recorded."
-      : m.auditVerdict;
-
-    if (verdictText) {
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(...SLATE_900);
-      doc.text(`AUDIT VERDICT: `, margin.left + 4, y + 16);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(...SLATE_700);
-      const verdictLines = doc.splitTextToSize(verdictText, contentWidth - 32);
-      doc.text(verdictLines, margin.left + 28, y + 16);
-    }
-    y += 26;
-  }
-
-  // Downtime Summary Table (Historical Only)
-  if (data.periodType !== "current") {
-    sectionTitle("DOWNTIME SUMMARY");
-    subLabel("Sum of downtime across camera incidents; not elapsed fleet outage time.");
-
-    const dtRows = [
-      ["TOTAL OFFLINE INCIDENTS", String(data.totalOfflineIncidents)],
-      [
-        "AGGREGATED CAMERA DOWNTIME",
-        data.alarmEventMetrics?.totalDowntimeFormatted || (data.totalOfflineIncidents > 0 ? "SEE OFFLINE DETAIL BELOW" : "0s (NO INCIDENTS)"),
-      ],
-      ["EFFECTIVE CAMERA UPTIME INDEX", `${data.cameraOnlineRate}%`],
-    ];
-
-    autoTable(doc, {
-      startY: y,
-      head: [],
-      body: dtRows,
-      theme: "plain",
-      styles: {
-        fontSize: 8.5,
-        cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
-        textColor: [...SLATE_700],
-      },
-      columnStyles: {
-        0: { fontStyle: "bold", cellWidth: 70, textColor: [...SLATE_900] },
-        1: { cellWidth: contentWidth - 70 },
-      },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  }
-
-  // ─── 1. PERFORMANCE TREND ──────────────────────────────────
-  checkPage(40);
-  if (data.periodType === "current") {
-    sectionTitle("1. PERFORMANCE TREND ANALYSIS (CURRENT)");
-    subLabel("Trend analysis is available for historical reporting periods only: DAILY / WEEKLY / MONTHLY / CUSTOM.");
-    y += 8;
-  } else if (data.trendData && data.trendData.length > 0) {
-    sectionTitle(`1. PERFORMANCE TREND ANALYSIS (${data.periodType.toUpperCase()})`);
-    subLabel(`Online camera ratio vs alarm frequency dataset for ${data.selectedServerLabel}`);
-
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "TIME / INTERVAL", "ONLINE CAMERAS", "ALARM INCIDENTS", "HEALTH SCORE"]],
-      body: data.trendData.map((item, idx) => [
-        idx + 1,
-        item.label,
-        item.cameras !== null && item.cameras !== undefined ? `${item.cameras} / ${data.totalCameras} ONLINE` : "N/A",
-        `${item.alarms} ALARMS LOGGED`,
-        item.healthScore !== null && item.healthScore !== undefined ? `${item.healthScore}% HEALTH` : "N/A",
-      ]),
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 8, cellPadding: 2.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  } else {
-    sectionTitle(`1. PERFORMANCE TREND ANALYSIS (${data.periodType.toUpperCase()})`);
-    subLabel(`Online camera ratio vs alarm frequency dataset for ${data.selectedServerLabel}`);
-
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(...SLATE_200);
-    doc.roundedRect(margin.left, y, contentWidth, 14, 1.5, 1.5, "FD");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...SLATE_700);
-    doc.text("STATUS: N/A — PERFORMANCE TREND DATASET NOT AVAILABLE FOR THIS PERIOD.", margin.left + 4, y + 8);
-    y += 18;
-  }
-
-  // ─── 2. CAMERA REPORT / INVENTORY ───────────────────────────
-  checkPage(45);
-  sectionTitle(`2. DETAILED CAMERA INVENTORY REPORT (${data.cameras.length} UNITS)`);
-  subLabel("Complete centralized camera inventory matching current monitoring status.");
-
-  if (data.cameras.length > 0) {
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "CAMERA NAME", "SERVER", "STATUS", "OFFLINE EXACT TIME", "IP ADDRESS", "VENDOR / MODEL", "UPTIME RATE"]],
-      body: data.cameras.map((cam, idx) => [
-        idx + 1,
-        cam.name,
-        cam.serverName,
-        cam.status,
-        cam.status === "OFFLINE" ? cam.exactOfflineTime || "N/A" : "—",
-        cam.ipAddress,
-        cam.vendorModel,
-        cam.status === "OFFLINE" && cam.exactOfflineTime ? `OFFLINE (Since: ${cam.exactOfflineTime})` : cam.uptimeRate,
-      ]),
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-      didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index === 3) {
-          const val = String(hookData.cell.raw);
-          if (val === "ONLINE") {
-            hookData.cell.styles.textColor = [...GREEN_600];
-            hookData.cell.styles.fontStyle = "bold";
-          } else {
-            hookData.cell.styles.textColor = [...RED_600];
-            hookData.cell.styles.fontStyle = "bold";
-          }
-        }
-      },
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  } else {
-    subLabel("No camera inventory data available.");
-    y += 8;
-  }
-
-  // ─── 3. OFFLINE CAMERA SUMMARY ──────────────────────────────
+  // ─── 1. OFFLINE CAMERA SUMMARY ──────────────────────────────
   checkPage(45);
   if (data.periodType === "current") {
-    sectionTitle("3. CURRENT OFFLINE CAMERA SUMMARY");
+    sectionTitle("1. CURRENT OFFLINE CAMERA SUMMARY");
     subLabel("Current camera connectivity status across all monitored systems.");
 
     if (data.offlineCameras.length > 0) {
@@ -1413,7 +1260,7 @@ export function exportToPdf(data: FullReportData) {
       y += 18;
     }
   } else {
-    sectionTitle(`3. ${data.offlineSummaryTitle || "OFFLINE CAMERA SUMMARY"}`);
+    sectionTitle(`1. ${data.offlineSummaryTitle || "OFFLINE CAMERA SUMMARY"}`);
     subLabel("Historical disconnect incidents and availability audit for the selected period.");
 
     if (data.offlineCameras.length > 0) {
@@ -1616,127 +1463,11 @@ export function exportToPdf(data: FullReportData) {
     y += 4;
   }
 
-  // ─── 4. RECORDING SERVER & STORAGE ─────────────────────────
-  checkPage(45);
-  sectionTitle("4. RECORDING SERVER & STORAGE REPORT");
-  subLabel("Recording server storage consumption overview and disk-level hard drive breakdown.");
-
-  if (data.serverStorageStats && data.serverStorageStats.length > 0) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...ORIX_NAVY);
-    doc.text("4.1 RECORDING SERVER STORAGE CONSUMPTION OVERVIEW", margin.left, y);
-    y += 3;
-
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "SERVER NAME", "STATUS", "USED / TOTAL CAPACITY", "FREE SPACE", "USAGE %", "DISKS"]],
-      body: data.serverStorageStats.map((srv, idx) => [
-        idx + 1,
-        srv.name,
-        srv.isOnline ? "ONLINE" : "OFFLINE",
-        srv.usedGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
-        srv.freeGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.freeGb} GB` : "N/A",
-        `${srv.usedPct}%`,
-        srv.diskCount,
-      ]),
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-    });
-    y = (doc as any).lastAutoTable.finalY + 6;
-  }
-
-  checkPage(30);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.5);
-  doc.setTextColor(...ORIX_NAVY);
-  doc.text("4.2 RECORDING SERVER STORAGE & HARD DRIVE BREAKDOWN", margin.left, y);
-  y += 3;
-
-  if (data.serverDisks && data.serverDisks.length > 0) {
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "SERVER", "DISK DRIVE", "STATUS", "TOTAL CAPACITY", "USED CAPACITY", "FREE SPACE", "USAGE %"]],
-      body: data.serverDisks.map((d, idx) => [
-        idx + 1,
-        d.serverName,
-        d.diskName,
-        d.status,
-        d.total,
-        d.used,
-        d.free,
-        d.usagePct,
-      ]),
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  } else {
-    subLabel("No storage data available from source.");
-    y += 8;
-  }
-
-  // ─── 5. SYSTEM HEALTH REPORT ─────────────────────────────────
-  checkPage(45);
-  sectionTitle(`5. SYSTEM HEALTH REPORT (${data.servers.length} SERVERS)`);
-  subLabel("Server hardware host metrics and operating environment status.");
-
-  if (data.servers.length > 0) {
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "SERVER NAME", "STATUS", "SOFTWARE VERSION", "OPERATING SYSTEM", "CPU USAGE", "RAM MEMORY", "DISKS", "STORAGE CONSUMED"]],
-      body: data.servers.map((srv, idx) => [
-        idx + 1,
-        srv.serverName,
-        srv.status,
-        srv.version,
-        srv.osName,
-        srv.cpuUsage,
-        srv.ramUsage,
-        srv.diskCount,
-        srv.storageUsage,
-      ]),
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-      didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index === 2) {
-          const val = String(hookData.cell.raw);
-          if (val === "ONLINE") {
-            hookData.cell.styles.textColor = [...GREEN_600];
-            hookData.cell.styles.fontStyle = "bold";
-          } else {
-            hookData.cell.styles.textColor = [...RED_600];
-            hookData.cell.styles.fontStyle = "bold";
-          }
-        }
-      },
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  } else {
-    subLabel("No server health data available.");
-    y += 8;
-  }
-
-  // ─── 6. SERVER OUTAGE & DOWNTIME AUDIT / LIVE SERVER OVERVIEW ───
+  // ─── 2. SERVER HEALTH & DOWNTIME AUDIT / LIVE SERVER OVERVIEW ───
   checkPage(45);
   if (data.periodType === "current") {
-    sectionTitle("6. LIVE SERVER STATUS OVERVIEW");
-    subLabel("Host server live status and resource metrics.");
+    sectionTitle("2. LIVE SERVER STATUS & HARDWARE OVERVIEW");
+    subLabel("Host server live status, operating system, and hardware resource metrics.");
 
     const liveServerRows = data.servers.map((srv, idx) => [
       idx + 1,
@@ -1780,7 +1511,7 @@ export function exportToPdf(data: FullReportData) {
       y += 8;
     }
   } else {
-    sectionTitle("6. SERVER OUTAGE & DOWNTIME AUDIT");
+    sectionTitle("2. SERVER HEALTH & DOWNTIME AUDIT");
     subLabel("Host server live status and historical period uptime audit derived from VMS server failure and recovery events.");
 
     const serverOutageRows = data.serverUptimeResults && data.serverUptimeResults.length > 0
@@ -2004,9 +1735,79 @@ export function exportToPdf(data: FullReportData) {
     }
   }
 
-  // ─── 7. ALARM EVENTS REPORT ─────────────────────────────────
+  // ─── 3. RECORDING SERVER & STORAGE ─────────────────────────
+  checkPage(45);
+  sectionTitle("3. RECORDING SERVER & STORAGE REPORT");
+  subLabel("Recording server storage consumption overview and disk-level hard drive breakdown.");
+
+  if (data.serverStorageStats && data.serverStorageStats.length > 0) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...ORIX_NAVY);
+    doc.text("3.1 RECORDING SERVER STORAGE CONSUMPTION OVERVIEW", margin.left, y);
+    y += 3;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["#", "SERVER NAME", "STATUS", "USED / TOTAL CAPACITY", "FREE SPACE", "USAGE %", "DISKS"]],
+      body: data.serverStorageStats.map((srv, idx) => [
+        idx + 1,
+        srv.name,
+        srv.isOnline ? "ONLINE" : "OFFLINE",
+        srv.usedGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.usedGb} GB / ${srv.totalGb} GB` : "STORAGE DATA NOT AVAILABLE FROM SOURCE",
+        srv.freeGb !== "STORAGE DATA NOT AVAILABLE FROM SOURCE" ? `${srv.freeGb} GB` : "N/A",
+        `${srv.usedPct}%`,
+        srv.diskCount,
+      ]),
+      theme: "striped",
+      showHead: "everyPage",
+      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
+      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      margin: { left: margin.left, right: margin.right },
+      tableWidth: contentWidth,
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+  }
+
+  checkPage(30);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(...ORIX_NAVY);
+  doc.text("3.2 RECORDING SERVER STORAGE & HARD DRIVE BREAKDOWN", margin.left, y);
+  y += 3;
+
+  if (data.serverDisks && data.serverDisks.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      head: [["#", "SERVER", "DISK DRIVE", "STATUS", "TOTAL CAPACITY", "USED CAPACITY", "FREE SPACE", "USAGE %"]],
+      body: data.serverDisks.map((d, idx) => [
+        idx + 1,
+        d.serverName,
+        d.diskName,
+        d.status,
+        d.total,
+        d.used,
+        d.free,
+        d.usagePct,
+      ]),
+      theme: "striped",
+      showHead: "everyPage",
+      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
+      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      margin: { left: margin.left, right: margin.right },
+      tableWidth: contentWidth,
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  } else {
+    subLabel("No storage data available from source.");
+    y += 8;
+  }
+
+  // ─── 4. ALARM EVENTS REPORT ─────────────────────────────────
   checkPage(50);
-  sectionTitle(`7. ALARM EVENTS REPORT (${data.alarms.length} TOTAL EVENTS)`);
+  sectionTitle(`4. ALARM EVENTS REPORT (${data.alarms.length} TOTAL EVENTS)`);
   subLabel("Executive summary of security incidents, hardware alerts, and event severity distribution.");
 
   const analysis = analyzeEvents(data.alarms);
@@ -2069,7 +1870,7 @@ export function exportToPdf(data: FullReportData) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(...ORIX_NAVY);
-    doc.text("7.1 INCIDENTS BY SEVERITY LEVEL", margin.left, y);
+    doc.text("4.1 INCIDENTS BY SEVERITY LEVEL", margin.left, y);
     y += 3;
 
     autoTable(doc, {
@@ -2099,7 +1900,7 @@ export function exportToPdf(data: FullReportData) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(...ORIX_NAVY);
-    doc.text("7.2 INCIDENTS BY EVENT CATEGORY", margin.left, y);
+    doc.text("4.2 INCIDENTS BY EVENT CATEGORY", margin.left, y);
     y += 3;
 
     autoTable(doc, {
@@ -2122,7 +1923,7 @@ export function exportToPdf(data: FullReportData) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(8.5);
       doc.setTextColor(...ORIX_NAVY);
-      doc.text("7.3 TOP AFFECTED HARDWARE & SOURCES", margin.left, y);
+      doc.text("4.3 TOP AFFECTED HARDWARE & SOURCES", margin.left, y);
       y += 3;
 
       autoTable(doc, {
@@ -2139,108 +1940,6 @@ export function exportToPdf(data: FullReportData) {
       });
       y = (doc as any).lastAutoTable.finalY + 5;
     }
-  }
-
-  // ─── 8. DETAILED EVENT & ALARM LOG ───────────────────────────
-  checkPage(40);
-  if (data.alarms.length > 0) {
-    const analystPresentation = buildAnalystRelevantEventLog(data.alarms);
-
-    sectionTitle(
-      `8. DETAILED SECURITY EVENT & ALARM LOG (${analystPresentation.canonicalCount} SOURCE EVENTS • ${analystPresentation.presentationItems.length} ANALYST PRESENTATION ITEMS)`
-    );
-    subLabel("Chronological audit log of events received from monitored VMS endpoints.");
-
-
-    const alarmRows = analystPresentation.presentationItems.map((a: any, idx: number) => {
-      if (a.isSummary) {
-        return [
-          idx + 1,
-          a.sourceName || "S3 CLOUD BRIDGE",
-          a.systemName || data.selectedServerLabel,
-          a.severity,
-          a.firstFormattedTime && a.lastFormattedTime ? `${a.firstFormattedTime} → ${a.lastFormattedTime}` : "TELEMETRY WINDOW",
-          `[SUMMARY OF ${a.count} REPEATED TELEMETRY LOGS] ${a.representativeCaption} - ${a.representativeDescription}`,
-        ];
-      }
-      return [
-        idx + 1,
-        a.source,
-        a.systemName || data.selectedServerLabel,
-        a.severity,
-        a.timestamp,
-        a.description,
-      ];
-    });
-
-    autoTable(doc, {
-      startY: y,
-      head: [["#", "EVENT SOURCE / DEVICE", "SYSTEM / LOCATION", "SEVERITY", "TIMESTAMP", "DESCRIPTION"]],
-      body: alarmRows,
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 7.5, cellPadding: 2 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-      columnStyles: {
-        5: { cellWidth: "auto", overflow: "linebreak" },
-      },
-      didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index === 3) {
-          const val = String(hookData.cell.raw).toLowerCase();
-          if (val.includes("crit") || val.includes("error")) {
-            hookData.cell.styles.textColor = [...RED_600];
-            hookData.cell.styles.fontStyle = "bold";
-          } else if (val.includes("warn")) {
-            hookData.cell.styles.textColor = [...AMBER_600];
-            hookData.cell.styles.fontStyle = "bold";
-          }
-        }
-      },
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  } else {
-    subLabel("No events logged in this period.");
-    y += 8;
-  }
-
-  // ─── 9. S3 CLOUD BRIDGE PERFORMANCE ────────────────────────
-  checkPage(30);
-  sectionTitle("9. S3 CLOUD BRIDGE PERFORMANCE");
-
-  if (data.s3Logs && data.s3Logs.length > 0) {
-    autoTable(doc, {
-      startY: y,
-      head: [["LOG TIME", "UPLOAD SPEED", "INCOMING SPEED", "CACHE FILL %", "QUEUE DEPTH", "CLOUD STATUS"]],
-      body: data.s3Logs.map((s) => [s.time, s.uploadSpeed, s.incomingSpeed, s.cacheFill, s.queueDepth, s.status]),
-      theme: "striped",
-      showHead: "everyPage",
-      headStyles: { fillColor: [...ORIX_NAVY], fontSize: 8, fontStyle: "bold", textColor: [...WHITE] },
-      bodyStyles: { fontSize: 8, cellPadding: 2.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: margin.left, right: margin.right },
-      tableWidth: contentWidth,
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  } else {
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(...SLATE_200);
-    doc.roundedRect(margin.left, y, contentWidth, 16, 1.5, 1.5, "FD");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...SLATE_700);
-    doc.text("STATUS: N/A — S3 DATA NOT AVAILABLE — NO ACTIVE S3 DATA SOURCE CONFIGURED", margin.left + 4, y + 6);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...SLATE_500);
-    doc.text(
-      "No live S3 API endpoint is configured in this deployment. To enable S3 Cloud Bridge reporting, connect an active S3 data source.",
-      margin.left + 4,
-      y + 12
-    );
-    y += 22;
   }
 
   // ─── FOOTERS ON ALL PAGES ─────────────────────────────────
