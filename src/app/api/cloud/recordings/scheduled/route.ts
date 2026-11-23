@@ -24,6 +24,7 @@ import {
   getLastAdminAuthToken,
   getFallbackAuthToken,
   getServerBasicAuthHeader,
+  isMasterSnapshotUser,
 } from "@/lib/watchdog-auth";
 
 
@@ -483,17 +484,22 @@ const startWatchdog = () => {
             return diskRec;
           });
 
-        const adminFallback = global._lastAdminVmsAuth || (storeData.adminAuthFallback as string | undefined);
+        const masterFallback =
+          global._masterSnapshotAuth ||
+          (storeData.masterSnapshotAuth as string | undefined) ||
+          global._lastAdminVmsAuth ||
+          (storeData.adminAuthFallback as string | undefined);
         const generalFallback = global._lastActiveVmsAuth || storeData.globalAuthFallback;
         delete storeData.globalUserKeyFallback;
         delete storeData.globalAuth;
         delete storeData.notificationUserKey;
 
-        if (adminFallback) {
-          storeData.adminAuthFallback = adminFallback;
+        if (masterFallback) {
+          storeData.masterSnapshotAuth = masterFallback;
+          storeData.adminAuthFallback = masterFallback;
         }
-        if (generalFallback) {
-          storeData.globalAuthFallback = adminFallback || generalFallback;
+        if (masterFallback || generalFallback) {
+          storeData.globalAuthFallback = masterFallback || generalFallback;
         }
 
         await writeScheduledRecordings({
@@ -854,8 +860,10 @@ const startWatchdog = () => {
           try {
             const port = detectCurrentPort(appPort || "3030");
             const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
-            const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort, rec.scheduledBy);
-            const primaryAuth = rec.auth || fallbackAuth;
+            const masterFallback = await getFallbackAuthToken(nxLocationIp, nxLocationPort);
+            // ALL background snapshots execute using the master snapshot token (test user / admin)
+            const primaryAuth = masterFallback || rec.auth;
+            const fallbackAuth = masterFallback;
             const headers: any = { "Content-Type": "application/json" };
             if (nxLocationIp && nxLocationIp !== "localhost") headers["x-nx-location-ip"] = nxLocationIp;
             if (nxLocationPort && nxLocationPort !== "7001") headers["x-nx-location-port"] = nxLocationPort;
@@ -1003,7 +1011,7 @@ const startWatchdog = () => {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort, rec.scheduledBy);
-            const auth = rec.auth || fallbackAuth;
+            const auth = fallbackAuth || rec.auth;
             if (!auth || !ip) {
               console.warn(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
               continue;
@@ -1084,7 +1092,7 @@ const startWatchdog = () => {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
             const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort, rec.scheduledBy);
-            const auth = rec.auth || fallbackAuth;
+            const auth = fallbackAuth || rec.auth;
             console.log(`[Watchdog] Stopping recording for ${rec.cameraName} (${cleanId})`);
             // Use provided auth/IP or fallback to defaults
             if (auth && ip) {
@@ -1506,11 +1514,14 @@ export async function GET(request: NextRequest) {
     }
 
     if (token) {
+      const isMaster = isMasterSnapshotUser(username, userIsAdmin);
       setLastActiveAuthToken(token, username, userIsAdmin);
-      if (userIsAdmin) {
+      if (isMaster) {
+        data.masterSnapshotAuth = token;
+        data.masterSnapshotUser = username;
         data.adminAuthFallback = token;
       }
-      if (!data.globalAuthFallback || userIsAdmin) {
+      if (!data.globalAuthFallback || isMaster) {
         data.globalAuthFallback = token;
       }
       if (username && username !== "System") {
@@ -1522,18 +1533,16 @@ export async function GET(request: NextRequest) {
     if (token && username && username !== "System") {
       let fileNeedsUpdate = false;
       const rawSchedules = data.schedules || [];
+      const isMaster = isMasterSnapshotUser(username, userIsAdmin);
       rawSchedules.forEach((s: any) => {
-        if (s.scheduledBy && s.scheduledBy.toLowerCase() === username.toLowerCase()) {
+        if (isMaster) {
           if (s.auth !== token) {
             s.auth = token;
             fileNeedsUpdate = true;
           }
-        } else if (userIsAdmin && !s.auth) {
-          s.auth = token;
-          fileNeedsUpdate = true;
         }
       });
-      if (fileNeedsUpdate || (userIsAdmin && data.adminAuthFallback === token)) {
+      if (fileNeedsUpdate || (isMaster && data.masterSnapshotAuth === token)) {
         await writeScheduledRecordings(data);
       }
     }
@@ -1629,11 +1638,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (token) {
+      const isMaster = isMasterSnapshotUser(username, userIsAdmin);
       setLastActiveAuthToken(token, username, userIsAdmin);
-      if (userIsAdmin) {
+      if (isMaster) {
+        body.masterSnapshotAuth = token;
+        body.masterSnapshotUser = username;
         body.adminAuthFallback = token;
-      } else if (existingData.adminAuthFallback) {
-        body.adminAuthFallback = existingData.adminAuthFallback;
+      } else {
+        if (existingData.masterSnapshotAuth) body.masterSnapshotAuth = existingData.masterSnapshotAuth;
+        if (existingData.masterSnapshotUser) body.masterSnapshotUser = existingData.masterSnapshotUser;
+        if (existingData.adminAuthFallback) body.adminAuthFallback = existingData.adminAuthFallback;
       }
       if (username && username !== "System") {
         body.userAuthTokens = {
@@ -1641,15 +1655,14 @@ export async function POST(request: NextRequest) {
           [username.toLowerCase()]: token,
         };
       }
-      if (userIsAdmin || !existingData.adminAuthFallback) {
-        body.globalAuthFallback = token;
-      } else {
-        body.globalAuthFallback = existingData.adminAuthFallback;
-      }
+      body.globalAuthFallback = body.masterSnapshotAuth || existingData.globalAuthFallback || token;
     } else {
-      const fallback = getLastAdminAuthToken() || getLastActiveAuthToken() || existingData.adminAuthFallback || existingData.globalAuthFallback;
+      const fallback = getLastAdminAuthToken() || getLastActiveAuthToken() || existingData.masterSnapshotAuth || existingData.adminAuthFallback || existingData.globalAuthFallback;
       if (fallback) {
         body.globalAuthFallback = fallback;
+      }
+      if (existingData.masterSnapshotAuth) {
+        body.masterSnapshotAuth = existingData.masterSnapshotAuth;
       }
       if (existingData.adminAuthFallback) {
         body.adminAuthFallback = existingData.adminAuthFallback;
@@ -1780,9 +1793,10 @@ export async function POST(request: NextRequest) {
               };
               const bounds = getScheduleTimeBounds(recTimeObj);
 
-              // Auto-refresh the token if this user is the owner, otherwise preserve existing
+              const masterAuth = global._masterSnapshotAuth || (existingData.masterSnapshotAuth as string | undefined) || (existingData.adminAuthFallback as string | undefined);
               const isOwner = policy.createdBy && policy.createdBy.toLowerCase() === username.toLowerCase();
-              const finalAuth = isOwner ? token : (existingRun?.auth || (existingData.adminAuthFallback as string | undefined) || token);
+              // Execution auth is ALWAYS the master snapshot account (test user)
+              const finalAuth = masterAuth || existingRun?.auth || token;
               const finalUserKey = isOwner ? userKey : (existingRun?.userKey || userKey);
 
               const run = {

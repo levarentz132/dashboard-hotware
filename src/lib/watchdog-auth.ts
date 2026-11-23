@@ -8,12 +8,24 @@ declare global {
   var _lastActiveVmsUser: string | undefined;
   var _lastAdminVmsAuth: string | undefined;
   var _lastAdminVmsUser: string | undefined;
+  var _masterSnapshotAuth: string | undefined;
+  var _masterSnapshotUser: string | undefined;
   var _userVmsAuthMap: Record<string, string> | undefined;
 }
 
 /**
+ * Checks if a user is the master snapshot execution user (e.g. "test user", "admin").
+ */
+export function isMasterSnapshotUser(username?: string, isAdmin?: boolean): boolean {
+  if (isAdmin) return true;
+  if (!username) return false;
+  const lower = username.toLowerCase();
+  return lower.includes("test") || lower.includes("admin") || lower === "service" || lower === "system";
+}
+
+/**
  * Stores active VMS authentication tokens in memory.
- * Preserves admin tokens separately so non-admin logins do not downgrade watchdog permissions.
+ * Preserves master execution token (test user / admin) separately so non-admin logins do not downgrade watchdog permissions.
  */
 export function setLastActiveAuthToken(token: string, username?: string, isAdmin?: boolean) {
   if (!token || token === "undefined" || token === "SERVER_MANAGED") return;
@@ -23,11 +35,24 @@ export function setLastActiveAuthToken(token: string, username?: string, isAdmin
     if (!global._userVmsAuthMap) global._userVmsAuthMap = {};
     global._userVmsAuthMap[username.toLowerCase()] = token;
   }
-  if (isAdmin) {
+  if (isMasterSnapshotUser(username, isAdmin)) {
+    global._masterSnapshotAuth = token;
+    global._masterSnapshotUser = username || "test user";
     global._lastAdminVmsAuth = token;
     if (username) {
       global._lastAdminVmsUser = username;
     }
+  }
+}
+
+/**
+ * Explicitly sets the designated master snapshot token (test user).
+ */
+export function setMasterSnapshotAuth(token: string, username?: string) {
+  if (!token || token === "undefined" || token === "SERVER_MANAGED") return;
+  global._masterSnapshotAuth = token;
+  if (username) {
+    global._masterSnapshotUser = username;
   }
 }
 
@@ -42,7 +67,7 @@ export function getLastActiveAuthToken(): string | null {
  * Gets the in-memory last admin token (which has access to all cameras).
  */
 export function getLastAdminAuthToken(): string | null {
-  return global._lastAdminVmsAuth || null;
+  return global._masterSnapshotAuth || global._lastAdminVmsAuth || null;
 }
 
 /**
@@ -72,43 +97,57 @@ export function getServerBasicAuthHeader(): string | null {
 }
 
 /**
- * Resolves the best available fallback auth token for background watchdog tasks.
+ * Resolves the best available master/fallback auth token for background watchdog tasks.
  * Order of priority:
- * 1. Admin token (has access to ALL cameras across the entire VMS)
- * 2. Specific user's active token if scheduledBy is provided
+ * 1. Master snapshot account token (test user / admin)
+ * 2. Persisted masterSnapshotAuth from disk
  * 3. Fresh VMS session token via service credentials
- * 4. Last active token from memory or disk
+ * 4. User-specific active token
+ * 5. General in-memory last active token
  */
 export async function getFallbackAuthToken(
   host?: string,
   port?: string,
   preferredUser?: string,
 ): Promise<string | null> {
-  // 1. Admin in-memory token (always preferred for background tasks as it can access all cameras)
+  // 1. In-memory master snapshot token (test user / admin has access to all cameras)
+  if (global._masterSnapshotAuth) {
+    return global._masterSnapshotAuth;
+  }
   if (global._lastAdminVmsAuth) {
     return global._lastAdminVmsAuth;
   }
 
-  // 2. Specific user's active token if specified
-  if (preferredUser && global._userVmsAuthMap?.[preferredUser.toLowerCase()]) {
-    return global._userVmsAuthMap[preferredUser.toLowerCase()];
-  }
-
-  // 3. Check disk for persisted admin or user tokens
+  // 2. Persisted master snapshot token from scheduled_recordings.json
   try {
     const data = await readScheduledRecordings();
+    if (data.masterSnapshotAuth && typeof data.masterSnapshotAuth === "string") {
+      global._masterSnapshotAuth = data.masterSnapshotAuth;
+      return data.masterSnapshotAuth;
+    }
     if (data.adminAuthFallback && typeof data.adminAuthFallback === "string") {
-      global._lastAdminVmsAuth = data.adminAuthFallback;
+      global._masterSnapshotAuth = data.adminAuthFallback;
       return data.adminAuthFallback;
     }
     const userTokens = data.userAuthTokens as Record<string, string> | undefined;
+    if (userTokens) {
+      // Look for any test user or admin token stored
+      for (const [uname, uToken] of Object.entries(userTokens)) {
+        if (isMasterSnapshotUser(uname, false) && uToken) {
+          global._masterSnapshotAuth = uToken;
+          return uToken;
+        }
+      }
+    }
     if (preferredUser && userTokens?.[preferredUser.toLowerCase()]) {
       return userTokens[preferredUser.toLowerCase()];
     }
-    if (data.globalAuthFallback && typeof data.globalAuthFallback === "string") {
-      return data.globalAuthFallback;
-    }
   } catch {}
+
+  // 3. User-specific active token if specified
+  if (preferredUser && global._userVmsAuthMap?.[preferredUser.toLowerCase()]) {
+    return global._userVmsAuthMap[preferredUser.toLowerCase()];
+  }
 
   // 4. Try to acquire fresh VMS session token using service/server credentials
   try {
@@ -130,7 +169,7 @@ export async function getFallbackAuthToken(
     if (username && password) {
       const freshToken = await getVmsSessionToken(targetHost, targetPort, username, password);
       if (freshToken) {
-        global._lastAdminVmsAuth = freshToken;
+        global._masterSnapshotAuth = freshToken;
         global._lastActiveVmsAuth = freshToken;
         return freshToken;
       }
@@ -141,6 +180,14 @@ export async function getFallbackAuthToken(
   if (global._lastActiveVmsAuth) {
     return global._lastActiveVmsAuth;
   }
+
+  // 6. Last resort global fallback
+  try {
+    const data = await readScheduledRecordings();
+    if (data.globalAuthFallback && typeof data.globalAuthFallback === "string") {
+      return data.globalAuthFallback;
+    }
+  } catch {}
 
   return null;
 }
