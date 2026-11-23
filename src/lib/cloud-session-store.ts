@@ -52,7 +52,7 @@ export async function saveServerCloudSession(
   session: Partial<ServerCloudSession> & { refreshToken: string },
 ): Promise<void> {
   const filePath = getCloudSessionFilePath();
-  const current = (await readServerCloudSession()) || {};
+  const current: Partial<ServerCloudSession> = (await readServerCloudSession()) || {};
   const updated: ServerCloudSession = {
     accessToken: session.accessToken || current.accessToken || "",
     refreshToken: session.refreshToken || current.refreshToken || "",

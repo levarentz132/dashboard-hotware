@@ -6,6 +6,7 @@ import path from "path";
 import { readAppSettings } from "@/lib/server-settings";
 import { logRecordingEvent } from "@/lib/recording-logger";
 import { logScheduledRecordingError } from "@/lib/log-scheduled-error";
+import { getFallbackAuthToken, getServerBasicAuthHeader } from "@/lib/watchdog-auth";
 
 
 /**
@@ -115,13 +116,35 @@ export async function POST(request: NextRequest) {
 
     // Pulse recording to ensure live stream is ready
     let originalSchedule = null;
+    let workingFallbackAuth: string | null = null;
     try {
       const vmsUrl = buildCloudUrl(systemId, `/rest/v3/devices/${cleanDeviceId}`, undefined, request);
       const vmsHeaders = buildCloudHeaders(request, systemId);
       let camRes = await fetch(vmsUrl, { headers: vmsHeaders });
       
       if (camRes.status === 401 || camRes.status === 403) {
-        const basic = getBasicAuthHeaderFromRequest(request);
+        const fallbackAuth = request.headers.get("x-watchdog-fallback-auth") || (await getFallbackAuthToken());
+        if (fallbackAuth) {
+          const isLocalToken = fallbackAuth.startsWith("vms-");
+          const fallbackHeaders: Record<string, string> = {
+            ...vmsHeaders,
+            "x-runtime-guid": fallbackAuth,
+          };
+          if (!isLocalToken) {
+            fallbackHeaders["Authorization"] = `Bearer ${fallbackAuth}`;
+          }
+          const retryRes = await fetch(vmsUrl, { headers: fallbackHeaders });
+          if (retryRes.ok) {
+            camRes = retryRes;
+            workingFallbackAuth = fallbackAuth;
+            vmsHeaders["x-runtime-guid"] = fallbackAuth;
+            if (!isLocalToken) vmsHeaders["Authorization"] = `Bearer ${fallbackAuth}`;
+          }
+        }
+      }
+
+      if (camRes.status === 401 || camRes.status === 403) {
+        const basic = getBasicAuthHeaderFromRequest(request) || getServerBasicAuthHeader();
         if (basic) camRes = await fetch(vmsUrl, { headers: { ...vmsHeaders, Authorization: basic } });
       }
 
@@ -175,6 +198,12 @@ export async function POST(request: NextRequest) {
     const endpoint = `/rest/v3/devices/${cleanDeviceId}/image`;
     const downloadUrl = buildCloudUrl(systemId, endpoint, params, request, systemName || undefined);
     const headers: Record<string, string> = buildCloudHeaders(request, systemId);
+    if (workingFallbackAuth) {
+      headers["x-runtime-guid"] = workingFallbackAuth;
+      if (!workingFallbackAuth.startsWith("vms-")) {
+        headers["Authorization"] = `Bearer ${workingFallbackAuth}`;
+      }
+    }
     headers["Accept"] = "image/png, image/jpeg, image/*;q=0.9, */*;q=0.8";
     delete headers["Content-Type"];
 
@@ -190,7 +219,29 @@ export async function POST(request: NextRequest) {
       });
 
       if (imageResponse.status === 401 || imageResponse.status === 403) {
-        const basic = getBasicAuthHeaderFromRequest(request);
+        const fallbackAuth = request.headers.get("x-watchdog-fallback-auth") || (await getFallbackAuthToken());
+        if (fallbackAuth) {
+          const isLocalToken = fallbackAuth.startsWith("vms-");
+          const fallbackHeaders: Record<string, string> = {
+            ...headers,
+            "x-runtime-guid": fallbackAuth,
+          };
+          if (!isLocalToken) {
+            fallbackHeaders["Authorization"] = `Bearer ${fallbackAuth}`;
+          }
+          const retryRes = await fetch(downloadUrl, {
+            headers: fallbackHeaders,
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          if (retryRes.ok) {
+            imageResponse = retryRes;
+          }
+        }
+      }
+
+      if (imageResponse.status === 401 || imageResponse.status === 403) {
+        const basic = getBasicAuthHeaderFromRequest(request) || getServerBasicAuthHeader();
         if (basic) {
           imageResponse = await fetch(downloadUrl, {
             headers: { ...headers, Authorization: basic },
