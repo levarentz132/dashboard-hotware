@@ -21,6 +21,7 @@ import { readAppSettings } from "@/lib/server-settings";
 import {
   setLastActiveAuthToken,
   getLastActiveAuthToken,
+  getLastAdminAuthToken,
   getFallbackAuthToken,
   getServerBasicAuthHeader,
 } from "@/lib/watchdog-auth";
@@ -241,7 +242,7 @@ async function getVmsTimeOffsetMs(systemId: string, auth: string, ip: string, po
  * Useful in dev where ports can change (e.g. 3010, 3011).
  */
 function detectCurrentPort(fallback: string): string {
-  let port = process.env.PORT || fallback || "3030";
+  let port = global._nxAppPort || process.env.PORT || fallback;
 
   const pIndex = process.argv.indexOf("-p");
   if (pIndex !== -1 && process.argv[pIndex + 1]) {
@@ -250,8 +251,7 @@ function detectCurrentPort(fallback: string): string {
     port = global._nxAppPort;
   }
 
-  // console.log(`[Watchdog] Port detection: argv=${process.argv.slice(2).join(' ')}, detected=${global._nxAppPort || 'none'} -> using ${port}`);
-  return port;
+  return port || "3000";
 }
 
 
@@ -483,13 +483,17 @@ const startWatchdog = () => {
             return diskRec;
           });
 
-        const fallback = global._lastActiveVmsAuth || storeData.globalAuthFallback;
+        const adminFallback = global._lastAdminVmsAuth || (storeData.adminAuthFallback as string | undefined);
+        const generalFallback = global._lastActiveVmsAuth || storeData.globalAuthFallback;
         delete storeData.globalUserKeyFallback;
         delete storeData.globalAuth;
         delete storeData.notificationUserKey;
 
-        if (fallback) {
-          storeData.globalAuthFallback = fallback;
+        if (adminFallback) {
+          storeData.adminAuthFallback = adminFallback;
+        }
+        if (generalFallback) {
+          storeData.globalAuthFallback = adminFallback || generalFallback;
         }
 
         await writeScheduledRecordings({
@@ -850,55 +854,80 @@ const startWatchdog = () => {
           try {
             const port = detectCurrentPort(appPort || "3030");
             const internalUrl = `http://127.0.0.1:${port}/api/cloud/recordings/screenshot`;
-            const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort);
+            const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort, rec.scheduledBy);
             const primaryAuth = rec.auth || fallbackAuth;
             const headers: any = { "Content-Type": "application/json" };
             if (nxLocationIp && nxLocationIp !== "localhost") headers["x-nx-location-ip"] = nxLocationIp;
             if (nxLocationPort && nxLocationPort !== "7001") headers["x-nx-location-port"] = nxLocationPort;
             if (primaryAuth) {
               headers["x-watchdog-auth"] = primaryAuth;
-              headers["Authorization"] = `Bearer ${primaryAuth}`;
+              if (!primaryAuth.startsWith("vms-")) {
+                headers["Authorization"] = `Bearer ${primaryAuth}`;
+              }
             }
             if (fallbackAuth && fallbackAuth !== primaryAuth) {
               headers["x-watchdog-fallback-auth"] = fallbackAuth;
             }
 
+            const reqBody = {
+              systemId: rec.systemId || nxLocationIp || "localhost",
+              deviceId: rec.cameraId,
+              cameraName: rec.cameraName,
+              timestampMs: startMs,
+              scheduledStartTime: rec.startTime,
+              timeOffsetMs: timeOffsetMs,
+              notificationUserKey: rec.scheduledBy || "admin"
+            };
+
             let res = await fetch(internalUrl, {
               method: "POST",
               headers,
-              body: JSON.stringify({
-                systemId: rec.systemId,
-                deviceId: rec.cameraId,
-                cameraName: rec.cameraName,
-                timestampMs: startMs,
-                scheduledStartTime: rec.startTime,
-                timeOffsetMs: timeOffsetMs,
-                notificationUserKey: rec.scheduledBy || "admin"
-              })
+              body: JSON.stringify(reqBody)
             });
 
             if (!res.ok && fallbackAuth && fallbackAuth !== primaryAuth) {
               console.log(`[Watchdog] Screenshot with primary auth returned ${res.status} for ${rec.cameraName}, retrying with active fallback auth...`);
               headers["x-watchdog-auth"] = fallbackAuth;
-              headers["Authorization"] = `Bearer ${fallbackAuth}`;
+              if (!fallbackAuth.startsWith("vms-")) {
+                headers["Authorization"] = `Bearer ${fallbackAuth}`;
+              } else {
+                delete headers["Authorization"];
+              }
               delete headers["x-watchdog-fallback-auth"];
               res = await fetch(internalUrl, {
                 method: "POST",
                 headers,
-                body: JSON.stringify({
-                  systemId: rec.systemId,
-                  deviceId: rec.cameraId,
-                  cameraName: rec.cameraName,
-                  timestampMs: startMs,
-                  scheduledStartTime: rec.startTime,
-                  timeOffsetMs: timeOffsetMs,
-                  notificationUserKey: rec.scheduledBy || "admin"
-                })
+                body: JSON.stringify(reqBody)
               });
               if (res.ok) {
                 console.log(`[Watchdog] Screenshot fallback succeeded for ${rec.cameraName}, self-healing schedule auth.`);
                 rec.auth = fallbackAuth;
                 changed = true;
+              }
+            }
+
+            // If still not ok and status is 401 or 403, retry with admin auth or fresh service token
+            if (!res.ok && (res.status === 401 || res.status === 403)) {
+              const adminAuth = getLastAdminAuthToken() || global._lastAdminVmsAuth;
+              if (adminAuth && adminAuth !== primaryAuth && adminAuth !== fallbackAuth) {
+                console.log(`[Watchdog] Screenshot 401/403 for ${rec.cameraName}, retrying with admin token...`);
+                headers["x-watchdog-auth"] = adminAuth;
+                if (!adminAuth.startsWith("vms-")) {
+                  headers["Authorization"] = `Bearer ${adminAuth}`;
+                } else {
+                  delete headers["Authorization"];
+                }
+                const adminRes = await fetch(internalUrl, {
+                  method: "POST",
+                  headers,
+                  body: JSON.stringify(reqBody)
+                });
+                if (adminRes.ok) {
+                  console.log(`[Watchdog] Screenshot admin auth succeeded for ${rec.cameraName}!`);
+                  res = adminRes;
+                  rec.auth = adminAuth;
+                  changed = true;
+                }
               }
             }
 
@@ -920,11 +949,12 @@ const startWatchdog = () => {
                 }
               } else {
                 rec.status = "failed";
+                const errText = await res.text().catch(() => "");
                 await logScheduledRecordingError({
                   cameraId: rec.cameraId,
                   cameraName: rec.cameraName,
                   systemId: rec.systemId,
-                  message: `Screenshot failed for camera ${rec.cameraName}`,
+                  message: `Screenshot failed for camera ${rec.cameraName}: HTTP ${res.status}${errText ? ` (${errText.slice(0, 100)})` : ""}`,
                 });
               }
             } else {
@@ -963,7 +993,7 @@ const startWatchdog = () => {
                 cameraId: rec.cameraId,
                 cameraName: rec.cameraName,
                 systemId: rec.systemId,
-                message: `Screenshot failed for camera ${rec.cameraName}`,
+                message: `Screenshot failed for camera ${rec.cameraName}: ${(e as any)?.message || String(e)}`,
               });
             }
           }
@@ -972,7 +1002,7 @@ const startWatchdog = () => {
         if (task.type === "video_start") {
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
-            const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort);
+            const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort, rec.scheduledBy);
             const auth = rec.auth || fallbackAuth;
             if (!auth || !ip) {
               console.warn(`[Watchdog] video_start SKIPPED for ${rec.cameraName}: auth=${!!auth}, ip=${ip}`);
@@ -1053,7 +1083,7 @@ const startWatchdog = () => {
 
           try {
             const cleanId = rec.cameraId.replace(/[{}]/g, "");
-            const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort);
+            const fallbackAuth = await getFallbackAuthToken(nxLocationIp, nxLocationPort, rec.scheduledBy);
             const auth = rec.auth || fallbackAuth;
             console.log(`[Watchdog] Stopping recording for ${rec.cameraName} (${cleanId})`);
             // Use provided auth/IP or fallback to defaults
@@ -1476,9 +1506,16 @@ export async function GET(request: NextRequest) {
     }
 
     if (token) {
-      setLastActiveAuthToken(token, username);
-      if (data.globalAuthFallback !== token) {
+      setLastActiveAuthToken(token, username, userIsAdmin);
+      if (userIsAdmin) {
+        data.adminAuthFallback = token;
+      }
+      if (!data.globalAuthFallback || userIsAdmin) {
         data.globalAuthFallback = token;
+      }
+      if (username && username !== "System") {
+        if (!data.userAuthTokens) data.userAuthTokens = {};
+        (data.userAuthTokens as Record<string, string>)[username.toLowerCase()] = token;
       }
     }
 
@@ -1491,15 +1528,12 @@ export async function GET(request: NextRequest) {
             s.auth = token;
             fileNeedsUpdate = true;
           }
-        } else if (s.auth === token && !isScheduleOwner(s, username)) {
-          s.scheduledBy = username;
-          fileNeedsUpdate = true;
-        } else if (!s.auth && (userIsAdmin || canUserViewSchedule(s, userIsAdmin, allowedCameraIds, rights))) {
+        } else if (userIsAdmin && !s.auth) {
           s.auth = token;
           fileNeedsUpdate = true;
         }
       });
-      if (fileNeedsUpdate || data.globalAuthFallback === token) {
+      if (fileNeedsUpdate || (userIsAdmin && data.adminAuthFallback === token)) {
         await writeScheduledRecordings(data);
       }
     }
@@ -1595,12 +1629,30 @@ export async function POST(request: NextRequest) {
     }
 
     if (token) {
-      setLastActiveAuthToken(token, username);
-      body.globalAuthFallback = token;
+      setLastActiveAuthToken(token, username, userIsAdmin);
+      if (userIsAdmin) {
+        body.adminAuthFallback = token;
+      } else if (existingData.adminAuthFallback) {
+        body.adminAuthFallback = existingData.adminAuthFallback;
+      }
+      if (username && username !== "System") {
+        body.userAuthTokens = {
+          ...((existingData.userAuthTokens as Record<string, string>) || {}),
+          [username.toLowerCase()]: token,
+        };
+      }
+      if (userIsAdmin || !existingData.adminAuthFallback) {
+        body.globalAuthFallback = token;
+      } else {
+        body.globalAuthFallback = existingData.adminAuthFallback;
+      }
     } else {
-      const fallback = getLastActiveAuthToken() || existingData.globalAuthFallback;
+      const fallback = getLastAdminAuthToken() || getLastActiveAuthToken() || existingData.adminAuthFallback || existingData.globalAuthFallback;
       if (fallback) {
         body.globalAuthFallback = fallback;
+      }
+      if (existingData.adminAuthFallback) {
+        body.adminAuthFallback = existingData.adminAuthFallback;
       }
     }
 
@@ -1628,6 +1680,31 @@ export async function POST(request: NextRequest) {
         ...p,
         createdBy: p.createdBy || username,
       }));
+    }
+
+    // NON-ADMIN PROTECTION:
+    // If user is not admin, keep existing policies and schedules that this user cannot see!
+    if (!userIsAdmin) {
+      if (Array.isArray(body.policies)) {
+        const invisiblePolicies = (existingData.policies || []).filter((p: any) => {
+          const hasAccess = (p.cameras || []).some((c: any) =>
+            canUserViewSchedule({ cameraId: c.id }, userIsAdmin, allowedCameraIds, rights)
+          );
+          return !hasAccess;
+        });
+        const postedPolicyIds = new Set(body.policies.map((p: any) => p.id));
+        const preservedPolicies = invisiblePolicies.filter((p: any) => !postedPolicyIds.has(p.id));
+        body.policies = [...body.policies, ...preservedPolicies];
+      }
+
+      if (Array.isArray(body.schedules)) {
+        const invisibleSchedules = (existingData.schedules || []).filter((s: any) =>
+          !canUserViewSchedule(s, userIsAdmin, allowedCameraIds, rights)
+        );
+        const postedIds = new Set(body.schedules.map((s: any) => s.id));
+        const preservedSchedules = invisibleSchedules.filter((s: any) => !postedIds.has(s.id));
+        body.schedules = [...body.schedules, ...preservedSchedules];
+      }
     }
 
     // Allow any user to modify or delete policies (bypass strict user ownership check for local deployment convenience)
@@ -1705,7 +1782,7 @@ export async function POST(request: NextRequest) {
 
               // Auto-refresh the token if this user is the owner, otherwise preserve existing
               const isOwner = policy.createdBy && policy.createdBy.toLowerCase() === username.toLowerCase();
-              const finalAuth = isOwner ? token : (existingRun?.auth || token);
+              const finalAuth = isOwner ? token : (existingRun?.auth || (existingData.adminAuthFallback as string | undefined) || token);
               const finalUserKey = isOwner ? userKey : (existingRun?.userKey || userKey);
 
               const run = {

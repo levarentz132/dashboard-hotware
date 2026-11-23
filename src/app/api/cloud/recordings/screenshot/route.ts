@@ -33,16 +33,26 @@ export async function POST(request: NextRequest) {
       systemId = validated.systemId;
       systemName = validated.systemName;
     }
-
-    if (!systemId || !deviceId) {
-      return NextResponse.json({ error: "systemId and deviceId are required" }, { status: 400 });
+    if (!systemId) {
+      systemId = request.headers.get("x-nx-location-ip") || API_CONFIG.serverHost || "localhost";
     }
 
-    const cleanDeviceId = String(deviceId).replace(/[{}]/g, "");
     const safeCameraName = (cameraName || "Camera")
       .replace(/[<>:"/\\|?*]/g, "_")
       .replace(/\s+/g, " ")
       .trim();
+
+    if (!systemId || !deviceId) {
+      await logScheduledRecordingError({
+        cameraId: String(deviceId || "unknown"),
+        cameraName: safeCameraName,
+        systemId: systemId || "",
+        message: `Screenshot failed for camera ${safeCameraName}: missing systemId or deviceId`,
+      });
+      return NextResponse.json({ error: "systemId and deviceId are required" }, { status: 400 });
+    }
+
+    const cleanDeviceId = String(deviceId).replace(/[{}]/g, "");
 
     const now = new Date();
     
@@ -145,7 +155,11 @@ export async function POST(request: NextRequest) {
 
       if (camRes.status === 401 || camRes.status === 403) {
         const basic = getBasicAuthHeaderFromRequest(request) || getServerBasicAuthHeader();
-        if (basic) camRes = await fetch(vmsUrl, { headers: { ...vmsHeaders, Authorization: basic } });
+        if (basic) {
+          const basicHeaders: Record<string, string> = { ...vmsHeaders, Authorization: basic };
+          delete basicHeaders["x-runtime-guid"];
+          camRes = await fetch(vmsUrl, { headers: basicHeaders });
+        }
       }
 
       if (camRes.ok) {
@@ -243,8 +257,10 @@ export async function POST(request: NextRequest) {
       if (imageResponse.status === 401 || imageResponse.status === 403) {
         const basic = getBasicAuthHeaderFromRequest(request) || getServerBasicAuthHeader();
         if (basic) {
+          const basicHeaders: Record<string, string> = { ...headers, Authorization: basic };
+          delete basicHeaders["x-runtime-guid"];
           imageResponse = await fetch(downloadUrl, {
-            headers: { ...headers, Authorization: basic },
+            headers: basicHeaders,
             signal: controller.signal,
           });
         }
@@ -318,7 +334,13 @@ export async function POST(request: NextRequest) {
       timestamp: targetDate.toISOString(),
     });
   } catch (error: any) {
-    // console.error("[screenshot] Internal error:", error);
+    const safeName = (body?.cameraName || "Camera").replace(/[<>:"/\\|?*]/g, "_").trim();
+    await logScheduledRecordingError({
+      cameraId: String(body?.deviceId || "unknown"),
+      cameraName: safeName,
+      systemId: body?.systemId || "",
+      message: `Screenshot failed for camera ${safeName}: ${error?.message || "Internal server error"}`,
+    });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

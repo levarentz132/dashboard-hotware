@@ -6,16 +6,28 @@ import { getVmsSessionToken } from "./vms-auth";
 declare global {
   var _lastActiveVmsAuth: string | undefined;
   var _lastActiveVmsUser: string | undefined;
+  var _lastAdminVmsAuth: string | undefined;
+  var _lastAdminVmsUser: string | undefined;
+  var _userVmsAuthMap: Record<string, string> | undefined;
 }
 
 /**
- * Stores the most recent active VMS authentication token in memory.
+ * Stores active VMS authentication tokens in memory.
+ * Preserves admin tokens separately so non-admin logins do not downgrade watchdog permissions.
  */
-export function setLastActiveAuthToken(token: string, username?: string) {
+export function setLastActiveAuthToken(token: string, username?: string, isAdmin?: boolean) {
   if (!token || token === "undefined" || token === "SERVER_MANAGED") return;
   global._lastActiveVmsAuth = token;
   if (username) {
     global._lastActiveVmsUser = username;
+    if (!global._userVmsAuthMap) global._userVmsAuthMap = {};
+    global._userVmsAuthMap[username.toLowerCase()] = token;
+  }
+  if (isAdmin) {
+    global._lastAdminVmsAuth = token;
+    if (username) {
+      global._lastAdminVmsUser = username;
+    }
   }
 }
 
@@ -24,6 +36,13 @@ export function setLastActiveAuthToken(token: string, username?: string) {
  */
 export function getLastActiveAuthToken(): string | null {
   return global._lastActiveVmsAuth || null;
+}
+
+/**
+ * Gets the in-memory last admin token (which has access to all cameras).
+ */
+export function getLastAdminAuthToken(): string | null {
+  return global._lastAdminVmsAuth || null;
 }
 
 /**
@@ -54,26 +73,44 @@ export function getServerBasicAuthHeader(): string | null {
 
 /**
  * Resolves the best available fallback auth token for background watchdog tasks.
- * 1. Global in-memory last active token
- * 2. Disk scheduled_recordings globalAuthFallback
- * 3. Fresh VMS session token via vms-auth if service credentials exist
+ * Order of priority:
+ * 1. Admin token (has access to ALL cameras across the entire VMS)
+ * 2. Specific user's active token if scheduledBy is provided
+ * 3. Fresh VMS session token via service credentials
+ * 4. Last active token from memory or disk
  */
-export async function getFallbackAuthToken(host?: string, port?: string): Promise<string | null> {
-  // 1. In-memory last active token
-  if (global._lastActiveVmsAuth) {
-    return global._lastActiveVmsAuth;
+export async function getFallbackAuthToken(
+  host?: string,
+  port?: string,
+  preferredUser?: string,
+): Promise<string | null> {
+  // 1. Admin in-memory token (always preferred for background tasks as it can access all cameras)
+  if (global._lastAdminVmsAuth) {
+    return global._lastAdminVmsAuth;
   }
 
-  // 2. Persisted fallback token from scheduled_recordings.json
+  // 2. Specific user's active token if specified
+  if (preferredUser && global._userVmsAuthMap?.[preferredUser.toLowerCase()]) {
+    return global._userVmsAuthMap[preferredUser.toLowerCase()];
+  }
+
+  // 3. Check disk for persisted admin or user tokens
   try {
     const data = await readScheduledRecordings();
+    if (data.adminAuthFallback && typeof data.adminAuthFallback === "string") {
+      global._lastAdminVmsAuth = data.adminAuthFallback;
+      return data.adminAuthFallback;
+    }
+    const userTokens = data.userAuthTokens as Record<string, string> | undefined;
+    if (preferredUser && userTokens?.[preferredUser.toLowerCase()]) {
+      return userTokens[preferredUser.toLowerCase()];
+    }
     if (data.globalAuthFallback && typeof data.globalAuthFallback === "string") {
-      global._lastActiveVmsAuth = data.globalAuthFallback;
       return data.globalAuthFallback;
     }
   } catch {}
 
-  // 3. Try to acquire fresh VMS session token using service/server credentials
+  // 4. Try to acquire fresh VMS session token using service/server credentials
   try {
     const settings = readAppSettings();
     const username =
@@ -93,12 +130,17 @@ export async function getFallbackAuthToken(host?: string, port?: string): Promis
     if (username && password) {
       const freshToken = await getVmsSessionToken(targetHost, targetPort, username, password);
       if (freshToken) {
+        global._lastAdminVmsAuth = freshToken;
         global._lastActiveVmsAuth = freshToken;
         return freshToken;
       }
     }
   } catch {}
 
+  // 5. General in-memory last active token
+  if (global._lastActiveVmsAuth) {
+    return global._lastActiveVmsAuth;
+  }
+
   return null;
 }
-

@@ -403,7 +403,10 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
 
     headers["x-runtime-guid"] = rawToken;
     if (!headers["Authorization"] || isLocal) {
-      headers["Authorization"] = `Bearer ${rawToken}`;
+      // Do not set Bearer header for local session tokens (e.g. vms-...) as Nx Meta rejects non-JWT Bearer tokens
+      if (!rawToken.startsWith("vms-")) {
+        headers["Authorization"] = `Bearer ${rawToken}`;
+      }
     }
   } else if (cloudAuth && cloudAuth !== 'undefined' && cloudAuth !== 'SERVER_MANAGED') {
     headers["Authorization"] = cloudAuth.toLowerCase().startsWith('bearer ')
