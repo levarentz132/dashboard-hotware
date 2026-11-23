@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const dirs = ['dist', '.next', 'data'];
+const dirs = ['dist', '.next'];
 
 dirs.forEach(dir => {
     const fullPath = path.join(__dirname, '..', dir);

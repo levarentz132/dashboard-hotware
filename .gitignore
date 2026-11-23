@@ -21,6 +21,7 @@ dist-electron/
 
 # Local JSON data storage
 data/
+data_backup/
 
 # Runtime data
 pids

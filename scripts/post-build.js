@@ -60,6 +60,15 @@ if (!serverDir) {
 
 console.log(`Found server.js at: ${serverDir}`);
 
+// If standalone has nested serverDir, create a root wrapper so "node .next/standalone/server.js" always works
+const rootServerJs = path.join(standaloneRoot, 'server.js');
+const actualServerJs = path.join(serverDir, 'server.js');
+if (serverDir !== standaloneRoot && !fs.existsSync(rootServerJs)) {
+    console.log(`Creating wrapper server.js at ${rootServerJs} pointing to ${actualServerJs}`);
+    const rel = path.relative(standaloneRoot, actualServerJs).replace(/\\/g, '/');
+    fs.writeFileSync(rootServerJs, `require('./${rel}');\n`, 'utf-8');
+}
+
 // Copy public and static relative to server.js location
 const srcPublic = path.join(projectRoot, 'public');
 const destPublic = path.join(serverDir, 'public');
