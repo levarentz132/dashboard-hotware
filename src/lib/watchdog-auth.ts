@@ -70,6 +70,9 @@ export function getLastAdminAuthToken(): string | null {
   return global._masterSnapshotAuth || global._lastAdminVmsAuth || null;
 }
 
+export const DEFAULT_VMS_SERVICE_USER = "test.user";
+export const DEFAULT_VMS_SERVICE_PASS = "Lippo.123";
+
 /**
  * Resolves server-level basic auth header from settings or environment variables.
  * Supports VMS_SERVICE_USER / VMS_SERVICE_PASSWORD or settings.json vmsServiceUsername / vmsServicePassword.
@@ -81,12 +84,14 @@ export function getServerBasicAuthHeader(): string | null {
       (settings.vmsServiceUsername as string) ||
       process.env.VMS_SERVICE_USER ||
       process.env.NEXT_PUBLIC_NX_USERNAME ||
-      API_CONFIG.username;
+      API_CONFIG.username ||
+      DEFAULT_VMS_SERVICE_USER;
     const password =
       (settings.vmsServicePassword as string) ||
       process.env.VMS_SERVICE_PASSWORD ||
       process.env.NEXT_PUBLIC_NX_PASSWORD ||
-      API_CONFIG.password;
+      API_CONFIG.password ||
+      DEFAULT_VMS_SERVICE_PASS;
 
     if (username && password) {
       const creds = Buffer.from(`${username}:${password}`, "utf-8").toString("base64");
@@ -156,12 +161,14 @@ export async function getFallbackAuthToken(
       (settings.vmsServiceUsername as string) ||
       process.env.VMS_SERVICE_USER ||
       process.env.NEXT_PUBLIC_NX_USERNAME ||
-      API_CONFIG.username;
+      API_CONFIG.username ||
+      DEFAULT_VMS_SERVICE_USER;
     const password =
       (settings.vmsServicePassword as string) ||
       process.env.VMS_SERVICE_PASSWORD ||
       process.env.NEXT_PUBLIC_NX_PASSWORD ||
-      API_CONFIG.password;
+      API_CONFIG.password ||
+      DEFAULT_VMS_SERVICE_PASS;
 
     const targetHost = host || settings.nxServerHost || API_CONFIG.serverHost || "localhost";
     const targetPort = port || String(settings.nxServerPort || API_CONFIG.serverPort || "7001");
