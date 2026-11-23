@@ -193,8 +193,17 @@ export function getBasicAuthHeaderFromRequest(request: NextRequest): string | nu
   }
 
   const dynamicConfig = getDynamicConfig(request);
-  const username = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
-  const password = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+  let username = dynamicConfig?.NEXT_PUBLIC_NX_USERNAME || process.env.NEXT_PUBLIC_NX_USERNAME;
+  let password = dynamicConfig?.NEXT_PUBLIC_NX_PASSWORD || process.env.NEXT_PUBLIC_NX_PASSWORD;
+
+  if (!username || !password) {
+    try {
+      const { readAppSettings } = require("./server-settings");
+      const settings = readAppSettings();
+      username = (settings.vmsServiceUsername as string) || process.env.VMS_SERVICE_USER || username;
+      password = (settings.vmsServicePassword as string) || process.env.VMS_SERVICE_PASSWORD || password;
+    } catch {}
+  }
 
   if (!username || !password) return null;
 
@@ -347,7 +356,7 @@ export function buildCloudHeaders(request: NextRequest, systemId: string, prefer
   // Last-resort fallback: watchdog server-to-server calls pass auth via custom header
   // because no browser cookies are available in those requests.
   if (!localToken || localToken === 'undefined') {
-    const watchdogAuth = request.headers.get("x-watchdog-auth");
+    const watchdogAuth = request.headers.get("x-watchdog-auth") || request.headers.get("x-watchdog-fallback-auth");
     if (watchdogAuth) {
       localToken = watchdogAuth;
     }
